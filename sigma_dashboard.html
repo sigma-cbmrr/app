@@ -195,6 +195,8 @@
             #app-runner-container { left: 0; width: 100%; z-index: 500; }
             .modern-filter-card { flex-direction: column; align-items: stretch; gap: 10px; }
             .btn-filter-modern { width: 100%; }
+            .filter-input { max-width: 100%; }
+            .filter-item { min-width: 100%; }
         }
         @media (min-width: 769px) { .sidebar-overlay { display: none !important; } }
         .restricted-admin-only { display: none; } 
@@ -414,7 +416,7 @@
         <div class="modal-content">
             <button class="close-btn" onclick="document.getElementById('modal-gestao-ca').style.display='none'"><i class="fas fa-times"></i></button>
             <h2>Gerenciar Item</h2>
-            <p id="gestao-item-nome" style="color:#800020; font-weight:bold; margin-bottom:20px;"></p>
+            <p id="gestao-item-nome" style="color:#800020; font-weight:bold; margin-bottom:20px; border-bottom:1px dashed #ccc; padding-bottom:10px;"></p>
             
             <input type="hidden" id="gestao-doc-id"><input type="hidden" id="gestao-item-index">
             <input type="hidden" id="gestao-item-id-lista"><input type="hidden" id="gestao-item-max-qtd">
@@ -687,7 +689,6 @@
                 document.getElementById('app-runner-container').style.display = 'none';
                 document.getElementById('app-iframe').src = "";
                 
-                // Limpa o resume
                 localStorage.removeItem('sigma_active_conf');
                 verificarConferenciaAtiva();
 
@@ -949,6 +950,7 @@
         function mostrarTabela(data) {
             const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
             document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; tbody.innerHTML = '';
+            // Garante array
             const items = data.items || [];
             const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
             if (itemsToShow.length === 0) { wrapper.querySelector('table').style.display = 'none'; document.getElementById('no-issues-msg').style.display = 'block'; } else {
@@ -956,10 +958,12 @@
                 itemsToShow.forEach(i => {
                     const tr = tbody.insertRow();
                     const obsFormatada = (i.obs || '').replace(/\n/g, '<br>');
+                    // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
                     const itemComDocId = { ...i, docId: data.docId }; 
                     
                     tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
                     const td = tr.insertCell(); 
+                    // Passa o item enriquecido
                     td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
                 });
             }
@@ -1183,6 +1187,36 @@
                 li.innerHTML = `<div class="local-info"><strong>${info.nome}</strong><span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span></div><button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">Editar</button>`;
                 ul.appendChild(li);
             });
+        }
+
+        function abrirEditor(id, nome) { 
+            currentEditingId = id; 
+            document.getElementById('editor-title').textContent = `Editando: ${nome}`; 
+            switchView('editor'); 
+            carregarDadosGerenciador(); 
+        }
+
+        function voltarParaLocais() { currentEditingId = null; switchView('listas'); }
+        
+        function renderizarLista() { 
+            const container = document.getElementById('lista-setores-container'); container.innerHTML = '';
+            dadosConferencia.forEach(setor => {
+                const setorLi = document.createElement('li'); setorLi.className = 'setor-item'; setorLi.setAttribute('data-id', setor.id);
+                const addItemFormHtml = `<div class="add-item-form-setor"><input type="text" id="input-item-nome-${setor.id}" placeholder="Item"><input type="number" id="input-item-qtd-${setor.id}" value="1" style="width:50px"><select id="select-item-tipo-${setor.id}"><option value="single">Único</option><option value="multi">Tombamento</option></select><button class="btn-add" onclick="adicionarItemPorSetor('${setor.id}')">+</button></div>`;
+                let itensHtml = '';
+                setor.itens.forEach(item => {
+                    let tombamentosHtml = '';
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        const tombamentosList = item.tombamentos.map(tomb => `<li><div style="display:flex; align-items:center; width:100%;"><span style="margin-right:10px; font-size:0.85em; font-weight:bold; color:#555;">TB:</span><input type="text" value="${tomb.tomb}" onblur="editarTombamento('${item.id}', '${tomb.tomb}', this)" style="padding:4px; font-size:0.85em; border:1px solid #ddd; border-radius:4px;"></div><button class="btn-remover" onclick="removerTombamento('${item.id}', '${tomb.tomb}')" style="padding:2px 8px; margin-left:10px;"><i class="fas fa-trash" style="font-size:0.8em;"></i></button></li>`).join('');
+                        tombamentosHtml = `<div class="tombamento-container-wrapper"><div class="tombamento-section"><h4>Tombamentos (${item.tombamentos.length})</h4><ul class="tombamento-list">${tombamentosList}</ul><div class="add-tombamento-form"><input type="text" id="tomb-input-${item.id}" placeholder="Novo Tombamento"><button class="btn-add" onclick="adicionarTombamento('${item.id}', document.getElementById('tomb-input-${item.id}'))"><i class="fas fa-plus"></i></button></div></div></div>`;
+                    }
+                    itensHtml += `<li class="item-conferencia-admin"><div style="width:100%"><div style="display:flex;justify-content:space-between;"><div><strong>${item.nome}</strong><small> Qtd: ${item.quantidadeEsperada}</small></div><div class="item-actions-admin"><button class="btn-edit-alt" onclick="abrirModalEdicao('${setor.id}','${item.id}')"><i class="fas fa-edit"></i></button><button class="btn-remover" onclick="removerItem('${setor.id}','${item.id}')"><i class="fas fa-trash"></i></button></div></div>${item.tipo === 'multi' ? tombamentosHtml : ''}</div></li>`;
+                });
+                setorLi.innerHTML = `<div class="setor-header-admin" onclick="this.nextElementSibling.classList.toggle('collapsed')"><span>${setor.nome}</span><button class="btn-remover" onclick="event.stopPropagation();removerSetor('${setor.id}')">X</button></div><div class="setor-content-admin">${addItemFormHtml}<ul class="lista-setores item-list-admin" data-setor-id="${setor.id}">${itensHtml}</ul></div>`;
+                container.appendChild(setorLi);
+            });
+            new Sortable(container, { animation: 150, handle: '.setor-header-admin', onEnd: () => salvarDados(false) });
+            document.querySelectorAll('.item-list-admin').forEach(el => { new Sortable(el, { group: 'items', animation: 150, onEnd: () => { updateOrdens(); salvarDados(false); } }); });
         }
     </script>
 </body>
