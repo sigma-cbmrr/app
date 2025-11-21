@@ -180,7 +180,7 @@
     </header>
     
     <div class="sidebar" id="main-sidebar">
-        <div class="sidebar-header"><img src="cci.png" alt="Logo CCI" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'"><h2>SIGMA Gestão</h2></div>
+        <div class="sidebar-header"><img src="logo_sigma.png" alt="Logo SIGMA" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'"><h2>SIGMA Gestão</h2></div>
         <div class="menu-label">Operacional</div>
         <a onclick="switchView('dashboard')" id="link-dashboard" class="active"><i class="fas fa-chart-line"></i> Dashboard & Serviço</a>
         <a onclick="switchView('my-history')" id="link-my-history"><i class="fas fa-history"></i> Minhas Conferências</a>
@@ -517,6 +517,8 @@
         async function loadCaaData() {
             const container = document.getElementById('cards-container');
             container.innerHTML = 'Carregando...';
+            const loading = document.getElementById('loading-message-dashboard');
+            loading.style.display = 'block';
             try {
                 const rotasDoc = await db.collection('config_geral').doc('rotas').get();
                 const rotas = rotasDoc.data() || {};
@@ -530,7 +532,7 @@
                 const docs = [];
                 snap.forEach(d => docs.push({id:d.id, ...d.data()}));
                 
-                // Ordena em memória (sem orderBy composto no firebase)
+                // Ordena em memória
                 docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
 
                 docs.forEach(d => {
@@ -541,7 +543,7 @@
 
                     if (!map[localNome]) map[localNome] = { docId: d.id, local: d.local, conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), items: d.itensCaa || [] };
                 });
-
+                loading.style.display = 'none';
                 renderCards(map);
             } catch (e) { console.error(e); container.innerHTML = 'Erro ao carregar.'; }
         }
@@ -630,7 +632,7 @@
                     }
                 });
                 ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
-            } catch(e){ ul.innerHTML = 'Erro.'; }
+            } catch(e){ console.error(e); ul.innerHTML = 'Erro.'; }
         }
 
         async function loadMyHistory() {
@@ -660,7 +662,8 @@
             const localFilter = document.getElementById('glob-hist-local').value;
 
             try {
-                const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get(); // SEM orderBy no banco
+                const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get(); 
+                
                 const rotasDoc = await db.collection('config_geral').doc('rotas').get();
                 const rotas = rotasDoc.data() || {};
                 const listToUnitMap = {};
@@ -866,24 +869,27 @@
                 itemsToShow.forEach(i => {
                     const tr = tbody.insertRow();
                     const obsFormatada = i.obs.replace(/\n/g, '<br>');
+                    // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
+                    const itemComDocId = { ...i, docId: data.docId }; 
+                    
                     tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
-                    const td = tr.insertCell(); td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(i)})'>Gerenciar</button>`;
+                    const td = tr.insertCell(); 
+                    // Passa o item enriquecido
+                    td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
                 });
             }
             wrapper.style.display = 'block';
-            // Scroll suave para a tabela
             wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
         function fecharTabela(){ document.getElementById('ca-table-wrapper').style.display='none'; }
         
         function abrirModalGestao(i){
             document.getElementById('gestao-item-nome').textContent = i.nomeCompleto;
-            document.getElementById('gestao-doc-id').value = i.docId;
+            document.getElementById('gestao-doc-id').value = i.docId; // Agora recebe corretamente
             document.getElementById('gestao-item-index').value = i.originalIndex;
-            document.getElementById('gestao-item-id-lista').value = i.id; // Para edição real
+            document.getElementById('gestao-item-id-lista').value = i.id; 
             document.getElementById('gestao-item-max-qtd').value = i.quantidade || 1;
             
-            // Reseta campos
             document.getElementById('gestao-status').value = i.statusAdmin || 'Solucionado';
             document.getElementById('gestao-obs').value = '';
             document.getElementById('gestao-qtd').value = '1';
@@ -904,7 +910,6 @@
             }
         }
 
-        // Define onchange programaticamente para evitar erro de escopo
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
 
         async function salvarGestaoCa(){
@@ -918,18 +923,18 @@
             if(!obs) return alert("Digite uma observação.");
 
             try {
-                // 1. Atualiza status na conferência (Histórico visual)
                 const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
                 const snap = await ref.get();
+                if(!snap.exists) return alert("Documento não encontrado.");
+                
                 const resData = snap.data();
                 const items = resData.itensCaa;
                 
-                items[idx].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); // Marca como resolvido no painel
+                items[idx].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
                 items[idx].adminObs = obs + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
                 
                 await ref.update({ itensCaa: items });
 
-                // 2. Se for Remover ou Solucionado, reflete na Lista Original (Estoque)
                 if(status === 'Remover' || status === 'Solucionado') {
                     const listaId = resData.lista_id;
                     if(listaId) {
@@ -939,23 +944,19 @@
                             let listaData = listSnap.data().list;
                             let updated = false;
 
-                            // Percorre a estrutura para achar o item
                             for(let s of listaData) {
                                 for(let i = s.itens.length - 1; i >= 0; i--) {
                                     const item = s.itens[i];
-                                    
-                                    // Item Único
                                     if(item.tipo === 'single' && item.id === itemId) {
                                         if(status === 'Remover') {
                                             item.quantidadeEsperada -= qtdRemover;
-                                            delete item.pendencia; // Limpa pendencia pois foi "resolvido" removendo
-                                            if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1); // Remove se zerar
+                                            delete item.pendencia; 
+                                            if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
                                         } else {
-                                            delete item.pendencia; // Solucionado
+                                            delete item.pendencia; 
                                         }
                                         updated = true;
                                     }
-                                    // Tombamento
                                     else if(item.tipo === 'multi' && item.tombamentos) {
                                         const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
                                         if(tIndex > -1) {
@@ -979,13 +980,11 @@
                 alert("Salvo com sucesso!");
                 fecharModalGestao();
                 fecharTabela();
-                loadCaaData(); // Recarrega
+                loadCaaData(); 
             } catch(e) { console.error(e); alert("Erro ao salvar."); }
         }
 
         // --- FUNÇÕES DE EDITOR ---
-        
-        // Carrega dados para edição
         async function carregarDadosGerenciador(){ 
             if(!currentEditingId) return; 
             try{ 
@@ -998,43 +997,20 @@
                 document.getElementById('main-admin-content').style.display = 'block';
             }catch(e){console.error(e); alert("Erro ao carregar lista.");} 
         }
-
-        // Salva lista editada
-        async function salvarDados(a=true){ 
-            if(!currentEditingId) return; 
-            try{ 
-                await db.collection(COLECAO_LISTAS).doc(currentEditingId).update({ list:dadosConferencia, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }); 
-                if(a)alert("Salvo!"); 
-            }catch(e){alert("Erro ao salvar");} 
-        }
-
-        // Gera ID único
+        async function salvarDados(a=true){ if(!currentEditingId) return; try{ await db.collection(COLECAO_LISTAS).doc(currentEditingId).update({ list:dadosConferencia, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }); if(a)alert("Salvo!"); }catch(e){alert("Erro ao salvar");} }
         function gerarNovoId(){ return Date.now().toString().slice(-6)+Math.floor(Math.random()*100).toString().padStart(2,'0'); }
-
-        // Funções de manipulação da lista (Globais para HTML acessar)
         function adicionarSetor(n){ n=n.trim().toUpperCase(); if(!n)return; dadosConferencia.push({id:gerarNovoId(), nome:n, itens:[]}); document.getElementById('input-setor-nome').value=''; salvarDados(false); renderizarLista(); }
-        
         function removerSetor(id){ if(confirm("Remover setor?")) { dadosConferencia=dadosConferencia.filter(x=>x.id!==id); salvarDados(false); renderizarLista(); } }
-        
         function adicionarItemPorSetor(sid){ const n=document.getElementById('input-item-nome-'+sid).value.trim().toUpperCase(); const q=parseInt(document.getElementById('input-item-qtd-'+sid).value); const t=document.getElementById('select-item-tipo-'+sid).value; if(!n||q<1)return; const s=dadosConferencia.find(x=>x.id===sid); const novo={id:sid+'-'+gerarNovoId(), nome:n, quantidadeEsperada:q, tipo:t, tombamentos:[]}; if(t==='multi')for(let i=0;i<q;i++)novo.tombamentos.push({tomb:'NOVO-'+(i+1),status:'pending',obs:''}); s.itens.push(novo); salvarDados(false); renderizarLista(); document.getElementById('input-item-nome-'+sid).value=''; }
-        
         function removerItem(sid,iid){ if(confirm("Remover item?")){ const s=dadosConferencia.find(x=>x.id===sid); s.itens=s.itens.filter(i=>i.id!==iid); salvarDados(false); renderizarLista(); } }
-        
-        // Funções auxiliares de tombamento
         function encontrarItemPorId(id) { for (const setor of dadosConferencia) { const item = setor.itens.find(i => i.id === id); if (item) return item; } return null; }
         function adicionarTombamento(itemId, inputElement) { const tombamento = inputElement.value.trim().toUpperCase(); if (!tombamento) return; const item = encontrarItemPorId(itemId); if (item) { if (item.tombamentos.some(t => t.tomb === tombamento)) return alert("Duplicado!"); item.tombamentos.push({ tomb: tombamento, status: "pending", obs: "" }); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
         function removerTombamento(itemId, tombamento) { if (!confirm("Remover tombamento?")) return; const item = encontrarItemPorId(itemId); if (item) { item.tombamentos = item.tombamentos.filter(t => t.tomb !== tombamento); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
         function editarTombamento(itemId, tombamentoAtual, inputElement) { const novoTombamento = inputElement.value.trim().toUpperCase(); if (!novoTombamento || novoTombamento === tombamentoAtual) return; const item = encontrarItemPorId(itemId); if (item) { const tomb = item.tombamentos.find(t => t.tomb === tombamentoAtual); if (tomb) { tomb.tomb = novoTombamento; salvarDados(false); } } }
-        
-        // Ordenação
         function updateOrdens() { const novosDados = []; document.querySelectorAll('.setor-item').forEach(sNode => { const sId = sNode.getAttribute('data-id'); const sOriginal = dadosConferencia.find(x => x.id === sId); const novosItens = []; sNode.querySelectorAll('.item-conferencia-admin').forEach(iNode => { const iId = iNode.querySelector('.btn-edit-alt').getAttribute('onclick').split("'")[3]; const itemObj = encontrarItemPorId(iId); if(itemObj) novosItens.push(itemObj); }); sOriginal.itens = novosItens; novosDados.push(sOriginal); }); dadosConferencia = novosDados; }
-
-        // Modal Edição Item
         function abrirModalEdicao(sid, iid){ const s=dadosConferencia.find(x=>x.id===sid); const i=s.itens.find(x=>x.id===iid); document.getElementById('edit-setor-id').value=sid; document.getElementById('edit-item-original-id').value=iid; document.getElementById('edit-item-nome').value=i.nome; document.getElementById('edit-item-qtd').value=i.quantidadeEsperada; document.getElementById('edit-item-qtd').disabled=(i.tipo==='multi'); document.getElementById('edit-item-tipo').value=i.tipo; const sl=document.getElementById('edit-item-setor'); sl.innerHTML=''; dadosConferencia.forEach(d=>{const o=document.createElement('option'); o.value=d.id; o.text=d.nome; if(d.id===sid)o.selected=true; sl.appendChild(o);}); document.getElementById('modal-edicao').style.display='flex'; }
         function salvarEdicaoItem(){ const osid=document.getElementById('edit-setor-id').value; const iid=document.getElementById('edit-item-original-id').value; const n=document.getElementById('edit-item-nome').value.trim().toUpperCase(); const nsid=document.getElementById('edit-item-setor').value; const q=parseInt(document.getElementById('edit-item-qtd').value); const os=dadosConferencia.find(x=>x.id===osid); const ns=dadosConferencia.find(x=>x.id===nsid); const i=os.itens.find(x=>x.id===iid); i.nome=n; if(i.tipo==='single')i.quantidadeEsperada=q; if(osid!==nsid){ os.itens=os.itens.filter(x=>x.id!==iid); i.id=nsid+'-'+gerarNovoId(); ns.itens.push(i); } salvarDados(false); renderizarLista(); fecharModal(); }
         function fecharModal(){document.getElementById('modal-edicao').style.display='none';}
-        
-        // Backup
         function fazerBackupLocal(){ const b=new Blob([JSON.stringify(dadosConferencia,null,2)],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='backup.json'; a.click(); }
         function importarBackupLocal(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=function(ev){if(confirm("Substituir?")){try{dadosConferencia=JSON.parse(ev.target.result);salvarDados();renderizarLista();}catch(err){alert("Erro JSON");}}}; r.readAsText(f); }
         
@@ -1125,7 +1101,7 @@
         }
 
         function voltarParaLocais() { currentEditingId = null; switchView('listas'); }
-
+        
         function renderizarLista() { 
             const container = document.getElementById('lista-setores-container'); container.innerHTML = '';
             dadosConferencia.forEach(setor => {
