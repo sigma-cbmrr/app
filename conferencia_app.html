@@ -98,7 +98,11 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 
     <script>
+        console.log("Script iniciado");
+
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
+        
+        // Inicialização Firebase Global
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
 
@@ -107,7 +111,7 @@
         const COLECAO_LISTAS = 'listas_conferencia'; 
         let dadosConferencia = []; let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
 
-        // --- 1. FUNÇÕES UTILITÁRIAS (DEFINIDAS NO TOPO) ---
+        // --- FUNÇÕES UTILITÁRIAS (Topo do Script) ---
         function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
         
         const userInfo = { 
@@ -123,7 +127,8 @@
         }
 
         function updateHeaderInfo() { 
-            document.getElementById('militar-info').innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
+            const el = document.getElementById('militar-info');
+            if(el) el.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
         }
 
         function updateOverallStatus() { 
@@ -139,10 +144,83 @@
             }
         }
 
-        // --- 2. LÓGICA DO RASCUNHO ---
+        // --- LÓGICA DO RASCUNHO ---
         function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
         function salvarRascunho() { try { localStorage.setItem(getStorageKey(), JSON.stringify({ timestamp: Date.now(), status: window.itemStatus })); } catch (e) { console.error(e); } }
         function limparRascunho() { try { localStorage.removeItem(getStorageKey()); } catch (e) { console.error(e); } }
+
+        function restaurarRascunho() {
+            const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
+            try {
+                const parsed = JSON.parse(saved); window.itemStatus = parsed.status; 
+                const msgDiv = document.getElementById('draft-message');
+                if(msgDiv) msgDiv.style.display = 'block';
+
+                Object.keys(window.itemStatus).forEach(uid => {
+                    const st = window.itemStatus[uid];
+                    let container;
+                    let isTombamento = false;
+                    
+                    container = document.querySelector(`.item-conferencia[data-id="${uid}"]`);
+                    if (!container) {
+                        const allTombs = document.querySelectorAll('.tombamento-container');
+                        for (let t of allTombs) { 
+                            const pItem = t.closest('.item-conferencia');
+                            if(pItem && `${pItem.dataset.id}-${t.dataset.tomb}` === uid) { container = t; isTombamento = true; break; } 
+                        }
+                    }
+
+                    if (container) {
+                        const btnSA=container.querySelector('.sa-ok'), btnCA=container.querySelector('.ca-alert');
+                        if(btnSA)btnSA.classList.remove('active'); if(btnCA)btnCA.classList.remove('active');
+                        const descEl = container.querySelector('.descricao-salva') || container.querySelector('.tombamento-descricao-salva');
+                        
+                        if (st.status === 'S/A') { 
+                            if(btnSA)btnSA.classList.add('active'); 
+                            if(!isTombamento) {
+                                container.className = 'item-conferencia status-ok'; 
+                                container.querySelector('.status-icon').className='status-icon ok';
+                            } else { 
+                                updateItemMainStatusDisplay(container.closest('.item-conferencia')); 
+                            }
+                        } 
+                        else if (st.status === 'C/A' || st.status === 'KEEP') { 
+                            if(btnCA)btnCA.classList.add('active'); 
+                            if(!isTombamento) {
+                                container.className = 'item-conferencia status-alert'; 
+                                container.querySelector('.status-icon').className='status-icon alert'; 
+                            }
+                            
+                            if(descEl && st.status === 'C/A') {
+                                const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+                                const now=formatarDataSimples(new Date());
+                                descEl.innerHTML=gerarHtmlVisual(st.obs,conf,now,null,null); 
+                                descEl.style.display='block';
+                                const pendBox = container.querySelector('.pendencia-alert-box'); if(pendBox) pendBox.style.display = 'none';
+                            } else if(st.status === 'KEEP') {
+                                const pendBox = container.querySelector('.pendencia-alert-box');
+                                if(pendBox) {
+                                    pendBox.classList.add('kept'); 
+                                    const actions = pendBox.querySelector('.pendencia-actions');
+                                    if(actions) actions.style.display='none';
+                                    if(!pendBox.innerHTML.includes('✔ Mantido')) pendBox.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>');
+                                }
+                            }
+                        }
+                        else if (st.status === 'PENDING_CA') {
+                             const editArea = container.querySelector('.tombamento-obs-container') || container.querySelector('.alteracao-container');
+                             if(editArea) editArea.style.display = 'block';
+                             if(btnCA) btnCA.classList.add('active');
+                        }
+                    }
+                });
+                
+                // Atualiza status após restaurar
+                const setores = document.querySelectorAll('.setor');
+                setores.forEach(s => updateSetorStatus(s)); 
+                updateOverallStatus();
+            } catch (e) { console.error("Erro restore", e); }
+        }
 
         // --- 3. FORMATAÇÃO ---
         const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
@@ -182,7 +260,7 @@
             html += '</ul>';
             return html;
         };
-        
+
         const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
             const separator = ' | + NOVA: ';
             if (obsAnterior.includes(separator)) {
@@ -190,64 +268,89 @@
             } else { let anteriorAssinado = `"${obsAnterior}" (Por: ${autorAnterior} em ${dataAnterior})`; return `${anteriorAssinado}${separator}${novoTexto}`; }
         };
 
-        // --- 4. UPDATES UI ---
-        function updateSetorStatus(setor) { 
-            const items = setor.querySelectorAll('.item-conferencia'); let completed = 0, altered = 0, total = 0; 
-            items.forEach(item => { 
-                if (item.dataset.type === 'single') { 
-                    total++; const s = window.itemStatus[item.dataset.id]?.status; 
-                    if (s === 'S/A') completed++; else if (s === 'C/A' || s === 'KEEP') { completed++; altered++; } 
-                } else { 
-                    const tombs = item.querySelectorAll('.tombamento-container'); 
-                    tombs.forEach(t => { 
-                        total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
-                        if (s === 'S/A') completed++; else if (s === 'C/A' || s === 'KEEP') { completed++; altered++; } 
-                    }); 
-                } 
-            }); 
-            setor.dataset.totalItems = total; 
-            const st = setor.querySelector('.setor-status'); 
-            st.dataset.completed = completed; 
-            if (completed === total && altered === 0) { st.textContent = 'S/A'; st.classList.add('ok'); } 
-            else if (altered > 0) { st.textContent = `${altered} C/A`; st.classList.remove('ok'); } 
-            else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
+        // --- 4. RENDERIZAÇÃO ---
+        function renderizarConferencia() {
+            const mainContent = document.getElementById('main-content');
+            let htmlSetores = '';
+            const setorIds = [];
+            dadosConferencia.forEach(s => setorIds.push(s.id));
+            window.setorIds = setorIds;
+
+            dadosConferencia.forEach(setor => {
+                let htmlItens = ''; let totalItensNoSetor = 0;
+                setor.itens.forEach(item => {
+                    const montarPendenciaHtml = (uid, pendenciaObj) => {
+                        if (!pendenciaObj) return '';
+                        const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; 
+                        const quem = pendenciaObj.quem || 'Anônimo'; 
+                        const dataPend = formatarDataSimples(pendenciaObj.data);
+                        const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); 
+                        const safeHistorico = encodeURIComponent(dadosHistorico);
+                        const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
+                        let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
+                        return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
+                    };
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        let htmlTombamentos = '';
+                        item.tombamentos.forEach(tomb => {
+                            const uid = `${item.id}-${tomb.tomb}`; 
+                            const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
+                            htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options"><button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button></div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
+                            totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
+                        });
+                        htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
+                    } else {
+                        let classExtra = ''; if (item.pendencia) { if (item.pendencia.statusAdmin) classExtra = 'status-admin-response'; else classExtra = 'status-existing-alert'; }
+                        const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
+                        htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options"><button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button></div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
+                        totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
+                    }
+                });
+                htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div></div><span class="arrow">►</span></div><div class="setor-content">${htmlItens}</div></div>`;
+            });
+            mainContent.querySelector('#btn-finalizar').insertAdjacentHTML('beforebegin', htmlSetores);
         }
 
-        function updateItemMainStatusDisplay(item) { 
-            if (item.dataset.type === 'single') return; 
-            const tombs = item.querySelectorAll('.tombamento-container'); let conf = 0, alt = 0; 
-            tombs.forEach(t => { const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; if (s === 'S/A' || s === 'C/A' || s === 'KEEP') { conf++; if (s === 'C/A' || s === 'KEEP') alt++; } }); 
-            const icon = item.querySelector('.status-icon'); item.className = 'item-conferencia item-has-tombamentos'; icon.className = 'status-icon'; 
-            if (conf === tombs.length) { if (alt > 0) { icon.classList.add('alert'); item.classList.add('status-alert'); } else { icon.classList.add('ok'); item.classList.add('status-ok'); } } 
+        // --- 5. CARREGAMENTO INICIAL ---
+        async function carregarDadosRemotos() {
+            if (!LISTA_ID) { 
+                document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>"; 
+                return; 
+            }
+            document.getElementById('loading-message').innerHTML = "Conectando...";
+            
+            try {
+                const doc = await db.collection(COLECAO_LISTAS).doc(LISTA_ID).get();
+                if (!doc.exists) throw new Error("Lista não encontrada.");
+                
+                const data = doc.data(); 
+                dadosConferencia = data.list || [];
+                infoLocal = { nome: data.nome_local || "DESCONHECIDO", posto: data.posto || "Geral" };
+                
+                document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
+                document.title = `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
+                
+                document.getElementById('loading-message').innerHTML = "Renderizando...";
+                
+                renderizarConferencia(); 
+                updateHeaderInfo(); 
+                updateOverallStatus();
+                restaurarRascunho();
+
+                document.getElementById('loading-message').style.display='none'; 
+                document.getElementById('main-content').style.display='block';
+            } catch (e) { 
+                console.error(e);
+                document.getElementById('loading-message').innerHTML = "Erro: " + e.message; 
+            }
         }
 
-        function checkSetorCompletion(currentSetor, currentItemId) { 
-            const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); 
-            if (comp === total) autoAdvanceSetor(currentSetor.dataset.id); else focusNextItem(currentItemId); 
-        }
-
-        function focusNextItem(currentItemId) { 
-            const allItems = Array.from(document.querySelectorAll('.item-conferencia')); let baseId = currentItemId.split('-')[0]; const idx = allItems.findIndex(i => i.dataset.id === baseId); 
-            for (let i = idx; i < allItems.length; i++) { 
-                const item = allItems[i]; if (!item) continue; const id = item.dataset.id; 
-                if (item.dataset.type === 'single') { const st = window.itemStatus[id]; if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { item.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; } } 
-                if (item.dataset.type === 'multi') { const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; }); if (pendingTomb) { pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); const uid = `${id}-${pendingTomb.dataset.tomb}`; if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; } } 
-            } 
-        }
-
-        function autoAdvanceSetor(sid) { 
-            const s = document.querySelector(`.setor[data-id="${sid}"]`); if (s) toggleSetor(s.querySelector('.setor-header')); 
-            const idx = window.setorIds.indexOf(sid); const nextId = window.setorIds[idx + 1]; 
-            if (nextId) { const next = document.querySelector(`.setor[data-id="${nextId}"]`); if (next) { const h = next.querySelector('.setor-header'); toggleSetor(h); next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } 
-        }
-
-        function toggleSetor(header) { 
-            const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); 
-            if (content.classList.contains('expanded')) { content.classList.remove('expanded'); arrow.textContent = '►'; } 
-            else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►'}); content.classList.add('expanded'); arrow.textContent = '▼'; } 
-        }
-
-        // --- 5. INTERAÇÃO ---
+        // --- FUNÇÕES DE UI ---
+        function toggleSetor(header) { const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); if (content.classList.contains('expanded')) { content.classList.remove('expanded'); arrow.textContent = '►'; } else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►'}); content.classList.add('expanded'); arrow.textContent = '▼'; } }
+        function checkSetorCompletion(currentSetor, currentItemId) { const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); if (comp === total) autoAdvanceSetor(currentSetor.dataset.id); else focusNextItem(currentItemId); }
+        function focusNextItem(currentItemId) { const allItems = Array.from(document.querySelectorAll('.item-conferencia')); let baseId = currentItemId.split('-')[0]; const idx = allItems.findIndex(i => i.dataset.id === baseId); for (let i = idx; i < allItems.length; i++) { const item = allItems[i]; if (!item) continue; const id = item.dataset.id; if (item.dataset.type === 'single') { const st = window.itemStatus[id]; if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { item.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; } } if (item.dataset.type === 'multi') { const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; }); if (pendingTomb) { pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); const uid = `${id}-${pendingTomb.dataset.tomb}`; if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; } } } }
+        function autoAdvanceSetor(sid) { const s = document.querySelector(`.setor[data-id="${sid}"]`); if (s) toggleSetor(s.querySelector('.setor-header')); const idx = window.setorIds.indexOf(sid); const nextId = window.setorIds[idx + 1]; if (nextId) { const next = document.querySelector(`.setor[data-id="${nextId}"]`); if (next) { const h = next.querySelector('.setor-header'); toggleSetor(h); next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }
+        
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
             item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
@@ -268,30 +371,6 @@
             salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); 
         }
 
-        function manterPendencia(btn, uid) { 
-            const box = btn.closest('.pendencia-alert-box'); 
-            if(box) { 
-                box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept'); 
-                box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
-                window.itemStatus[uid]={status:'KEEP',obs:''}; salvarRascunho(); 
-                const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); 
-                const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); 
-                const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); 
-                if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item); 
-                const setor=c.closest('.setor'); updateSetorStatus(setor); updateOverallStatus(); checkSetorCompletion(setor, item.dataset.id); 
-            } 
-        }
-
-        function acrescentarPendencia(btn, uid, encodedData) { 
-            const box = btn.closest('.pendencia-alert-box'); const container = box.closest('.tombamento-container')||box.closest('.item-conferencia'); box.style.display='none'; 
-            if(container){ 
-                const btnCA=container.querySelector('.ca-alert'); if(btnCA){btnCA.classList.add('active'); container.querySelector('.sa-ok').classList.remove('active');} 
-                const edit=container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container'); edit.style.display='block'; 
-                const hist=edit.querySelector('.historico-fixo'); hist.dataset.meta=encodedData; hist.style.display='none'; 
-                edit.querySelector('textarea').value=''; edit.querySelector('textarea').focus(); window.itemStatus[uid]={status:'PENDING_CA',obs:''}; salvarRascunho(); 
-            } 
-        }
-
         function salvarItem(btn) { 
             const item=btn.closest('.item-conferencia'); const obs=item.querySelector('textarea').value.trim(); const hist=item.querySelector('.historico-fixo'); 
             let final=obs; if(hist&&hist.dataset.meta){if(obs.length<3)return alert("Digite a alteração."); const meta=JSON.parse(decodeURIComponent(hist.dataset.meta)); final=montarHistoricoLinear(meta.obs,obs,meta.autor,meta.data);} else {if(obs.length<3)return alert("Descreva.");} 
@@ -310,75 +389,10 @@
             updateItemMainStatusDisplay(item); updateSetorStatus(btn.closest('.setor')); updateOverallStatus(); checkSetorCompletion(btn.closest('.setor'), item.dataset.id); 
         }
 
-        function restaurarRascunho() {
-            const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
-            try {
-                const parsed = JSON.parse(saved); window.itemStatus = parsed.status; 
-                document.getElementById('draft-message').style.display = 'block';
-                Object.keys(window.itemStatus).forEach(uid => {
-                    const st = window.itemStatus[uid]; let container, isTombamento=false;
-                    container = document.querySelector(`.item-conferencia[data-id="${uid}"]`);
-                    if (!container) {
-                        const allTombs = document.querySelectorAll('.tombamento-container');
-                        for (let t of allTombs) { if (`${t.closest('.item-conferencia').dataset.id}-${t.dataset.tomb}` === uid) { container = t; isTombamento = true; break; } }
-                    }
-                    if (container) {
-                        const btnSA=container.querySelector('.sa-ok'), btnCA=container.querySelector('.ca-alert');
-                        if(btnSA)btnSA.classList.remove('active'); if(btnCA)btnCA.classList.remove('active');
-                        const descEl = container.querySelector('.descricao-salva') || container.querySelector('.tombamento-descricao-salva');
-                        
-                        if (st.status === 'S/A') { if(btnSA)btnSA.classList.add('active'); if(!isTombamento) container.querySelector('.status-icon').className='status-icon ok'; }
-                        else if (st.status === 'C/A' || st.status === 'KEEP') { 
-                            if(btnCA)btnCA.classList.add('active'); 
-                            if(!isTombamento) container.querySelector('.status-icon').className='status-icon alert'; 
-                            if(descEl && st.status === 'C/A') {
-                                const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-                                const now=formatarDataSimples(new Date());
-                                descEl.innerHTML=gerarHtmlVisual(st.obs,conf,now,null,null); 
-                                descEl.style.display='block';
-                                const pendBox = container.querySelector('.pendencia-alert-box'); if(pendBox) pendBox.style.display = 'none';
-                            } else if(st.status === 'KEEP') {
-                                const pendBox = container.querySelector('.pendencia-alert-box');
-                                if(pendBox) {
-                                    pendBox.classList.add('kept'); pendBox.querySelector('.pendencia-actions').style.display='none';
-                                    if(!pendBox.innerHTML.includes('✔ Mantido')) pendBox.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>');
-                                }
-                            }
-                        }
-                        else if (st.status === 'PENDING_CA') {
-                            const edit = container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container');
-                            if(edit) edit.style.display='block';
-                            if(btnCA) btnCA.classList.add('active');
-                        }
-                        if(isTombamento) updateItemMainStatusDisplay(container.closest('.item-conferencia'));
-                    }
-                });
-                document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s)); updateOverallStatus();
-            } catch (e) { console.error("Erro restore", e); }
-        }
+        function updateItemMainStatusDisplay(item) { if (item.dataset.type === 'single') return; const tombs = item.querySelectorAll('.tombamento-container'); let conf = 0, alt = 0; tombs.forEach(t => { const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; if (s === 'S/A' || s === 'C/A' || s === 'KEEP') { conf++; if (s === 'C/A' || s === 'KEEP') alt++; } }); const icon = item.querySelector('.status-icon'); item.className = 'item-conferencia item-has-tombamentos'; icon.className = 'status-icon'; if (conf === tombs.length) { if (alt > 0) { icon.classList.add('alert'); item.classList.add('status-alert'); } else { icon.classList.add('ok'); item.classList.add('status-ok'); } } }
+        function updateSetorStatus(setor) { const items = setor.querySelectorAll('.item-conferencia'); let completed = 0, altered = 0, total = 0; items.forEach(item => { if (item.dataset.type === 'single') { total++; const s = window.itemStatus[item.dataset.id]?.status; if (s === 'S/A') completed++; else if (s === 'C/A' || s === 'KEEP') { completed++; altered++; } } else { const tombs = item.querySelectorAll('.tombamento-container'); tombs.forEach(t => { total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; if (s === 'S/A') completed++; else if (s === 'C/A' || s === 'KEEP') { completed++; altered++; } }); } }); setor.dataset.totalItems = total; const st = setor.querySelector('.setor-status'); st.dataset.completed = completed; if (completed === total && altered === 0) { st.textContent = 'S/A'; st.classList.add('ok'); } else if (altered > 0) { st.textContent = `${altered} C/A`; st.classList.remove('ok'); } else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } }
 
-        // --- 6. CARREGAMENTO ---
-        async function carregarDadosRemotos() {
-            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-            db = firebase.firestore();
-            if (!LISTA_ID) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>"; return; }
-            document.getElementById('loading-message').innerHTML = "Conectando...";
-            try {
-                const doc = await db.collection(COLECAO_LISTAS).doc(LISTA_ID).get();
-                if (!doc.exists) throw new Error("Lista não encontrada.");
-                const data = doc.data(); dadosConferencia = data.list || [];
-                infoLocal = { nome: data.nome_local || "DESCONHECIDO", posto: data.posto || "Geral" };
-                document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
-                document.title = `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
-                document.getElementById('loading-message').innerHTML = "Renderizando...";
-                renderizarConferencia(); 
-                updateHeaderInfo(); 
-                restaurarRascunho();
-                document.getElementById('loading-message').style.display='none'; document.getElementById('main-content').style.display='block';
-            } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message; }
-        }
-
-        // --- 7. FINALIZAR ---
+        // --- 7. FINALIZAR (ENVIA E FECHA) ---
         async function finalizarConferencia() {
             const btn = document.getElementById('btn-finalizar'); if (btn.disabled) return;
             btn.textContent = "Salvando..."; btn.disabled = true;
