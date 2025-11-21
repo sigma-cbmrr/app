@@ -98,7 +98,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 
     <script>
-        // --- 1. CONFIGURAÇÕES E GLOBAIS ---
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
@@ -106,11 +105,9 @@
         const urlParams = new URLSearchParams(window.location.search);
         const LISTA_ID = urlParams.get('id'); 
         const COLECAO_LISTAS = 'listas_conferencia'; 
-        let dadosConferencia = []; 
-        let infoLocal = { nome: '', posto: '' }; 
-        window.itemStatus = {};
+        let dadosConferencia = []; let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
 
-        // --- 2. FUNÇÕES DE UTILIDADE (DEFINIDAS PRIMEIRO PARA EVITAR ERROS) ---
+        // --- 1. FUNÇÕES UTILITÁRIAS (DEFINIDAS NO TOPO) ---
         function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
         
         const userInfo = { 
@@ -125,12 +122,10 @@
             return date.toLocaleDateString('pt-BR'); 
         }
 
-        // ESSENCIAL: Atualiza o cabeçalho
         function updateHeaderInfo() { 
             document.getElementById('militar-info').innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
         }
 
-        // ESSENCIAL: Calcula status geral e libera botão
         function updateOverallStatus() { 
             let total = 0, completed = 0; 
             document.querySelectorAll('.setor').forEach(s => { 
@@ -144,12 +139,12 @@
             }
         }
 
-        // --- 3. LÓGICA DO RASCUNHO (LOCAL STORAGE) ---
+        // --- 2. LÓGICA DO RASCUNHO ---
         function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
         function salvarRascunho() { try { localStorage.setItem(getStorageKey(), JSON.stringify({ timestamp: Date.now(), status: window.itemStatus })); } catch (e) { console.error(e); } }
         function limparRascunho() { try { localStorage.removeItem(getStorageKey()); } catch (e) { console.error(e); } }
 
-        // --- 4. FORMATAÇÃO DE TEXTO ---
+        // --- 3. FORMATAÇÃO ---
         const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
             const linhas = [];
             if (adminStatus) linhas.push(`[${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
@@ -187,7 +182,7 @@
             html += '</ul>';
             return html;
         };
-
+        
         const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
             const separator = ' | + NOVA: ';
             if (obsAnterior.includes(separator)) {
@@ -195,7 +190,7 @@
             } else { let anteriorAssinado = `"${obsAnterior}" (Por: ${autorAnterior} em ${dataAnterior})`; return `${anteriorAssinado}${separator}${novoTexto}`; }
         };
 
-        // --- 5. UPDATES DE UI (FUNÇÕES AUXILIARES DE RENDERIZAÇÃO) ---
+        // --- 4. UPDATES UI ---
         function updateSetorStatus(setor) { 
             const items = setor.querySelectorAll('.item-conferencia'); let completed = 0, altered = 0, total = 0; 
             items.forEach(item => { 
@@ -252,7 +247,7 @@
             else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►'}); content.classList.add('expanded'); arrow.textContent = '▼'; } 
         }
 
-        // --- 6. INTERAÇÃO (ACTIONS) ---
+        // --- 5. INTERAÇÃO ---
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
             item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
@@ -315,7 +310,6 @@
             updateItemMainStatusDisplay(item); updateSetorStatus(btn.closest('.setor')); updateOverallStatus(); checkSetorCompletion(btn.closest('.setor'), item.dataset.id); 
         }
 
-        // --- 7. RESTAURAÇÃO (DEVE VIR APÓS DEFINIÇÕES DE UI) ---
         function restaurarRascunho() {
             const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
             try {
@@ -363,7 +357,28 @@
             } catch (e) { console.error("Erro restore", e); }
         }
 
-        // --- 8. FINALIZAR ---
+        // --- 6. CARREGAMENTO ---
+        async function carregarDadosRemotos() {
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            if (!LISTA_ID) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>"; return; }
+            document.getElementById('loading-message').innerHTML = "Conectando...";
+            try {
+                const doc = await db.collection(COLECAO_LISTAS).doc(LISTA_ID).get();
+                if (!doc.exists) throw new Error("Lista não encontrada.");
+                const data = doc.data(); dadosConferencia = data.list || [];
+                infoLocal = { nome: data.nome_local || "DESCONHECIDO", posto: data.posto || "Geral" };
+                document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
+                document.title = `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
+                document.getElementById('loading-message').innerHTML = "Renderizando...";
+                renderizarConferencia(); 
+                updateHeaderInfo(); 
+                restaurarRascunho();
+                document.getElementById('loading-message').style.display='none'; document.getElementById('main-content').style.display='block';
+            } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message; }
+        }
+
+        // --- 7. FINALIZAR ---
         async function finalizarConferencia() {
             const btn = document.getElementById('btn-finalizar'); if (btn.disabled) return;
             btn.textContent = "Salvando..."; btn.disabled = true;
