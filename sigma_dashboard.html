@@ -195,8 +195,9 @@
             #app-runner-container { left: 0; width: 100%; z-index: 500; }
             .modern-filter-card { flex-direction: column; align-items: stretch; gap: 10px; }
             .btn-filter-modern { width: 100%; }
-            .filter-input { max-width: 100%; }
-            .filter-item { min-width: 100%; }
+            /* Correção seletor vazando */
+            .filter-input { max-width: 100%; width: 100%; }
+            .filter-item { width: 100%; min-width: 0; }
         }
         @media (min-width: 769px) { .sidebar-overlay { display: none !important; } }
         .restricted-admin-only { display: none; } 
@@ -624,7 +625,8 @@
             
             keys.forEach(key => {
                 const d = map[key];
-                const count = d.items.filter(i => i.statusAdmin !== 'Solucionado').length;
+                const items = d.items || [];
+                const count = items.filter(i => i.statusAdmin !== 'Solucionado').length;
                 const div = document.createElement('div');
                 div.className = `sector-card ${count===0?'status-ok':'status-alert'}`;
                 div.innerHTML = `<h3>${d.local}</h3><div class="main-stat"><span class="count-value">${count===0?'OK':count}</span></div><div class="card-footer"><strong>${d.conferente}</strong><br>${d.date}</div>`;
@@ -779,89 +781,6 @@
             return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'><i class="fas fa-file-pdf"></i></button></div></li>`;
         }
 
-        // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
-        async function carregarUnidadesVisuais() {
-            const container = document.getElementById('units-cards-container');
-            container.innerHTML = 'Carregando...';
-            try {
-                const unitsDoc = await db.collection('config_geral').doc('unidades').get();
-                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-                const unidades = unitsDoc.data().lista || [];
-                const rotas = rotasDoc.data() || {};
-
-                container.innerHTML = '';
-                unidades.forEach(u => {
-                    const listsInUnit = Object.values(rotas).filter(r => r.unidade === u).map(r => r.nome);
-                    const card = document.createElement('div');
-                    card.className = 'sector-card status-unit';
-                    card.innerHTML = `<h3>${u}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInUnit.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
-                    card.onclick = () => abrirGestaoUnidade(u, rotas);
-                    container.appendChild(card);
-                });
-                
-                const sel = document.getElementById('glob-hist-local');
-                const locais = [...new Set(Object.values(rotas).map(r=>r.nome))].sort();
-                locais.forEach(l => { const o=document.createElement('option'); o.value=l; o.text=l; sel.appendChild(o); });
-
-            } catch(e){ container.innerHTML='Erro'; }
-        }
-
-        function abrirGestaoUnidade(unitName, allRotas) {
-            document.getElementById('edit-unit-original-name').value = unitName;
-            document.getElementById('edit-unit-name-input').value = unitName;
-            const checklist = document.getElementById('unit-lists-checklist');
-            checklist.innerHTML = '';
-            Object.entries(allRotas).forEach(([id, r]) => {
-                if(r.ativo === false) return;
-                const div = document.createElement('div');
-                div.className = 'checklist-item';
-                const isChecked = (r.unidade === unitName) ? 'checked' : '';
-                div.innerHTML = `<input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> <label for="chk-${id}" style="margin:0;font-weight:normal;">${r.nome} (${r.posto})</label>`;
-                checklist.appendChild(div);
-            });
-            document.getElementById('modal-unit-manager').style.display = 'flex';
-        }
-
-        async function salvarAlteracoesUnidade() {
-            const oldName = document.getElementById('edit-unit-original-name').value;
-            const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
-            if(!newName) return alert("Nome inválido");
-            try {
-                const unitsRef = db.collection('config_geral').doc('unidades');
-                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayRemove(oldName) });
-                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayUnion(newName) });
-                const rotasRef = db.collection('config_geral').doc('rotas');
-                const rotasSnap = await rotasRef.get();
-                const rotasData = rotasSnap.data();
-                const checkboxes = document.querySelectorAll('#unit-lists-checklist input[type="checkbox"]');
-                checkboxes.forEach(chk => {
-                    const id = chk.value;
-                    if (chk.checked) {
-                        rotasData[id].unidade = newName; 
-                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: newName });
-                    } else if (rotasData[id].unidade === oldName) {
-                        rotasData[id].unidade = null; 
-                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: null });
-                    }
-                });
-                await rotasRef.set(rotasData);
-                alert("Atualizado!"); document.getElementById('modal-unit-manager').style.display = 'none'; carregarUnidadesVisuais();
-            } catch(e) { alert("Erro: " + e.message); }
-        }
-
-        async function excluirUnidade() {
-            const name = document.getElementById('edit-unit-original-name').value;
-            if(!confirm(`Excluir a unidade ${name}? As listas perderão o vínculo.`)) return;
-            try {
-                await db.collection('config_geral').doc('unidades').update({ lista: firebase.firestore.FieldValue.arrayRemove(name) });
-                const rotasRef = db.collection('config_geral').doc('rotas');
-                const s = await rotasRef.get(); const d = s.data();
-                Object.keys(d).forEach(k => { if(d[k].unidade === name) d[k].unidade = null; });
-                await rotasRef.set(d);
-                alert("Excluído."); document.getElementById('modal-unit-manager').style.display = 'none'; carregarUnidadesVisuais();
-            } catch(e){ alert("Erro"); }
-        }
-
         // --- PDF GENERATOR ---
         function reimprimirPDF(data) {
             try {
@@ -914,7 +833,6 @@
         }
 
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
-        
         function sairDoSistema() { auth.signOut().then(() => { sessionStorage.clear(); window.location.href = 'index.html'; }); }
         
         function switchView(v) {
@@ -950,7 +868,6 @@
         function mostrarTabela(data) {
             const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
             document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; tbody.innerHTML = '';
-            // Garante array
             const items = data.items || [];
             const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
             if (itemsToShow.length === 0) { wrapper.querySelector('table').style.display = 'none'; document.getElementById('no-issues-msg').style.display = 'block'; } else {
@@ -958,12 +875,10 @@
                 itemsToShow.forEach(i => {
                     const tr = tbody.insertRow();
                     const obsFormatada = (i.obs || '').replace(/\n/g, '<br>');
-                    // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
                     const itemComDocId = { ...i, docId: data.docId }; 
                     
                     tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
                     const td = tr.insertCell(); 
-                    // Passa o item enriquecido
                     td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
                 });
             }
@@ -1003,7 +918,6 @@
 
         async function salvarGestaoCa(){
             const docId = document.getElementById('gestao-doc-id').value;
-            const idx = parseInt(document.getElementById('gestao-item-index').value);
             const itemId = document.getElementById('gestao-item-id-lista').value;
             const status = document.getElementById('gestao-status').value;
             const obsRaw = document.getElementById('gestao-obs').value.trim();
@@ -1011,7 +925,6 @@
 
             if(!obsRaw) return alert("Digite uma observação.");
 
-            // --- CARIMBO AUTOMÁTICO ---
             const dataHoje = new Date().toLocaleDateString('pt-BR');
             const carimbo = `Por ${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra} em ${dataHoje}`;
             const obsFinal = `${carimbo}: "${obsRaw}"` + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
@@ -1024,10 +937,22 @@
                 const resData = snap.data();
                 const items = resData.itensCaa || [];
                 
-                if (!items[idx]) return alert("Erro: Item não encontrado no índice.");
+                // BUSCA INTELIGENTE (Pelo ID e não apenas pelo índice)
+                let targetIndex = -1;
+                
+                // 1. Tenta achar pelo ID
+                targetIndex = items.findIndex(i => i.id === itemId);
+                
+                // 2. Se não achar, tenta pelo Nome + Obs (Fallback)
+                if (targetIndex === -1) {
+                    const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
+                    targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
+                }
 
-                items[idx].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
-                items[idx].adminObs = obsFinal;
+                if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
+
+                items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
+                items[targetIndex].adminObs = obsFinal;
                 
                 await ref.update({ itensCaa: items });
 
@@ -1080,7 +1005,15 @@
             } catch(e) { console.error(e); alert("Erro ao salvar: " + e.message); }
         }
 
-        // --- FUNÇÕES DE EDITOR ---
+        // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
+        function abrirEditor(id, nome) { 
+            currentEditingId = id; 
+            document.getElementById('editor-title').textContent = `Editando: ${nome}`; 
+            switchView('editor'); 
+            carregarDadosGerenciador(); 
+        }
+        function voltarParaLocais() { currentEditingId = null; switchView('listas'); }
+        
         async function carregarDadosGerenciador(){ 
             if(!currentEditingId) return; 
             try{ 
@@ -1188,15 +1121,6 @@
                 ul.appendChild(li);
             });
         }
-
-        function abrirEditor(id, nome) { 
-            currentEditingId = id; 
-            document.getElementById('editor-title').textContent = `Editando: ${nome}`; 
-            switchView('editor'); 
-            carregarDadosGerenciador(); 
-        }
-
-        function voltarParaLocais() { currentEditingId = null; switchView('listas'); }
         
         function renderizarLista() { 
             const container = document.getElementById('lista-setores-container'); container.innerHTML = '';
