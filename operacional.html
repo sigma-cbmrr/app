@@ -147,7 +147,7 @@
     <!-- CABEÇALHO PADRÃO -->
     <header class="main-header">
         <button id="menu-btn" onclick="toggleMenuMobile()"><i class="fas fa-bars"></i></button>
-        <img src="cbmrr.png" alt="CBM-RR" class="header-icon" onerror="this.onerror=null; this.src='https://placehold.co/40x40/ffffff/800020/fff?text=CBM'">
+        <img id="logo-cbmrr" src="cbmrr.png" alt="CBM-RR" class="header-icon" onerror="this.onerror=null; this.src='https://placehold.co/40x40/ffffff/800020/fff?text=CBM'">
         <div class="header-title-desktop"><span class="text-white">CORPO DE BOMBEIROS MILITAR </span><span class="text-red">RORAIMA</span></div>
         <div class="header-title-mobile"><span class="text-white">CBM</span><span class="text-red">RR</span></div>
         <button class="btn-logout-header" onclick="sairDoSistema()" title="Sair"><i class="fas fa-sign-out-alt"></i></button>
@@ -156,7 +156,7 @@
     <!-- SIDEBAR (LOGO ALTERADA) -->
     <div class="sidebar" id="main-sidebar">
         <div class="sidebar-header">
-            <img src="logo_sigma.png" alt="Logo SIGMA" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'">
+            <img id="logo-sigma-sidebar" src="logo_sigma.png" alt="Logo SIGMA" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'">
             <h2>Área Operacional</h2>
         </div>
         <div class="menu-label">Principal</div>
@@ -374,7 +374,6 @@
             ul.innerHTML = '';
 
             try {
-                // Busca conferências do usuário e ordena no cliente para evitar erro de índice
                 const snapshot = await db.collection('resultados_conferencias')
                     .where('conferente', '==', userProfile.nomeCompletoMilitar)
                     .get();
@@ -384,12 +383,12 @@
                     return;
                 }
 
-                // Ordenação via JavaScript
-                const docs = snapshot.docs.map(d => d.data())
-                             .sort((a, b) => b.timestamp - a.timestamp)
-                             .slice(0, 10);
+                const conferencias = snapshot.docs
+                    .map(doc => doc.data())
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 10);
 
-                docs.forEach(d => {
+                conferencias.forEach(d => {
                     const dataHora = d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D';
                     const temAlteracao = d.totalCaa > 0;
                     
@@ -418,38 +417,127 @@
             }
         }
 
-        // 6. REIMPRIMIR PDF
+        // 6. REIMPRIMIR PDF (ATUALIZADO COM DESIGN PADRÃO DO APP)
         function reimprimirPDF(data) {
             try {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF('p', 'mm', 'a4');
                 
-                doc.setFontSize(10);
-                doc.text('CÓPIA DE CONFERÊNCIA - CBM-RR', 105, 15, { align: 'center' });
+                const MARGIN=14, PG_W=210, LOGO_S=15; 
+
+                // 1. LOGOS (Função de desenho capturando das imagens na tela se existirem, ou fallback)
+                // Como estamos em outra página, pode não ter a logo com mesmo ID. 
+                // Vamos tentar pegar do Header ou Sidebar
+                const drawLogo = (imgId, x) => {
+                    const img = document.getElementById(imgId) || document.querySelector(`img[src*="${imgId.replace('-','_')}"]`); 
+                    if(img && img.src) {
+                        try { 
+                            const c = document.createElement('canvas'); c.width=160; c.height=160; 
+                            c.getContext('2d').drawImage(img,0,0,160,160); 
+                            doc.addImage(c.toDataURL('image/png'), 'PNG', x, 10, LOGO_S, LOGO_S); 
+                        } catch(e){} 
+                    }
+                };
                 
-                doc.setFontSize(10);
-                doc.text(`Local: ${data.local}`, 14, 30);
-                doc.text(`Conferente: ${data.conferente}`, 14, 36);
+                drawLogo('logo-cbmrr', MARGIN); // Tenta ID
+                drawLogo('logo-sigma-sidebar', PG_W-MARGIN-LOGO_S); // Tenta ID da sidebar
+
+                // 2. CABEÇALHO GOVERNO
+                doc.setFontSize(10); doc.setTextColor(51); doc.setFont('helvetica','bold'); 
+                doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
+                doc.setTextColor(217,15,35); 
+                doc.text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
+                doc.setTextColor(51); doc.setFont('helvetica','italic'); 
+                doc.text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
+                
+                // 3. TÍTULO
+                doc.setFontSize(14); doc.setTextColor(0); doc.setFont('helvetica','bold'); 
+                doc.text("RELATÓRIO DE CONFERÊNCIA (CÓPIA)", PG_W/2, 35, {align:'center'});
+
+                // 4. BLOCO CINZA DE DETALHES
+                doc.setFillColor(240, 240, 240); doc.setDrawColor(200, 200, 200); 
+                doc.roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
+                doc.setFontSize(10); doc.setTextColor(50);
+                
+                let y = 46; const X_LABEL = MARGIN + 5; const X_VAL = MARGIN + 30;
+                
                 const dataHora = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString('pt-BR') : 'N/D';
-                doc.text(`Data Original: ${dataHora}`, 14, 42);
+
+                doc.setFont('helvetica','bold'); doc.text('Local:', X_LABEL, y); 
+                doc.setFont('helvetica','normal'); doc.text(data.local, X_VAL, y); y+=6; 
                 
+                doc.setFont('helvetica','bold'); doc.text('Conferente:', X_LABEL, y); 
+                doc.setFont('helvetica','normal'); doc.text(data.conferente, X_VAL, y); y+=6; 
+                
+                doc.setFont('helvetica','bold'); doc.text('Data/Hora:', X_LABEL, y); 
+                doc.setFont('helvetica','normal'); doc.text(dataHora, X_VAL, y);
+                
+                // Resumo no canto direito do bloco
+                doc.setFont('helvetica','bold'); doc.setTextColor(128, 0, 32); 
+                doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
+
+                // 5. TABELA DE ITENS C/A
                 let tableBody = [];
                 if (data.itensCaa && data.itensCaa.length > 0) {
                     data.itensCaa.forEach(item => {
-                         let obs = item.obs || '-';
-                         tableBody.push([item.nomeCompleto, item.quantidade, item.status || 'C/A', obs]);
+                        let finalObs = item.obs || '-';
+                        
+                        // Formatação para PDF: Adiciona bullets e admin status se não tiver
+                        // A string salva no histórico do 'resultados_conferencias' geralmente já está formatada ou é bruta.
+                        // O ideal é limpar HTML se houver, mas o histórico do 'finalizarConferencia' salva texto limpo com bullets.
+                        // Vamos garantir quebras de linha se for muito longo.
+                        
+                        let statusTxt = item.status || 'C/A';
+                        if (item.statusAdmin && item.statusAdmin !== 'Solucionado') {
+                            statusTxt = item.statusAdmin; // Mostra status atualizado pelo admin se houver
+                        }
+                        
+                        tableBody.push([item.nomeCompleto, `QTD: ${item.quantidade}`, statusTxt, finalObs]);
                     });
                 } else {
-                    tableBody.push(['-', '-', 'SEM ALTERAÇÕES', 'Conferência S/A.']);
+                    tableBody.push(['-', '-', 'SEM ALTERAÇÕES', 'Conferência realizada sem alterações (S/A).']);
                 }
 
+                const GREEN = [27, 138, 62];
+                const RED = [217, 15, 35];
+
                 doc.autoTable({
-                    startY: 50,
+                    startY: 70,
                     head: [['Item', 'Qtd', 'Status', 'Observação']],
                     body: tableBody,
-                    styles: { fontSize: 8 },
-                    columnStyles: { 0: { cellWidth: 60 }, 3: { cellWidth: 'auto' } }
+                    theme: 'striped',
+                    styles: { 
+                        fontSize: 8, 
+                        halign: 'left', 
+                        valign: 'middle', 
+                        textColor: 51, 
+                        cellPadding: 1.5 
+                    },
+                    columnStyles: { 
+                        0: { cellWidth: 70 }, 
+                        1: { cellWidth: 20, halign: 'center' }, 
+                        2: { cellWidth: 25, halign: 'center', fontStyle: 'bold' } 
+                    },
+                    didParseCell: function(data) {
+                        if (data.section === 'body' && data.column.index === 2) {
+                            // Coluna Status Colorida
+                            const text = data.cell.text[0];
+                            if (text === 'S/A' || text === 'SEM ALTERAÇÕES') {
+                                data.cell.styles.textColor = GREEN;
+                            } else {
+                                data.cell.styles.textColor = RED;
+                            }
+                        }
+                    }
                 });
+
+                // 6. RODAPÉ
+                const totalPages = doc.internal.getNumberOfPages();
+                for (let i = 1; i <= totalPages; i++) {
+                    doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
+                    doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-10);
+                    doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
+                }
 
                 doc.save(`Copia_Conferencia_${data.local}.pdf`);
             } catch(e) { alert("Erro ao gerar PDF."); console.error(e); }
