@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIGMA - Área Operacional</title>
+    <link rel="icon" type="image/png" href="logo_sigma.png">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        /* --- ESTILOS BASE (Igual ao Index) --- */
+        body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f9; margin: 0; padding-bottom: 60px; }
+        
+        /* Header */
+        .app-header { background-color: #800020; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .user-avatar { width: 40px; height: 40px; border-radius: 50%; border: 2px solid white; object-fit: cover; }
+        .user-text { line-height: 1.2; }
+        .user-name { font-weight: bold; font-size: 1em; display: block; }
+        .user-role { font-size: 0.8em; opacity: 0.9; display: block; }
+        .btn-logout { background: rgba(255,255,255,0.2); border: none; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        .btn-logout:hover { background: rgba(255,255,255,0.3); }
+
+        /* Container Principal */
+        .main-container { max-width: 800px; margin: 20px auto; padding: 0 15px; }
+
+        /* Cards */
+        .card { background: white; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; }
+        .card-title { color: #800020; margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 1.2em; display: flex; align-items: center; gap: 8px; }
+
+        /* Formulário Nova Conferência */
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-weight: bold; color: #555; margin-bottom: 5px; font-size: 0.9em; }
+        .form-group select { width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 1em; background-color: #fff; }
+        .btn-start { background: linear-gradient(135deg, #1b8a3e 0%, #145a2d 100%); color: white; border: none; width: 100%; padding: 15px; border-radius: 8px; font-size: 1.1em; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.1s; }
+        .btn-start:active { transform: scale(0.98); }
+
+        /* Lista Histórico */
+        .history-list { list-style: none; padding: 0; margin: 0; }
+        .history-item { border-bottom: 1px solid #eee; padding: 12px 0; display: flex; justify-content: space-between; align-items: center; }
+        .history-item:last-child { border-bottom: none; }
+        .hist-info strong { display: block; color: #333; font-size: 1em; }
+        .hist-info small { color: #777; }
+        .hist-status { font-size: 0.8em; padding: 3px 8px; border-radius: 10px; font-weight: bold; margin-left: 5px; }
+        .status-ok { background-color: #e8f5e9; color: #2e7d32; }
+        .status-alert { background-color: #ffebee; color: #c62828; }
+        .btn-reprint { background: none; border: 1px solid #ccc; padding: 5px 10px; border-radius: 4px; color: #555; cursor: pointer; font-size: 0.85em; }
+        .btn-reprint:hover { background: #f5f5f5; color: #333; }
+
+        /* Footer */
+        .footer-mini { text-align: center; color: #aaa; font-size: 0.8em; margin-top: 30px; }
+
+        /* Loading Overlay */
+        #loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(255,255,255,0.9); display: flex; justify-content: center; align-items: center; z-index: 999; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #800020; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="loading-overlay"><div class="loader"></div></div>
+
+    <header class="app-header">
+        <div class="user-info">
+            <img id="user-photo" src="https://placehold.co/40x40/ffffff/800020?text=U" class="user-avatar">
+            <div class="user-text">
+                <span id="user-name" class="user-name">Carregando...</span>
+                <span id="user-rank" class="user-role">...</span>
+            </div>
+        </div>
+        <button class="btn-logout" onclick="sairDoSistema()"><i class="fas fa-sign-out-alt"></i> Sair</button>
+    </header>
+
+    <div class="main-container">
+        
+        <div class="card">
+            <h2 class="card-title"><i class="fas fa-clipboard-list"></i> Nova Conferência</h2>
+            
+            <div class="form-group">
+                <label>1. Escolha o Setor / Posto</label>
+                <select id="select-setor" onchange="filtrarListas()">
+                    <option value="" disabled selected>Carregando setores...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>2. Escolha a Viatura / Lista</label>
+                <select id="select-lista" disabled>
+                    <option value="" disabled selected>Selecione um setor acima</option>
+                </select>
+            </div>
+
+            <button class="btn-start" onclick="iniciarConferencia()">INICIAR AGORA</button>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title"><i class="fas fa-history"></i> Minhas Conferências Recentes</h2>
+            <ul id="history-list" class="history-list">
+                <li style="text-align:center; color:#999; padding:20px;">Carregando histórico...</li>
+            </ul>
+        </div>
+
+        <div class="footer-mini">
+            SIGMA - Sistema Integrado de Gestão de Materiais<br>CBM-RR
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+    <script>
+        // CONFIGURAÇÃO FIREBASE
+        const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // VARIÁVEIS DO USUÁRIO (Dados militares)
+        let userProfile = {
+            posto: '',
+            quadro: '',
+            nomeGuerra: '',
+            nomeCompletoMilitar: ''
+        };
+
+        let todasListas = []; // Cache das listas para o dropdown
+
+        // 1. VERIFICAÇÃO DE LOGIN
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                // Carrega perfil completo do Firestore
+                try {
+                    const doc = await db.collection('usuarios').doc(user.uid).get();
+                    if (doc.exists) {
+                        const data = doc.data();
+                        userProfile = {
+                            posto: data.posto,
+                            quadro: data.quadro,
+                            nomeGuerra: data.nome_guerra,
+                            nomeCompletoMilitar: data.nome_militar_completo
+                        };
+
+                        // Atualiza UI do Header
+                        document.getElementById('user-name').textContent = userProfile.nomeGuerra;
+                        document.getElementById('user-rank').textContent = `${userProfile.posto} ${userProfile.quadro}`;
+                        if(user.photoURL) document.getElementById('user-photo').src = user.photoURL;
+
+                        // Carrega dados da página
+                        await Promise.all([carregarListas(), carregarHistorico()]);
+                        document.getElementById('loading-overlay').style.display = 'none';
+                    } else {
+                        // Se não tiver perfil, manda pro Index para cadastrar
+                        window.location.href = 'index.html';
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("Erro ao carregar perfil.");
+                }
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+
+        // 2. CARREGAR LISTAS E POPULAR SELECTS
+        async function carregarListas() {
+            try {
+                // Pega configuração de rotas (onde estão os nomes e setores)
+                const docRotas = await db.collection('config_geral').doc('rotas').get();
+                if (docRotas.exists) {
+                    const rotas = docRotas.data();
+                    todasListas = []; // Limpa array global
+
+                    const setoresSet = new Set();
+
+                    Object.entries(rotas).forEach(([id, info]) => {
+                        if (info.ativo !== false) {
+                            // Filtra obsoletos
+                            if (id !== 'ABT-17' && id !== 'ABT-18' && id !== 'permanência - bravo 5') {
+                                todasListas.push({ id: id, nome: info.nome, setor: info.posto });
+                                setoresSet.add(info.posto);
+                            }
+                        }
+                    });
+
+                    // Popula Select de Setores
+                    const selSetor = document.getElementById('select-setor');
+                    selSetor.innerHTML = '<option value="" disabled selected>Selecione o Setor...</option>';
+                    Array.from(setoresSet).sort().forEach(setor => {
+                        const opt = document.createElement('option');
+                        opt.value = setor;
+                        opt.textContent = setor;
+                        selSetor.appendChild(opt);
+                    });
+                }
+            } catch (e) { console.error("Erro listas", e); }
+        }
+
+        // 3. FILTRAR LISTAS AO ESCOLHER SETOR
+        function filtrarListas() {
+            const setor = document.getElementById('select-setor').value;
+            const selLista = document.getElementById('select-lista');
+            
+            selLista.innerHTML = '<option value="" disabled selected>Selecione a Lista...</option>';
+            selLista.disabled = false;
+
+            const listasFiltradas = todasListas.filter(l => l.setor === setor);
+            listasFiltradas.sort((a,b) => a.nome.localeCompare(b.nome));
+
+            listasFiltradas.forEach(l => {
+                const opt = document.createElement('option');
+                opt.value = l.id;
+                opt.textContent = l.nome;
+                selLista.appendChild(opt);
+            });
+        }
+
+        // 4. INICIAR CONFERÊNCIA
+        function iniciarConferencia() {
+            const listaId = document.getElementById('select-lista').value;
+            if (!listaId) return alert("Selecione uma lista primeiro.");
+
+            // Monta a URL com os dados do usuário logado
+            // Codificando URI para evitar erros com espaços
+            const url = `conferencia_app.html?id=${listaId}` +
+                        `&posto_grad=${encodeURIComponent(userProfile.posto)}` +
+                        `&quadro_mil=${encodeURIComponent(userProfile.quadro)}` +
+                        `&nome_guerra=${encodeURIComponent(userProfile.nomeGuerra)}`;
+
+            window.location.href = url;
+        }
+
+        // 5. CARREGAR HISTÓRICO
+        async function carregarHistorico() {
+            const ul = document.getElementById('history-list');
+            ul.innerHTML = '';
+
+            try {
+                // Busca apenas conferências feitas por ESTE usuário
+                // O campo 'conferente' no banco é "Posto Quadro Nome".
+                // Precisamos garantir que a busca bata. Como é string exata, deve funcionar.
+                
+                const snapshot = await db.collection('resultados_conferencias')
+                    .where('conferente', '==', userProfile.nomeCompletoMilitar)
+                    .orderBy('timestamp', 'desc')
+                    .limit(10)
+                    .get();
+
+                if (snapshot.empty) {
+                    ul.innerHTML = '<li style="padding:15px; text-align:center; color:#777;">Você ainda não realizou conferências.</li>';
+                    return;
+                }
+
+                snapshot.forEach(doc => {
+                    const d = doc.data();
+                    const dataHora = d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D';
+                    const temAlteracao = d.totalCaa > 0;
+                    
+                    const li = document.createElement('li');
+                    li.className = 'history-item';
+                    li.innerHTML = `
+                        <div class="hist-info">
+                            <strong>${d.local}</strong>
+                            <small>${dataHora} • ${d.totalItensConferidos} itens</small>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span class="hist-status ${temAlteracao ? 'status-alert' : 'status-ok'}">
+                                ${temAlteracao ? 'C/A' : 'S/A'}
+                            </span>
+                            <button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(d)})' title="Gerar PDF">
+                                <i class="fas fa-file-pdf"></i>
+                            </button>
+                        </div>
+                    `;
+                    ul.appendChild(li);
+                });
+
+            } catch (e) {
+                console.error(e);
+                // Se der erro de índice composto (Where + OrderBy), avisa no console
+                ul.innerHTML = '<li style="padding:15px; color:red;">Erro ao carregar histórico. Verifique conexão.</li>';
+            }
+        }
+
+        // 6. REIMPRIMIR PDF (Usando dados salvos)
+        function reimprimirPDF(data) {
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('p', 'mm', 'a4');
+                
+                // Cabeçalho Simplificado para Reimpressão
+                doc.setFontSize(10);
+                doc.text('CÓPIA DE CONFERÊNCIA - CBM-RR', 105, 15, { align: 'center' });
+                
+                doc.setFontSize(10);
+                doc.text(`Local: ${data.local}`, 14, 30);
+                doc.text(`Conferente: ${data.conferente}`, 14, 36);
+                const dataHora = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString('pt-BR') : 'N/D';
+                doc.text(`Data Original: ${dataHora}`, 14, 42);
+                
+                let tableBody = [];
+                if (data.itensCaa && data.itensCaa.length > 0) {
+                    data.itensCaa.forEach(item => {
+                         let obs = item.obs || '-';
+                         tableBody.push([item.nomeCompleto, item.quantidade, item.status || 'C/A', obs]);
+                    });
+                } else {
+                    tableBody.push(['-', '-', 'SEM ALTERAÇÕES', 'Conferência S/A.']);
+                }
+
+                doc.autoTable({
+                    startY: 50,
+                    head: [['Item', 'Qtd', 'Status', 'Observação']],
+                    body: tableBody,
+                    styles: { fontSize: 8 },
+                    columnStyles: { 0: { cellWidth: 60 }, 3: { cellWidth: 'auto' } }
+                });
+
+                doc.save(`Copia_Conferencia_${data.local}.pdf`);
+            } catch(e) { alert("Erro ao gerar PDF."); console.error(e); }
+        }
+
+        // 7. SAIR
+        function sairDoSistema() {
+            auth.signOut().then(() => {
+                sessionStorage.clear();
+                window.location.href = 'index.html';
+            });
+        }
+    </script>
+</body>
+</html>
