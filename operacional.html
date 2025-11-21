@@ -280,13 +280,10 @@
 
         function switchView(viewName) {
             closeMenuMobile();
-            // Esconde todas as views
             document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active-view'));
-            // Remove active dos links
             document.getElementById('link-home').classList.remove('active');
             document.getElementById('link-history').classList.remove('active');
 
-            // Ativa a selecionada
             if (viewName === 'home') {
                 document.getElementById('view-home').classList.add('active-view');
                 document.getElementById('link-home').classList.add('active');
@@ -294,7 +291,8 @@
             } else if (viewName === 'history') {
                 document.getElementById('view-history').classList.add('active-view');
                 document.getElementById('link-history').classList.add('active');
-                // Preenche filtro se vazio
+                
+                // Preenche data padrão se vazio (últimos 30 dias)
                 if(!document.getElementById('hist-start-date').value) {
                     const today = new Date();
                     const past = new Date(); past.setDate(today.getDate() - 30);
@@ -302,8 +300,7 @@
                     document.getElementById('hist-end-date').valueAsDate = today;
                 }
                 popularFiltroLocais();
-                // Carrega automaticamente ao abrir
-                buscarHistoricoCompleto();
+                buscarHistoricoCompleto(); // Carrega auto
             }
         }
 
@@ -332,14 +329,14 @@
                         atualizarSaudacao();
                         verificarConferenciaAtiva(); 
                         await carregarListas();
-                        await carregarConferenciasHoje(); // Carrega só as de hoje na home
+                        await carregarConferenciasHoje();
                         document.getElementById('loading-overlay').style.display = 'none';
                     } else { window.location.href = 'index.html'; }
                 } catch (e) { console.error(e); alert("Erro ao carregar perfil."); }
             } else { window.location.href = 'index.html'; }
         });
 
-        // --- VERIFICAÇÃO DE CONTINUIDADE ---
+        // --- CONTINUIDADE ---
         function verificarConferenciaAtiva() {
             const activeConf = localStorage.getItem('sigma_active_conf');
             const container = document.getElementById('resume-container');
@@ -348,13 +345,7 @@
                 try {
                     const confData = JSON.parse(activeConf);
                     if(confData.user === userProfile.nomeGuerra) {
-                        container.innerHTML = `
-                            <div class="op-card resume" onclick="retomarConferencia('${confData.url}')">
-                                <h2 class="op-card-title" style="border:none; margin:0; color:#e65100;">
-                                    <i class="fas fa-play-circle"></i> Continuar Conferência: ${confData.nomeLista}
-                                </h2>
-                                <p style="margin:5px 0 0 30px; color:#666; font-size:0.9em;">Clique para retomar de onde parou...</p>
-                            </div>`;
+                        container.innerHTML = `<div class="op-card resume" onclick="retomarConferencia('${confData.url}')"><h2 class="op-card-title" style="border:none; margin:0; color:#e65100;"><i class="fas fa-play-circle"></i> Continuar Conferência: ${confData.nomeLista}</h2><p style="margin:5px 0 0 30px; color:#666; font-size:0.9em;">Clique para retomar de onde parou...</p></div>`;
                     }
                 } catch(e) {}
             }
@@ -367,7 +358,7 @@
             container.style.display = 'block';
         }
 
-        // --- CARREGAR DADOS DAS LISTAS ---
+        // --- LISTAS ---
         async function carregarListas() {
             try {
                 const docRotas = await db.collection('config_geral').doc('rotas').get();
@@ -403,14 +394,10 @@
 
         function popularFiltroLocais() {
             const sel = document.getElementById('hist-filter-local');
-            if (sel.options.length > 1) return; // Já preenchido
-            
+            if (sel.options.length > 1) return;
             const locaisUnicos = [...new Set(todasListas.map(l => l.nome))].sort();
             locaisUnicos.forEach(nome => {
-                const opt = document.createElement('option');
-                opt.value = nome;
-                opt.textContent = nome;
-                sel.appendChild(opt);
+                const opt = document.createElement('option'); opt.value = nome; opt.textContent = nome; sel.appendChild(opt);
             });
         }
 
@@ -440,7 +427,7 @@
             const iframe = document.getElementById('app-iframe');
             const container = document.getElementById('app-runner-container');
             container.style.display = 'none';
-            carregarConferenciasHoje(); // Atualiza lista ao fechar
+            carregarConferenciasHoje();
         }
 
         window.addEventListener('message', function(event) {
@@ -453,18 +440,16 @@
             }
         });
 
-        // --- HISTÓRICO: HOJE (Corrigido para evitar índice composto) ---
+        // --- HISTÓRICO: HOJE (CORREÇÃO DE ÍNDICE) ---
         async function carregarConferenciasHoje() {
             const ul = document.getElementById('today-list');
             ul.innerHTML = '<li style="text-align:center; color:#999; padding:15px;">Carregando...</li>';
             
             try {
-                // Consulta simples apenas por conferente, ordenada por data
-                // Filtra a data no cliente (JavaScript) para evitar erro de índice
+                // Busca simples por conferente (sem orderBy no DB para evitar erro de indice)
                 const snap = await db.collection('resultados_conferencias')
                     .where('conferente', '==', userProfile.nomeCompletoMilitar)
-                    .orderBy('timestamp', 'desc')
-                    .limit(50) 
+                    .limit(50) // Limite seguro
                     .get();
 
                 if (snap.empty) { ul.innerHTML = '<li style="padding:15px; text-align:center; color:#777;">Nenhuma conferência encontrada.</li>'; return; }
@@ -482,6 +467,9 @@
                     }
                 });
 
+                // Ordenação via JavaScript (Descendente)
+                docsHoje.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+
                 if(docsHoje.length === 0) {
                     ul.innerHTML = '<li style="padding:15px; text-align:center; color:#777;">Nenhuma conferência realizada hoje.</li>';
                 } else {
@@ -491,11 +479,11 @@
 
             } catch (e) { 
                 console.error("Erro hoje:", e); 
-                ul.innerHTML = '<li style="padding:15px; color:red;">Erro ao carregar. Tente atualizar.</li>'; 
+                ul.innerHTML = '<li style="padding:15px; color:red;">Erro ao carregar.</li>'; 
             }
         }
 
-        // --- HISTÓRICO: COMPLETO (FILTRO - Lógica Cliente) ---
+        // --- HISTÓRICO: COMPLETO (CORREÇÃO DE ÍNDICE) ---
         async function buscarHistoricoCompleto() {
             const ul = document.getElementById('full-history-list');
             const startInput = document.getElementById('hist-start-date').value;
@@ -506,16 +494,15 @@
 
             ul.innerHTML = '<li style="text-align:center; padding:15px;">Buscando...</li>';
 
-            // Ajusta datas para comparar (Inicio 00:00, Fim 23:59)
+            // Ajusta datas (Inicio 00:00, Fim 23:59)
             const startDate = new Date(startInput + 'T00:00:00');
             const endDate = new Date(endInput + 'T23:59:59');
 
             try {
-                // Estratégia: Busca as últimas 100 conferências do usuário e filtra em memória.
-                // Isso evita a criação de múltiplos índices compostos no Firebase.
+                // Busca apenas pelo conferente para evitar erro de índice composto
+                // Trazemos os últimos 100 registros e filtramos no cliente (JavaScript)
                 const snapshot = await db.collection('resultados_conferencias')
                     .where('conferente', '==', userProfile.nomeCompletoMilitar)
-                    .orderBy('timestamp', 'desc')
                     .limit(100) 
                     .get();
                 
@@ -525,22 +512,30 @@
                     return; 
                 }
 
-                let encontrou = false;
+                let docsFiltrados = [];
+
                 snapshot.docs.forEach(doc => {
                     const data = doc.data();
+                    if(!data.timestamp) return;
                     const dataConf = new Date(data.timestamp.seconds * 1000);
 
-                    // Filtro de Data (Cliente)
+                    // Filtro de Data (JS)
                     if (dataConf < startDate || dataConf > endDate) return;
 
-                    // Filtro de Local (Cliente)
+                    // Filtro de Local (JS)
                     if (localFilter && !data.local.includes(localFilter)) return;
                     
-                    criarItemHistorico(ul, data);
-                    encontrou = true;
+                    docsFiltrados.push(data);
                 });
 
-                if (!encontrou) ul.innerHTML = '<li style="padding:15px; text-align:center; color:#777;">Nenhum registro encontrado com estes filtros.</li>';
+                // Ordenação via JS
+                docsFiltrados.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+
+                if (docsFiltrados.length === 0) {
+                    ul.innerHTML = '<li style="padding:15px; text-align:center; color:#777;">Nenhum registro encontrado com estes filtros.</li>';
+                } else {
+                    docsFiltrados.forEach(data => criarItemHistorico(ul, data));
+                }
 
             } catch (e) {
                 console.error(e);
@@ -548,11 +543,10 @@
             }
         }
 
-        // --- FUNÇÕES AUXILIARES DE RENDERIZAÇÃO ---
+        // --- RENDERIZAÇÃO ---
         function criarItemHistorico(ulElement, data) {
             const dataHora = data.timestamp ? new Date(data.timestamp.seconds * 1000).toLocaleString('pt-BR') : 'N/D';
-            
-            // Verifica se tem itens C/A no array novo ou no antigo
+            // Verifica se tem itens C/A (compatibilidade com novo e velho modelo)
             const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
             
             const li = document.createElement('li');
@@ -573,7 +567,7 @@
             ulElement.appendChild(li);
         }
 
-        // --- 7. GERADOR DE PDF (MANTIDO DO CONFERENCIA_TESTE/VERSÃO ANTERIOR) ---
+        // --- PDF GENERATOR ---
         function reimprimirPDF(data) {
             try {
                 const { jsPDF } = window.jspdf;
@@ -617,29 +611,23 @@
                 doc.setFont('helvetica','bold'); doc.text('Data/Hora:', X_LABEL, y); doc.setFont('helvetica','normal'); doc.text(dataHoraStr, X_VAL, y);
                 doc.setFont('helvetica','bold'); doc.setTextColor(128, 0, 32); doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
 
-                // --- LÓGICA DO EXTRATO COMPLETO ---
                 let tableData = [];
                 const RED_FILL = [217, 15, 35];
                 const GREEN_FILL = [27, 138, 62];
 
-                // Verifica se existe a nova lista completa 'itensRelatorio'
                 let listaParaImprimir = [];
-                
                 if (data.itensRelatorio && data.itensRelatorio.length > 0) {
-                    // NOVO MODELO: Usa a lista completa salva
                     listaParaImprimir = data.itensRelatorio;
                 } else if (data.itensCaa && data.itensCaa.length > 0) {
-                    // MODELO LEGADO: Só tem as pendências
                     listaParaImprimir = data.itensCaa;
                 } else {
-                    // Sem registros (Legado S/A)
                     tableData.push([{ content: 'CONFERÊNCIA REALIZADA SEM ALTERAÇÕES (REGISTRO LEGADO)', colSpan: 4, styles: { halign: 'center', fillColor: GREEN_FILL, textColor: 255, fontStyle: 'bold', cellPadding: 5 } }]);
                 }
 
                 if (listaParaImprimir.length > 0) {
                     listaParaImprimir.forEach(item => {
                         let finalObs = item.obs || '-';
-                        if(finalObs === '-') finalObs = ''; // Limpa traço visual se for vazio
+                        if(finalObs === '-') finalObs = '';
                         
                         if (finalObs.includes(' | + NOVA: ')) {
                             let partes = finalObs.split(' | + NOVA: ');
