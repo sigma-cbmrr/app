@@ -1,372 +1,52 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SIGMA - Acesso ao Sistema</title>
-    <link rel="icon" type="image/png" href="logo_sigma.png">
-    
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<script>
+    // ... suas configurações do firebaseConfig ...
+    const auth = firebase.auth();
+    const db = firebase.firestore();
 
-    <style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            background-color: #f4f4f9;
-            background-image: linear-gradient(135deg, #f4f4f9 0%, #e0e0e0 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .login-card {
-            background: white;
-            padding: 40px 30px;
-            border-radius: 15px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            text-align: center;
-            width: 100%;
-            max-width: 400px;
-            transition: all 0.3s ease;
-        }
-        .logo {
-            width: 100px;
-            height: auto;
-            margin-bottom: 20px;
-        }
-        h1 {
-            color: #800020;
-            font-size: 1.5em;
-            margin-bottom: 10px;
-        }
-        p.subtitle {
-            color: #666;
-            font-size: 0.9em;
-            margin-bottom: 30px;
-        }
-        
-        /* Botão Google */
-        .btn-google {
-            background-color: #fff;
-            color: #757575;
-            border: 1px solid #ddd;
-            border-radius: 50px;
-            padding: 12px 20px;
-            font-size: 1em;
-            font-weight: 500;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            width: 100%;
-            box-sizing: border-box;
-            transition: background-color 0.2s, box-shadow 0.2s;
-        }
-        .btn-google:hover {
-            background-color: #f1f1f1;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        .google-icon {
-            width: 20px;
-            height: 20px;
-        }
+    function login() {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        const btn = document.getElementById('btn-login'); // Assumindo que seu botão tem esse ID
 
-        /* Área de Onboarding (Escondida inicialmente) */
-        #onboarding-section {
-            display: none;
-            text-align: left;
-            border-top: 1px solid #eee;
-            margin-top: 20px;
-            padding-top: 20px;
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            font-size: 0.85em;
-            color: #333;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        .form-group select, .form-group input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 1em;
-            box-sizing: border-box;
-        }
-        .btn-save {
-            background-color: #800020;
-            color: white;
-            border: none;
-            width: 100%;
-            padding: 12px;
-            border-radius: 6px;
-            font-size: 1em;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 10px;
-        }
-        .btn-save:hover {
-            background-color: #600018;
-        }
+        btn.textContent = "Verificando...";
+        btn.disabled = true;
 
-        /* Loading */
-        #loading-overlay {
-            position: fixed; top:0; left:0; width:100%; height:100%;
-            background: rgba(255,255,255,0.9);
-            display: flex; flex-direction: column;
-            justify-content: center; align-items: center;
-            z-index: 999;
-            display: none;
-        }
-        .spinner {
-            border: 4px solid #f3f3f3; border-top: 4px solid #800020;
-            border-radius: 50%; width: 40px; height: 40px;
-            animation: spin 1s linear infinite;
-            margin-bottom: 15px;
-        }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .user-badge {
-            background: #e3f2fd; color: #0d47a1; padding: 5px 10px; border-radius: 20px; font-size: 0.8em; font-weight: bold; display: inline-block; margin-bottom: 15px;
-        }
-    </style>
-</head>
-<body>
+        auth.signInWithEmailAndPassword(email, password)
+            .then(async (userCredential) => {
+                // Login Auth deu certo, agora verificamos o PERFIL no banco
+                const uid = userCredential.user.uid;
+                
+                try {
+                    const doc = await db.collection('usuarios').doc(uid).get();
+                    
+                    if (doc.exists) {
+                        const dados = doc.data();
+                        const role = dados.role;
 
-    <div id="loading-overlay">
-        <div class="spinner"></div>
-        <div id="loading-text" style="color: #800020; font-weight: bold;">Carregando...</div>
-    </div>
-
-    <div class="login-card" id="login-card">
-        <img src="logo_sigma.png" alt="SIGMA" class="logo" onerror="this.src='https://placehold.co/100x100/800020/ffffff?text=S'">
-        <h1>Bem-vindo ao SIGMA</h1>
-        <p class="subtitle">Sistema Integrado de Gestão de Materiais</p>
-
-        <div id="login-area">
-            <button class="btn-google" onclick="fazerLoginGoogle()">
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="google-icon" alt="G">
-                Entrar com Google
-            </button>
-        </div>
-
-        <div id="onboarding-section">
-            <div style="text-align: center;">
-                <span class="user-badge" id="badge-email">...</span>
-                <p style="font-size: 0.9em; color: #555;">Para continuar, complete seu cadastro militar.</p>
-            </div>
-            
-            <div class="form-group">
-                <label>Posto / Graduação</label>
-                <select id="cadastro-posto" onchange="atualizarQuadros()">
-                    <option value="" disabled selected>Selecione...</option>
-                    <option value="CEL">CEL</option>
-                    <option value="TEN CEL">TEN CEL</option>
-                    <option value="MAJ">MAJ</option>
-                    <option value="CAP">CAP</option>
-                    <option value="1º TEN">1º TEN</option>
-                    <option value="2º TEN">2º TEN</option>
-                    <option value="ST">ST</option>
-                    <option value="1º SGT">1º SGT</option>
-                    <option value="2º SGT">2º SGT</option>
-                    <option value="3º SGT">3º SGT</option>
-                    <option value="CB">CB</option>
-                    <option value="SD">SD</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label>Quadro</label>
-                <select id="cadastro-quadro">
-                    <option value="" disabled selected>Selecione... </option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label>Nome de Guerra</label>
-                <input type="text" id="cadastro-nome" placeholder="Ex: JHONATH" oninput="this.value = this.value.toUpperCase()">
-            </div>
-
-            <button class="btn-save" onclick="salvarPerfilMilitar()">Concluir Cadastro</button>
-        </div>
-    </div>
-
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
-
-    <script>
-        // CONFIGURAÇÃO
-        const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        
-        const auth = firebase.auth();
-        const db = firebase.firestore();
-        const provider = new firebase.auth.GoogleAuthProvider();
-
-        let currentUser = null;
-
-        // 1. LÓGICA DE QUADROS (AUTOMÁTICA X SELEÇÃO OBRIGATÓRIA)
-        function atualizarQuadros() {
-            const posto = document.getElementById('cadastro-posto').value;
-            const quadroSelect = document.getElementById('cadastro-quadro');
-            quadroSelect.innerHTML = ''; // Limpa opções
-
-            let opcoes = [];
-
-            const oficiais = ['CEL', 'TEN CEL', 'MAJ', 'CAP', '1º TEN', '2º TEN'];
-            const pracas = ['ST', '1º SGT', '2º SGT', '3º SGT', 'CB'];
-
-            if (oficiais.includes(posto)) {
-                opcoes = ['QOCBM', 'QCOBM', 'QOSBM', 'QEOBM'];
-            } else if (pracas.includes(posto)) {
-                opcoes = ['QPCBM', 'QPSBM', 'QEPBM'];
-            } else if (posto === 'SD') {
-                opcoes = ['QPCBM'];
-            }
-
-            // SE FOR SOLDADO (Única opção, seleciona automático)
-            if (posto === 'SD') {
-                 const opt = document.createElement('option');
-                 opt.value = 'QPCBM';
-                 opt.text = 'QPCBM';
-                 opt.selected = true;
-                 quadroSelect.appendChild(opt);
-            } 
-            // SE FOR OUTRO (Lista opções, mas força usuário a escolher)
-            else {
-                 const placeholder = document.createElement('option');
-                 placeholder.text = "Selecione...";
-                 placeholder.value = "";
-                 placeholder.disabled = true;
-                 placeholder.selected = true;
-                 quadroSelect.appendChild(placeholder);
-
-                 if(opcoes.length > 0) {
-                    opcoes.forEach(q => {
-                        const opt = document.createElement('option');
-                        opt.value = q;
-                        opt.text = q;
-                        quadroSelect.appendChild(opt);
-                    });
-                 } else {
-                     // Fallback se não tiver opções
-                     placeholder.text = "Selecione o Posto";
-                 }
-            }
-        }
-
-        // 2. OBSERVA ESTADO DO LOGIN
-        auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                currentUser = user;
-                verificarUsuarioNoBanco(user);
-            } else {
-                document.getElementById('loading-overlay').style.display = 'none';
-                document.getElementById('login-area').style.display = 'block';
-            }
-        });
-
-        // 3. LOGIN COM GOOGLE
-        function fazerLoginGoogle() {
-            document.getElementById('loading-overlay').style.display = 'flex';
-            document.getElementById('loading-text').innerText = 'Autenticando...';
-            auth.signInWithPopup(provider).catch((error) => {
-                console.error(error);
-                alert("Erro ao logar: " + error.message);
-                document.getElementById('loading-overlay').style.display = 'none';
-            });
-        }
-
-        // 4. VERIFICA SE EXISTE NO FIRESTORE
-        async function verificarUsuarioNoBanco(user) {
-            document.getElementById('loading-overlay').style.display = 'flex';
-            document.getElementById('loading-text').innerText = 'Verificando cadastro...';
-
-            try {
-                const docRef = db.collection('usuarios').doc(user.uid);
-                const doc = await docRef.get();
-
-                if (doc.exists) {
-                    // USUÁRIO JÁ CADASTRADO -> REDIRECIONAR
-                    const dados = doc.data();
-                    redirecionarPorPerfil(dados);
-                } else {
-                    // NOVO USUÁRIO -> MOSTRAR ONBOARDING
-                    document.getElementById('loading-overlay').style.display = 'none';
-                    document.getElementById('login-area').style.display = 'none'; // Esconde botão Google
-                    document.getElementById('onboarding-section').style.display = 'block';
-                    document.getElementById('badge-email').innerText = user.email;
+                        if (role === 'admin' || role === 'gestor') {
+                            // Se for Admin ou Gestor -> Vai pro Dashboard
+                            window.location.href = "sigma_dashboard.html";
+                        } else {
+                            // Se for Operacional ou qualquer outra coisa -> Vai pro Operacional
+                            window.location.href = "operacional.html";
+                        }
+                    } else {
+                        // Usuário existe no Auth mas não no Banco (Erro de cadastro)
+                        alert("Erro: Perfil de usuário não encontrado no banco de dados.");
+                        btn.textContent = "Entrar";
+                        btn.disabled = false;
+                    }
+                } catch (error) {
+                    console.error("Erro ao buscar perfil:", error);
+                    alert("Erro de conexão ao verificar perfil.");
+                    btn.textContent = "Entrar";
+                    btn.disabled = false;
                 }
-            } catch (e) {
-                console.error(e);
-                alert("Erro de conexão: " + e.message);
-                document.getElementById('loading-overlay').style.display = 'none';
-            }
-        }
-
-        // 5. SALVAR PERFIL (ONBOARDING)
-        async function salvarPerfilMilitar() {
-            const posto = document.getElementById('cadastro-posto').value;
-            const quadro = document.getElementById('cadastro-quadro').value;
-            const nomeGuerra = document.getElementById('cadastro-nome').value.trim().toUpperCase();
-
-            if (!posto || !quadro || !nomeGuerra) {
-                return alert("Por favor, preencha todos os campos.");
-            }
-
-            document.getElementById('loading-overlay').style.display = 'flex';
-            document.getElementById('loading-text').innerText = 'Criando perfil...';
-
-            const nomeMilitarCompleto = `${posto} ${quadro} ${nomeGuerra}`;
-
-            const novoPerfil = {
-                uid: currentUser.uid,
-                email: currentUser.email,
-                nome_google: currentUser.displayName,
-                foto_url: currentUser.photoURL,
-                posto: posto,
-                quadro: quadro,
-                nome_guerra: nomeGuerra,
-                nome_militar_completo: nomeMilitarCompleto,
-                perfil: 'operacional', // PADRÃO: OPERACIONAL
-                unidade: null, // PADRÃO: SEM UNIDADE DEFINIDA
-                criadoEm: firebase.firestore.FieldValue.serverTimestamp()
-            };
-
-            try {
-                await db.collection('usuarios').doc(currentUser.uid).set(novoPerfil);
-                // Cadastro salvo, agora redireciona
-                redirecionarPorPerfil(novoPerfil);
-            } catch (e) {
-                console.error(e);
-                alert("Erro ao salvar perfil: " + e.message);
-                document.getElementById('loading-overlay').style.display = 'none';
-            }
-        }
-
-        // 6. REDIRECIONAMENTO INTELIGENTE
-        function redirecionarPorPerfil(dados) {
-            // Salva dados básicos no SessionStorage para uso nas outras páginas
-            sessionStorage.setItem('sigma_user_nome', dados.nome_militar_completo);
-            sessionStorage.setItem('sigma_user_perfil', dados.perfil);
-            sessionStorage.setItem('sigma_user_unidade', dados.unidade || '');
-
-            document.getElementById('loading-text').innerText = 'Entrando no sistema...';
-
-            if (dados.perfil === 'admin' || dados.perfil === 'gestor') {
-                // ADMIN E GESTOR VÃO PARA O DASHBOARD
-                window.location.href = 'sigma_dashboard.html';
-            } else {
-                // OPERACIONAL VAI PARA O PAINEL PESSOAL
-                window.location.href = 'operacional.html'; 
-            }
-        }
-    </script>
-</body>
-</html>
+            })
+            .catch((error) => {
+                btn.textContent = "Entrar";
+                btn.disabled = false;
+                alert("Erro no login: " + error.message);
+            });
+    }
+</script>
