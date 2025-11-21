@@ -75,49 +75,6 @@
         .op-card.action { border-left-color: #1b8a3e; }
         .op-card.history { border-left-color: #2c7399; }
         .op-card-title { color: #333; margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 1.2em; display: flex; align-items: center; gap: 8px; }
-        
-        /* Filtros Premium (Modernos) */
-        .modern-filter-card {
-            background-color: #fff;
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid #e0e0e0;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            margin-bottom: 20px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            align-items: flex-end;
-        }
-        .filter-item { flex: 1; min-width: 200px; }
-        .filter-item label { display: block; margin-bottom: 6px; font-weight: 600; color: #555; font-size: 0.9em; }
-        .filter-input {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 0.95em;
-            transition: border-color 0.3s;
-            box-sizing: border-box;
-        }
-        .filter-input:focus { border-color: #2c7399; outline: none; box-shadow: 0 0 0 2px rgba(44, 115, 153, 0.2); }
-        .btn-filter-modern {
-            background-color: #2c7399;
-            color: white;
-            border: none;
-            padding: 11px 25px;
-            border-radius: 6px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            height: 42px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        .btn-filter-modern:hover { background-color: #205b7a; }
-
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; font-weight: bold; color: #555; margin-bottom: 5px; font-size: 0.9em; }
         .form-group select, .form-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
@@ -172,6 +129,7 @@
         .btn-modern-action { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; font-size: 0.9em; transition: 0.2s; }
         .btn-create { background-color: #2c7399; } .btn-create:hover { background-color: #205b7a; }
         .btn-edit { background-color: #f57c00; } .btn-delete { background-color: #d90f23; } .btn-sync { background-color: #1b8a3e; } .btn-backup { background: #5d6164; }
+        .btn-filter-modern { background-color: #2c7399; color: white; border: none; padding: 11px 25px; border-radius: 6px; font-weight: bold; cursor: pointer; }
 
         /* APP CONTAINER (IFRAME) */
         #app-runner-container { display: none; position: fixed; top: 50px; left: 250px; width: calc(100% - 250px); height: calc(100vh - 50px); background: white; z-index: 500; overflow: hidden; }
@@ -190,6 +148,12 @@
         .btn-reprint { background: white; border: 1px solid #ddd; padding: 8px 12px; border-radius: 6px; color: #555; cursor: pointer; font-size: 0.9em; display: flex; align-items: center; gap: 5px; }
         .btn-reprint:hover { border-color: #800020; color: #800020; background-color: #fff5f5; }
 
+        /* Filtros Premium */
+        .modern-filter-card { background-color: #fff; padding: 20px; border-radius: 10px; border: 1px solid #e0e0e0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end; }
+        .filter-item { flex: 1; min-width: 200px; }
+        .filter-item label { display: block; margin-bottom: 6px; font-weight: 600; color: #555; font-size: 0.9em; }
+        .filter-input { width: 100%; padding: 10px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95em; box-sizing: border-box; }
+        
         /* Mobile */
         @media (max-width: 768px) { 
             #menu-btn { display: block; }
@@ -216,7 +180,7 @@
     </header>
     
     <div class="sidebar" id="main-sidebar">
-        <div class="sidebar-header"><img src="cci.png" alt="Logo CCI" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'"><h2>SIGMA Gestão</h2></div>
+        <div class="sidebar-header"><img src="logo_sigma.png" alt="Logo CCI" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'"><h2>SIGMA Gestão</h2></div>
         <div class="menu-label">Operacional</div>
         <a onclick="switchView('dashboard')" id="link-dashboard" class="active"><i class="fas fa-chart-line"></i> Dashboard & Serviço</a>
         <a onclick="switchView('my-history')" id="link-my-history"><i class="fas fa-history"></i> Minhas Conferências</a>
@@ -554,17 +518,22 @@
                     listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL';
                 });
 
-                const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(50).get();
+                // CORREÇÃO FIREBASE INDEX: Remove orderBy, ordena no cliente
+                const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
                 const map = {};
                 
-                snap.forEach(doc => {
-                    const d = doc.data();
+                // Filtragem e Ordenação no Cliente (JS)
+                const allDocs = [];
+                snap.forEach(doc => allDocs.push({id: doc.id, ...doc.data()}));
+                allDocs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds); // Ordena por data desc
+
+                allDocs.forEach(d => {
                     const localNome = d.local.split(' - ')[1] || d.local; 
                     const listUnit = listToUnitMap[localNome] || 'GERAL';
 
                     if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
 
-                    if (!map[localNome]) map[localNome] = { docId: doc.id, local: d.local, conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), items: d.itensCaa || [] };
+                    if (!map[localNome]) map[localNome] = { docId: d.id, local: d.local, conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), items: d.itensCaa || [] };
                 });
 
                 renderCards(map);
@@ -641,18 +610,24 @@
         async function carregarConferenciasHoje() {
             const ul = document.getElementById('today-list'); ul.innerHTML = '<li>Carregando...</li>';
             try {
-                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(20).get();
+                // CORREÇÃO FIREBASE INDEX: Remove orderBy do query
+                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(50).get();
                 const hojeStr = new Date().toLocaleDateString('pt-BR');
+                
+                let docs = [];
+                snap.forEach(doc => docs.push(doc.data()));
+                // Ordena no cliente
+                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+
                 let html = '';
-                snap.forEach(doc => {
-                    const d = doc.data();
+                docs.forEach(d => {
                     const dt = d.timestamp.toDate();
                     if(dt.toLocaleDateString('pt-BR') === hojeStr) {
                         html += criarItemHistoricoHTML(d);
                     }
                 });
                 ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
-            } catch(e){ ul.innerHTML = 'Erro.'; }
+            } catch(e){ console.error(e); ul.innerHTML = 'Erro.'; }
         }
 
         async function loadMyHistory() {
@@ -661,11 +636,14 @@
             const dF = new Date(document.getElementById('my-hist-end').value + 'T23:59:59');
             
             try {
-                // Filtro em memória para evitar index complexo
-                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).orderBy('timestamp','desc').limit(100).get();
+                // Filtro em memória
+                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(100).get();
+                let docs = [];
+                snap.forEach(doc => docs.push(doc.data()));
+                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+
                 let html = '';
-                snap.forEach(doc => {
-                    const d = doc.data();
+                docs.forEach(d => {
                     const dt = d.timestamp.toDate();
                     if(dt >= dI && dt <= dF) html += criarItemHistoricoHTML(d);
                 });
@@ -680,10 +658,10 @@
             const localFilter = document.getElementById('glob-hist-local').value;
 
             try {
+                // Ordenação apenas por timestamp (índice padrão existe)
                 let q = db.collection(COLECAO_RESULTADOS).orderBy('timestamp','desc').limit(100);
                 const snap = await q.get();
                 
-                // Mapa de Unidades para filtrar se for Gestor
                 const rotasDoc = await db.collection('config_geral').doc('rotas').get();
                 const rotas = rotasDoc.data() || {};
                 const listToUnitMap = {};
@@ -696,7 +674,7 @@
                     const localNome = d.local.split(' - ')[1] || d.local;
                     const unit = listToUnitMap[localNome] || 'GERAL';
 
-                    if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; // Filtro de Gestor
+                    if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; 
                     
                     if(dt >= dI && dt <= dF) {
                         if(!localFilter || localNome === localFilter) html += criarItemHistoricoHTML(d);
@@ -712,7 +690,7 @@
             return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'><i class="fas fa-file-pdf"></i></button></div></li>`;
         }
 
-        // --- 5. GESTÃO DE UNIDADES (ADMIN - CARDS & VINCULO) ---
+        // --- 5. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
             const container = document.getElementById('units-cards-container');
             container.innerHTML = 'Carregando...';
@@ -732,7 +710,6 @@
                     container.appendChild(card);
                 });
                 
-                // Preenche select do histórico global
                 const sel = document.getElementById('glob-hist-local');
                 const locais = [...new Set(Object.values(rotas).map(r=>r.nome))].sort();
                 locais.forEach(l => { const o=document.createElement('option'); o.value=l; o.text=l; sel.appendChild(o); });
@@ -743,10 +720,8 @@
         function abrirGestaoUnidade(unitName, allRotas) {
             document.getElementById('edit-unit-original-name').value = unitName;
             document.getElementById('edit-unit-name-input').value = unitName;
-            
             const checklist = document.getElementById('unit-lists-checklist');
             checklist.innerHTML = '';
-            
             Object.entries(allRotas).forEach(([id, r]) => {
                 if(r.ativo === false) return;
                 const div = document.createElement('div');
@@ -755,7 +730,6 @@
                 div.innerHTML = `<input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> <label for="chk-${id}" style="margin:0;font-weight:normal;">${r.nome} (${r.posto})</label>`;
                 checklist.appendChild(div);
             });
-
             document.getElementById('modal-unit-manager').style.display = 'flex';
         }
 
@@ -763,35 +737,26 @@
             const oldName = document.getElementById('edit-unit-original-name').value;
             const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
             if(!newName) return alert("Nome inválido");
-
             try {
-                // 1. Atualizar lista de unidades
                 const unitsRef = db.collection('config_geral').doc('unidades');
                 await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayRemove(oldName) });
                 await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayUnion(newName) });
-
-                // 2. Atualizar vínculos das rotas
                 const rotasRef = db.collection('config_geral').doc('rotas');
                 const rotasSnap = await rotasRef.get();
                 const rotasData = rotasSnap.data();
                 const checkboxes = document.querySelectorAll('#unit-lists-checklist input[type="checkbox"]');
-                
                 checkboxes.forEach(chk => {
                     const id = chk.value;
                     if (chk.checked) {
-                        rotasData[id].unidade = newName; // Atribui à nova/atual unidade
-                        // Atualiza também no documento da lista individual para consistência
+                        rotasData[id].unidade = newName; 
                         db.collection(COLECAO_LISTAS).doc(id).update({ unidade: newName });
                     } else if (rotasData[id].unidade === oldName) {
-                        rotasData[id].unidade = null; // Remove vínculo se foi desmarcado
+                        rotasData[id].unidade = null; 
                         db.collection(COLECAO_LISTAS).doc(id).update({ unidade: null });
                     }
                 });
-
                 await rotasRef.set(rotasData);
-                alert("Atualizado!");
-                document.getElementById('modal-unit-manager').style.display = 'none';
-                carregarUnidadesVisuais();
+                alert("Atualizado!"); document.getElementById('modal-unit-manager').style.display = 'none'; carregarUnidadesVisuais();
             } catch(e) { alert("Erro: " + e.message); }
         }
 
@@ -800,7 +765,6 @@
             if(!confirm(`Excluir a unidade ${name}? As listas perderão o vínculo.`)) return;
             try {
                 await db.collection('config_geral').doc('unidades').update({ lista: firebase.firestore.FieldValue.arrayRemove(name) });
-                // Remove vínculos das rotas
                 const rotasRef = db.collection('config_geral').doc('rotas');
                 const s = await rotasRef.get(); const d = s.data();
                 Object.keys(d).forEach(k => { if(d[k].unidade === name) d[k].unidade = null; });
@@ -809,7 +773,7 @@
             } catch(e){ alert("Erro"); }
         }
 
-        // --- PDF GENERATOR (Reutilizado Operacional) ---
+        // --- PDF GENERATOR ---
         function reimprimirPDF(data) {
             try {
                 const { jsPDF } = window.jspdf;
@@ -839,6 +803,25 @@
                     listaParaImprimir.forEach(item => {
                         let finalObs = item.obs || '-';
                         if (finalObs === '-') finalObs = '';
+                        
+                        if (finalObs.includes(' | + NOVA: ')) {
+                            let partes = finalObs.split(' | + NOVA: ');
+                            let formatado = "";
+                            partes.forEach(p => {
+                                p = p.trim();
+                                const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
+                                const match = p.match(regex);
+                                if(match) formatado += `• Por: ${match[2]} em ${match[3]}: "${match[1]}"\n`;
+                                else formatado += `• ${p}\n`;
+                            });
+                            finalObs = formatado.trim();
+                        } else {
+                            const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
+                            const match = finalObs.match(regex);
+                            if(match) { finalObs = `• Por: ${match[2]} em ${match[3]}: "${match[1]}"`; } 
+                            else { if(finalObs.trim() !== '') finalObs = `• Por: ${data.conferente} em ${dataTimestamp.toLocaleDateString('pt-BR')}: "${finalObs}"`; }
+                        }
+
                         let bgStatus = GREEN_FILL; 
                         if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
                         tableData.push([ item.nomeCompleto || 'Item', `QTD: ${item.quantidade || 1}`, { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold' }, valign: 'middle' }, finalObs ]);
@@ -849,17 +832,10 @@
             } catch(e) { console.error(e); alert("Erro ao gerar PDF."); }
         }
 
-        // --- OUTROS (EDITOR LISTAS / USUÁRIOS) ---
-        // Funções reutilizadas do bloco anterior (criarNovoLocal, carregarListaLocaisAdmin, etc.) mantidas pela lógica de "View".
-        // Apenas certifique-se que as funções de "Editor" (abrirEditor, salvarDados) estão presentes.
-        // Para brevidade no bloco, assumo que as funções de editor (adicionarSetor, etc.) já estão no seu arquivo. 
-        // Caso precise delas novamente, me avise que colo o bloco isolado.
-        
-        // ... Bloco do Editor de Listas (adicionarSetor, removerItem, etc) ...
-        // INSERIR AQUI AS FUNÇÕES DO EDITOR DE LISTAS SE NECESSÁRIO
-        // (Elas já estavam no seu arquivo anterior, mantenha-as).
+        // --- OUTROS E FUNÇÕES GLOBAIS ---
         
         function sairDoSistema() { auth.signOut().then(() => { sessionStorage.clear(); window.location.href = 'index.html'; }); }
+        
         function switchView(v) {
             document.getElementById('mobile-overlay').style.display = 'none';
             document.getElementById('main-sidebar').classList.remove('mobile-active');
@@ -886,19 +862,39 @@
         function toggleMenuMobile() { const s = document.getElementById('main-sidebar'); if(s.classList.contains('mobile-active')) { s.classList.remove('mobile-active'); document.getElementById('mobile-overlay').style.display='none'; } else { s.classList.add('mobile-active'); document.getElementById('mobile-overlay').style.display='block'; } }
         function closeMenuMobile() { toggleMenuMobile(); }
         
-        async function criarUnidade() {
-            const nome = document.getElementById('new-unit-name').value.trim().toUpperCase();
-            if(!nome) return alert("Digite o nome.");
-            try {
-                await db.collection('config_geral').doc('unidades').set({ lista: firebase.firestore.FieldValue.arrayUnion(nome) }, { merge: true });
-                alert("Unidade criada!"); carregarUnidadesVisuais();
-            } catch(e) { alert("Erro: " + e.message); }
+        // --- FUNÇÕES EXPORTADAS PARA O ESCOPO GLOBAL ---
+        
+        // Editor
+        async function carregarDadosGerenciador(){ 
+            if(!currentEditingId) return; 
+            try{ 
+                document.getElementById('loading-message-admin').style.display = 'block';
+                document.getElementById('main-admin-content').style.display = 'none';
+                const d=await db.collection(COLECAO_LISTAS).doc(currentEditingId).get(); 
+                dadosConferencia=d.exists?(d.data().list||[]):[]; 
+                renderizarLista(); 
+                document.getElementById('loading-message-admin').style.display = 'none';
+                document.getElementById('main-admin-content').style.display = 'block';
+            }catch(e){console.error(e); alert("Erro ao carregar lista.");} 
         }
+        async function salvarDados(a=true){ if(!currentEditingId) return; try{ await db.collection(COLECAO_LISTAS).doc(currentEditingId).update({ list:dadosConferencia, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }); if(a)alert("Salvo!"); }catch(e){alert("Erro ao salvar");} }
+        function gerarNovoId(){ return Date.now().toString().slice(-6)+Math.floor(Math.random()*100).toString().padStart(2,'0'); }
+        function adicionarSetor(n){ n=n.trim().toUpperCase(); if(!n)return; dadosConferencia.push({id:gerarNovoId(), nome:n, itens:[]}); document.getElementById('input-setor-nome').value=''; salvarDados(false); renderizarLista(); }
+        function removerSetor(id){ if(confirm("Remover?")) { dadosConferencia=dadosConferencia.filter(x=>x.id!==id); salvarDados(false); renderizarLista(); } }
+        function adicionarItemPorSetor(sid){ const n=document.getElementById('input-item-nome-'+sid).value.trim().toUpperCase(); const q=parseInt(document.getElementById('input-item-qtd-'+sid).value); const t=document.getElementById('select-item-tipo-'+sid).value; if(!n||q<1)return; const s=dadosConferencia.find(x=>x.id===sid); const novo={id:sid+'-'+gerarNovoId(), nome:n, quantidadeEsperada:q, tipo:t, tombamentos:[]}; if(t==='multi')for(let i=0;i<q;i++)novo.tombamentos.push({tomb:'NOVO-'+(i+1),status:'pending',obs:''}); s.itens.push(novo); salvarDados(false); renderizarLista(); document.getElementById('input-item-nome-'+sid).value=''; }
+        function removerItem(sid,iid){ if(confirm("Remover?")){ const s=dadosConferencia.find(x=>x.id===sid); s.itens=s.itens.filter(i=>i.id!==iid); salvarDados(false); renderizarLista(); } }
+        function encontrarItemPorId(id) { for (const setor of dadosConferencia) { const item = setor.itens.find(i => i.id === id); if (item) return item; } return null; }
+        function adicionarTombamento(itemId, inputElement) { const tombamento = inputElement.value.trim().toUpperCase(); if (!tombamento) return; const item = encontrarItemPorId(itemId); if (item) { if (item.tombamentos.some(t => t.tomb === tombamento)) return alert("Duplicado!"); item.tombamentos.push({ tomb: tombamento, status: "pending", obs: "" }); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
+        function removerTombamento(itemId, tombamento) { if (!confirm("Remover tombamento?")) return; const item = encontrarItemPorId(itemId); if (item) { item.tombamentos = item.tombamentos.filter(t => t.tomb !== tombamento); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
+        function editarTombamento(itemId, tombamentoAtual, inputElement) { const novoTombamento = inputElement.value.trim().toUpperCase(); if (!novoTombamento || novoTombamento === tombamentoAtual) return; const item = encontrarItemPorId(itemId); if (item) { const tomb = item.tombamentos.find(t => t.tomb === tombamentoAtual); if (tomb) { tomb.tomb = novoTombamento; salvarDados(false); } } }
+        function updateOrdens() { const novosDados = []; document.querySelectorAll('.setor-item').forEach(sNode => { const sId = sNode.getAttribute('data-id'); const sOriginal = dadosConferencia.find(x => x.id === sId); const novosItens = []; sNode.querySelectorAll('.item-conferencia-admin').forEach(iNode => { const iId = iNode.querySelector('.btn-edit-alt').getAttribute('onclick').split("'")[3]; const itemObj = encontrarItemPorId(iId); if(itemObj) novosItens.push(itemObj); }); sOriginal.itens = novosItens; novosDados.push(sOriginal); }); dadosConferencia = novosDados; }
+        function abrirModalEdicao(sid, iid){ const s=dadosConferencia.find(x=>x.id===sid); const i=s.itens.find(x=>x.id===iid); document.getElementById('edit-setor-id').value=sid; document.getElementById('edit-item-original-id').value=iid; document.getElementById('edit-item-nome').value=i.nome; document.getElementById('edit-item-qtd').value=i.quantidadeEsperada; document.getElementById('edit-item-qtd').disabled=(i.tipo==='multi'); document.getElementById('edit-item-tipo').value=i.tipo; const sl=document.getElementById('edit-item-setor'); sl.innerHTML=''; dadosConferencia.forEach(d=>{const o=document.createElement('option'); o.value=d.id; o.text=d.nome; if(d.id===sid)o.selected=true; sl.appendChild(o);}); document.getElementById('modal-edicao').style.display='flex'; }
+        function salvarEdicaoItem(){ const osid=document.getElementById('edit-setor-id').value; const iid=document.getElementById('edit-item-original-id').value; const n=document.getElementById('edit-item-nome').value.trim().toUpperCase(); const nsid=document.getElementById('edit-item-setor').value; const q=parseInt(document.getElementById('edit-item-qtd').value); const os=dadosConferencia.find(x=>x.id===osid); const ns=dadosConferencia.find(x=>x.id===nsid); const i=os.itens.find(x=>x.id===iid); i.nome=n; if(i.tipo==='single')i.quantidadeEsperada=q; if(osid!==nsid){ os.itens=os.itens.filter(x=>x.id!==iid); i.id=nsid+'-'+gerarNovoId(); ns.itens.push(i); } salvarDados(false); renderizarLista(); fecharModal(); }
+        function fecharModal(){document.getElementById('modal-edicao').style.display='none';}
+        function fazerBackupLocal(){ const b=new Blob([JSON.stringify(dadosConferencia,null,2)],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='backup.json'; a.click(); }
+        function importarBackupLocal(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=function(ev){if(confirm("Substituir?")){try{dadosConferencia=JSON.parse(ev.target.result);salvarDados();renderizarLista();}catch(err){alert("Erro JSON");}}}; r.readAsText(f); }
         
-        // Funções de Usuário (criarUsuario, listarUsuarios) já inclusas na lógica anterior.
-        // Mantenha as funções de editor que você já tem.
-        
-        // REINSERINDO FUNÇÕES CRÍTICAS DE USUÁRIO E UNIDADE QUE PODEM TER SIDO CORTADAS NA VISUALIZAÇÃO:
+        // Admin
         async function carregarUnidadesSelect() {
             const sel = document.getElementById('new-user-unit');
             const selLista = document.getElementById('novo-local-unidade');
@@ -911,7 +907,6 @@
                 if(selLista) selLista.innerHTML = html;
             } catch(e) {}
         }
-        
         async function criarUsuario() {
             const email = document.getElementById('new-user-email').value;
             const guerra = document.getElementById('new-user-guerra').value;
@@ -925,7 +920,6 @@
                 alert("Usuário registrado! (Crie o login no Auth)"); listarUsuarios();
             } catch(e) { alert("Erro: " + e.message); }
         }
-
         async function listarUsuarios() {
             const tbody = document.getElementById('users-table-body');
             tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
@@ -940,12 +934,39 @@
                 });
             } catch(e) {}
         }
-        
-        // ASSEGURE QUE AS FUNÇÕES DE EDITOR (adicionarSetor, removerItem, etc.) ESTEJAM AQUI ABAIXO
-        // (Elas são longas, se não estiverem no seu arquivo, me peça e eu envio o BLOCO EDITOR separadamente).
-        
-        // Injeção de dependência visual para o logo do PDF funcionar
-        // (O logo precisa estar visível no DOM ou carregado para o canvas desenhar)
+        async function carregarPostosEditor() {
+             const sel = document.getElementById('novo-local-posto'); if(!sel) return;
+             try {
+                const doc = await db.collection('config_geral').doc('postos').get();
+                const lista = doc.exists ? doc.data().lista : [];
+                let h = ''; lista.forEach(p => h+=`<option value="${p}">${p}</option>`); sel.innerHTML = h;
+             } catch(e){}
+        }
+        async function criarNovoLocal() {
+            const posto = document.getElementById('novo-local-posto').value;
+            const nome = document.getElementById('novo-local-nome').value.trim().toUpperCase();
+            const unidade = document.getElementById('novo-local-unidade').value;
+            if(!posto || !nome || !unidade) return alert("Preencha Posto, Nome e Unidade.");
+            const id = `${posto.toLowerCase()}_${nome.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+            try {
+                await db.collection(COLECAO_LISTAS).doc(id).set({ nome_local: nome, posto: posto, list: [], unidade: unidade, updatedAt: firebase.firestore.Timestamp.now() });
+                await db.collection('config_geral').doc('rotas').set({ [id]: { nome: nome, posto: posto, unidade: unidade, ativo: true } }, { merge: true });
+                alert("Lista Criada!"); carregarListaLocaisAdmin();
+            } catch(e) { alert("Erro: " + e.message); }
+        }
+        async function carregarListaLocaisAdmin() {
+            const ul = document.getElementById('lista-locais-container');
+            const doc = await db.collection('config_geral').doc('rotas').get();
+            const rotas = doc.data(); ul.innerHTML = '';
+            Object.entries(rotas).forEach(([id, info]) => {
+                if(info.ativo === false) return;
+                const li = document.createElement('li'); li.className = 'local-item';
+                const safeName = info.nome.replace(/'/g, "\\'");
+                const safeId = id.replace(/'/g, "\\'");
+                li.innerHTML = `<div class="local-info"><strong>${info.nome}</strong><span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span></div><button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">Editar</button>`;
+                ul.appendChild(li);
+            });
+        }
     </script>
 </body>
 </html>
