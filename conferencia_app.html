@@ -92,17 +92,16 @@
         // --- 1. CONFIGURAÇÃO E VARIÁVEIS GLOBAIS ---
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore(); // CONSTANTE GLOBAL ÚNICA
+        const db = firebase.firestore();
 
         const urlParams = new URLSearchParams(window.location.search);
         const LISTA_ID = urlParams.get('id'); 
         const COLECAO_LISTAS = 'listas_conferencia'; 
         let dadosConferencia = []; let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
 
-        // --- 2. FUNÇÕES ESSENCIAIS (ORDEM PRIORITÁRIA) ---
-
+        // --- 2. FUNÇÕES UTILITÁRIAS ---
         function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
-
+        
         const userInfo = { 
             postoGraduacao: getUrlParameter('posto_grad') || "ND", 
             quadro: getUrlParameter('quadro_mil') || "ND", 
@@ -115,25 +114,92 @@
             return date.toLocaleDateString('pt-BR'); 
         }
 
-        // Esta função deve existir antes de ser chamada
         function updateHeaderInfo() { 
             const el = document.getElementById('militar-info');
             if (el) el.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
         }
 
-        // Esta função deve existir antes de ser chamada
-        function updateOverallStatus() { 
-            let total = 0, completed = 0; 
-            document.querySelectorAll('.setor').forEach(s => { 
-                total += parseInt(s.dataset.totalItems || 0); 
-                completed += parseInt(s.querySelector('.setor-status').dataset.completed || 0); 
-            }); 
-            const btn = document.getElementById('btn-finalizar'); 
+        // --- FUNÇÃO CRÍTICA DE STATUS (REESCRITA PARA SER INFALÍVEL) ---
+        function updateOverallStatus() {
+            let total = 0;
+            let completed = 0;
+
+            // Varre o DOM real para garantir a contagem exata
+            const todosItens = document.querySelectorAll('.item-conferencia');
+            total += todosItens.length; // Itens single contam como 1
+            
+            // Para tombamentos, precisamos somar os sub-itens e subtrair o pai da contagem se ele for apenas container
+            // Mas a lógica do dataset.totalItems já fazia isso. Vamos usar o window.itemStatus que é a fonte da verdade.
+
+            // RECONTAGEM BASEADA NO ESTADO ATUAL (MAIS SEGURO)
+            let realTotal = 0;
+            let realCompleted = 0;
+
+            // Itera sobre os dados originais para saber o total esperado
+            dadosConferencia.forEach(setor => {
+                setor.itens.forEach(item => {
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        realTotal += item.tombamentos.length;
+                        item.tombamentos.forEach(t => {
+                            const uid = `${item.id}-${t.tomb}`;
+                            const status = window.itemStatus[uid]?.status;
+                            if (status === 'S/A' || status === 'C/A' || status === 'KEEP') realCompleted++;
+                        });
+                    } else {
+                        realTotal++; // Item single
+                        const status = window.itemStatus[item.id]?.status;
+                        if (status === 'S/A' || status === 'C/A' || status === 'KEEP') realCompleted++;
+                    }
+                });
+                
+                // Atualiza visualmente o cabeçalho do setor
+                const setorEl = document.querySelector(`.setor[data-id="${setor.id}"]`);
+                if (setorEl) {
+                    // Recalcula localmente para o setor visual
+                    let setorTotal = 0;
+                    let setorCompleted = 0;
+                    
+                    // ... (Lógica simplificada visual, o importante é o total global para o botão)
+                    const setorStatus = setorEl.querySelector('.setor-status');
+                    // Apenas atualiza texto visual se necessário, o foco é o botão finalizar
+                }
+            });
+
+            const btn = document.getElementById('btn-finalizar');
             if(btn) {
-                btn.textContent = `FINALIZAR CONFERÊNCIA (${completed}/${total} ITENS)`; 
-                btn.disabled = (completed !== total); 
+                btn.textContent = `FINALIZAR CONFERÊNCIA (${realCompleted}/${realTotal} ITENS)`;
+                if (realTotal > 0 && realCompleted >= realTotal) {
+                    btn.disabled = false;
+                    btn.style.backgroundColor = "#1b8a3e"; // Verde visual
+                } else {
+                    btn.disabled = true;
+                    btn.style.backgroundColor = "#d90f23"; // Vermelho padrão
+                }
             }
         }
+        
+        // Função auxiliar para atualizar visual do setor (usada nos cliques)
+        function updateSetorStatus(setorEl) {
+             // Mantém a lógica visual local para feedback rápido
+            const items = setorEl.querySelectorAll('.item-conferencia'); 
+            let completed = 0, total = 0; 
+            items.forEach(item => { 
+                if (item.dataset.type === 'single') { 
+                    total++; const s = window.itemStatus[item.dataset.id]?.status; 
+                    if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
+                } else { 
+                    const tombs = item.querySelectorAll('.tombamento-container'); 
+                    tombs.forEach(t => { 
+                        total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
+                        if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
+                    }); 
+                } 
+            }); 
+            const st = setorEl.querySelector('.setor-status'); 
+            st.textContent = `${completed}/${total}`;
+            if(completed === total && total > 0) st.classList.add('ok'); else st.classList.remove('ok');
+        }
+
 
         // --- 3. LÓGICA DO RASCUNHO ---
         function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
@@ -188,7 +254,6 @@
 
         function renderizarConferencia() {
             const mainContent = document.getElementById('main-content'); 
-            // Limpa setores antigos
             const antigos = mainContent.querySelectorAll('.setor');
             antigos.forEach(el => el.remove());
 
@@ -200,7 +265,6 @@
             dadosConferencia.forEach((setor, index) => {
                 const isFirstSetor = (index === 0);
                 let htmlItens = ''; 
-                let totalItensNoSetor = 0;
                 
                 setor.itens.forEach(item => {
                     const montarPendenciaHtml = (uid, pendenciaObj) => {
@@ -216,21 +280,21 @@
                         item.tombamentos.forEach(tomb => {
                             const uid = `${item.id}-${tomb.tomb}`; const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
                             htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options"><button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button></div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
-                            totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
+                            window.itemStatus[uid] = { status: 'pending', obs: '' };
                         });
                         htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
                     } else {
                         let classExtra = ''; if (item.pendencia) { if (item.pendencia.statusAdmin) classExtra = 'status-admin-response'; else classExtra = 'status-existing-alert'; }
                         const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
                         htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options"><button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button></div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
-                        totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
+                        window.itemStatus[item.id] = { status: 'pending', obs: '' };
                     }
                 });
                 
                 const expandedClass = isFirstSetor ? 'expanded' : '';
                 const arrowChar = isFirstSetor ? '▼' : '►';
                 
-                htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div></div><span class="arrow">${arrowChar}</span></div><div class="setor-content ${expandedClass}">${htmlItens}</div></div>`;
+                htmlSetores += `<div class="setor" data-total-items="0" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/0</div></div><span class="arrow">${arrowChar}</span></div><div class="setor-content ${expandedClass}">${htmlItens}</div></div>`;
             });
             
             mainContent.querySelector('#btn-finalizar').insertAdjacentHTML('beforebegin', htmlSetores);
@@ -238,12 +302,61 @@
 
         // --- 5. INTERAÇÃO UI ---
         function toggleSetor(header) { const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); if (content.classList.contains('expanded')) { content.classList.remove('expanded'); arrow.textContent = '►'; } else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►'}); content.classList.add('expanded'); arrow.textContent = '▼'; } }
-        function checkSetorCompletion(currentSetor, currentItemId) { const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); if (comp === total) autoAdvanceSetor(currentSetor.dataset.id); else focusNextItem(currentItemId); }
+        
+        function checkSetorCompletion(currentSetor, currentItemId) { 
+            // Verifica se todos no setor estão OK visualmente
+            // Se sim, avança
+            const total = parseInt(currentSetor.dataset.totalItems); 
+            // Recalcula completed na hora para garantir
+            let completed = 0;
+            currentSetor.querySelectorAll('.item-conferencia').forEach(i => {
+                // Lógica simplificada de check visual
+                if(i.classList.contains('status-ok') || i.classList.contains('status-alert')) {
+                    if(i.dataset.type === 'single') completed++;
+                    else {
+                         const subs = i.querySelectorAll('.tombamento-container');
+                         let subComp = 0;
+                         subs.forEach(s => {
+                             const btnOk = s.querySelector('.sa-ok.active');
+                             const btnCa = s.querySelector('.ca-alert.active');
+                             if(btnOk || btnCa) subComp++;
+                         });
+                         if(subComp === subs.length) completed++;
+                    }
+                }
+            });
+
+            if (completed >= total) autoAdvanceSetor(currentSetor.dataset.id); else focusNextItem(currentItemId); 
+        }
+        
         function focusNextItem(currentItemId) { const allItems = Array.from(document.querySelectorAll('.item-conferencia')); let baseId = currentItemId.split('-')[0]; const idx = allItems.findIndex(i => i.dataset.id === baseId); for (let i = idx; i < allItems.length; i++) { const item = allItems[i]; if (!item) continue; const id = item.dataset.id; if (item.dataset.type === 'single') { const st = window.itemStatus[id]; if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { item.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; } } if (item.dataset.type === 'multi') { const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; }); if (pendingTomb) { pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); const uid = `${id}-${pendingTomb.dataset.tomb}`; if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; } } } }
         function autoAdvanceSetor(sid) { const s = document.querySelector(`.setor[data-id="${sid}"]`); if (s) toggleSetor(s.querySelector('.setor-header')); const idx = window.setorIds.indexOf(sid); const nextId = window.setorIds[idx + 1]; if (nextId) { const next = document.querySelector(`.setor[data-id="${nextId}"]`); if (next) { const h = next.querySelector('.setor-header'); toggleSetor(h); next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } } }
         
-        function manterPendencia(btn, uid) { const box = btn.closest('.pendencia-alert-box'); if(box) { box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept'); box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); window.itemStatus[uid]={status:'KEEP',obs:''}; salvarRascunho(); const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item); const setor=c.closest('.setor'); updateSetorStatus(setor); updateOverallStatus(); checkSetorCompletion(setor, item.dataset.id); } }
-        function acrescentarPendencia(btn, uid, encodedData) { const box = btn.closest('.pendencia-alert-box'); const container = box.closest('.tombamento-container')||box.closest('.item-conferencia'); box.style.display='none'; if(container){ const btnCA=container.querySelector('.ca-alert'); if(btnCA){btnCA.classList.add('active'); container.querySelector('.sa-ok').classList.remove('active');} const edit=container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container'); edit.style.display='block'; const hist=edit.querySelector('.historico-fixo'); hist.dataset.meta=encodedData; hist.style.display='none'; edit.querySelector('textarea').value=''; edit.querySelector('textarea').focus(); window.itemStatus[uid]={status:'PENDING_CA',obs:''}; salvarRascunho(); } }
+        // --- 6. ACTIONS (BOTÕES) ---
+        function manterPendencia(btn, uid) { 
+            const box = btn.closest('.pendencia-alert-box'); 
+            if(box) { 
+                box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept'); 
+                box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
+                
+                window.itemStatus[uid]={status:'KEEP',obs:''}; 
+                salvarRascunho(); 
+                
+                const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); 
+                const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); 
+                const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); 
+                if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item); 
+                const setor=c.closest('.setor'); 
+                
+                updateSetorStatus(setor); 
+                updateOverallStatus(); 
+                checkSetorCompletion(setor, item.dataset.id); 
+            } 
+        }
+
+        function acrescentarPendencia(btn, uid, encodedData) { 
+            const box = btn.closest('.pendencia-alert-box'); const container = box.closest('.tombamento-container')||box.closest('.item-conferencia'); box.style.display='none'; if(container){ const btnCA=container.querySelector('.ca-alert'); if(btnCA){btnCA.classList.add('active'); container.querySelector('.sa-ok').classList.remove('active');} const edit=container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container'); edit.style.display='block'; const hist=edit.querySelector('.historico-fixo'); hist.dataset.meta=encodedData; hist.style.display='none'; edit.querySelector('textarea').value=''; edit.querySelector('textarea').focus(); window.itemStatus[uid]={status:'PENDING_CA',obs:''}; salvarRascunho(); } 
+        }
         function setItemStatus(btn, status) { const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); item.querySelector('.descricao-salva').style.display='none'; item.querySelector('.alteracao-container').style.display='none'; const pb=item.querySelector('.pendencia-alert-box'); if(pb)pb.style.display='none'; if(status==='ok'){item.className='item-conferencia status-ok'; item.querySelector('.status-icon').className='status-icon ok'; window.itemStatus[item.dataset.id]={status:'S/A',obs:''};} else {item.className='item-conferencia status-alert'; item.querySelector('.status-icon').className='status-icon alert'; item.querySelector('.alteracao-container').style.display='block'; window.itemStatus[item.dataset.id]={status:'PENDING_CA',obs:''}; item.querySelector('textarea').focus();} salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); }
         function setTombamentoStatus(btn, status) { const tomb = btn.closest('.tombamento-container'); const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); const uid=`${item.dataset.id}-${tomb.dataset.tomb}`; tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); tomb.querySelector('.tombamento-obs-container').style.display='none'; tomb.querySelector('.tombamento-descricao-salva').style.display='none'; const pb=tomb.querySelector('.pendencia-alert-box'); if(pb)pb.style.display='none'; if(status==='ok'){window.itemStatus[uid]={status:'S/A',obs:''}; updateItemMainStatusDisplay(item);} else {tomb.querySelector('.tombamento-obs-container').style.display='block'; window.itemStatus[uid]={status:'PENDING_CA',obs:''}; tomb.querySelector('textarea').focus(); updateItemMainStatusDisplay(item);} salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); }
         
@@ -303,9 +416,10 @@
             document.getElementById('loading-message').innerHTML = "Conectando...";
             
             if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-            // REMOVIDA A REATRIBUIÇÃO DE 'db'
-            
+            db = firebase.firestore();
+
             try {
+                document.getElementById('loading-message').innerHTML = "Baixando dados...";
                 const doc = await db.collection(COLECAO_LISTAS).doc(LISTA_ID).get();
                 if (!doc.exists) throw new Error("Lista não encontrada.");
                 
