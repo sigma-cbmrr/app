@@ -74,6 +74,9 @@
         .op-card { background: white; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; border-left: 5px solid #ccc; }
         .op-card.action { border-left-color: #1b8a3e; }
         .op-card.history { border-left-color: #2c7399; }
+        .op-card.resume { border-left-color: #f57c00; background-color: #fff3e0; cursor: pointer; transition: transform 0.2s; }
+        .op-card.resume:hover { transform: translateY(-2px); }
+        
         .op-card-title { color: #333; margin-top: 0; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; font-size: 1.2em; display: flex; align-items: center; gap: 8px; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; font-weight: bold; color: #555; margin-bottom: 5px; font-size: 0.9em; }
@@ -233,6 +236,8 @@
                     <span id="current-date" class="greeting-date">...</span>
                 </div>
             </div>
+
+            <div id="resume-container"></div>
 
             <div class="op-card action">
                 <h2 class="op-card-title"><i class="fas fa-clipboard-list"></i> Nova Conferência</h2>
@@ -527,6 +532,7 @@
 
             carregarListasParaNovaConferencia();
             carregarConferenciasHoje(); // Minhas conferências de hoje
+            verificarConferenciaAtiva(); // Verifica se há conferência para continuar
             loadCaaData();
             
             if (role === 'admin') {
@@ -551,12 +557,35 @@
             if(user.foto_url) document.getElementById('greeting-photo').src = user.foto_url;
         }
 
-        // --- 2. DASHBOARD HIERÁRQUICO ---
+        // --- 2. VERIFICAÇÃO DE RESUME ---
+        function verificarConferenciaAtiva() {
+            const activeConf = localStorage.getItem('sigma_active_conf');
+            const container = document.getElementById('resume-container');
+            container.innerHTML = '';
+            if (activeConf) {
+                try {
+                    const confData = JSON.parse(activeConf);
+                    if(confData.user === currentUserData.nome_guerra) {
+                        container.innerHTML = `<div class="op-card resume" onclick="retomarConferencia('${confData.url}')"><h2 class="op-card-title" style="border:none; margin:0; color:#e65100;"><i class="fas fa-play-circle"></i> Continuar Conferência: ${confData.nomeLista}</h2><p style="margin:5px 0 0 30px; color:#666; font-size:0.9em;">Clique para retomar de onde parou...</p></div>`;
+                    }
+                } catch(e) {}
+            }
+        }
+
+        function retomarConferencia(url) {
+            const iframe = document.getElementById('app-iframe');
+            const container = document.getElementById('app-runner-container');
+            iframe.src = url;
+            container.style.display = 'block';
+        }
+
+        // --- 3. DASHBOARD HIERÁRQUICO ---
         async function loadCaaData() {
             const container = document.getElementById('cards-container');
             container.innerHTML = 'Carregando...';
             const loading = document.getElementById('loading-message-dashboard');
             loading.style.display = 'block';
+            
             try {
                 const rotasDoc = await db.collection('config_geral').doc('rotas').get();
                 const rotas = rotasDoc.data() || {};
@@ -602,7 +631,7 @@
             });
         }
 
-        // --- 3. NOVA CONFERÊNCIA ---
+        // --- 4. NOVA CONFERÊNCIA ---
         async function carregarListasParaNovaConferencia() {
             try {
                 const doc = await db.collection('config_geral').doc('rotas').get();
@@ -635,8 +664,19 @@
 
         function iniciarConferenciaDashboard() {
             const listaId = document.getElementById('dash-select-lista').value;
+            const listaSelect = document.getElementById('dash-select-lista');
+            const nomeLista = listaSelect.options[listaSelect.selectedIndex].text;
+            
             if(!listaId) return alert("Selecione uma lista.");
+            
             const url = `conferencia_app.html?id=${listaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(currentUserData.nome_guerra)}`;
+            
+            // Salva para resume
+            localStorage.setItem('sigma_active_conf', JSON.stringify({
+                id: listaId, nomeLista: nomeLista, user: currentUserData.nome_guerra, url: url
+            }));
+            verificarConferenciaAtiva();
+
             const container = document.getElementById('app-runner-container');
             const iframe = document.getElementById('app-iframe');
             iframe.src = url; container.style.display = 'block';
@@ -646,13 +686,18 @@
             if (event.data && event.data.type === 'SIGMA_FINISHED') {
                 document.getElementById('app-runner-container').style.display = 'none';
                 document.getElementById('app-iframe').src = "";
+                
+                // Limpa o resume
+                localStorage.removeItem('sigma_active_conf');
+                verificarConferenciaAtiva();
+
                 loadCaaData();
                 carregarConferenciasHoje();
                 alert("Conferência salva!");
             }
         });
 
-        // --- 4. HISTÓRICOS ---
+        // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
             const ul = document.getElementById('today-list'); ul.innerHTML = '<li>Carregando...</li>';
             try {
@@ -733,7 +778,7 @@
             return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'><i class="fas fa-file-pdf"></i></button></div></li>`;
         }
 
-        // --- 5. GESTÃO DE UNIDADES (ADMIN) ---
+        // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
             const container = document.getElementById('units-cards-container');
             container.innerHTML = 'Carregando...';
@@ -880,6 +925,9 @@
             const link = document.getElementById('link-' + v);
             if(link) link.classList.add('active');
             
+            // Fecha o runner se estiver aberto
+            document.getElementById('app-runner-container').style.display = 'none';
+
             if(v === 'usuarios') listarUsuarios();
             if(v === 'listas') carregarListaLocaisAdmin();
             if(v === 'unidades') carregarUnidadesVisuais();
@@ -901,7 +949,6 @@
         function mostrarTabela(data) {
             const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
             document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; tbody.innerHTML = '';
-            // Garante array
             const items = data.items || [];
             const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
             if (itemsToShow.length === 0) { wrapper.querySelector('table').style.display = 'none'; document.getElementById('no-issues-msg').style.display = 'block'; } else {
@@ -909,12 +956,10 @@
                 itemsToShow.forEach(i => {
                     const tr = tbody.insertRow();
                     const obsFormatada = (i.obs || '').replace(/\n/g, '<br>');
-                    // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
                     const itemComDocId = { ...i, docId: data.docId }; 
                     
                     tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
                     const td = tr.insertCell(); 
-                    // Passa o item enriquecido
                     td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
                 });
             }
@@ -973,7 +1018,6 @@
                 if(!snap.exists) return alert("Erro: Conferência não encontrada.");
                 
                 const resData = snap.data();
-                // Proteção contra array nulo
                 const items = resData.itensCaa || [];
                 
                 if (!items[idx]) return alert("Erro: Item não encontrado no índice.");
@@ -1139,36 +1183,6 @@
                 li.innerHTML = `<div class="local-info"><strong>${info.nome}</strong><span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span></div><button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">Editar</button>`;
                 ul.appendChild(li);
             });
-        }
-
-        function abrirEditor(id, nome) { 
-            currentEditingId = id; 
-            document.getElementById('editor-title').textContent = `Editando: ${nome}`; 
-            switchView('editor'); 
-            carregarDadosGerenciador(); 
-        }
-
-        function voltarParaLocais() { currentEditingId = null; switchView('listas'); }
-        
-        function renderizarLista() { 
-            const container = document.getElementById('lista-setores-container'); container.innerHTML = '';
-            dadosConferencia.forEach(setor => {
-                const setorLi = document.createElement('li'); setorLi.className = 'setor-item'; setorLi.setAttribute('data-id', setor.id);
-                const addItemFormHtml = `<div class="add-item-form-setor"><input type="text" id="input-item-nome-${setor.id}" placeholder="Item"><input type="number" id="input-item-qtd-${setor.id}" value="1" style="width:50px"><select id="select-item-tipo-${setor.id}"><option value="single">Único</option><option value="multi">Tombamento</option></select><button class="btn-add" onclick="adicionarItemPorSetor('${setor.id}')">+</button></div>`;
-                let itensHtml = '';
-                setor.itens.forEach(item => {
-                    let tombamentosHtml = '';
-                    if (item.tipo === 'multi' && item.tombamentos) {
-                        const tombamentosList = item.tombamentos.map(tomb => `<li><div style="display:flex; align-items:center; width:100%;"><span style="margin-right:10px; font-size:0.85em; font-weight:bold; color:#555;">TB:</span><input type="text" value="${tomb.tomb}" onblur="editarTombamento('${item.id}', '${tomb.tomb}', this)" style="padding:4px; font-size:0.85em; border:1px solid #ddd; border-radius:4px;"></div><button class="btn-remover" onclick="removerTombamento('${item.id}', '${tomb.tomb}')" style="padding:2px 8px; margin-left:10px;"><i class="fas fa-trash" style="font-size:0.8em;"></i></button></li>`).join('');
-                        tombamentosHtml = `<div class="tombamento-container-wrapper"><div class="tombamento-section"><h4>Tombamentos (${item.tombamentos.length})</h4><ul class="tombamento-list">${tombamentosList}</ul><div class="add-tombamento-form"><input type="text" id="tomb-input-${item.id}" placeholder="Novo Tombamento"><button class="btn-add" onclick="adicionarTombamento('${item.id}', document.getElementById('tomb-input-${item.id}'))"><i class="fas fa-plus"></i></button></div></div></div>`;
-                    }
-                    itensHtml += `<li class="item-conferencia-admin"><div style="width:100%"><div style="display:flex;justify-content:space-between;"><div><strong>${item.nome}</strong><small> Qtd: ${item.quantidadeEsperada}</small></div><div class="item-actions-admin"><button class="btn-edit-alt" onclick="abrirModalEdicao('${setor.id}','${item.id}')"><i class="fas fa-edit"></i></button><button class="btn-remover" onclick="removerItem('${setor.id}','${item.id}')"><i class="fas fa-trash"></i></button></div></div>${item.tipo === 'multi' ? tombamentosHtml : ''}</div></li>`;
-                });
-                setorLi.innerHTML = `<div class="setor-header-admin" onclick="this.nextElementSibling.classList.toggle('collapsed')"><span>${setor.nome}</span><button class="btn-remover" onclick="event.stopPropagation();removerSetor('${setor.id}')">X</button></div><div class="setor-content-admin">${addItemFormHtml}<ul class="lista-setores item-list-admin" data-setor-id="${setor.id}">${itensHtml}</ul></div>`;
-                container.appendChild(setorLi);
-            });
-            new Sortable(container, { animation: 150, handle: '.setor-header-admin', onEnd: () => salvarDados(false) });
-            document.querySelectorAll('.item-list-admin').forEach(el => { new Sortable(el, { group: 'items', animation: 150, onEnd: () => { updateOrdens(); salvarDados(false); } }); });
         }
     </script>
 </body>
