@@ -78,7 +78,6 @@
         <div id="draft-message" class="draft-badge"><strong>Rascunho recuperado:</strong> Você está continuando de onde parou.</div>
         <div id="loading-message" class="loading-message">Inicializando sistema...</div>
         <div id="main-content" style="display: none;">
-            <!-- CONTEUDO SERÁ INJETADO AQUI -->
             <button id="btn-finalizar" onclick="finalizarConferencia()" disabled>FINALIZAR CONFERÊNCIA (0/X ITENS)</button>
         </div>
     </div>
@@ -99,7 +98,7 @@
         const COLECAO_LISTAS = 'listas_conferencia'; 
         let dadosConferencia = []; let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
 
-        // --- 2. FUNÇÕES DE UTILIDADE (DEFINIDAS NO TOPO PARA EVITAR ReferenceError) ---
+        // --- 2. FUNÇÕES DE UTILIDADE ---
 
         function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
 
@@ -122,7 +121,6 @@
 
         function updateOverallStatus() { 
             let total = 0, completed = 0; 
-            // Calcula com base no DOM para garantir sincronia visual
             document.querySelectorAll('.setor').forEach(s => { 
                 total += parseInt(s.dataset.totalItems || 0); 
                 completed += parseInt(s.querySelector('.setor-status').dataset.completed || 0); 
@@ -130,14 +128,13 @@
             const btn = document.getElementById('btn-finalizar'); 
             if(btn) {
                 btn.textContent = `FINALIZAR CONFERÊNCIA (${completed}/${total} ITENS)`; 
-                // Habilita apenas se tudo estiver completo e houver itens
                 if (total > 0 && completed >= total) {
                     btn.disabled = false;
-                    btn.style.backgroundColor = '#1b8a3e'; // Verde para indicar pronto
+                    btn.style.backgroundColor = '#1b8a3e'; 
                     btn.style.cursor = 'pointer';
                 } else {
                     btn.disabled = true;
-                    btn.style.backgroundColor = '#d90f23'; // Vermelho padrão
+                    btn.style.backgroundColor = '#d90f23'; 
                     btn.style.cursor = 'not-allowed';
                 }
             }
@@ -159,7 +156,6 @@
                 } 
             }); 
             
-            // Atualiza dataset e visual do setor
             setorEl.dataset.totalItems = total; 
             const st = setorEl.querySelector('.setor-status'); 
             st.dataset.completed = completed; 
@@ -502,7 +498,12 @@
                 const localNome = `${infoLocal.posto} - ${infoLocal.nome}`; 
                 const clean = (val) => val === undefined ? null : val;
                 let updated = false;
-                let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+                
+                // Variáveis para o Relatório Completo
+                let itensRelatorio = []; // << NOVA LISTA COMPLETA
+                let itensCaa = []; 
+                let itemsCount = 0; 
+                let cA_count = 0;
 
                 const atualizarListaDB = (itemOuTomb, uid) => {
                     const s = window.itemStatus[uid]; if(!s) return;
@@ -512,6 +513,7 @@
                     } else if(s.status === 'S/A' && itemOuTomb.pendencia) { delete itemOuTomb.pendencia; updated=true; }
                 };
 
+                // 1. Atualiza o DB da Lista Original (Persistência)
                 dadosConferencia.forEach(setor => {
                     setor.itens.forEach(item => {
                         if(item.tipo === 'single') atualizarListaDB(item, item.id);
@@ -519,18 +521,44 @@
                     });
                 });
                 
+                // 2. Prepara o Extrato Completo (S/A e C/A)
                 dadosConferencia.forEach(setor => {
                     setor.itens.forEach(item => {
                         const process = (id, nome, pend) => {
                             const s = window.itemStatus[id];
                             if (s && s.status !== 'pending') {
-                                itemsCount++; if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
+                                itemsCount++;
+                                
+                                // Define status final para o relatório
+                                let finalStatus = s.status;
+                                if(finalStatus === 'KEEP') finalStatus = 'C/A'; // Visualmente é C/A
+                                
+                                // Contabilidade
+                                if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
+                                
+                                // Prepara a observação
+                                let finalObs = s.obs;
+                                if (s.status === 'KEEP' && pend) finalObs = pend.obs;
+                                if (s.status === 'S/A') finalObs = null;
+
+                                // Objeto de dados do item
+                                const dadosItem = { 
+                                    nomeCompleto: nome, 
+                                    status: finalStatus, 
+                                    obs: finalObs, 
+                                    quantidade: item.quantidadeEsperada || 1, 
+                                    id: id,
+                                    // Salva dados extras se houver C/A
+                                    statusAdmin: (s.status !== 'S/A' && pend) ? clean(pend.statusAdmin) : null, 
+                                    adminObs: (s.status !== 'S/A' && pend) ? clean(pend.adminObs) : null 
+                                };
+
+                                // Adiciona na lista completa
+                                itensRelatorio.push(dadosItem);
+
+                                // Mantém a lista antiga de C/A por compatibilidade
                                 if (s.status === 'C/A' || s.status === 'KEEP') {
-                                    let finalObs = s.obs;
-                                    if (s.status === 'KEEP' && pend) finalObs = pend.obs;
-                                    itensCaa.push({ 
-                                        nomeCompleto: nome, status: 'C/A', obs: finalObs, quantidade: item.quantidadeEsperada || 1, id: id, statusAdmin: clean(pend ? pend.statusAdmin : null), adminObs: clean(pend ? pend.adminObs : null) 
-                                    });
+                                    itensCaa.push(dadosItem);
                                 }
                             }
                         };
@@ -540,7 +568,18 @@
                 });
 
                 if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-                await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa });
+                
+                // SALVA O RESULTADO COM A LISTA COMPLETA 'itensRelatorio'
+                await db.collection('resultados_conferencias').add({ 
+                    local: localNome, 
+                    lista_id: LISTA_ID, 
+                    conferente, 
+                    timestamp: firebase.firestore.Timestamp.now(), 
+                    totalItensConferidos: itemsCount, 
+                    totalCaa: cA_count, 
+                    itensCaa,          // Mantido por compatibilidade com Dashboard
+                    itensRelatorio     // << NOVA LISTA PARA PDF COMPLETO (Imutável pelo dashboard)
+                });
 
                 limparRascunho();
                 window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
