@@ -616,41 +616,47 @@
         }
 
         // --- 3. DASHBOARD HIERÁRQUICO ---
+        // --- 3. DASHBOARD HIERÁRQUICO ---
         async function loadCaaData() {
             const container = document.getElementById('cards-container');
             container.innerHTML = 'Carregando...';
             const loading = document.getElementById('loading-message-dashboard');
             loading.style.display = 'block';
-            
             try {
                 const rotasDoc = await db.collection('config_geral').doc('rotas').get();
                 const rotas = rotasDoc.data() || {};
                 const listToUnitMap = {};
+                
                 Object.keys(rotas).forEach(key => {
-                    listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL';
+                    // Ignora o artefato 'bravo 5' ou outros IDs específicos
+                    if (!key.toLowerCase().includes('bravo 5') && rotas[key].ativo !== false) {
+                        listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL';
+                    }
                 });
-
+                
                 const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
                 const map = {};
                 const docs = [];
                 snap.forEach(d => docs.push({id:d.id, ...d.data()}));
-                
                 docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
 
                 docs.forEach(d => {
                     const localNome = d.local.split(' - ')[1] || d.local; 
                     const listUnit = listToUnitMap[localNome] || 'GERAL';
+                    
+                    // Condição crucial: Só processa se a lista existir no mapa filtrado
+                    if (!listToUnitMap[localNome]) return; 
 
                     if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
 
                     if (!map[localNome]) map[localNome] = { docId: d.id, local: d.local, conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), items: d.itensCaa || [] };
                 });
-                
                 renderCards(map);
-            } catch (e) { console.error(e); container.innerHTML = 'Erro ao carregar.'; }
-            finally { loading.style.display = 'none'; }
+            } catch (e) { console.error(e); container.innerHTML = 'Erro ao carregar.';
+            }
+            finally { loading.style.display = 'none';
+            }
         }
-
         function renderCards(map) {
             const container = document.getElementById('cards-container'); container.innerHTML = '';
             const keys = Object.keys(map).sort();
