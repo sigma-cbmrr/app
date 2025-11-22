@@ -1338,7 +1338,42 @@
         function gerarNovoId(){ return Date.now().toString().slice(-6)+Math.floor(Math.random()*100).toString().padStart(2,'0'); }
         function adicionarSetor(n){ n=n.trim().toUpperCase(); if(!n)return; dadosConferencia.push({id:gerarNovoId(), nome:n, itens:[]}); document.getElementById('input-setor-nome').value=''; salvarDados(false); renderizarLista(); }
         function removerSetor(id){ if(confirm("Remover setor?")) { dadosConferencia=dadosConferencia.filter(x=>x.id!==id); salvarDados(false); renderizarLista(); } }
-        function adicionarItemPorSetor(sid){ const n=document.getElementById('input-item-nome-'+sid).value.trim().toUpperCase(); const q=parseInt(document.getElementById('input-item-qtd-'+sid).value); const t=document.getElementById('select-item-tipo-'+sid).value; if(!n||q<1)return; const s=dadosConferencia.find(x=>x.id===sid); const novo={id:sid+'-'+gerarNovoId(), nome:n, quantidadeEsperada:q, tipo:t, tombamentos:[]}; if(t==='multi')for(let i=0;i<q;i++)novo.tombamentos.push({tomb:'NOVO-'+(i+1),status:'pending',obs:''}); s.itens.push(novo); salvarDados(false); renderizarLista(); document.getElementById('input-item-nome-'+sid).value=''; }
+        // ATENÇÃO: Esta é a função que você deve modificar no sigma_dashboard.html
+function adicionarItemPorSetor(sid) { 
+    const n = document.getElementById('input-item-nome-'+sid).value.trim().toUpperCase(); 
+    const q = parseInt(document.getElementById('input-item-qtd-'+sid).value); 
+    const t = document.getElementById('select-item-tipo-'+sid).value; 
+    
+    if(!n || q < 1) return; 
+
+    // 1. CAPTURAR O SCROLL POSITION ANTES DA RECONSTRUÇÃO DO DOM
+    // O elemento que rola é o pai da lista de setores, ou o contêiner principal do editor.
+    const scrollContainer = document.querySelector('.admin-container'); 
+    let scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+    
+    const s = dadosConferencia.find(x => x.id === sid);
+    const novo = {id: sid+'-'+gerarNovoId(), nome: n, quantidadeEsperada: q, tipo: t, tombamentos:[]}; 
+    
+    if(t === 'multi') for(let i = 0; i < q; i++) novo.tombamentos.push({tomb: 'NOVO-' + (i+1), status: 'pending', obs: ''}); 
+    
+    s.itens.push(novo); 
+    
+    // OTIMIZAÇÃO: Limpar o campo de nome
+    document.getElementById('input-item-nome-'+sid).value = '';
+
+    salvarDados(false); 
+    
+    // 2. RECONSTRUIR A LISTA
+    renderizarLista(); 
+
+    // 3. RESTAURAR O SCROLL POSITION APÓS A RECONSTRUÇÃO
+    if (scrollContainer && scrollTop > 0) {
+        // Usamos um pequeno timeout para garantir que o DOM foi totalmente renderizado
+        setTimeout(() => {
+            scrollContainer.scrollTop = scrollTop;
+        }, 50); 
+    }
+}
         function removerItem(sid,iid){ if(confirm("Remover item?")){ const s=dadosConferencia.find(x=>x.id===sid); s.itens=s.itens.filter(i=>i.id!==iid); salvarDados(false); renderizarLista(); } }
         function encontrarItemPorId(id) { for (const setor of dadosConferencia) { const item = setor.itens.find(i => i.id === id); if (item) return item; } return null; }
         function adicionarTombamento(itemId, inputElement) { const tombamento = inputElement.value.trim().toUpperCase(); if (!tombamento) return; const item = encontrarItemPorId(itemId); if (item) { if (item.tombamentos.some(t => t.tomb === tombamento)) return alert("Duplicado!"); item.tombamentos.push({ tomb: tombamento, status: "pending", obs: "" }); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
