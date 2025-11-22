@@ -89,7 +89,7 @@
         .new-local-section { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; border-top: 3px solid #2c7399; }
         .admin-table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
         .admin-table th, .admin-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
-        .admin-table th { background-color: #f8f8f8; font-weight: bold; color: #555; text-transform: uppercase; font-size: 0.85em; }
+        .admin-table th { background-color: #f8f9fa; font-weight: bold; color: #555; text-transform: uppercase; font-size: 0.85em; }
         .role-badge { padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; color: white; }
         .role-admin { background-color: #d90f23; } .role-gestor { background-color: #f57c00; } .role-operacional { background-color: #1b8a3e; }
         
@@ -533,16 +533,85 @@
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
 
-        // --- 1. FUNÇÕES DO EDITOR DE LISTAS (Global) ---
+        // --- FUNÇÕES GLOBAIS DE ADMIN (Declaradas no Topo para Acessibilidade) ---
+        
+        async function carregarUnidadesVisuais() {
+            const container = document.getElementById('units-cards-container');
+            container.innerHTML = 'Carregando...';
+            try {
+                const unitsDoc = await db.collection('config_geral').doc('unidades').get();
+                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+                const unidades = unitsDoc.data().lista || [];
+                const rotas = rotasDoc.data() || {};
 
+                container.innerHTML = '';
+                unidades.forEach(u => {
+                    const listsInUnit = Object.values(rotas).filter(r => r.unidade === u).map(r => r.nome);
+                    const card = document.createElement('div');
+                    card.className = 'sector-card status-unit';
+                    card.innerHTML = `<h3>${u}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInUnit.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+                    card.onclick = () => abrirGestaoUnidade(u, rotas);
+                    container.appendChild(card);
+                });
+                
+                const sel = document.getElementById('glob-hist-local');
+                const locais = [...new Set(Object.values(rotas).map(r=>r.nome))].sort();
+                locais.forEach(l => { const o=document.createElement('option'); o.value=l; o.text=l; sel.appendChild(o); });
+
+            } catch(e){ container.innerHTML='Erro'; }
+        }
+
+        async function carregarPostosVisuais() {
+            const container = document.getElementById('postos-cards-container');
+            if(!container) return;
+            container.innerHTML = 'Carregando...';
+            try {
+                const postosDoc = await db.collection('config_geral').doc('postos').get();
+                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+                const postos = postosDoc.exists ? (postosDoc.data().lista || []) : [];
+                const rotas = rotasDoc.data() || {};
+
+                container.innerHTML = '';
+                postos.sort().forEach(p => {
+                    const listsInPosto = Object.values(rotas).filter(r => r.posto === p).map(r => r.nome);
+                    const card = document.createElement('div');
+                    card.className = 'sector-card status-posto';
+                    card.innerHTML = `<h3>${p}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInPosto.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+                    card.onclick = () => abrirGestaoPosto(p, rotas);
+                    container.appendChild(card);
+                });
+            } catch(e){ container.innerHTML='Erro'; }
+        }
+
+        async function carregarUnidadesSelect() {
+            const sel = document.getElementById('new-user-unit');
+            const selLista = document.getElementById('novo-local-unidade');
+            try {
+                const doc = await db.collection('config_geral').doc('unidades').get();
+                const unidades = doc.exists ? doc.data().lista : [];
+                let html = '<option value="">Selecione...</option>';
+                unidades.forEach(u => html += `<option value="${u}">${u}</option>`);
+                if(sel) sel.innerHTML = html;
+                if(selLista) selLista.innerHTML = html;
+            } catch(e) {}
+        }
+        
+        async function carregarPostosEditor() {
+             const sel = document.getElementById('novo-local-posto'); if(!sel) return;
+             try {
+                const doc = await db.collection('config_geral').doc('postos').get();
+                const lista = doc.exists ? doc.data().lista : [];
+                let h = ''; lista.forEach(p => h+=`<option value="${p}">${p}</option>`); sel.innerHTML = h;
+             } catch(e){}
+        }
+
+        // --- 7. EDITOR DE LISTAS E COMPONENTES ---
         function abrirEditor(id, nome) { 
             currentEditingId = id; 
             document.getElementById('editor-title').textContent = `Editando: ${nome}`; 
             switchView('editor'); 
             carregarDadosGerenciador(); 
         }
-        function voltarParaLocais() { currentEditingId = null; switchView('listas'); }
-        
         async function carregarDadosGerenciador(){ 
             if(!currentEditingId) return; 
             try{ 
@@ -555,23 +624,291 @@
                 document.getElementById('main-admin-content').style.display = 'block';
             }catch(e){console.error(e); alert("Erro ao carregar lista.");} 
         }
-        async function salvarDados(a=true){ if(!currentEditingId) return; try{ await db.collection(COLECAO_LISTAS).doc(currentEditingId).update({ list:dadosConferencia, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }); if(a)alert("Salvo!"); }catch(e){alert("Erro ao salvar");} }
-        function gerarNovoId(){ return Date.now().toString().slice(-6)+Math.floor(Math.random()*100).toString().padStart(2,'0'); }
-        function adicionarSetor(n){ n=n.trim().toUpperCase(); if(!n)return; dadosConferencia.push({id:gerarNovoId(), nome:n, itens:[]}); document.getElementById('input-setor-nome').value=''; salvarDados(false); renderizarLista(); }
-        function removerSetor(id){ if(confirm("Remover setor?")) { dadosConferencia=dadosConferencia.filter(x=>x.id!==id); salvarDados(false); renderizarLista(); } }
-        function adicionarItemPorSetor(sid){ const n=document.getElementById('input-item-nome-'+sid).value.trim().toUpperCase(); const q=parseInt(document.getElementById('input-item-qtd-'+sid).value); const t=document.getElementById('select-item-tipo-'+sid).value; if(!n||q<1)return; const s=dadosConferencia.find(x=>x.id===sid); const novo={id:sid+'-'+gerarNovoId(), nome:n, quantidadeEsperada:q, tipo:t, tombamentos:[]}; if(t==='multi')for(let i=0;i<q;i++)novo.tombamentos.push({tomb:'NOVO-'+(i+1),status:'pending',obs:''}); s.itens.push(novo); salvarDados(false); renderizarLista(); document.getElementById('input-item-nome-'+sid).value=''; }
-        function removerItem(sid,iid){ if(confirm("Remover item?")){ const s=dadosConferencia.find(x=>x.id===sid); s.itens=s.itens.filter(i=>i.id!==iid); salvarDados(false); renderizarLista(); } }
-        function encontrarItemPorId(id) { for (const setor of dadosConferencia) { const item = setor.itens.find(i => i.id === id); if (item) return item; } return null; }
-        function adicionarTombamento(itemId, inputElement) { const tombamento = inputElement.value.trim().toUpperCase(); if (!tombamento) return; const item = encontrarItemPorId(itemId); if (item) { if (item.tombamentos.some(t => t.tomb === tombamento)) return alert("Duplicado!"); item.tombamentos.push({ tomb: tombamento, status: "pending", obs: "" }); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
-        function removerTombamento(itemId, tombamento) { if (!confirm("Remover tombamento?")) return; const item = encontrarItemPorId(itemId); if (item) { item.tombamentos = item.tombamentos.filter(t => t.tomb !== tombamento); item.quantidadeEsperada = item.tombamentos.length; salvarDados(false); renderizarLista(); } }
-        function editarTombamento(itemId, tombamentoAtual, inputElement) { const novoTombamento = inputElement.value.trim().toUpperCase(); if (!novoTombamento || novoTombamento === tombamentoAtual) return; const item = encontrarItemPorId(itemId); if (item) { const tomb = item.tombamentos.find(t => t.tomb === tombamentoAtual); if (tomb) { tomb.tomb = novoTombamento; salvarDados(false); } } }
-        function updateOrdens() { const novosDados = []; document.querySelectorAll('.setor-item').forEach(sNode => { const sId = sNode.getAttribute('data-id'); const sOriginal = dadosConferencia.find(x => x.id === sId); const novosItens = []; sNode.querySelectorAll('.item-conferencia-admin').forEach(iNode => { const iId = iNode.querySelector('.btn-edit-alt').getAttribute('onclick').split("'")[3]; const itemObj = encontrarItemPorId(iId); if(itemObj) novosItens.push(itemObj); }); sOriginal.itens = novosItens; novosDados.push(sOriginal); }); dadosConferencia = novosDados; }
-        function abrirModalEdicao(sid, iid){ const s=dadosConferencia.find(x=>x.id===sid); const i=s.itens.find(x=>x.id===iid); document.getElementById('edit-setor-id').value=sid; document.getElementById('edit-item-original-id').value=iid; document.getElementById('edit-item-nome').value=i.nome; document.getElementById('edit-item-qtd').value=i.quantidadeEsperada; document.getElementById('edit-item-qtd').disabled=(i.tipo==='multi'); document.getElementById('edit-item-tipo').value=i.tipo; const sl=document.getElementById('edit-item-setor'); sl.innerHTML=''; dadosConferencia.forEach(d=>{const o=document.createElement('option'); o.value=d.id; o.text=d.nome; if(d.id===sid)o.selected=true; sl.appendChild(o);}); document.getElementById('modal-edicao').style.display='flex'; }
-        function salvarEdicaoItem(){ const osid=document.getElementById('edit-setor-id').value; const iid=document.getElementById('edit-item-original-id').value; const n=document.getElementById('edit-item-nome').value.trim().toUpperCase(); const nsid=document.getElementById('edit-item-setor').value; const q=parseInt(document.getElementById('edit-item-qtd').value); const os=dadosConferencia.find(x=>x.id===osid); const ns=dadosConferencia.find(x=>x.id===nsid); const i=os.itens.find(x=>x.id===iid); i.nome=n; if(i.tipo==='single')i.quantidadeEsperada=q; if(osid!==nsid){ os.itens=os.itens.filter(x=>x.id!==iid); i.id=nsid+'-'+gerarNovoId(); ns.itens.push(i); } salvarDados(false); renderizarLista(); fecharModal(); }
-        function fecharModal(){document.getElementById('modal-edicao').style.display='none';}
-        function fazerBackupLocal(){ const b=new Blob([JSON.stringify(dadosConferencia,null,2)],{type:"application/json"}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download='backup.json'; a.click(); }
-        function importarBackupLocal(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=function(ev){if(confirm("Substituir?")){try{dadosConferencia=JSON.parse(ev.target.result);salvarDados();renderizarLista();}catch(err){alert("Erro JSON");}}}; r.readAsText(f); }
+        async function carregarListaLocaisAdmin() {
+            const ul = document.getElementById('lista-locais-container');
+            const doc = await db.collection('config_geral').doc('rotas').get();
+            const rotas = doc.data(); ul.innerHTML = '';
+            Object.entries(rotas).forEach(([id, info]) => {
+                if(info.ativo === false) return;
+                const li = document.createElement('li'); li.className = 'local-item';
+                const safeName = info.nome.replace(/'/g, "\\'");
+                const safeId = id.replace(/'/g, "\\'");
+                li.innerHTML = `<div class="local-info"><strong>${info.nome}</strong><span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span></div><button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">Editar</button>`;
+                ul.appendChild(li);
+            });
+        }
+        function renderizarLista() { 
+            const container = document.getElementById('lista-setores-container'); container.innerHTML = '';
+            dadosConferencia.forEach(setor => {
+                const setorLi = document.createElement('li'); setorLi.className = 'setor-item'; setorLi.setAttribute('data-id', setor.id);
+                const addItemFormHtml = `<div class="add-item-form-setor"><input type="text" id="input-item-nome-${setor.id}" placeholder="Item"><input type="number" id="input-item-qtd-${setor.id}" value="1" style="width:50px"><select id="select-item-tipo-${setor.id}"><option value="single">Único</option><option value="multi">Tombamento</option></select><button class="btn-add" onclick="adicionarItemPorSetor('${setor.id}')">+</button></div>`;
+                let itensHtml = '';
+                setor.itens.forEach(item => {
+                    let tombamentosHtml = '';
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        const tombamentosList = item.tombamentos.map(tomb => `<li><div style="display:flex; align-items:center; width:100%;"><span style="margin-right:10px; font-size:0.85em; font-weight:bold; color:#555;">TB:</span><input type="text" value="${tomb.tomb}" onblur="editarTombamento('${item.id}', '${tomb.tomb}', this)" style="padding:4px; font-size:0.85em; border:1px solid #ddd; border-radius:4px;"></div><button class="btn-remover" onclick="removerTombamento('${item.id}', '${tomb.tomb}')" style="padding:2px 8px; margin-left:10px;"><i class="fas fa-trash" style="font-size:0.8em;"></i></button></li>`).join('');
+                        tombamentosHtml = `<div class="tombamento-container-wrapper"><div class="tombamento-section"><h4>Tombamentos (${item.tombamentos.length})</h4><ul class="tombamento-list">${tombamentosList}</ul><div class="add-tombamento-form"><input type="text" id="tomb-input-${item.id}" placeholder="Novo Tombamento"><button class="btn-add" onclick="adicionarTombamento('${item.id}', document.getElementById('tomb-input-${item.id}'))"><i class="fas fa-plus"></i></button></div></div></div>`;
+                    }
+                    itensHtml += `<li class="item-conferencia-admin"><div style="width:100%"><div style="display:flex;justify-content:space-between;"><div><strong>${item.nome}</strong><small> Qtd: ${item.quantidadeEsperada}</small></div><div class="item-actions-admin"><button class="btn-edit-alt" onclick="abrirModalEdicao('${setor.id}','${item.id}')"><i class="fas fa-edit"></i></button><button class="btn-remover" onclick="removerItem('${setor.id}','${item.id}')"><i class="fas fa-trash"></i></button></div></div>${item.tipo === 'multi' ? tombamentosHtml : ''}</div></li>`;
+                });
+                setorLi.innerHTML = `<div class="setor-header-admin" onclick="this.nextElementSibling.classList.toggle('collapsed')"><span>${setor.nome}</span><button class="btn-remover" onclick="event.stopPropagation();removerSetor('${setor.id}')">X</button></div><div class="setor-content-admin">${addItemFormHtml}<ul class="lista-setores item-list-admin" data-setor-id="${setor.id}">${itensHtml}</ul></div>`;
+                container.appendChild(setorLi);
+            });
+            new Sortable(container, { animation: 150, handle: '.setor-header-admin', onEnd: () => salvarDados(false) });
+            document.querySelectorAll('.item-list-admin').forEach(el => { new Sortable(el, { group: 'items', animation: 150, onEnd: () => { updateOrdens(); salvarDados(false); } }); });
+        }
+        async function carregarPostosVisuais() {
+            const container = document.getElementById('postos-cards-container');
+            if(!container) return;
+            container.innerHTML = 'Carregando...';
+            try {
+                const postosDoc = await db.collection('config_geral').doc('postos').get();
+                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+                const postos = postosDoc.exists ? (postosDoc.data().lista || []) : [];
+                const rotas = rotasDoc.data() || {};
 
+                container.innerHTML = '';
+                postos.sort().forEach(p => {
+                    const listsInPosto = Object.values(rotas).filter(r => r.posto === p).map(r => r.nome);
+                    const card = document.createElement('div');
+                    card.className = 'sector-card status-posto';
+                    card.innerHTML = `<h3>${p}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInPosto.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+                    card.onclick = () => abrirGestaoPosto(p, rotas);
+                    container.appendChild(card);
+                });
+            } catch(e){ container.innerHTML='Erro'; }
+        }
+        
+        // --- 7. FUNÇÕES DE SUPORTE (Global) ---
+
+        function abrirGestaoPosto(postoName, allRotas) {
+            document.getElementById('edit-posto-original-name').value = postoName;
+            document.getElementById('edit-posto-name-input').value = postoName;
+            
+            const checklist = document.getElementById('posto-lists-checklist');
+            checklist.innerHTML = '';
+            
+            Object.entries(allRotas).forEach(([id, r]) => {
+                if(r.ativo === false) return;
+                const div = document.createElement('div');
+                div.className = 'checklist-item';
+                const isChecked = (r.posto === postoName) ? 'checked' : '';
+                div.innerHTML = `<input type="checkbox" id="chk-p-${id}" ${isChecked} value="${id}"> <label for="chk-p-${id}" style="margin:0;font-weight:normal;">${r.nome}</label>`;
+                checklist.appendChild(div);
+            });
+
+            document.getElementById('modal-posto-manager').style.display = 'flex';
+        }
+        
+        function sairDoSistema() { auth.signOut().then(() => { sessionStorage.clear(); window.location.href = 'index.html'; }); }
+        
+        function switchView(v) {
+            document.getElementById('mobile-overlay').style.display = 'none';
+            document.getElementById('main-sidebar').classList.remove('mobile-active');
+            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active-view'));
+            document.querySelectorAll('.sidebar a').forEach(el => el.classList.remove('active'));
+            document.getElementById('view-' + v).classList.add('active-view');
+            const link = document.getElementById('link-' + v);
+            if(link) link.classList.add('active');
+            
+            // Fecha o runner se estiver aberto
+            document.getElementById('app-runner-container').style.display = 'none';
+
+            if(v === 'usuarios') listarUsuarios();
+            if(v === 'listas') carregarListaLocaisAdmin();
+            if(v === 'unidades') carregarUnidadesVisuais();
+            if(v === 'postos') carregarPostosVisuais(); // CARREGA POSTOS
+            if(v === 'my-history') { 
+                document.getElementById('my-hist-start').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
+                document.getElementById('my-hist-end').valueAsDate = new Date();
+                loadMyHistory(); 
+            }
+            if(v === 'global-history') {
+                document.getElementById('glob-hist-start').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
+                document.getElementById('glob-hist-end').valueAsDate = new Date();
+                loadGlobalHistory();
+            }
+        }
+        function toggleMenuMobile() { const s = document.getElementById('main-sidebar'); if(s.classList.contains('mobile-active')) { s.classList.remove('mobile-active'); document.getElementById('mobile-overlay').style.display='none'; } else { s.classList.add('mobile-active'); document.getElementById('mobile-overlay').style.display='block'; } }
+        function closeMenuMobile() { toggleMenuMobile(); }
+        
+        // --- ADMIN HELPERS (CRUD, MOVIDOS PARA O TOPO) ---
+        
+        async function criarUnidade() {
+            const nome = document.getElementById('new-unit-name').value.trim().toUpperCase();
+            if(!nome) return alert("Digite o nome.");
+            try {
+                await db.collection('config_geral').doc('unidades').update({ lista: firebase.firestore.FieldValue.arrayUnion(nome) });
+                alert("Unidade criada!"); carregarUnidadesVisuais();
+            } catch(e) { alert("Erro: " + e.message); }
+        }
+
+        async function salvarAlteracoesUnidade() {
+            const oldName = document.getElementById('edit-unit-original-name').value;
+            const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
+            if(!newName) return alert("Nome inválido");
+            try {
+                const unitsRef = db.collection('config_geral').doc('unidades');
+                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayRemove(oldName) });
+                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayUnion(newName) });
+                const rotasRef = db.collection('config_geral').doc('rotas');
+                const rotasSnap = await rotasRef.get();
+                const rotasData = rotasSnap.data();
+                const checkboxes = document.querySelectorAll('#unit-lists-checklist input[type="checkbox"]');
+                checkboxes.forEach(chk => {
+                    const id = chk.value;
+                    if (chk.checked) {
+                        rotasData[id].unidade = newName; 
+                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: newName });
+                    } else if (rotasData[id].unidade === oldName) {
+                        rotasData[id].unidade = null; 
+                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: null });
+                    }
+                });
+                await rotasRef.set(rotasData);
+                alert("Atualizado!"); document.getElementById('modal-unit-manager').style.display = 'none'; carregarUnidadesVisuais();
+            } catch(e) { alert("Erro: " + e.message); }
+        }
+
+        async function excluirUnidade() {
+            const name = document.getElementById('edit-unit-original-name').value;
+            if(!confirm(`Excluir a unidade ${name}? As listas perderão o vínculo.`)) return;
+            try {
+                await db.collection('config_geral').doc('unidades').update({ lista: firebase.firestore.FieldValue.arrayRemove(name) });
+                const rotasRef = db.collection('config_geral').doc('rotas');
+                const s = await rotasRef.get(); const d = s.data();
+                Object.keys(d).forEach(k => { if(d[k].unidade === name) d[k].unidade = null; });
+                await rotasRef.set(d);
+                alert("Excluído."); document.getElementById('modal-unit-manager').style.display = 'none'; carregarUnidadesVisuais();
+            } catch(e){ alert("Erro"); }
+        }
+        
+        async function carregarPostosVisuais() {
+            const container = document.getElementById('postos-cards-container');
+            if(!container) return;
+            container.innerHTML = 'Carregando...';
+            try {
+                const postosDoc = await db.collection('config_geral').doc('postos').get();
+                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+                const postos = postosDoc.exists ? (postosDoc.data().lista || []) : [];
+                const rotas = rotasDoc.data() || {};
+
+                container.innerHTML = '';
+                postos.sort().forEach(p => {
+                    const listsInPosto = Object.values(rotas).filter(r => r.posto === p).map(r => r.nome);
+                    const card = document.createElement('div');
+                    card.className = 'sector-card status-posto';
+                    card.innerHTML = `<h3>${p}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInPosto.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+                    card.onclick = () => abrirGestaoPosto(p, rotas);
+                    container.appendChild(card);
+                });
+            } catch(e){ container.innerHTML='Erro'; }
+        }
+
+        function criarPosto() {
+            const nome = document.getElementById('new-posto-name').value.trim().toUpperCase();
+            if(!nome) return alert("Digite o nome.");
+            db.collection('config_geral').doc('postos').update({ lista: firebase.firestore.FieldValue.arrayUnion(nome) })
+            .then(() => { alert("Posto criado!"); carregarPostosVisuais(); })
+            .catch(e => alert("Erro: " + e.message));
+        }
+
+        function abrirGestaoPosto(postoName, allRotas) {
+            document.getElementById('edit-posto-original-name').value = postoName;
+            document.getElementById('edit-posto-name-input').value = postoName;
+            
+            const checklist = document.getElementById('posto-lists-checklist');
+            checklist.innerHTML = '';
+            
+            Object.entries(allRotas).forEach(([id, r]) => {
+                if(r.ativo === false) return;
+                const div = document.createElement('div');
+                div.className = 'checklist-item';
+                const isChecked = (r.posto === postoName) ? 'checked' : '';
+                div.innerHTML = `<input type="checkbox" id="chk-p-${id}" ${isChecked} value="${id}"> <label for="chk-p-${id}" style="margin:0;font-weight:normal;">${r.nome}</label>`;
+                checklist.appendChild(div);
+            });
+
+            document.getElementById('modal-posto-manager').style.display = 'flex';
+        }
+
+        async function salvarAlteracoesPosto() {
+            const oldName = document.getElementById('edit-posto-original-name').value;
+            const newName = document.getElementById('edit-posto-name-input').value.trim().toUpperCase();
+            if(!newName) return alert("Nome inválido");
+
+            try {
+                // 1. Atualizar lista de postos
+                const postosRef = db.collection('config_geral').doc('postos');
+                await postosRef.update({ lista: firebase.firestore.FieldValue.arrayRemove(oldName) });
+                await postosRef.update({ lista: firebase.firestore.FieldValue.arrayUnion(newName) });
+
+                // 2. Atualizar vínculos das rotas
+                const rotasRef = db.collection('config_geral').doc('rotas');
+                const rotasSnap = await rotasRef.get();
+                const rotasData = rotasSnap.data();
+                const checkboxes = document.querySelectorAll('#posto-lists-checklist input[type="checkbox"]');
+                
+                checkboxes.forEach(chk => {
+                    const id = chk.value;
+                    if (chk.checked) {
+                        rotasData[id].posto = newName; 
+                        db.collection(COLECAO_LISTAS).doc(id).update({ posto: newName });
+                    }
+                });
+
+                await rotasRef.set(rotasData);
+                alert("Atualizado!");
+                document.getElementById('modal-posto-manager').style.display = 'none';
+                carregarPostosVisuais();
+            } catch(e) { alert("Erro: " + e.message); }
+        }
+
+        async function excluirPosto() {
+            const name = document.getElementById('edit-posto-original-name').value;
+            if(!confirm(`Excluir o posto ${name}?`)) return;
+            try {
+                await db.collection('config_geral').doc('postos').update({ lista: firebase.firestore.FieldValue.arrayRemove(name) });
+                alert("Excluído."); document.getElementById('modal-posto-manager').style.display = 'none'; carregarPostosVisuais();
+            } catch(e){ alert("Erro"); }
+        }
+        
+        async function carregarPostosEditor() {
+             const sel = document.getElementById('novo-local-posto'); if(!sel) return;
+             try {
+                const doc = await db.collection('config_geral').doc('postos').get();
+                const lista = doc.exists ? doc.data().lista : [];
+                let h = ''; lista.forEach(p => h+=`<option value="${p}">${p}</option>`); sel.innerHTML = h;
+             } catch(e){}
+        }
+
+        async function criarNovoLocal() {
+            const posto = document.getElementById('novo-local-posto').value;
+            const nome = document.getElementById('novo-local-nome').value.trim().toUpperCase();
+            const unidade = document.getElementById('novo-local-unidade').value;
+            if(!posto || !nome || !unidade) return alert("Preencha Posto, Nome e Unidade.");
+            const id = `${posto.toLowerCase()}_${nome.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+            try {
+                await db.collection(COLECAO_LISTAS).doc(id).set({ nome_local: nome, posto: posto, list: [], unidade: unidade, updatedAt: firebase.firestore.Timestamp.now() });
+                await db.collection('config_geral').doc('rotas').set({ [id]: { nome: nome, posto: posto, unidade: unidade, ativo: true } }, { merge: true });
+                alert("Lista Criada!"); carregarListaLocaisAdmin();
+            } catch(e) { alert("Erro: " + e.message); }
+        }
+
+        async function carregarListaLocaisAdmin() {
+            const ul = document.getElementById('lista-locais-container');
+            const doc = await db.collection('config_geral').doc('rotas').get();
+            const rotas = doc.data(); ul.innerHTML = '';
+            Object.entries(rotas).forEach(([id, info]) => {
+                if(info.ativo === false) return;
+                const li = document.createElement('li'); li.className = 'local-item';
+                const safeName = info.nome.replace(/'/g, "\\'");
+                const safeId = id.replace(/'/g, "\\'");
+                li.innerHTML = `<div class="local-info"><strong>${info.nome}</strong><span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span></div><button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">Editar</button>`;
+                ul.appendChild(li);
+            });
+        }
+        
         function renderizarLista() { 
             const container = document.getElementById('lista-setores-container'); container.innerHTML = '';
             dadosConferencia.forEach(setor => {
