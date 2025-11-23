@@ -538,7 +538,41 @@
             </div>
         </div>
     </div>
+    <div id="modal-user-manager" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="document.getElementById('modal-user-manager').style.display='none'"><i class="fas fa-times"></i></button>
+            <h2>Gerenciar Militar</h2>
+            
+            <input type="hidden" id="edit-user-doc-id">
+            
+            <label>Nome de Guerra</label>
+            <input type="text" id="edit-user-guerra">
 
+            <label>Posto/Graduação</label>
+            <input type="text" id="edit-user-posto">
+
+            <label>Nome Completo</label>
+            <input type="text" id="edit-user-completo">
+
+            <label>E-mail (Login) - *Somente Leitura*</label>
+            <input type="email" id="edit-user-email" disabled style="background-color: #eee;">
+
+            <label>Perfil de Acesso</label>
+            <select id="edit-user-role">
+                <option value="operacional">Operacional</option>
+                <option value="gestor">Gestor de Unidade</option>
+                <option value="admin">Administrador Geral</option>
+            </select>
+
+            <label>Unidade Associada</label>
+            <select id="edit-user-unit"><option value="">Carregando...</option></select>
+
+            <div class="modal-buttons" style="justify-content: space-between;">
+                <button class="btn-modern-action btn-delete" onclick="excluirUsuario()">Excluir Militar</button>
+                <button class="btn-modern-action btn-sync" onclick="salvarAlteracoesUsuario()">Salvar Alterações</button>
+            </div>
+        </div>
+    </div>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script><script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script><script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script>
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
@@ -1399,16 +1433,30 @@ function adicionarItemPorSetor(sid) {
         function importarBackupLocal(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=function(ev){if(confirm("Substituir?")){try{dadosConferencia=JSON.parse(ev.target.result);salvarDados();renderizarLista();}catch(err){alert("Erro JSON");}}}; r.readAsText(f); }
         
         // Admin Helpers
-        async function carregarUnidadesSelect() {
-            const sel = document.getElementById('new-user-unit');
+        async function carregarUnidadesSelect(selectId = 'new-user-unit') {
+            const selCadastro = document.getElementById('new-user-unit');
+            const selEdicao = document.getElementById('edit-user-unit'); // NOVO: Elemento no modal de edição
             const selLista = document.getElementById('novo-local-unidade');
+            
+            // Define o elemento que será preenchido
+            const targetSel = document.getElementById(selectId);
+            
+            // ... (restante da função)
             try {
                 const doc = await db.collection('config_geral').doc('unidades').get();
                 const unidades = doc.exists ? doc.data().lista : [];
                 let html = '<option value="">Selecione...</option>';
                 unidades.forEach(u => html += `<option value="${u}">${u}</option>`);
-                if(sel) sel.innerHTML = html;
-                if(selLista) selLista.innerHTML = html;
+                
+                // Atualiza o select correto
+                if(targetSel) targetSel.innerHTML = html;
+                
+                // Garante que os outros selects sejam atualizados se a chamada não for do modal de edição
+                if(selectId === 'new-user-unit' || selectId === 'novo-local-unidade') {
+                    if(selCadastro) selCadastro.innerHTML = html;
+                    if(selLista) selLista.innerHTML = html;
+                }
+                
             } catch(e) {}
         }
         
@@ -1434,11 +1482,77 @@ function adicionarItemPorSetor(sid) {
                 tbody.innerHTML = '';
                 snap.forEach(doc => {
                     const u = doc.data();
+                    const docId = doc.id; // <--- CAPTURA O ID DO DOCUMENTO
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${u.posto} ${u.nome_guerra}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;">Editar</button></td>`;
+                    tr.innerHTML = `<td>${u.posto} ${u.nome_guerra}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')">Editar</button></td>`;
                     tbody.appendChild(tr);
                 });
             } catch(e) {}
+        }
+        async function abrirGestaoUsuario(docId) {
+            try {
+                const doc = await db.collection('usuarios').doc(docId).get();
+                if (!doc.exists) return alert("Usuário não encontrado.");
+                
+                const u = doc.data();
+                
+                // Preenche o campo de unidades (garante que está atualizado)
+                await carregarUnidadesSelect('edit-user-unit');
+
+                document.getElementById('edit-user-doc-id').value = docId;
+                document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
+                document.getElementById('edit-user-posto').value = u.posto || '';
+                document.getElementById('edit-user-completo').value = u.nome_militar_completo || '';
+                document.getElementById('edit-user-email').value = u.email || 'N/D';
+                document.getElementById('edit-user-role').value = u.role || 'operacional';
+                document.getElementById('edit-user-unit').value = u.unidade || '';
+
+                document.getElementById('modal-user-manager').style.display = 'flex';
+            } catch(e) {
+                console.error(e);
+                alert("Erro ao abrir edição: " + e.message);
+            }
+        }
+        async function salvarAlteracoesUsuario() {
+            const docId = document.getElementById('edit-user-doc-id').value;
+            const guerra = document.getElementById('edit-user-guerra').value.trim();
+            const posto = document.getElementById('edit-user-posto').value.trim();
+            const completo = document.getElementById('edit-user-completo').value.trim();
+            const role = document.getElementById('edit-user-role').value;
+            const unit = document.getElementById('edit-user-unit').value;
+            
+            if (!guerra || !posto || !unit) return alert("Nome de Guerra, Posto e Unidade são obrigatórios.");
+
+            try {
+                await db.collection('usuarios').doc(docId).update({
+                    nome_guerra: guerra,
+                    posto: posto,
+                    nome_militar_completo: completo,
+                    role: role,
+                    unidade: unit
+                });
+                
+                alert("Dados do militar atualizados com sucesso!");
+                document.getElementById('modal-user-manager').style.display = 'none';
+                listarUsuarios();
+            } catch(e) {
+                alert("Erro ao salvar alterações: " + e.message);
+            }
+        }
+        async function excluirUsuario() {
+            const docId = document.getElementById('edit-user-doc-id').value;
+            const guerra = document.getElementById('edit-user-guerra').value;
+
+            if(!confirm(`Tem certeza que deseja EXCLUIR o militar ${guerra}? O login associado (Auth) DEVE ser removido manualmente.`)) return;
+            
+            try {
+                await db.collection('usuarios').doc(docId).delete();
+                alert(`Militar ${guerra} excluído com sucesso do Firestore!`);
+                document.getElementById('modal-user-manager').style.display = 'none';
+                listarUsuarios();
+            } catch(e) {
+                alert("Erro ao excluir: " + e.message);
+            }
         }
 
         async function carregarPostosEditor() {
