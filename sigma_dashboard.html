@@ -566,6 +566,18 @@
 
             <label>Unidade Associada</label>
             <select id="edit-user-unit"><option value="">Carregando...</option></select>
+            <div id="user-permissions-fields" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #ddd; display: none;">
+            <label class="section-label" style="font-weight: bold;">Permissões de Gestor</label>
+            <p style="font-size: 0.8em; margin: 5px 0 10px; color: #666;">Essas permissões só são aplicáveis a usuários com a Role 'gestor'.</p>
+
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+            <label><input type="checkbox" id="perm-view-cards"> Visualizar Cards de Pendência C/A</label>
+            <label><input type="checkbox" id="perm-view-history"> Acesso ao Histórico da Unidade</label>
+            <label><input type="checkbox" id="perm-manage-posts"> Gerenciar Vínculos de Postos</label>
+            <label><input type="checkbox" id="perm-manage-users"> Gerenciar Usuários da Unidade</label>
+            <label><input type="checkbox" id="perm-manage-lists"> Gerenciar Listas da Unidade</label>
+        </div>
+    </div>
 
             <div class="modal-buttons" style="justify-content: space-between;">
                 <button class="btn-modern-action btn-delete" onclick="excluirUsuario()">Excluir Militar</button>
@@ -605,47 +617,82 @@
         });
 
        function setupUIBasedOnRole() {
-        const role = currentUserData.role || 'operacional';
-        const unit = currentUserData.unidade || 'N/D';
+    const role = currentUserData.role || 'operacional';
+    const unit = currentUserData.unidade || 'N/D';
 
-            document.getElementById('user-role-display').textContent = `${role.toUpperCase()} - ${unit}`;
-            atualizarSaudacao(currentUserData);
+    document.getElementById('user-role-display').textContent = `${role.toUpperCase()} - ${unit}`;
+    atualizarSaudacao(currentUserData);
     
-            // --- 1. Restrições para Gestores e Operacionais (Ocultar menus ADMIN) ---
-        if (role !== 'admin') {
-        // Oculta os links de ADMIN para gestores e operacionais
+    // --- 1. Definindo as Permissões Reais de Acesso ---
+    const p = currentUserData.permissoes || {}; // Objeto de Permissões
+    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
+    
+    // Permissões Admin (FULL ACESS)
+    const canViewAdminTools = role === 'admin'; 
+
+    // Permissões de Visualização (Gestor e Admin)
+    // Se for Admin, TRUE. Se for Gestor, checa o Firebase. Se for Operacional, é FALSE por padrão.
+    const canViewDashboardCards = role === 'admin' || (isGestorOuAdmin && p.canViewDashboardCards);
+    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
+    
+    // Permissões de Gerenciamento (Gestor e Admin)
+    const canManagePosts = role === 'admin' || (isGestorOuAdmin && p.canManagePosts);
+    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
+    const canManageUnitLists = role === 'admin' || (isGestorOuAdmin && p.canManageUnitLists);
+
+    // --- 2. Aplicação das Restrições na UI (Usando as Permissões) ---
+
+    // Oculta links do Menu de Administração para Gestores/Operacionais
+    if (!canViewAdminTools) {
+        // Isso oculta o RÓTULO "Administração" e links de Unidades/Postos/Usuários/Listas
         document.querySelectorAll('.restricted-admin-only').forEach(el => el.style.display = 'none');
     }
+    
+    // --- 2.1 Ajuste Fino dos Links de Gestão (para Gestores) ---
+    // Mesmo que o bloco '.restricted-admin-only' tenha sido ocultado acima para não-Admin,
+    // garantimos que o link permaneça oculto, mesmo que o Admin decida ativá-lo para Gestor
+    // (Apenas para garantir que links não apareçam se a permissão individual for FALSE).
+    
+    if (!canManagePosts) { document.getElementById('link-postos').style.display = 'none'; }
+    if (!canManageUnitUsers) { document.getElementById('link-usuarios').style.display = 'none'; }
+    if (!canManageUnitLists) { document.getElementById('link-listas').style.display = 'none'; }
+    
+    // --- 2.2 Controle de Visualização no Dashboard ---
 
-    // --- 2. Restrições Adicionais Apenas para Operacional ---
-    if (role === 'operacional') {
-        
-        // Oculta o link de Histórico Global (Operacional usa "Minhas Conferências")
+    // Oculta Histórico Global (link-global-history)
+    if (!canViewUnitHistory) {
         const globalHistoryLink = document.getElementById('link-global-history');
         if(globalHistoryLink) globalHistoryLink.style.display = 'none';
-
-        // Oculta a seção de Pendências da Unidade (Cards/Tabela C/A) no Dashboard
-        const cardsContainer = document.getElementById('cards-container');
-        const loadingMessage = document.getElementById('loading-message-dashboard');
-        
-        // Seletor do título da seção de Pendências (h2 com o ícone de triângulo)
-        const caTitle = document.querySelector('#view-dashboard h2 i.fa-exclamation-triangle').parentNode; 
-
-        if (cardsContainer) cardsContainer.style.display = 'none';
-        if (loadingMessage) loadingMessage.style.display = 'none';
-        if (caTitle) caTitle.style.display = 'none';
-        
-        // Garante que o usuário Operacional inicie na visão de Dashboard (Início de Conf)
-        // Não é necessário um switchView explícito aqui, pois o link 'dashboard' é o padrão ativo (active) no HTML.
     }
 
-    // --- 3. Chamadas Universais de Dados (Todos precisam disso) ---
+    // Oculta a seção de Pendências C/A e não carrega os dados
+    if (!canViewDashboardCards) {
+        const cardsContainer = document.getElementById('cards-container');
+        const loadingMessage = document.getElementById('loading-message-dashboard');
+        const caTitleElement = document.querySelector('#view-dashboard h2 i.fa-exclamation-triangle');
+        
+        // Se o elemento pai (o h2) existe, ocultamos ele e os contêineres
+        if (caTitleElement) {
+            const caTitle = caTitleElement.parentNode;
+            if (caTitle) caTitle.style.display = 'none';
+            if (cardsContainer) cardsContainer.style.display = 'none';
+            if (loadingMessage) loadingMessage.style.display = 'none';
+        }
+    }
+    
+    // --- 3. Chamadas de Dados ---
+    
+    // Chamadas Universais (Todos precisam)
     carregarListasParaNovaConferencia();
-    carregarConferenciasHoje(); // Minhas conferências de hoje
-    verificarConferenciaAtiva(); // Verifica se há conferência para continuar
-    loadCaaData(); // IMPORTANTE: loadCaaData fará a filtragem interna para Gestor/Admin
-
-    // --- 4. Chamadas Exclusivas de ADMIN ---
+    carregarConferenciasHoje(); 
+    verificarConferenciaAtiva(); 
+    
+    // Chamada Condicional (Apenas quem tem permissão vê o dado)
+    if (canViewDashboardCards) { 
+        loadCaaData(); // Função que carrega e filtra as pendências
+    }
+    
+    // Chamadas Exclusivas de ADMIN
     if (role === 'admin') {
         carregarUnidadesSelect();
         carregarPostosEditor();
@@ -1512,55 +1559,90 @@ function adicionarItemPorSetor(sid) {
         }
         
         async function abrirGestaoUsuario(docId) {
-            try {
-                const doc = await db.collection('usuarios').doc(docId).get();
-                if (!doc.exists) return alert("Usuário não encontrado.");
-                
-                const u = doc.data();
-                
-                // Preenche o campo de unidades (garante que está atualizado)
-                await carregarUnidadesSelect('edit-user-unit');
+    try {
+        const doc = await db.collection('usuarios').doc(docId).get();
+        if (!doc.exists) return alert("Usuário não encontrado.");
+        
+        const u = doc.data();
+        const permissoes = u.permissoes || {}; // Inicializa o objeto de permissões
+        
+        // Preenche o campo de unidades
+        await carregarUnidadesSelect('edit-user-unit');
 
-                document.getElementById('edit-user-doc-id').value = docId;
-                document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
-                document.getElementById('edit-user-posto').value = u.posto || '';
-                document.getElementById('edit-user-completo').value = u.nome_militar_completo || '';
-                document.getElementById('edit-user-email').value = u.email || 'N/D';
-                document.getElementById('edit-user-role').value = u.role || 'operacional';
-                document.getElementById('edit-user-unit').value = u.unidade || '';
+        document.getElementById('edit-user-doc-id').value = docId;
+        document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
+        document.getElementById('edit-user-posto').value = u.posto || '';
+        document.getElementById('edit-user-completo').value = u.nome_militar_completo || '';
+        document.getElementById('edit-user-email').value = u.email || 'N/D';
+        document.getElementById('edit-user-role').value = u.role || 'operacional';
+        document.getElementById('edit-user-unit').value = u.unidade || '';
 
-                document.getElementById('modal-user-manager').style.display = 'flex';
-            } catch(e) {
-                console.error(e);
-                alert("Erro ao abrir edição: " + e.message);
-            }
-        }
+        // --- NOVA LÓGICA DE PERMISSÕES ---
+        const roleSelect = document.getElementById('edit-user-role');
+        const permFields = document.getElementById('user-permissions-fields');
+        
+        // Mostra o bloco de permissões apenas se a role for 'gestor' ou 'admin'
+        permFields.style.display = (u.role === 'gestor' || u.role === 'admin') ? 'block' : 'none';
+
+        // Preenche os checkboxes com base nos dados do Firestore (se existir)
+        document.getElementById('perm-view-cards').checked = permissoes.canViewDashboardCards || false;
+        document.getElementById('perm-view-history').checked = permissoes.canViewUnitHistory || false;
+        document.getElementById('perm-manage-posts').checked = permissoes.canManagePosts || false;
+        document.getElementById('perm-manage-users').checked = permissoes.canManageUnitUsers || false;
+        document.getElementById('perm-manage-lists').checked = permissoes.canManageUnitLists || false;
+
+        // Listener para mostrar/ocultar as permissões ao mudar a Role
+        roleSelect.onchange = function() {
+            permFields.style.display = (this.value === 'gestor' || this.value === 'admin') ? 'block' : 'none';
+        };
+        // ---------------------------------
+
+        document.getElementById('modal-user-manager').style.display = 'flex';
+    } catch(e) {
+        console.error(e);
+        alert("Erro ao abrir edição: " + e.message);
+    }
+}
         async function salvarAlteracoesUsuario() {
-            const docId = document.getElementById('edit-user-doc-id').value;
-            const guerra = document.getElementById('edit-user-guerra').value.trim();
-            const posto = document.getElementById('edit-user-posto').value.trim();
-            const completo = document.getElementById('edit-user-completo').value.trim();
-            const role = document.getElementById('edit-user-role').value;
-            const unit = document.getElementById('edit-user-unit').value;
-            
-            if (!guerra || !posto || !unit) return alert("Nome de Guerra, Posto e Unidade são obrigatórios.");
+    const docId = document.getElementById('edit-user-doc-id').value;
+    const guerra = document.getElementById('edit-user-guerra').value.trim();
+    const posto = document.getElementById('edit-user-posto').value.trim();
+    const completo = document.getElementById('edit-user-completo').value.trim();
+    const role = document.getElementById('edit-user-role').value;
+    const unit = document.getElementById('edit-user-unit').value;
+    
+    if (!guerra || !posto || !unit) return alert("Nome de Guerra, Posto e Unidade são obrigatórios.");
 
-            try {
-                await db.collection('usuarios').doc(docId).update({
-                    nome_guerra: guerra,
-                    posto: posto,
-                    nome_militar_completo: completo,
-                    role: role,
-                    unidade: unit
-                });
-                
-                alert("Dados do militar atualizados com sucesso!");
-                document.getElementById('modal-user-manager').style.display = 'none';
-                listarUsuarios();
-            } catch(e) {
-                alert("Erro ao salvar alterações: " + e.message);
-            }
-        }
+    // --- NOVA LÓGICA DE SALVAMENTO DE PERMISSÕES ---
+    const novasPermissoes = {
+        canViewDashboardCards: document.getElementById('perm-view-cards').checked,
+        canViewUnitHistory: document.getElementById('perm-view-history').checked,
+        canManagePosts: document.getElementById('perm-manage-posts').checked,
+        canManageUnitUsers: document.getElementById('perm-manage-users').checked,
+        canManageUnitLists: document.getElementById('perm-manage-lists').checked,
+    };
+    
+    // O objeto de atualização
+    const updateData = {
+        nome_guerra: guerra,
+        posto: posto,
+        nome_militar_completo: completo,
+        role: role,
+        unidade: unit,
+        permissoes: novasPermissoes // SALVA O NOVO OBJETO
+    };
+    // ---------------------------------------------
+    
+    try {
+        await db.collection('usuarios').doc(docId).update(updateData);
+        
+        alert("Dados do militar atualizados com sucesso!");
+        document.getElementById('modal-user-manager').style.display = 'none';
+        listarUsuarios();
+    } catch(e) {
+        alert("Erro ao salvar alterações: " + e.message);
+    }
+}
         async function excluirUsuario() {
             const docId = document.getElementById('edit-user-doc-id').value;
             const guerra = document.getElementById('edit-user-guerra').value;
