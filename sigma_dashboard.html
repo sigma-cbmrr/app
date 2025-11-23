@@ -604,35 +604,55 @@
             } else { window.location.href = 'index.html'; }
         });
 
-        function setupUIBasedOnRole() {
-            const role = currentUserData.role || 'operacional';
-            const unit = currentUserData.unidade || 'N/D';
-            
+       function setupUIBasedOnRole() {
+        const role = currentUserData.role || 'operacional';
+        const unit = currentUserData.unidade || 'N/D';
+
             document.getElementById('user-role-display').textContent = `${role.toUpperCase()} - ${unit}`;
             atualizarSaudacao(currentUserData);
+    
+            // --- 1. Restrições para Gestores e Operacionais (Ocultar menus ADMIN) ---
+        if (role !== 'admin') {
+        // Oculta os links de ADMIN para gestores e operacionais
+        document.querySelectorAll('.restricted-admin-only').forEach(el => el.style.display = 'none');
+    }
 
-            if (role === 'operacional') {
-                alert("Acesso restrito a Gestores. Redirecionando.");
-                window.location.href = 'operacional.html';
-                return;
-            }
+    // --- 2. Restrições Adicionais Apenas para Operacional ---
+    if (role === 'operacional') {
+        
+        // Oculta o link de Histórico Global (Operacional usa "Minhas Conferências")
+        const globalHistoryLink = document.getElementById('link-global-history');
+        if(globalHistoryLink) globalHistoryLink.style.display = 'none';
 
-            if (role === 'gestor') {
-                document.querySelectorAll('.restricted-admin-only').forEach(el => el.style.display = 'none');
-            }
+        // Oculta a seção de Pendências da Unidade (Cards/Tabela C/A) no Dashboard
+        const cardsContainer = document.getElementById('cards-container');
+        const loadingMessage = document.getElementById('loading-message-dashboard');
+        
+        // Seletor do título da seção de Pendências (h2 com o ícone de triângulo)
+        const caTitle = document.querySelector('#view-dashboard h2 i.fa-exclamation-triangle').parentNode; 
 
-            carregarListasParaNovaConferencia();
-            carregarConferenciasHoje(); // Minhas conferências de hoje
-            verificarConferenciaAtiva(); // Verifica se há conferência para continuar
-            loadCaaData();
-            
-            if (role === 'admin') {
-                carregarUnidadesSelect();
-                carregarPostosEditor();
-                carregarUnidadesVisuais();
-                carregarPostosVisuais(); 
-            }
-        }
+        if (cardsContainer) cardsContainer.style.display = 'none';
+        if (loadingMessage) loadingMessage.style.display = 'none';
+        if (caTitle) caTitle.style.display = 'none';
+        
+        // Garante que o usuário Operacional inicie na visão de Dashboard (Início de Conf)
+        // Não é necessário um switchView explícito aqui, pois o link 'dashboard' é o padrão ativo (active) no HTML.
+    }
+
+    // --- 3. Chamadas Universais de Dados (Todos precisam disso) ---
+    carregarListasParaNovaConferencia();
+    carregarConferenciasHoje(); // Minhas conferências de hoje
+    verificarConferenciaAtiva(); // Verifica se há conferência para continuar
+    loadCaaData(); // IMPORTANTE: loadCaaData fará a filtragem interna para Gestor/Admin
+
+    // --- 4. Chamadas Exclusivas de ADMIN ---
+    if (role === 'admin') {
+        carregarUnidadesSelect();
+        carregarPostosEditor();
+        carregarUnidadesVisuais();
+        carregarPostosVisuais(); 
+    }
+}
 
         function atualizarSaudacao(user) {
             const now = new Date(); const hour = now.getHours();
@@ -1434,30 +1454,31 @@ function adicionarItemPorSetor(sid) {
         
         // Admin Helpers
         async function carregarUnidadesSelect(selectId = 'new-user-unit') {
-            const selCadastro = document.getElementById('new-user-unit');
-            const selEdicao = document.getElementById('edit-user-unit'); // NOVO: Elemento no modal de edição
-            const selLista = document.getElementById('novo-local-unidade');
-            
-            // Define o elemento que será preenchido
-            const targetSel = document.getElementById(selectId);
-            
-            // ... (restante da função)
-            try {
-                const doc = await db.collection('config_geral').doc('unidades').get();
-                const unidades = doc.exists ? doc.data().lista : [];
-                let html = '<option value="">Selecione...</option>';
+    
+    // 1. Define todos os elementos SELECT conhecidos para Unidades
+        const selCadastro = document.getElementById('new-user-unit'); // Cadastro de novo usuário
+        const selEdicao = document.getElementById('edit-user-unit');   // Edição de usuário (novo modal)
+        const selLista = document.getElementById('novo-local-unidade'); // Criação de lista
+    
+        try {
+            const doc = await db.collection('config_geral').doc('unidades').get();
+            const unidades = doc.exists ? doc.data().lista : [];
+            let html = '<option value="">Selecione...</option>';
                 unidades.forEach(u => html += `<option value="${u}">${u}</option>`);
-                
-                // Atualiza o select correto
-                if(targetSel) targetSel.innerHTML = html;
-                
-                // Garante que os outros selects sejam atualizados se a chamada não for do modal de edição
-                if(selectId === 'new-user-unit' || selectId === 'novo-local-unidade') {
-                    if(selCadastro) selCadastro.innerHTML = html;
-                    if(selLista) selLista.innerHTML = html;
-                }
-                
-            } catch(e) {}
+        
+            // 2. Preenche TODOS os selects de unidade existentes
+            if(selCadastro) selCadastro.innerHTML = html;
+            if(selEdicao) selEdicao.innerHTML = html;
+            if(selLista) selLista.innerHTML = html;
+        
+        // --- OBSERVAÇÃO ---
+        // Se a função foi chamada passando um ID (como 'edit-user-unit'), o código acima já preencheu.
+        // O restante da sua lógica original (`if(targetSel) targetSel.innerHTML = html;` e os condicionais abaixo) 
+        // torna-se desnecessário com esta abordagem direta.
+
+            } catch(e) {
+        console.error("Erro ao carregar unidades:", e);
+            }
         }
         
         async function criarUsuario() {
@@ -1475,20 +1496,21 @@ function adicionarItemPorSetor(sid) {
         }
 
         async function listarUsuarios() {
-            const tbody = document.getElementById('users-table-body');
+        const tbody = document.getElementById('users-table-body');
             tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
-            try {
-                const snap = await db.collection('usuarios').get();
-                tbody.innerHTML = '';
-                snap.forEach(doc => {
-                    const u = doc.data();
-                    const docId = doc.id; // <--- CAPTURA O ID DO DOCUMENTO
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${u.posto} ${u.nome_guerra}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')">Editar</button></td>`;
-                    tbody.appendChild(tr);
-                });
-            } catch(e) {}
+        try {
+        const snap = await db.collection('usuarios').get();
+            tbody.innerHTML = '';
+            snap.forEach(doc => {
+        const u = doc.data();
+        const docId = doc.id; // <--- CORRETO: Capturando o ID do documento.
+        const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${u.posto} ${u.nome_guerra}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')">Editar</button></td>`; // <--- CORRETO: Chamando a função com o docId.
+            tbody.appendChild(tr);
+        });
+        } catch(e) {}
         }
+        
         async function abrirGestaoUsuario(docId) {
             try {
                 const doc = await db.collection('usuarios').doc(docId).get();
