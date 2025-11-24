@@ -741,45 +741,69 @@
         // --- 3. DASHBOARD HIERÁRQUICO ---
         // --- 3. DASHBOARD HIERÁRQUICO ---
         async function loadCaaData() {
-            const container = document.getElementById('cards-container');
-            container.innerHTML = 'Carregando...';
-            const loading = document.getElementById('loading-message-dashboard');
-            loading.style.display = 'block';
-            try {
-                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-                const rotas = rotasDoc.data() || {};
-                const listToUnitMap = {};
-                
-                Object.keys(rotas).forEach(key => {
-                    // Ignora o artefato 'bravo 5' ou outros IDs específicos
-                    if (!key.toLowerCase().includes('bravo 5') && rotas[key].ativo !== false) {
-                        listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL';
-                    }
-                });
-                
-                const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
-                const map = {};
-                const docs = [];
-                snap.forEach(d => docs.push({id:d.id, ...d.data()}));
-                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
-
-                docs.forEach(d => {
-                    const localNome = d.local.split(' - ')[1] || d.local; 
-                    const listUnit = listToUnitMap[localNome] || 'GERAL';
-                    
-                    // Condição crucial: Só processa se a lista existir no mapa filtrado
-                    if (!listToUnitMap[localNome]) return; 
-
-                    if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
-
-                    if (!map[localNome]) map[localNome] = { docId: d.id, local: d.local, conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), items: d.itensCaa || [] };
-                });
-                renderCards(map);
-            } catch (e) { console.error(e); container.innerHTML = 'Erro ao carregar.';
+    const container = document.getElementById('cards-container');
+    container.innerHTML = 'Carregando...';
+    const loading = document.getElementById('loading-message-dashboard');
+    loading.style.display = 'block';
+    
+    try {
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const rotas = rotasDoc.data() || {};
+        // Mantemos o mapeamento para filtragem de unidade, mas não para o agrupamento principal
+        const listToUnitMap = {};
+        
+        // Objeto para mapear o ID ÚNICO da ROTA/LISTA ao nome da Unidade
+        Object.keys(rotas).forEach(key => {
+            // key é o ID da lista (ex: "alfa_permanencia")
+            if (!key.toLowerCase().includes('bravo 5') && rotas[key].ativo !== false) {
+                listToUnitMap[key] = rotas[key].unidade || 'GERAL';
             }
-            finally { loading.style.display = 'none';
+        });
+        
+        const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
+        
+        // ALTERAÇÃO CRÍTICA: 'map' agora usará o LISTA_ID como chave, não o NOME do local.
+        const map = {}; 
+        const docs = [];
+        snap.forEach(d => docs.push({id:d.id, ...d.data()}));
+        
+        // Ordenação por tempo (mais recente primeiro)
+        docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+
+        docs.forEach(d => {
+            const localNome = d.local.split(' - ')[1] || d.local; 
+            const listaId = d.lista_id; // <--- NOVO: Usamos o ID único do resultado
+            
+            // Condição crucial: Só processa se a lista existir no mapa filtrado (rotas)
+            if (!rotas[listaId]) return; 
+
+            // Filtro de segurança (para Gestores)
+            const listUnit = rotas[listaId].unidade || 'GERAL';
+            if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
+
+            // CORREÇÃO: AQUI ESTAVA O ERRO!
+            // Usamos o listaId como chave. Isso garante que "alfa_permanencia" e "bravo_permanencia"
+            // sejam tratados como registros distintos, mesmo que ambos tenham o nome "PERMANENCIA".
+            if (!map[listaId]) {
+                 map[listaId] = { 
+                     docId: d.id, 
+                     local: d.local, 
+                     conferente: d.conferente, 
+                     date: d.timestamp.toDate().toLocaleString(), 
+                     items: d.itensCaa || [] 
+                 };
             }
-        }
+        });
+        
+        // Passamos o novo mapa baseado em ID para renderizar os cards
+        renderCards(map); 
+    } catch (e) { 
+        console.error(e); 
+        container.innerHTML = 'Erro ao carregar.';
+    } finally { 
+        loading.style.display = 'none';
+    }
+}
         function renderCards(map) {
             const container = document.getElementById('cards-container'); container.innerHTML = '';
             const keys = Object.keys(map).sort();
