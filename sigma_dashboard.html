@@ -1858,29 +1858,53 @@ transition: transform 0.2s, box-shadow 0.2s;
         }
 
         async function loadMyHistory() {
-            const ul = document.getElementById('my-history-list');
-            ul.innerHTML = '<li>Buscando...</li>';
-            const dI = new Date(document.getElementById('my-hist-start').value + 'T00:00:00');
-            const dF = new Date(document.getElementById('my-hist-end').value + 'T23:59:59');
-            
-            try {
-                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(100).get();
-                let docs = [];
-                snap.forEach(doc => docs.push(doc.data()));
-                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+    const ul = document.getElementById('my-history-list');
+    ul.innerHTML = '<li>Buscando...</li>';
+    
+    // 1. Cria objetos Date dos campos de input, garantindo o início e fim do dia
+    const startDateInput = document.getElementById('my-hist-start').value;
+    const endDateInput = document.getElementById('my-hist-end').value;
 
-                let html = '';
-                docs.forEach(d => {
-                    const dt = d.timestamp.toDate();
-                    if(dt >= dI && dt <= dF) html += criarItemHistoricoHTML(d);
-                });
-                
-                ul.innerHTML = html || '<li>Nada encontrado.</li>';
-            } catch(e){ 
-                console.error(e); 
-                ul.innerHTML='Erro.';
-            }
-        }
+    if (!startDateInput || !endDateInput) {
+        ul.innerHTML = '<li>Selecione as datas para filtrar.</li>';
+        return;
+    }
+
+    // 2. Cria Timestamps para filtro do Firestore
+    // dI: Começo do dia (00:00:00)
+    const dI = new Date(startDateInput + 'T00:00:00'); 
+    // dF: Final do dia (23:59:59), adicionamos um segundo extra para garantir a inclusão
+    const dF = new Date(endDateInput + 'T23:59:59'); 
+
+    // Converte para Timestamps do Firebase
+    const startTimestamp = firebase.firestore.Timestamp.fromDate(dI);
+    const endTimestamp = firebase.firestore.Timestamp.fromDate(dF);
+
+    try {
+        // 3. Executa a consulta no Firestore com o filtro de data (query otimizada)
+        const snap = await db.collection(COLECAO_RESULTADOS)
+            .where('conferente', '==', currentUserData.nome_militar_completo)
+            .where('timestamp', '>=', startTimestamp) // Data de início
+            .where('timestamp', '<=', endTimestamp)   // Data de fim
+            .orderBy('timestamp', 'desc') // Ordena (necessário ao usar where em timestamp)
+            .limit(100)
+            .get();
+            
+        let docs = [];
+        snap.forEach(doc => docs.push(doc.data()));
+
+        let html = '';
+        docs.forEach(d => {
+            html += criarItemHistoricoHTML(d);
+        });
+        
+        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nada encontrado no período selecionado.</li>';
+        
+    } catch(e){ 
+        console.error("Erro no loadMyHistory:", e);
+        ul.innerHTML='<li>Erro ao carregar histórico.</li>';
+    }
+}
 
         async function loadGlobalHistory() {
             const ul = document.getElementById('global-history-list');
