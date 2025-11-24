@@ -2573,20 +2573,14 @@ function formatarObsParaTabela(item, conferenteOriginal, dataOriginal) {
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
         async function salvarGestaoCa(){
-    const obsRaw = document.getElementById('modal-gestao-obs').value.trim();
-    const status = document.getElementById('modal-gestao-status').value;
-    const qtdRemover = parseInt(document.getElementById('modal-gestao-qtd-remover').value) || 0;
-    
-    if (obsRaw === '' && status === 'Manter') {
-        alert("Para 'Manter', você deve registrar uma observação de gestão.");
-        return;
-    }
+    const docId = document.getElementById('gestao-doc-id').value;
+    const itemId = document.getElementById('gestao-item-id-lista').value;
+    const status = document.getElementById('gestao-status').value;
+    const obsRaw = document.getElementById('gestao-obs').value.trim();
+    const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
 
-    if (status === 'Remover' && qtdRemover <= 0) {
-        alert("Para 'Remover', a quantidade a ser removida deve ser maior que zero.");
-        return;
-    }
-    
+    if(!obsRaw) return alert("Digite uma observação.");
+
     // 1. DADOS PARA O CARIMBO
     const dataHoje = new Date().toLocaleDateString('pt-BR');
     const roleDisplay = currentUserData.role.toUpperCase();
@@ -2602,11 +2596,8 @@ function formatarObsParaTabela(item, conferenteOriginal, dataOriginal) {
     const obsCarimbada = `${carimbo}: "${obsGestaoPura}"`; 
 
     // 2. BUSCA E ATUALIZAÇÃO DO DOCUMENTO
-    const docId = currentManagingItem.docId; // ID do documento principal de conferência
-    const targetId = currentManagingItem.id; // ID do item dentro do array itensCaa
-    
     const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
-
+    
     try {
         const doc = await ref.get();
         if (!doc.exists) {
@@ -2617,7 +2608,8 @@ function formatarObsParaTabela(item, conferenteOriginal, dataOriginal) {
         let data = doc.data();
         let items = data.itensCaa || [];
         
-        const targetIndex = items.findIndex(i => i.id === targetId);
+        // Busca o item pelo ID da Lista/Tombamento (itemId)
+        const targetIndex = items.findIndex(i => i.id === itemId); 
         
         if (targetIndex === -1) {
             alert('Item de alteração não encontrado na conferência.');
@@ -2628,7 +2620,6 @@ function formatarObsParaTabela(item, conferenteOriginal, dataOriginal) {
         let obsAnterior = items[targetIndex].adminObs || '';
         
         // Se já existe uma observação de gestão, concatenamos usando o separador.
-        // Isso preserva o histórico de todos os carimbos de gestão.
         if (obsAnterior.trim() !== '') {
             items[targetIndex].adminObs = `${obsAnterior} | + NOVA: ${obsCarimbada}`;
         } else {
@@ -2639,32 +2630,70 @@ function formatarObsParaTabela(item, conferenteOriginal, dataOriginal) {
         // Atualiza o status de gestão do item
         items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
         
-        // 4. ATUALIZA O FIREBASE
-        await ref.update({ 
-            itensCaa: items 
-        });
+        // 4. ATUALIZA O FIREBASE (Documento de resultado)
+        await ref.update({ itensCaa: items });
+        
+        // 5. ATUALIZA ESTOQUE (Se o status for Solucionado ou Remover)
+        if (status === 'Remover' || status === 'Solucionado') {
+            // ... (Seu código de atualização de estoque/lista aqui, se necessário) ...
 
-        // 5. ATUALIZA ESTOQUE (se status for 'Remover')
-        if (status === 'Remover' && qtdRemover > 0) {
-            // ... (Sua lógica para atualizar o estoque aqui, se aplicável) ...
-            
-            // Exemplo de como você pode tentar buscar e atualizar o estoque:
-            // await db.collection('estoque').doc(targetId).update({
-            //     quantidade: firebase.firestore.FieldValue.increment(-qtdRemover)
-            // });
+            // Lógica para remover do estoque na lista principal (linhas 539-552 do código anterior)
+            const listaId = data.lista_id;
+            if(listaId) {
+                const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
+                const listSnap = await listRef.get();
+                
+                if(listSnap.exists) {
+                    let listaData = listSnap.data().list;
+                    let updated = false;
+
+                    for(let s of listaData) {
+                        for(let i = s.itens.length - 1; i >= 0; i--) {
+                            const item = s.itens[i];
+                            
+                            // Simplificação da lógica de remoção:
+                            if(item.id === itemId) { // Item Único
+                                if(status === 'Remover') {
+                                    item.quantidadeEsperada -= qtdRemover;
+                                    delete item.pendencia; 
+                                    if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
+                                } else { // Apenas Solucionado
+                                    delete item.pendencia;
+                                }
+                                updated = true;
+                            }
+                            else if(item.tipo === 'multi' && item.tombamentos) { // Item Multi
+                                const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
+                                if(tIndex > -1) {
+                                    if(status === 'Remover') {
+                                        item.tombamentos.splice(tIndex, 1);
+                                        item.quantidadeEsperada = item.tombamentos.length;
+                                        if(item.tombamentos.length === 0) s.itens.splice(i, 1);
+                                    } else {
+                                        delete item.tombamentos[tIndex].pendencia;
+                                    }
+                                    updated = true;
+                                }
+                            }
+                        }
+                    }
+                    if(updated) await listRef.update({ list: listaData });
+                }
+            }
         }
         
         fecharModalGestao();
-        // Recarrega o histórico global para atualizar a tabela
-        loadGlobalHistory(); 
+        // Recarrega o dashboard (para a tabela C/A) e o histórico
+        loadCaaData();
+        carregarConferenciasHoje();
         
         alert('Alteração de gestão salva com sucesso! A lista será atualizada para o próximo conferente.');
-
+    
     } catch(e) {
         console.error("Erro ao salvar gestão C/A:", e);
         alert("Erro ao salvar gestão: " + e.message);
     }
-}
+} // <--- CHAVE DE FECHAMENTO DA FUNÇÃO ADICIONADA
 
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
         function abrirEditor(id, nome, unidadeLista) { 
