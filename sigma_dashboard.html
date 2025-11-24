@@ -2469,7 +2469,38 @@ function switchView(v) {
         function closeMenuMobile() { 
             toggleMenuMobile();
         }
+        // --- NOVO: FUNÇÃO AUXILIAR DE FORMATAÇÃO (CARIMBO) ---
+function formatarObsParaTabela(item, conferenteOriginal, dataOriginal) {
+    let obsHtml = '';
+
+    // 1. Formatação da OBSERVAÇÃO ORIGINAL (do conferente que fez a C/A)
+    if (item.obs && item.obs.trim() !== '') {
+        let obsOriginal = item.obs;
         
+        // Se a observação original não tem carimbo completo (separador), adicionamos
+        if (!obsOriginal.includes(" | + NOVA: ")) {
+             // Formato: • Por: Militar em Data: "OBSERVAÇÃO"
+             obsOriginal = `• Por: ${conferenteOriginal} em ${dataOriginal.split(' ')[0]}: "${obsOriginal}"`;
+        }
+
+        obsHtml += `<p style="margin-bottom: 5px;">${obsOriginal}</p>`;
+    }
+
+    // 2. Formatação da OBSERVAÇÃO DE GESTÃO (feita por Gestor/Admin)
+    if (item.adminObs && item.adminObs.trim() !== '') {
+        // Divide o histórico de gestão pelos separadores
+        const adminObsLines = item.adminObs.split(' | + NOVA: ').filter(l => l.trim() !== '');
+        
+        adminObsLines.forEach(line => {
+             // O carimbo de gestão já está completo (ex: Por SGT NOME (GESTOR): "OBS")
+             obsHtml += `<p style="margin-top: 5px; color:#f57c00; font-weight: 500;">${line}</p>`;
+        });
+    }
+    
+    return obsHtml || "Nenhuma alteração registrada";
+}
+// --- FIM DA FUNÇÃO AUXILIAR ---
+        // --- FUNÇÕES DO MODAL GESTÃO C/A ---
         // --- FUNÇÕES DO MODAL GESTÃO C/A ---
         function mostrarTabela(data) {
             const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
@@ -2481,7 +2512,7 @@ function switchView(v) {
             const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
             
             if (itemsToShow.length === 0) { 
-                wrapper.querySelector('table').style.display = 'none'; 
+                wrapper.querySelector('table').style.display = 'none';
                 document.getElementById('no-issues-msg').style.display = 'block';
             } else {
                 wrapper.querySelector('table').style.display = 'table';
@@ -2489,12 +2520,15 @@ function switchView(v) {
                 
                 itemsToShow.forEach(i => {
                     const tr = tbody.insertRow();
-                    const obsFormatada = (i.obs || '').replace(/\n/g, '<br>');
-                    // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
-                  
+                    
+                    // --- CORREÇÃO: CHAMA A FUNÇÃO DE FORMATAÇÃO ---
+                    const obsFormatada = formatarObsParaTabela(i, data.conferente, data.date);
+                    // ---------------------------------------------
+                    
                     const itemComDocId = { ...i, docId: data.docId }; 
                     
-                    tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
+                    // Note que a coluna 'Alteração' agora usa obsFormatada
+                    tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge badge-${i.statusAdmin.toLowerCase().replace(/\s/g,'')}">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
                     const td = tr.insertCell(); 
                     
                     // Passa o item enriquecido
@@ -2538,98 +2572,125 @@ function switchView(v) {
         }
 
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
+ async function salvarGestaoCa(){
+    const docId = document.getElementById('gestao-doc-id').value;
+    const itemId = document.getElementById('gestao-item-id-lista').value;
+    const status = document.getElementById('gestao-status').value;
+    const obsRaw = document.getElementById('gestao-obs').value.trim();
+    const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
+
+    if(!obsRaw) return alert("Digite uma observação.");
+ // 1. DADOS PARA O CARIMBO
+    const dataHoje = new Date().toLocaleDateString('pt-BR');
+    const roleDisplay = currentUserData.role.toUpperCase();
+    const militarCompleto = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
+    
+    // O carimbo completo da ação de gestão (AGORA INCLUI A ROLE)
+    const carimbo = `• Por: ${militarCompleto} (${roleDisplay}) em ${dataHoje}`;
+    
+    // Apenas a observação pura do gestor
+    const obsGestaoPura = obsRaw + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
+    
+    // A observação carimbada (será concatenada)
+    const obsCarimbada = `${carimbo}: "${obsGestaoPura}"`; 
+
+    // 2. BUSCA E ATUALIZAÇÃO DO DOCUMENTO
+    const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
+ try {
+        const doc = await ref.get();
+        if (!doc.exists) {
+            alert('Documento de conferência não encontrado.');
+            return;
+        }
         
-        async function salvarGestaoCa(){
-            const docId = document.getElementById('gestao-doc-id').value;
-            const itemId = document.getElementById('gestao-item-id-lista').value;
-            const status = document.getElementById('gestao-status').value;
-            const obsRaw = document.getElementById('gestao-obs').value.trim();
-            const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
+        let data = doc.data();
+        let items = data.itensCaa || [];
+        
+        // Busca o item pelo ID da Lista/Tombamento (itemId)
+        const targetIndex = items.findIndex(i => i.id === itemId);
+        
+        if (targetIndex === -1) {
+            alert('Item de alteração não encontrado na conferência.');
+            return;
+        }
+        
+        // --- 3. CONCATENAÇÃO CORRIGIDA DO HISTÓRICO DE GESTÃO ---
+        let obsAnterior = items[targetIndex].adminObs || '';
+        
+        // Se já existe uma observação de gestão, concatenamos usando o separador.
+        if (obsAnterior.trim() !== '') {
+            items[targetIndex].adminObs = `${obsAnterior} | + NOVA: ${obsCarimbada}`;
+        } else {
+            items[targetIndex].adminObs = obsCarimbada;
+        }
+        // -------------------------------------------------------
+
+        // Atualiza o status de gestão do item
+        items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
+        
+        // 4. ATUALIZA O FIREBASE (Documento de resultado)
+        await ref.update({ itensCaa: items });
+        
+        // 5. ATUALIZA ESTOQUE (Se o status for Solucionado ou Remover)
+        if (status === 'Remover' || status === 'Solucionado') {
             
-            if(!obsRaw) return alert("Digite uma observação.");
+            // Lógica para remover do estoque na lista principal 
+            const listaId = data.lista_id;
+            if(listaId) {
+                const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
+                const listSnap = await listRef.get();
+                
+                if(listSnap.exists) {
+                    let listaData = listSnap.data().list;
+                    let updated = false;
 
-            // --- CARIMBO AUTOMÁTICO ---
-            const dataHoje = new Date().toLocaleDateString('pt-BR');
-            const carimbo = `Por ${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra} em ${dataHoje}`;
-            const obsFinal = `${carimbo}: "${obsRaw}"` + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
-            
-            try {
-                const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
-                const snap = await ref.get();
-                if(!snap.exists) return alert("Erro: Conferência não encontrada.");
-                
-                const resData = snap.data();
-                const items = resData.itensCaa || [];
-                
-                // BUSCA INTELIGENTE (Pelo ID e não apenas pelo índice)
-                let targetIndex = -1;
-                // 1. Tenta achar pelo ID
-                targetIndex = items.findIndex(i => i.id === itemId);
-                // 2. Se não achar, tenta pelo Nome + Obs (Fallback)
-                if (targetIndex === -1) {
-                    const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
-                    targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
-                }
-
-                if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
-                
-                items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
-                items[targetIndex].adminObs = obsFinal;
-                
-                await ref.update({ itensCaa: items });
-                
-                if(status === 'Remover' || status === 'Solucionado') {
-                    const listaId = resData.lista_id;
-                    if(listaId) {
-                        const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
-                        const listSnap = await listRef.get();
-                        
-                        if(listSnap.exists) {
-                            let listaData = listSnap.data().list;
-                            let updated = false;
-
-                            for(let s of listaData) {
-                                for(let i = s.itens.length - 1; i >= 0; i--) {
-                                    const item = s.itens[i];
-                                    if(item.tipo === 'single' && item.id === itemId) {
-                                        if(status === 'Remover') {
-                                            item.quantidadeEsperada -= qtdRemover;
-                                            delete item.pendencia; 
-                                            if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
-                                        } else {
-                                            delete item.pendencia;
-                                        }
-                                        updated = true;
+                    for(let s of listaData) {
+                        for(let i = s.itens.length - 1; i >= 0; i--) {
+                            const item = s.itens[i];
+                            
+                            // Simplificação da lógica de remoção:
+                            if(item.id === itemId) { // Item Único
+                                if(status === 'Remover') {
+                                    item.quantidadeEsperada -= qtdRemover;
+                                    delete item.pendencia; 
+                                    if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
+                                } else { // Apenas Solucionado
+                                    delete item.pendencia;
+                                }
+                                updated = true;
+                            }
+                            else if(item.tipo === 'multi' && item.tombamentos) { // Item Multi
+                                const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
+                                if(tIndex > -1) {
+                                    if(status === 'Remover') {
+                                        item.tombamentos.splice(tIndex, 1);
+                                        item.quantidadeEsperada = item.tombamentos.length;
+                                        if(item.tombamentos.length === 0) s.itens.splice(i, 1);
+                                    } else {
+                                        delete item.tombamentos[tIndex].pendencia;
                                     }
-                                    else if(item.tipo === 'multi' && item.tombamentos) {
-                                        const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
-                                        if(tIndex > -1) {
-                                            if(status === 'Remover') {
-                                                item.tombamentos.splice(tIndex, 1);
-                                                item.quantidadeEsperada = item.tombamentos.length;
-                                                if(item.tombamentos.length === 0) s.itens.splice(i, 1);
-                                            } else {
-                                                delete item.tombamentos[tIndex].pendencia;
-                                            }
-                                            updated = true;
-                                        }
-                                    }
+                                    updated = true;
                                 }
                             }
-                            if(updated) await listRef.update({ list: listaData });
                         }
                     }
+                    if(updated) await listRef.update({ list: listaData });
                 }
-
-                alert("Salvo com sucesso!");
-                fecharModalGestao();
-                fecharTabela();
-                loadCaaData(); 
-            } catch(e) { 
-                console.error(e); 
-                alert("Erro ao salvar: " + e.message);
             }
         }
+        
+        fecharModalGestao();
+        // Recarrega o dashboard (para a tabela C/A) e o histórico
+        loadCaaData();
+        carregarConferenciasHoje();
+        
+        alert('Alteração de gestão salva com sucesso! A lista será atualizada para o próximo conferente.');
+    
+    } catch(e) {
+        console.error("Erro ao salvar gestão C/A:", e);
+        alert("Erro ao salvar gestão: " + e.message);
+    }
+}
 
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
         function abrirEditor(id, nome, unidadeLista) { 
