@@ -2528,12 +2528,26 @@ transition: transform 0.2s, box-shadow 0.2s;
         }
 
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
-        function abrirEditor(id, nome) { 
-            currentEditingId = id;
-            document.getElementById('editor-title').textContent = `Editando: ${nome}`; 
-            switchView('editor'); 
-            carregarDadosGerenciador(); 
-        }
+        function abrirEditor(id, nome, unidadeLista) { 
+    
+    // --- NOVA VERIFICAÇÃO DE PERMISSÃO DE UNIDADE ---
+    // Verifica se o usuário é um Gestor E se a Unidade da Lista 
+    // é diferente da Unidade do usuário logado.
+    if (currentUserData.role === 'gestor' && unidadeLista !== currentUserData.unidade) {
+        alert("Acesso negado. Você só pode editar listas da sua unidade.");
+        return; // Impede que o editor seja aberto
+    }
+    // --------------------------------------------------
+
+    currentEditingId = id;
+    const editorTitleEl = document.getElementById('editor-title');
+    if(editorTitleEl) {
+        editorTitleEl.textContent = `Editando: ${nome}`; 
+    }
+    
+    switchView('editor'); 
+    carregarDadosGerenciador(); 
+}
         function voltarParaLocais() { 
             currentEditingId = null;
             switchView('listas'); 
@@ -3008,42 +3022,56 @@ transition: transform 0.2s, box-shadow 0.2s;
         }
         
         async function carregarListaLocaisAdmin() {
-            const ul = document.getElementById('lista-locais-container');
-            const doc = await db.collection('config_geral').doc('rotas').get();
-            const rotas = doc.data();
-            ul.innerHTML = '';
-            
-            // Objeto para mapear o ID da lista para o nome do local
-            const listaNomes = {};
-            
-            // Mapeia as rotas e carrega os nomes
-            Object.entries(rotas).forEach(([id, info]) => {
-                if(info.ativo === false) return;
-                listaNomes[id] = info.nome;
-                
-                const li = document.createElement('li');
-                li.className = 'local-item';
-                const safeName = info.nome.replace(/'/g, "\\'");
-                const safeId = id.replace(/'/g, "\\'");
-                
-                // --- NOVO: Adicionado botão de Excluir ---
-                li.innerHTML = `
-                    <div class="local-info">
-                        <strong>${info.nome}</strong>
-                        <span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span>
-                    </div>
-                    <div style="display:flex; gap: 10px;">
-                        <button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">
-                            Editar
-                        </button>
-                        <button class="btn-modern-action btn-delete" onclick="excluirLocalAdmin('${safeId}', '${safeName}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                `;
-                ul.appendChild(li);
-            });
+    const ul = document.getElementById('lista-locais-container');
+    const doc = await db.collection('config_geral').doc('rotas').get();
+    const rotas = doc.data();
+    ul.innerHTML = '';
+    
+    // --- FILTRO DE SEGURANÇA PARA GESTOR ---
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeGestor = currentUserData.unidade;
+    // ----------------------------------------
+    
+    // Objeto para mapear o ID da lista para o nome do local
+    const listaNomes = {};
+
+    // Mapeia as rotas e carrega os nomes
+    Object.entries(rotas).forEach(([id, info]) => {
+        if(info.ativo === false) return;
+
+        // CONDIÇÃO DE FILTRAGEM: Se for gestor, só mostra se a unidade da rota for igual à unidade do gestor.
+        if (isGestor && info.unidade !== unidadeGestor) {
+            return;
         }
+        
+        listaNomes[id] = info.nome;
+        
+        const li = document.createElement('li');
+        li.className = 'local-item';
+        
+        const safeName = info.nome.replace(/'/g, "\\'");
+        const safeId = id.replace(/'/g, "\\'");
+        // NOVO: Passando o nome da unidade para uso no abrirEditor
+        const safeUnit = info.unidade.replace(/'/g, "\\'") || 'Geral'; 
+        
+        // --- CHAMADA CORRIGIDA: INCLUINDO A UNIDADE NO ABRIR EDITOR ---
+        li.innerHTML = `
+            <div class="local-info">
+                <strong>${info.nome}</strong>
+                <span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span>
+            </div>
+            <div style="display:flex; gap: 10px;">
+                <button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}', '${safeUnit}')">
+                    Editar
+                </button>
+                <button class="btn-modern-action btn-delete" onclick="excluirLocalAdmin('${safeId}', '${safeName}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        ul.appendChild(li);
+    });
+}
         
         function renderizarLista() { 
             const container = document.getElementById('lista-setores-container');
