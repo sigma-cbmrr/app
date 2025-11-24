@@ -1061,9 +1061,7 @@ onerror="this.onerror=null; this.src='https://placehold.co/40x40/ffffff/000000/f
         <span class="text-white header-title-mobile">CBM </span>
         <span class="text-red header-title-mobile">RR</span>
     </div>
-    <span id="user-name" class="header-title-desktop" style="margin-right: 10px;"></span>
-    <span id="user-role-display" class="profile-badge" style="margin-right: 15px;">Carregando...</span>
-
+    
     <div id="dashboard-greeting" style="display:none; margin-left: 20px; font-size: 0.9em; font-style: italic;">
         Bem-vindo(a)! Preencha a conferência para hoje.
     </div>
@@ -1511,7 +1509,8 @@ onerror="this.onerror=null; this.src='https://placehold.co/40x40/ffffff/000000/f
                 window.location.href = 'index.html'; 
             }
         });
-        function atualizarSaudacao(user) {
+        // AÇÃO 1: FUNÇÃO atualizarSaudacao DEVE ESTAR ACIMA DA FUNÇÃO setupUIBasedOnRole()
+function atualizarSaudacao(user) {
     const now = new Date();
     const hour = now.getHours();
     let saudacao = "Bom dia";
@@ -1524,53 +1523,119 @@ onerror="this.onerror=null; this.src='https://placehold.co/40x40/ffffff/000000/f
     
     const opcoesData = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
     let dataStr = now.toLocaleDateString('pt-BR', opcoesData);
-    // Capitaliza a primeira letra do dia da semana
     dataStr = dataStr.charAt(0).toUpperCase() + dataStr.slice(1);
 
-    // Preenche os elementos do Greeting Card
+    // Preenche apenas os elementos do Card de Saudação (Dashboard)
+    
+    // Saudação (Bom dia, Boa tarde)
     const greetingTextEl = document.getElementById('greeting-text');
     if (greetingTextEl) {
         greetingTextEl.textContent = saudacao + ",";
     }
     
+    // Nome Completo no Greeting Card
     const greetingNameEl = document.getElementById('greeting-name');
     if (greetingNameEl) {
         greetingNameEl.textContent = user.nome_militar_completo || user.nome_guerra;
     }
     
+    // Data atual no Greeting Card
     const currentDateEl = document.getElementById('current-date');
     if (currentDateEl) {
         currentDateEl.textContent = dataStr;
     }
     
-    // Tenta carregar a foto do usuário se existir
+    // Foto
     const greetingPhotoEl = document.getElementById('greeting-photo');
     if (user.foto_url && greetingPhotoEl) {
         greetingPhotoEl.src = user.foto_url;
     }
 }
-        function setupUIBasedOnRole() {
+
+// AÇÃO 2: CORREÇÃO DA LÓGICA DE setupUIBasedOnRole()
+function setupUIBasedOnRole() {
     const role = currentUserData.role || 'operacional';
     const unit = currentUserData.unidade || 'N/D';
+    const roleUnitDisplay = `${role.toUpperCase()} - ${unit}`;
     
-    // --- CORREÇÃO: MOVE A ATRIBUIÇÃO DE CARGO PARA A SIDEBAR ---
+    // Alvo principal para o nome do perfil (o <h2> que diz "SIGMA Gestão" na sidebar)
+    const sidebarTitleEl = document.querySelector('.sidebar-header h2'); 
+    
+    // Alvo para o perfil/unidade (o SPAN que continha a informação duplicada)
     const sidebarRoleDisplay = document.getElementById('sidebar-role-display');
-    if (sidebarRoleDisplay) { 
-        sidebarRoleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
-        
-        // Opcional: Ajustar a cor do badge na sidebar com base no cargo
-        sidebarRoleDisplay.style.backgroundColor = 
+
+    // --- 1. CONFIGURAÇÃO DA SIDEBAR (SUBSTITUINDO "SIGMA GESTÃO") ---
+    if (sidebarTitleEl) { 
+        sidebarTitleEl.textContent = roleUnitDisplay; // Perfil aparece aqui
+        // Oculta o SPAN redundante
+        if (sidebarRoleDisplay) {
+            sidebarRoleDisplay.style.display = 'none'; 
+        }
+    }
+    
+    // --- 2. CONFIGURAÇÃO DO CARD DE SAUDAÇÃO (Nível de Acesso no Dashboard) ---
+    // ESTE SPAN DEVE SER ADICIONADO NO HTML DO CARD DE SAUDAÇÃO PARA FUNCIONAR.
+    const greetingRoleEl = document.getElementById('greeting-role-display');
+    if (greetingRoleEl) {
+        greetingRoleEl.textContent = roleUnitDisplay;
+        greetingRoleEl.style.backgroundColor = 
             role === 'admin' ? '#d90f23' : 
             role === 'gestor' ? '#f57c00' : 
             '#1b8a3e';
     }
-    // REMOVIDO: Atribuição a user-role-display no cabeçalho
+    // ----------------------------------------------------
 
-    // REMOVIDO: Atribuição a user-name no cabeçalho
-    // (O name é atribuído na atualizarSaudacao, mas o campo de cabeçalho foi removido)
+    // Chama a função de saudação (AGORA ESTÁ DEFINIDA ANTES DESTA CHAMADA)
+    atualizarSaudacao(currentUserData); 
+    
+    // --- 3. DEFINIÇÃO DE PERMISSÕES (Mantido) ---
+    const p = currentUserData.permissoes || {}; 
+    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
+    const canViewAdminTools = role === 'admin';
+    const canViewDashboardCards = role === 'admin' || (isGestorOuAdmin && p.canViewDashboardCards);
+    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
+    const canManageUnits = role === 'admin'; 
+    const canManagePosts = role === 'admin' || (isGestorOuAdmin && p.canManagePosts);
+    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
+    const canManageUnitLists = role === 'admin' || (isGestorOuAdmin && p.canManageUnitLists);
 
-    atualizarSaudacao(currentUserData);
-    // ... (restante da função) ...
+    // --- 4. CARREGAMENTO DE DADOS (CORRIGIDO PARA INICIALIZAÇÃO) ---
+    
+    // CARREGAMENTO BÁSICO (Necessário para o 'Nova Conferência' e Histórico)
+    carregarListasParaNovaConferencia(); 
+    carregarUnidadesSelect();           
+    carregarPostosEditor();             
+    carregarConferenciasHoje();
+    verificarConferenciaAtiva(); 
+    
+    // CARREGAMENTO AVANÇADO (Dashboard C/A, Cartões e Ferramentas Admin)
+    if (canViewDashboardCards) {
+        loadCaaData(); // Carrega os Cartões de Pendência
+    }
+    
+    if (canViewAdminTools) { // Se for Admin, carrega as views de gestão
+        carregarUnidadesVisuais();
+        carregarPostosVisuais();
+    }
+
+    // --- 5. CONTROLE DE VISIBILIDADE (Mantido) ---
+    document.getElementById('menu-gestao-unidades').style.display = canManageUnits ? 'flex' : 'none';
+    document.getElementById('menu-gestao-usuarios').style.display = canManageUnitUsers ? 'flex' : 'none';
+    document.getElementById('menu-gestao-listas').style.display = canManageUnitLists ? 'flex' : 'none';
+    document.getElementById('menu-gestao-postos').style.display = canManagePosts ? 'flex' : 'none';
+    document.getElementById('menu-admin-tools').style.display = canViewAdminTools ? 'flex' : 'none';
+    
+    document.getElementById('cards-gestao').style.display = canViewDashboardCards ? 'flex' : 'none';
+    document.getElementById('ca-pendencias-card').style.display = canViewUnitHistory ? 'block' : 'none';
+    
+    const listaTitle = document.getElementById('lista-title');
+    if (listaTitle) {
+        listaTitle.textContent = canViewAdminTools ? "Listas de Conferência (Admin)" : "Listas de Conferência";
+    }
+
+    // --- FIM ---
+    switchView('dashboard'); 
+    document.getElementById('loading-screen').style.display = 'none';
 }
         function retomarConferencia(url) {
             const iframe = document.getElementById('app-iframe');
