@@ -1669,18 +1669,49 @@ function adicionarItemPorSetor(sid) {
         }
 
         async function criarNovoLocal() {
-            const posto = document.getElementById('novo-local-posto').value;
-            const nome = document.getElementById('novo-local-nome').value.trim().toUpperCase();
-            const unidade = document.getElementById('novo-local-unidade').value;
-            if(!posto || !nome || !unidade) return alert("Preencha Posto, Nome e Unidade.");
-            const id = `${posto.toLowerCase()}_${nome.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
-            try {
-                await db.collection(COLECAO_LISTAS).doc(id).set({ nome_local: nome, posto: posto, list: [], unidade: unidade, updatedAt: firebase.firestore.Timestamp.now() });
-                await db.collection('config_geral').doc('rotas').set({ [id]: { nome: nome, posto: posto, unidade: unidade, ativo: true } }, { merge: true });
-                alert("Lista Criada!"); carregarListaLocaisAdmin();
-            } catch(e) { alert("Erro: " + e.message); }
-        }
+    const posto = document.getElementById('novo-local-posto').value;
+    const nome = document.getElementById('novo-local-nome').value.trim().toUpperCase();
+    const unidade = document.getElementById('novo-local-unidade').value;
+    if(!posto || !nome || !unidade) return alert("Preencha Posto, Nome e Unidade.");
+    
+    // Constrói o ID único e o nome completo
+    const id = `${posto.toLowerCase()}_${nome.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+    const localCompleto = `${posto} - ${nome}`; // Nome que aparecerá no Card/Relatório
+    
+    try {
+        // 1. Salva a lista (Viaturas)
+        await db.collection(COLECAO_LISTAS).doc(id).set({ nome_local: nome, posto: posto, list: [], unidade: unidade, updatedAt: firebase.firestore.Timestamp.now() });
 
+        // 2. Salva a rota
+        await db.collection('config_geral').doc('rotas').set({ [id]: { nome: nome, posto: posto, unidade: unidade, ativo: true } }, { merge: true });
+
+        // --- NOVO: Cria o registro inicial para o Dashboard ---
+        // Este registro garante que o Card de Pendências apareça imediatamente com status OK.
+        await db.collection(COLECAO_RESULTADOS).add({
+            local: localCompleto,
+            lista_id: id,
+            conferente: "Sistema (Inicialização)",
+            unidade: unidade,
+            posto: posto,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            // Dados para garantir que o card seja renderizado com 0 pendências
+            itensRelatorio: [], 
+            itensCaa: [],
+            totalCaa: 0,
+            totalItensConferidos: 0,
+            statusAdmin: 'OK'
+        });
+        // ----------------------------------------------------
+
+        alert("Lista Criada e Card Inicializado!"); 
+        carregarListaLocaisAdmin();
+        // Chama loadCaaData() para atualizar o Dashboard com o novo Card
+        loadCaaData(); 
+        
+    } catch(e) { 
+        alert("Erro ao criar lista: " + e.message); 
+    }
+}
         async function carregarListaLocaisAdmin() {
             const ul = document.getElementById('lista-locais-container');
             const doc = await db.collection('config_geral').doc('rotas').get();
