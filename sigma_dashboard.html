@@ -804,22 +804,90 @@
         loading.style.display = 'none';
     }
 }
-        function renderCards(map) {
-            const container = document.getElementById('cards-container'); container.innerHTML = '';
-            const keys = Object.keys(map).sort();
-            if (keys.length === 0) { container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada.</p>'; return; }
+        async function renderCards(map) {
+    const container = document.getElementById('cards-container');
+    container.innerHTML = '';
+    const keys = Object.keys(map);
+    
+    if (keys.length === 0) { 
+        container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada.</p>'; 
+        return;
+    }
+
+    // 1. Obter Mapeamento de ID da Lista -> Unidade
+    // Precisamos buscar as rotas novamente para mapear o ID da lista à sua Unidade
+    const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+    const rotas = rotasDoc.data() || {};
+    
+    // 2. Agrupar os Cards por Unidade
+    const groupedCards = {};
+    
+    keys.forEach(listaId => {
+        const cardData = map[listaId];
+        const rotaInfo = rotas[listaId];
+        
+        // Verifica se a rota existe e pega o nome da unidade
+        if (rotaInfo) {
+            const unitName = rotaInfo.unidade || 'SEM UNIDADE';
             
-            keys.forEach(key => {
-                const d = map[key];
-                const items = d.items || [];
-                const count = items.filter(i => i.statusAdmin !== 'Solucionado').length;
-                const div = document.createElement('div');
-                div.className = `sector-card ${count===0?'status-ok':'status-alert'}`;
-                div.innerHTML = `<h3>${d.local}</h3><div class="main-stat"><span class="count-value">${count===0?'OK':count}</span></div><div class="card-footer"><strong>${d.conferente}</strong><br>${d.date}</div>`;
-                div.onclick = () => mostrarTabela(d);
-                container.appendChild(div);
+            if (!groupedCards[unitName]) {
+                groupedCards[unitName] = [];
+            }
+            // Adiciona a lista de IDs para que possamos ordená-los por Unidade
+            groupedCards[unitName].push({
+                ...cardData,
+                unit: unitName, // Adiciona a unidade para referência (embora já seja a chave)
             });
         }
+    });
+    
+    // 3. Renderizar Agrupado por Unidade
+    const sortedUnits = Object.keys(groupedCards).sort();
+    
+    sortedUnits.forEach(unit => {
+        const cardsList = groupedCards[unit];
+        
+        // --- Cabeçalho da Unidade ---
+        const unitHeader = document.createElement('h3');
+        unitHeader.className = 'unit-header';
+        unitHeader.style.cssText = 'color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 25px;';
+        unitHeader.innerHTML = `<i class="fas fa-building"></i> ${unit} (${cardsList.length} Locais)`;
+        container.appendChild(unitHeader);
+        
+        // --- Container dos Cards da Unidade ---
+        const gridContainer = document.createElement('div');
+        gridContainer.className = 'cards-grid'; // Reutilizamos a classe de grid
+        
+        cardsList.forEach(d => {
+            const items = d.items || [];
+            // O count é o número de itens C/A não solucionados
+            const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
+            
+            const div = document.createElement('div');
+            div.className = `sector-card ${count === 0 ? 'status-ok' : 'status-alert'}`;
+            
+            div.innerHTML = `
+                <h3>${d.local}</h3>
+                <div class="main-stat">
+                    <span class="count-value">${count === 0 ? 'OK' : count}</span>
+                </div>
+                <div class="card-footer">
+                    <strong>${d.conferente}</strong><br>${d.date}
+                </div>
+            `;
+            // Reutiliza a função de clique para abrir a tabela de detalhes
+            div.onclick = () => mostrarTabela(d);
+            gridContainer.appendChild(div);
+        });
+        
+        container.appendChild(gridContainer);
+    });
+    
+    // Se, por algum motivo, não houver cards (após todos os filtros)
+    if (container.children.length === 0) {
+        container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada para sua unidade ou permissão.</p>';
+    }
+}
 
         // --- 4. NOVA CONFERÊNCIA ---
         async function carregarListasParaNovaConferencia() {
