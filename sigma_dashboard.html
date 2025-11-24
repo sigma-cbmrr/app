@@ -1007,7 +1007,7 @@ transition: transform 0.2s, box-shadow 0.2s;
             } 
         }
         .restricted-admin-only { 
-    display: block !important; /* Força a exibição inicial */
+    display: none;
 }
     </style>
 </head>
@@ -2812,21 +2812,48 @@ transition: transform 0.2s, box-shadow 0.2s;
         }
 
         async function listarUsuarios() {
-            const tbody = document.getElementById('users-table-body');
-            tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
-            try {
-                const snap = await db.collection('usuarios').get();
-                tbody.innerHTML = '';
-                
-                snap.forEach(doc => {
-                    const u = doc.data();
-                    const docId = doc.id; // <--- CORRETO: Capturando o ID do documento.
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${u.posto} ${u.nome_guerra}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')">Editar</button></td>`; // <--- CORRETO: Chamando a função com o docId.
-                    tbody.appendChild(tr);
-                });
-            } catch(e) {}
+    const tbody = document.getElementById('users-table-body');
+    tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
+    
+    // --- NOVO: FILTRO DE UNIDADE PARA O GESTOR ---
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeGestor = currentUserData.unidade;
+    
+    let userQuery = db.collection('usuarios'); // Coleção correta
+    
+    if (isGestor) {
+        // Se for Gestor, filtre a query para buscar usuários APENAS na sua unidade
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
+    }
+    // ---------------------------------------------
+
+    try {
+        // Executa a query (filtrada ou total)
+        const snap = await userQuery.get();
+        tbody.innerHTML = '';
+        
+        if (snap.empty) {
+            tbody.innerHTML = '<tr><td colspan="5">Nenhum militar encontrado nesta unidade.</td></tr>';
+            return;
         }
+
+        snap.forEach(doc => {
+            const u = doc.data();
+            const docId = doc.id; 
+            const tr = document.createElement('tr');
+            
+            // O usuário Administrador não deve poder editar a si mesmo
+            const isCurrentUser = firebase.auth().currentUser.uid === docId;
+            
+            // Renderização da linha
+            tr.innerHTML = `<td>${u.posto} ${u.nome_guerra}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')" ${isCurrentUser ? 'disabled' : ''}>Editar</button></td>`;
+            tbody.appendChild(tr);
+        });
+    } catch(e) {
+        console.error("Erro ao listar usuários:", e);
+        tbody.innerHTML = '<tr><td colspan="5">Erro ao carregar lista de usuários.</td></tr>';
+    }
+}
         
         async function abrirGestaoUsuario(docId) {
             try {
