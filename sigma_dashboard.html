@@ -1136,6 +1136,10 @@ transition: transform 0.2s, box-shadow 0.2s;
                 <h2 class="op-card-title"><i class="fas fa-folder-open"></i> Histórico da Unidade (Gestão)</h2>
                 <div class="modern-filter-card">
                     <div class="filter-item">
+    <label><i class="fas fa-user"></i> Conferente</label>
+    <select id="glob-hist-user" class="filter-input"><option value="">Todos</option></select>
+</div>
+                    <div class="filter-item">
                         <label><i class="far fa-calendar-alt"></i> Data Inicial</label>
                         <input type="date" id="glob-hist-start" class="filter-input">
                     </div>
@@ -1926,37 +1930,58 @@ transition: transform 0.2s, box-shadow 0.2s;
 
         // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
-            const container = document.getElementById('units-cards-container');
-            container.innerHTML = 'Carregando...';
-            try {
-                const unitsDoc = await db.collection('config_geral').doc('unidades').get();
-                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-                const unidades = unitsDoc.data().lista || [];
-                const rotas = rotasDoc.data() || {};
+    const container = document.getElementById('units-cards-container');
+    container.innerHTML = 'Carregando...';
+    
+    // --- Variáveis de Restrição ---
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeGestor = currentUserData.unidade;
+    // -----------------------------
+    
+    try {
+        const unitsDoc = await db.collection('config_geral').doc('unidades').get();
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const unidades = unitsDoc.data().lista || [];
+        const rotas = rotasDoc.data() || {};
 
-                container.innerHTML = '';
-                unidades.forEach(u => {
-                    const listsInUnit = Object.values(rotas).filter(r => r.unidade === u).map(r => r.nome);
-                    const card = document.createElement('div');
-                    card.className = 'sector-card status-unit';
-                    card.innerHTML = `<h3>${u}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInUnit.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
-                    card.onclick = () => abrirGestaoUnidade(u, rotas);
-                    container.appendChild(card);
-                });
-                
-                const sel = document.getElementById('glob-hist-local');
-                const locais = [...new Set(Object.values(rotas).map(r=>r.nome))].sort();
-                locais.forEach(l => { 
-                    const o=document.createElement('option'); 
-                    o.value=l; 
-                    o.text=l; 
-                    sel.appendChild(o); 
-                });
-            } catch(e){ 
-                container.innerHTML='Erro'; 
-            }
+        container.innerHTML = '';
+        unidades.forEach(u => {
+            const listsInUnit = Object.values(rotas).filter(r => r.unidade === u).map(r => r.nome);
+            const card = document.createElement('div');
+            card.className = 'sector-card status-unit';
+            card.innerHTML = `<h3>${u}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInUnit.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
+            card.onclick = () => abrirGestaoUnidade(u, rotas);
+            container.appendChild(card);
+        });
+
+        // --- NOVO: FILTRAGEM DOS LOCAIS PARA O SELECT DO HISTÓRICO GLOBAL ---
+        const sel = document.getElementById('glob-hist-local');
+        // Garante que o elemento existe e reseta com a opção "Todos"
+        if(sel) sel.innerHTML = '<option value="">Todos</option>'; 
+        
+        if(sel) {
+            // 1. Mapeia todas as rotas (viaturas/listas) ativas
+            let locaisFiltrados = Object.values(rotas)
+                .filter(r => r.ativo !== false) 
+                // 2. Aplica a restrição: Se for gestor, só mostra as rotas da sua unidade.
+                .filter(r => !isGestor || r.unidade === unidadeGestor) 
+                .map(r => r.nome); 
+
+            // 3. Remove duplicatas e ordena
+            const locaisUnicos = [...new Set(locaisFiltrados)].sort();
+            
+            locaisUnicos.forEach(l => { 
+                const o = document.createElement('option'); 
+                o.value = l; 
+                o.text = l; 
+                sel.appendChild(o); 
+            });
         }
-
+    } catch(e){ 
+        console.error("Erro ao carregar unidades visuais:", e);
+        container.innerHTML='Erro ao carregar dados.';
+    }
+}
         function abrirGestaoUnidade(unitName, allRotas) {
             document.getElementById('edit-unit-original-name').value = unitName;
             document.getElementById('edit-unit-name-input').value = unitName;
@@ -2323,35 +2348,64 @@ transition: transform 0.2s, box-shadow 0.2s;
             });
         }
         
-        function switchView(v) {
-            document.getElementById('mobile-overlay').style.display = 'none';
-            document.getElementById('main-sidebar').classList.remove('mobile-active');
-            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active-view'));
-            document.querySelectorAll('.sidebar a').forEach(el => el.classList.remove('active'));
-            document.getElementById('view-' + v).classList.add('active-view');
-            const link = document.getElementById('link-' + v);
-            if(link) link.classList.add('active');
-            
-            // Fecha o runner se estiver aberto
-            document.getElementById('app-runner-container').style.display = 'none';
-            
-            if(v === 'usuarios') listarUsuarios();
-            if(v === 'listas') carregarListaLocaisAdmin();
-            if(v === 'unidades') carregarUnidadesVisuais();
-            if(v === 'postos') carregarPostosVisuais();
-            
-            // CARREGA POSTOS
-            if(v === 'my-history') { 
-                document.getElementById('my-hist-start').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
-                document.getElementById('my-hist-end').valueAsDate = new Date();
-                loadMyHistory(); 
-            }
-            if(v === 'global-history') {
-                document.getElementById('glob-hist-start').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
-                document.getElementById('glob-hist-end').valueAsDate = new Date();
-                loadGlobalHistory();
-            }
-        }
+function switchView(v) {
+    // Esconde todas as seções de visualização
+    document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
+    
+    // Mostra a seção desejada
+    const viewElement = document.getElementById(`view-${v}`);
+    if (viewElement) {
+        viewElement.style.display = 'block';
+    } else {
+        console.error(`View não encontrada: view-${v}`);
+        return;
+    }
+    
+    // Remove a classe 'active' de todos os links e adiciona ao link clicado
+    document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
+    
+    const activeLink = document.getElementById(`link-${v}`);
+    if (activeLink) {
+        activeLink.classList.add('active');
+    }
+
+    // --- AÇÕES ESPECÍFICAS POR VIEW ---
+    if (v === 'unidades') {
+        carregarUnidadesVisuais(); // Carrega os cards de Unidades/Rotas (Visão Admin)
+    }
+    
+    if (v === 'postos') {
+        carregarPostosVisuais(); // Carrega os cards de Postos (Visão Admin)
+    }
+
+    if (v === 'usuarios') {
+        listarUsuarios(); // Carrega a tabela de usuários (Visão Admin/Gestor)
+        carregarUnidadesSelect(); // Carrega o select de Unidades para o modal de cadastro/edição
+    }
+    
+    if (v === 'listas') {
+        carregarListaLocaisAdmin(); // Carrega a lista de Viaturas/Locais (Visão Admin/Gestor)
+    }
+
+    if(v === 'global-history') {
+        // Inicializa o filtro de data (últimos 30 dias)
+        document.getElementById('glob-hist-start').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
+        document.getElementById('glob-hist-end').valueAsDate = new Date();
+        
+        // Carrega as opções de Local (Viatura) e Filtra por Unidade do Gestor
+        carregarUnidadesVisuais(); 
+        
+        // NOVO: Carrega as opções de Conferente (Usuário) e Filtra por Unidade do Gestor
+        carregarUsuariosFiltro(); 
+        
+        // Carrega o histórico com os filtros iniciais
+        loadGlobalHistory();
+    }
+
+    if(v === 'my-history') {
+        loadMyHistory();
+    }
+}
         function toggleMenuMobile() { 
             const s = document.getElementById('main-sidebar');
             if(s.classList.contains('mobile-active')) { 
@@ -2941,7 +2995,44 @@ transition: transform 0.2s, box-shadow 0.2s;
                 alert("Erro ao salvar alterações: " + e.message);
             }
         }
-        
+        async function carregarUsuariosFiltro() {
+    const select = document.getElementById('glob-hist-user');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Todos</option>';
+    
+    // Filtro de segurança: Gestor só vê usuários da própria unidade. Admin vê todos.
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeGestor = currentUserData.unidade;
+
+    let userQuery = db.collection('usuarios');
+    
+    if (isGestor) {
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
+    }
+
+    try {
+        const snap = await userQuery.get();
+        let users = [];
+        snap.forEach(doc => {
+            const u = doc.data();
+            // Usamos o nome completo, pois é o que está salvo nos resultados (linha 1082)
+            if (u.nome_militar_completo) {
+                users.push(u.nome_militar_completo);
+            }
+        });
+
+        users.sort().forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+
+    } catch (e) {
+        console.error("Erro ao carregar filtro de usuários:", e);
+    }
+}
         async function excluirUsuario() {
             const docId = document.getElementById('edit-user-doc-id').value;
             const guerra = document.getElementById('edit-user-guerra').value;
