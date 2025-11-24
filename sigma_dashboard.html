@@ -1642,39 +1642,76 @@
        
         async function renderCards(map) {
     const container = document.getElementById('cards-container');
-container.innerHTML = '';
+    container.innerHTML = '';
     const keys = Object.keys(map);
+    
+    // 1. CARREGAR ROTAS PARA MAPEAMENTO DE UNIDADE (Já deveria estar em cache ou Global)
+    // Para fins de correção, vamos buscar as rotas aqui para garantir o vínculo de unidade.
+    const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+    const rotas = rotasDoc.data() || {};
+
     if (keys.length === 0) { 
         container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada.</p>';
-return;
+        return;
     }
 
-    // REMOVENDO O AGRUPAMENTO POR UNIDADE
-    // Simplesmente itera sobre todos os cards no mapa
+    // 2. AGRUPAR CARDS POR UNIDADE
+    const groupedCards = {};
     keys.forEach(listaId => {
         const d = map[listaId];
-        const items = d.items || [];
-        const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
-            
-        const div = document.createElement('div');
-        div.className 
-= `sector-card ${count === 0 ? 'status-ok' : 'status-alert'}`;
-        div.innerHTML = `
-            <h3>${d.local}</h3>
-            <div class="main-stat">
-                <span class="count-value">${count === 0 ? 'OK' : count}</span>
-            </div>
-            <div class="card-footer">
-         
-       <strong>${d.conferente}</strong><br>${d.date}
-            </div>
-        `;
-        div.onclick = () => mostrarTabela(d);
-        container.appendChild(div); // Adiciona DIRETAMENTE ao container principal
+        // Busca a Unidade associada a esta lista_id na coleção 'rotas'
+        const unit = rotas[listaId]?.unidade || 'GERAL'; 
+        
+        if (!groupedCards[unit]) {
+            groupedCards[unit] = [];
+        }
+        groupedCards[unit].push(d);
     });
-if (container.children.length === 0) {
+
+    // 3. RENDERIZAR AGRUPADO POR UNIDADE
+    const sortedUnits = Object.keys(groupedCards).sort();
+    sortedUnits.forEach(unit => {
+        const cardsList = groupedCards[unit];
+        
+        // --- Cabeçalho da Unidade (Ocupa 100% da largura, forçando quebra de linha) ---
+        const unitHeader = document.createElement('h3');
+        unitHeader.className = 'unit-header';
+        
+        // Estilo corrigido para garantir 100% de largura e quebra de linha no flex container pai
+        unitHeader.style.cssText = 'display: block; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 25px; width: 100%; box-sizing: border-box; font-size: 1.2em;'; 
+        
+        unitHeader.innerHTML = `<i class="fas fa-building"></i> ${unit} (${cardsList.length} Locais C/A)`;
+        container.appendChild(unitHeader); // Adiciona o cabeçalho no container principal
+        
+        // --- Container dos Cards da Unidade (Usando cards-grid para flexibilidade interna) ---
+        const gridContainer = document.createElement('div');
+        gridContainer.className = 'cards-grid'; // Esta classe faz os cards internos ficarem LADO A LADO
+        
+        cardsList.forEach(d => {
+            const items = d.items || [];
+            const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
+            
+            const div = document.createElement('div');
+            div.className = `sector-card ${count === 0 ? 'status-ok' : 'status-alert'}`;
+            div.innerHTML = `
+                <h3>${d.local}</h3>
+                <div class="main-stat">
+                    <span class="count-value">${count === 0 ? 'OK' : count}</span>
+                </div>
+                <div class="card-footer">
+                    <strong>${d.conferente}</strong><br>${d.date}
+                </div>
+            `;
+            div.onclick = () => mostrarTabela(d);
+            gridContainer.appendChild(div); // Adiciona o card ao container grid da unidade
+        });
+        
+        container.appendChild(gridContainer); // Adiciona o grid da unidade no container principal
+    });
+    
+    if (container.children.length === 0) {
         container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada para sua unidade ou permissão.</p>';
-}
+    }
 }
         // --- 4. NOVA CONFERÊNCIA ---
         async function carregarListasParaNovaConferencia() {
