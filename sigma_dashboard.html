@@ -1736,19 +1736,81 @@ function adicionarItemPorSetor(sid) {
         alert("Erro ao criar lista: " + e.message); 
     }
 }
-        async function carregarListaLocaisAdmin() {
-            const ul = document.getElementById('lista-locais-container');
-            const doc = await db.collection('config_geral').doc('rotas').get();
-            const rotas = doc.data(); ul.innerHTML = '';
-            Object.entries(rotas).forEach(([id, info]) => {
-                if(info.ativo === false) return;
-                const li = document.createElement('li'); li.className = 'local-item';
-                const safeName = info.nome.replace(/'/g, "\\'");
-                const safeId = id.replace(/'/g, "\\'");
-                li.innerHTML = `<div class="local-info"><strong>${info.nome}</strong><span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span></div><button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">Editar</button>`;
-                ul.appendChild(li);
-            });
+        async function excluirLocalAdmin(listaId, listaNome) {
+    if (!confirm(`TEM CERTEZA? Excluir a lista: ${listaNome} (ID: ${listaId})?`)) {
+        return;
+    }
+
+    try {
+        // 1. Remova o item da coleção principal de listas (o conteúdo em si)
+        await db.collection(COLECAO_LISTAS).doc(listaId).delete();
+        
+        // 2. Remova a referência da rota na configuração geral, inativando-a (mais seguro que deletar)
+        const rotasRef = db.collection('config_geral').doc('rotas');
+        const rotasSnap = await rotasRef.get();
+        const rotasData = rotasSnap.data();
+
+        if (rotasData && rotasData[listaId]) {
+            // Marca como inativo em vez de deletar para manter o histórico de dados antigos
+            rotasData[listaId].ativo = false; 
+            await rotasRef.set(rotasData); 
         }
+
+        // 3. Limpeza de Vínculos (Desnecessário se a lógica de gerenciamento checa rotas, 
+        // mas garante que Unidades/Postos não tentem referenciar algo deletado)
+
+        // Limpa o vínculo da Unidade (opcional, mas bom)
+        // Como o vínculo de unidade/posto é mantido pelo objeto 'rotas', 
+        // a inativação da rota na etapa 2 é suficiente.
+
+        alert(`Lista "${listaNome}" excluída/inativada com sucesso!`);
+        
+        // Atualiza a lista na tela e no dashboard
+        carregarListaLocaisAdmin();
+        loadCaaData(); 
+
+    } catch (e) {
+        console.error("Erro ao excluir lista:", e);
+        alert("Erro ao excluir lista: " + e.message);
+    }
+}
+        async function carregarListaLocaisAdmin() {
+    const ul = document.getElementById('lista-locais-container');
+    const doc = await db.collection('config_geral').doc('rotas').get();
+    const rotas = doc.data();
+    ul.innerHTML = '';
+    
+    // Objeto para mapear o ID da lista para o nome do local
+    const listaNomes = {}; 
+    
+    // Mapeia as rotas e carrega os nomes
+    Object.entries(rotas).forEach(([id, info]) => {
+        if(info.ativo === false) return;
+        listaNomes[id] = info.nome;
+        
+        const li = document.createElement('li');
+        li.className = 'local-item';
+        const safeName = info.nome.replace(/'/g, "\\'");
+        const safeId = id.replace(/'/g, "\\'");
+        
+        // --- NOVO: Adicionado botão de Excluir ---
+        li.innerHTML = `
+            <div class="local-info">
+                <strong>${info.nome}</strong>
+                <span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span>
+            </div>
+            <div style="display:flex; gap: 10px;">
+                <button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}')">
+                    Editar
+                </button>
+                <button class="btn-modern-action btn-delete" onclick="excluirLocalAdmin('${safeId}', '${safeName}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        ul.appendChild(li);
+    });
+}
         
         function renderizarLista() { 
             const container = document.getElementById('lista-setores-container');
