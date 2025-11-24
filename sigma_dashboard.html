@@ -1645,8 +1645,9 @@
     container.innerHTML = '';
     const keys = Object.keys(map);
     
-    // 1. CARREGAR ROTAS PARA MAPEAMENTO DE UNIDADE (Já deveria estar em cache ou Global)
-    // Para fins de correção, vamos buscar as rotas aqui para garantir o vínculo de unidade.
+    // 1. CARREGAR ROTAS PARA MAPEAMENTO DE UNIDADE
+    // Necessário para vincular cada lista_id à sua respectiva Unidade.
+    // Usamos 'loadCaaData' para buscar o 'rotas' uma vez, mas fazemos um fetch de segurança aqui.
     const rotasDoc = await db.collection('config_geral').doc('rotas').get();
     const rotas = rotasDoc.data() || {};
 
@@ -1660,6 +1661,7 @@
     keys.forEach(listaId => {
         const d = map[listaId];
         // Busca a Unidade associada a esta lista_id na coleção 'rotas'
+        // Fallback para 'GERAL' se a unidade não estiver definida
         const unit = rotas[listaId]?.unidade || 'GERAL'; 
         
         if (!groupedCards[unit]) {
@@ -1668,30 +1670,31 @@
         groupedCards[unit].push(d);
     });
 
-    // 3. RENDERIZAR AGRUPADO POR UNIDADE
+    // 3. RENDERIZAR AGRUPADO POR UNIDADE (Agora corrigido para exibir cards lado a lado)
     const sortedUnits = Object.keys(groupedCards).sort();
     sortedUnits.forEach(unit => {
         const cardsList = groupedCards[unit];
         
-        // --- Cabeçalho da Unidade (Ocupa 100% da largura, forçando quebra de linha) ---
+        // --- Cabeçalho da Unidade ---
+        // 'width: 100%;' garante que este título force o próximo elemento para a linha de baixo (empilhamento de grupos).
         const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
-        
-        // Estilo corrigido para garantir 100% de largura e quebra de linha no flex container pai
         unitHeader.style.cssText = 'display: block; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 25px; width: 100%; box-sizing: border-box; font-size: 1.2em;'; 
         
         unitHeader.innerHTML = `<i class="fas fa-building"></i> ${unit} (${cardsList.length} Locais C/A)`;
-        container.appendChild(unitHeader); // Adiciona o cabeçalho no container principal
+        container.appendChild(unitHeader); 
         
-        // --- Container dos Cards da Unidade (Usando cards-grid para flexibilidade interna) ---
+        // --- Container dos Cards da Unidade ---
+        // A classe 'cards-grid' (que tem 'display: flex; flex-wrap: wrap;') é o que garante que os cards INTERNOS fiquem LADO A LADO.
         const gridContainer = document.createElement('div');
-        gridContainer.className = 'cards-grid'; // Esta classe faz os cards internos ficarem LADO A LADO
+        gridContainer.className = 'cards-grid'; 
         
         cardsList.forEach(d => {
             const items = d.items || [];
             const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
             
             const div = document.createElement('div');
+            // O CSS para .sector-card (max-width: 280px) permite que ele se ajuste
             div.className = `sector-card ${count === 0 ? 'status-ok' : 'status-alert'}`;
             div.innerHTML = `
                 <h3>${d.local}</h3>
