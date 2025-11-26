@@ -1902,8 +1902,6 @@ function descartarConferenciaAtiva() {
     const keys = Object.keys(map);
     
     // 1. CARREGAR ROTAS PARA MAPEAMENTO DE UNIDADE
-    // Necessário para vincular cada lista_id à sua respectiva Unidade.
-    // Usamos 'loadCaaData' para buscar o 'rotas' uma vez, mas fazemos um fetch de segurança aqui.
     const rotasDoc = await db.collection('config_geral').doc('rotas').get();
     const rotas = rotasDoc.data() || {};
 
@@ -1917,7 +1915,6 @@ function descartarConferenciaAtiva() {
     keys.forEach(listaId => {
         const d = map[listaId];
         // Busca a Unidade associada a esta lista_id na coleção 'rotas'
-        // Fallback para 'GERAL' se a unidade não estiver definida
         const unit = rotas[listaId]?.unidade || 'GERAL'; 
         
         if (!groupedCards[unit]) {
@@ -1926,31 +1923,30 @@ function descartarConferenciaAtiva() {
         groupedCards[unit].push(d);
     });
 
-    // 3. RENDERIZAR AGRUPADO POR UNIDADE (Agora corrigido para exibir cards lado a lado)
+    // 3. RENDERIZAR AGRUPADO POR UNIDADE (Restaura o agrupamento e o empilhamento)
     const sortedUnits = Object.keys(groupedCards).sort();
     sortedUnits.forEach(unit => {
         const cardsList = groupedCards[unit];
         
         // --- Cabeçalho da Unidade ---
-        // ALTERAÇÃO: Removido 'display: block;' e 'width: 100%' e ajustado o margin-top
         const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
-        unitHeader.style.cssText = 'color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
+        
+        // RESTAURAÇÃO CRÍTICA: Força o elemento a ocupar 100% da largura do container FLEX (cards-container)
+        // Isso faz com que os cards abaixo dele sejam empurrados para a próxima linha.
+        unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
         
         unitHeader.innerHTML = `<i class="fas fa-building"></i> ${unit} (${cardsList.length} Locais C/A)`;
         container.appendChild(unitHeader); 
         
         // --- Container dos Cards da Unidade ---
-        // A classe 'cards-grid' (que tem 'display: flex; flex-wrap: wrap;') é o que garante que os cards INTERNOS fiquem LADO A LADO.
-        const gridContainer = document.createElement('div');
-        gridContainer.className = 'cards-grid'; 
-        
+        // Aqui não precisamos criar um novo grid, apenas adicionamos os cards ao container principal (container).
         cardsList.forEach(d => {
             const items = d.items || [];
             const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
             
             const div = document.createElement('div');
-            // O CSS para .sector-card (max-width: 280px) permite que ele se ajuste
+            // O CSS para .sector-card (flex: 0 0 280px) permite que ele se organize lado a lado
             div.className = `sector-card ${count === 0 ? 'status-ok' : 'status-alert'}`;
             div.innerHTML = `
                 <h3>${d.local}</h3>
@@ -1962,10 +1958,8 @@ function descartarConferenciaAtiva() {
                 </div>
             `;
             div.onclick = () => mostrarTabela(d);
-            gridContainer.appendChild(div); // Adiciona o card ao container grid da unidade
+            container.appendChild(div); // Adiciona o card ao container principal (que é um flexbox)
         });
-        
-        container.appendChild(gridContainer); // Adiciona o grid da unidade no container principal
     });
     
     if (container.children.length === 0) {
