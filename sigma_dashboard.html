@@ -2147,42 +2147,49 @@ sortedUnits.forEach(unit => {
         }
 
         function iniciarConferenciaDashboard() {
-    const select = document.getElementById('select-nova-conferencia');
-    const selectedOption = select.options[select.selectedIndex];
+            const listaId = document.getElementById('dash-select-lista').value;
+            const listaSelect = document.getElementById('dash-select-lista');
+            const nomeLista = listaSelect.options[listaSelect.selectedIndex].text;
+            
+            if(!listaId) return alert("Selecione uma lista.");
+            
+            // --- CORREÇÃO: Padroniza o nome do usuário para a chave do rascunho ---
+            // Define o nome de guerra em MAIÚSCULAS para consistência.
+            const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
+            
+            // Constrói a URL com o user padronizado (para leitura no app)
+            const url = `conferencia_app.html?id=${listaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}`;
+            
+            // Salva para resume
+            localStorage.setItem('sigma_active_conf', JSON.stringify({
+                id: listaId, 
+                nomeLista: nomeLista, 
+                user: userForDraft, // <-- CHAVE PADRONIZADA
+                url: url
+            }));
+            verificarConferenciaAtiva();
 
-    if (!selectedOption || selectedOption.value === "") {
-        alert("Por favor, selecione uma Lista/Local para iniciar a conferência.");
-        return;
-    }
+            // --- LÓGICA DE ABERTURA DO IFRAME (RE-INSERIDA) ---
+            const container = document.getElementById('app-runner-container');
+            const iframe = document.getElementById('app-iframe');
+            iframe.src = url; 
+            container.style.display = 'block';
+        }
 
-    const listaId = selectedOption.value;
-    const nomeLista = selectedOption.textContent;
-
-    if (localStorage.getItem('sigma_active_conf')) {
-        alert("Já existe uma conferência ativa. Por favor, descarte-a ou conclua-a antes de iniciar uma nova.");
-        return;
-    }
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'SIGMA_FINISHED') {
+                document.getElementById('app-runner-container').style.display = 'none';
+                document.getElementById('app-iframe').src = "";
+                
+                localStorage.removeItem('sigma_active_conf');
     
-    // --- CORREÇÃO: Padroniza o nome do usuário para a chave do rascunho ---
-    // 1. Garante que 'nome_guerra' seja sempre usado para a chave.
-    // 2. Converte para MAIÚSCULAS para consistência (eliminando erros de case sensitivity).
-    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
+                verificarConferenciaAtiva();
 
-    // Define a URL de destino da conferência
-    // ATENÇÃO: É VITAL que o parâmetro nomeGuerra na URL use 'userForDraft'
-    const url = `conferencia.html?id=${listaId}&nomeGuerra=${userForDraft}&local=${encodeURIComponent(nomeLista)}`;
-
-    // Salva o resumo da conferência ativa no localStorage
-    localStorage.setItem('sigma_active_conf', JSON.stringify({
-        id: listaId, 
-        nomeLista: nomeLista, 
-        user: userForDraft, // <-- ATENÇÃO: Usa a variável padronizada para o descarte funcionar
-        url: url
-    }));
-
-    // Redireciona para a tela de conferência
-    window.location.href = url;
-}
+                loadCaaData();
+                carregarConferenciasHoje();
+                alert("Conferência salva!");
+            }
+        });
         
         // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
