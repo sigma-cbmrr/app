@@ -1934,10 +1934,31 @@ function verificarConferenciaAtiva() {
         }
         // --- FUNÇÃO PARA DESCARTAR CONFERÊNCIA ATIVA ---
 function descartarConferenciaAtiva() {
-    if (confirm("Tem certeza que deseja descartar esta conferência em andamento? Ela não poderá ser retomada!")) {
+    const activeConf = localStorage.getItem('sigma_active_conf');
+    if (!activeConf) return; // Não há nada para descartar
+
+    try {
+        const confData = JSON.parse(activeConf);
+
+        if (confirm("Tem certeza que deseja descartar esta conferência em andamento? Ela não poderá ser retomada!")) {
+            // 1. Constrói a chave do rascunho para limpeza
+            const draftKey = `sigma_draft_${confData.id}_${confData.user}`; 
+            
+            // 2. Limpa o rascunho de progresso
+            localStorage.removeItem(draftKey);
+            
+            // 3. Limpa o card de resumo
+            localStorage.removeItem('sigma_active_conf');
+            
+            // 4. Atualiza UI
+            verificarConferenciaAtiva(); 
+            alert("Conferência e rascunho descartados.");
+        }
+    } catch(e) {
+        console.error("Erro ao descartar conf:", e);
+        // Limpa o card de resumo (apenas para corrigir o loop visual)
         localStorage.removeItem('sigma_active_conf');
-        verificarConferenciaAtiva(); // Atualiza a UI removendo o card
-        alert("Conferência descartada.");
+        verificarConferenciaAtiva();
     }
 }
 
@@ -2126,43 +2147,42 @@ sortedUnits.forEach(unit => {
         }
 
         function iniciarConferenciaDashboard() {
-            const listaId = document.getElementById('dash-select-lista').value;
-            const listaSelect = document.getElementById('dash-select-lista');
-            const nomeLista = listaSelect.options[listaSelect.selectedIndex].text;
-            
-            if(!listaId) return alert("Selecione uma lista.");
-            
-            const url = `conferencia_app.html?id=${listaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(currentUserData.nome_guerra)}`;
-            
-            // Salva para resume
-            localStorage.setItem('sigma_active_conf', JSON.stringify({
-                id: listaId, 
-                nomeLista: nomeLista, 
-                user: currentUserData.nome_guerra, 
-                url: url
-            }));
-            verificarConferenciaAtiva();
+    const select = document.getElementById('select-nova-conferencia');
+    const selectedOption = select.options[select.selectedIndex];
 
-            const container = document.getElementById('app-runner-container');
-            const iframe = document.getElementById('app-iframe');
-            iframe.src = url; 
-            container.style.display = 'block';
-        }
+    if (!selectedOption || selectedOption.value === "") {
+        alert("Por favor, selecione uma Lista/Local para iniciar a conferência.");
+        return;
+    }
 
-        window.addEventListener('message', function(event) {
-            if (event.data && event.data.type === 'SIGMA_FINISHED') {
-                document.getElementById('app-runner-container').style.display = 'none';
-                document.getElementById('app-iframe').src = "";
-                
-                localStorage.removeItem('sigma_active_conf');
+    const listaId = selectedOption.value;
+    const nomeLista = selectedOption.textContent;
+
+    if (localStorage.getItem('sigma_active_conf')) {
+        alert("Já existe uma conferência ativa. Por favor, descarte-a ou conclua-a antes de iniciar uma nova.");
+        return;
+    }
     
-                verificarConferenciaAtiva();
+    // --- CORREÇÃO: Padroniza o nome do usuário para a chave do rascunho ---
+    // 1. Garante que 'nome_guerra' seja sempre usado para a chave.
+    // 2. Converte para MAIÚSCULAS para consistência (eliminando erros de case sensitivity).
+    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
 
-                loadCaaData();
-                carregarConferenciasHoje();
-                alert("Conferência salva!");
-            }
-        });
+    // Define a URL de destino da conferência
+    // ATENÇÃO: É VITAL que o parâmetro nomeGuerra na URL use 'userForDraft'
+    const url = `conferencia.html?id=${listaId}&nomeGuerra=${userForDraft}&local=${encodeURIComponent(nomeLista)}`;
+
+    // Salva o resumo da conferência ativa no localStorage
+    localStorage.setItem('sigma_active_conf', JSON.stringify({
+        id: listaId, 
+        nomeLista: nomeLista, 
+        user: userForDraft, // <-- ATENÇÃO: Usa a variável padronizada para o descarte funcionar
+        url: url
+    }));
+
+    // Redireciona para a tela de conferência
+    window.location.href = url;
+}
         
         // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
