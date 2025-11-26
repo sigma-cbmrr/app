@@ -3519,36 +3519,46 @@ document.getElementById('glob-hist-end').valueAsDate = new Date();
         }
         
         async function excluirLocalAdmin(listaId, listaNome) {
-            if (!confirm(`TEM CERTEZA? Excluir a lista: ${listaNome} (ID: ${listaId})?`)) {
-                return;
-            }
+    if (!confirm(`TEM CERTEZA? Excluir a lista: ${listaNome} (ID: ${listaId})?`)) {
+        return;
+    }
 
-            try {
-                // 1. Remova o item da coleção principal de listas (o conteúdo em si)
-                await db.collection(COLECAO_LISTAS).doc(listaId).delete();
-                
-                // 2. Remova a referência da rota na configuração geral, inativando-a (mais seguro que deletar)
-                const rotasRef = db.collection('config_geral').doc('rotas');
-                const rotasSnap = await rotasRef.get();
-                const rotasData = rotasSnap.data();
+    try {
+        // --- 1. REMOVER REGISTROS DE PENDÊNCIA (CARDS) ---
+        const resultadosSnap = await db.collection(COLECAO_RESULTADOS)
+            .where('lista_id', '==', listaId)
+            .get();
 
-                if (rotasData && rotasData[listaId]) {
-                    // Marca como inativo em vez de deletar para manter o histórico de dados antigos
-                    rotasData[listaId].ativo = false;
-                    await rotasRef.set(rotasData); 
-                }
+        const batch = db.batch();
+        resultadosSnap.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        await batch.commit();
+        // ----------------------------------------------------
 
-                alert(`Lista "${listaNome}" excluída/inativada com sucesso!`);
-                
-                // Atualiza a lista na tela e no dashboard
-                carregarListaLocaisAdmin();
-                loadCaaData(); 
+        // 2. Remova o item da coleção principal de listas (o conteúdo em si)
+        await db.collection(COLECAO_LISTAS).doc(listaId).delete();
 
-            } catch (e) {
-                console.error("Erro ao excluir lista:", e);
-                alert("Erro ao excluir lista: " + e.message);
-            }
+        // 3. Remova a referência da rota na configuração geral, inativando-a
+        const rotasRef = db.collection('config_geral').doc('rotas');
+        const rotasSnap = await rotasRef.get();
+        const rotasData = rotasSnap.data();
+
+        if (rotasData && rotasData[listaId]) {
+            // Marca como inativo em vez de deletar para manter o histórico de dados antigos
+            rotasData[listaId].ativo = false;
+            await rotasRef.set(rotasData); 
         }
+
+        alert(`Lista "${listaNome}" excluída/inativada e Cards de Pendência removidos com sucesso!`);
+        
+        carregarListaLocaisAdmin();
+        loadCaaData(); // Atualiza o Dashboard
+    } catch (e) {
+        console.error("Erro ao excluir lista:", e);
+        alert("Erro ao excluir lista: " + e.message);
+    }
+}
         
         async function carregarListaLocaisAdmin() {
     const ul = document.getElementById('lista-locais-container');
