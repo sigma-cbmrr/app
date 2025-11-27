@@ -1327,6 +1327,14 @@
         <a onclick="switchView('dashboard')" id="link-dashboard" class="active"><i class="fas fa-chart-line"></i> Dashboard & Serviço</a>
         <a onclick="switchView('my-history')" id="link-my-history"><i class="fas fa-history"></i> Minhas Conferências</a>
         <a onclick="switchView('global-history')" id="link-global-history"><i class="fas fa-folder-open"></i> Histórico da Unidade</a>
+
+        <div class="menu-section" data-required-role="gestor,admin,operacional">
+                <div class="section-title"><i class="fas fa-boxes"></i> GESTÃO DE CAUTELAS</div>
+                <a href="#" onclick="switchView('cautela-nova'); return false;" id="menu-nova-cautela" class="menu-link"><i class="fas fa-plus-circle"></i> Nova Cautela</a>
+                <a href="#" onclick="switchView('cautela-ativas'); return false;" id="menu-cautelas-ativas" class="menu-link"><i class="fas fa-clipboard-list"></i> Minhas Cautelas Ativas</a>
+                <a href="#" onclick="switchView('cautela-recebidas'); return false;" id="menu-cautelas-recebidas" class="menu-link"><i class="fas fa-inbox"></i> Cautelas Recebidas</a>
+                <a href="#" onclick="switchView('cautela-historico'); return false;" id="menu-cautelas-historico" class="menu-link"><i class="fas fa-history"></i> Histórico de Cautelas</a>
+            </div>
         
         <div class="menu-label restricted-admin-only" id="sidebar-rotulo-admin">Administração</div>
         <a onclick="switchView('unidades')" id="link-unidades" class="restricted-admin-only"><i class="fas fa-shield-alt"></i> Unidades</a>
@@ -1739,6 +1747,7 @@ Escolha a Viatura / Lista</label>
         let allLists = [];
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
+        let allUsersData = [];
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -1760,35 +1769,43 @@ Escolha a Viatura / Lista</label>
             }
         });
 
-        function setupUIBasedOnRole() {
-    const role = currentUserData.role || 'operacional';
-    const unit = currentUserData.unidade || 'N/D';
-// --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
-    const roleDisplay = document.getElementById('user-role-display');
-// Verifica se o elemento existe antes de tentar definir o texto
-    if (roleDisplay) { 
-        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
-    }
-    // ------------------------------------------
+       function setupUIBasedOnRole() {
+    const role = currentUserData.role || 'operacional';
+    const unit = currentUserData.unidade || 'N/D';
+    // --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
+    const roleDisplay = document.getElementById('user-role-display');
+    // Verifica se o elemento existe antes de tentar definir o texto
+    if (roleDisplay) {
+        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
+    }
+    // ------------------------------------------
 
-    atualizarSaudacao(currentUserData);
-// --- 1. Definindo as Permissões Reais de Acesso ---
-    const p = currentUserData.permissoes ||
-{};
-// Objeto de Permissões
-    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
-    const canViewAdminTools = role === 'admin';
-    const canViewDashboardCards = role === 'admin' ||
-    (isGestorOuAdmin && p.canViewDashboardCards);
-    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
-    const canManageUnits = role === 'admin';
-// Assume que Gerenciamento de Unidades é Admin-Only
-    const canManagePosts = role === 'admin' ||
-(isGestorOuAdmin && p.canManagePosts);
-    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
-    const canManageUnitLists = role === 'admin' ||
-(isGestorOuAdmin && p.canManageUnitLists);
+    atualizarSaudacao(currentUserData);
+    
+    // --- INSERÇÃO DO CARREGAMENTO DE USUÁRIOS AQUI ---
+    // É seguro chamar esta função, mas precisamos garantir que o corpo dela seja "async".
+    // Já que você a definiu separadamente, vamos chamá-la.
+    // NOTE: Se o carregamento de usuários for demorado, adicione um await.
+    
+    carregarTodosUsuarios(); // Chamada para carregar a lista em segundo plano
 
+    // --- 1. Definindo as Permissões Reais de Acesso ---
+    const p = currentUserData.permissoes || {};
+    // Objeto de Permissões
+    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
+    const canViewAdminTools = role === 'admin';
+    const canViewDashboardCards = role === 'admin' ||
+        (isGestorOuAdmin && p.canViewDashboardCards);
+    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
+    const canManageUnits = role === 'admin';
+    // Assume que Gerenciamento de Unidades é Admin-Only
+    const canManagePosts = role === 'admin' ||
+        (isGestorOuAdmin && p.canManagePosts);
+    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
+    const canManageUnitLists = role === 'admin' ||
+        (isGestorOuAdmin && p.canManageUnitLists);
+
+   
     // --- 2. Aplicação das Restrições na UI (Corrigida e Segura) ---
     
     // Reseta visibilidade dos links de Admin.
@@ -1906,7 +1923,7 @@ function verificarConferenciaAtiva() {
     if (activeConf) {
         try {
             const confData = JSON.parse(activeConf);
-            if(confData.user === currentUserData.nome_guerra) {
+            if(confData.user === ca.nome_guerra) {
                 container.innerHTML = `
                     <div class="op-card resume">
                         <button class="btn-resume-close" onclick="event.stopPropagation(); descartarConferenciaAtiva()">
@@ -2750,6 +2767,31 @@ function reimprimirPDF(data) {
         function logout() {
             sairDoSistema();
         }
+        /**
+ * Carrega todos os usuários do sistema em memória para pesquisa rápida (autofill).
+ * @returns {Promise<void>}
+ */
+async function carregarTodosUsuarios() {
+    try {
+        const snapshot = await db.collection('usuarios').get();
+        
+        allUsersData = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                uid: doc.id,
+                posto: data.posto || '',
+                guerra: data.nome_guerra || '',
+                completo: data.nome_militar_completo || 'N/D',
+                // Inclui outros campos relevantes para identificação rápida
+                unidade: data.unidade || 'N/A'
+            };
+        });
+        
+        console.log(`[SIGMA] ${allUsersData.length} usuários carregados para Cautela.`);
+    } catch (e) {
+        console.error("Erro ao carregar lista de usuários:", e);
+    }
+}
         
         function switchView(v) {
         // Esconde todas as seções de visualização
