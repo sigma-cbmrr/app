@@ -1673,20 +1673,46 @@ Escolha a Viatura / Lista</label>
     </div>
     
     <div id="modal-user-manager" class="modal-overlay">
-        <div class="modal-content">
-            <button class="close-btn" onclick="document.getElementById('modal-user-manager').style.display='none'"><i class="fas fa-times"></i></button>
+        <button class="close-btn" onclick="document.getElementById('modal-user-manager').style.display='none'"><i class="fas fa-times"></i></button>
             <h2>Gerenciar Militar</h2>
             
             <input type="hidden" id="edit-user-doc-id">
             
+            <label for="edit-posto-grad">Posto/Graduação:</label>
+            <select id="edit-posto-grad" required>
+                <option value="">Selecione o Posto/Graduação</option>
+                <option value="CEL">Cel</option>
+                <option value="TC">TC</option>
+                <option value="MAJ">Maj</option>
+                <option value="CAP">Cap</option>
+                <option value="1TEN">1° Ten</option>
+                <option value="2TEN">2° Ten</option>
+                <option value="ASP">Asp</option>
+                <option value="SUBTEN">Sub Ten</option>
+                <option value="1SGT">1° Sgt</option>
+                <option value="2SGT">2° Sgt</option>
+                <option value="3SGT">3° Sgt</option>
+                <option value="CB">CB</option>
+                <option value="SD">SD</option>
+            </select>
+            
+            <label for="edit-quadro">Quadro Militar:</label>
+            <select id="edit-quadro" required>
+                <option value="">Selecione o Quadro</option>
+                <option value="QOC">QOC</option>
+                <option value="QOA">QOA</option>
+                <option value="QOE">QOE</option>
+                <option value="QOS">QOS</option>
+                <option value="QPBM">QPBM</option>
+                <option value="QPM">QPM</option>
+                <option value="QPE">QPE</option>
+            </select>
+            
             <label>Nome de Guerra</label>
             <input type="text" id="edit-user-guerra">
 
-            <label>Posto/Graduação</label>
-            <input type="text" id="edit-user-posto">
-
-            <label>Nome Completo</label>
-            <input type="text" id="edit-user-completo">
+            <label for="edit-user-completo">Nome Completo (Somente Leitura)</label>
+            <input type="text" id="edit-user-completo" required readonly>
 
             <label>E-mail (Login) - *Somente Leitura*</label>
             <input type="email" id="edit-user-email" disabled style="background-color: #eee;">
@@ -1712,6 +1738,11 @@ Escolha a Viatura / Lista</label>
                     <label><input type="checkbox" id="perm-manage-users"> Gerenciar Usuários da Unidade</label>
                     <label><input type="checkbox" id="perm-manage-lists"> Gerenciar Listas da Unidade</label>
                 </div>
+            </div>
+
+            <div class="modal-buttons" style="justify-content: space-between;">
+                <button class="btn-modern-action btn-delete" onclick="excluirUsuario()">Excluir Militar</button>
+                <button class="btn-modern-action btn-sync" onclick="salvarAlteracoesUsuario()">Salvar Alterações</button>
             </div>
 
             <div class="modal-buttons" style="justify-content: space-between;">
@@ -2368,58 +2399,71 @@ sortedUnits.forEach(unit => {
         container.innerHTML='Erro ao carregar dados.';
     }
 }
-        function abrirGestaoUnidade(unitName, allRotas) {
-            document.getElementById('edit-unit-original-name').value = unitName;
-            document.getElementById('edit-unit-name-input').value = unitName;
-            const checklist = document.getElementById('unit-lists-checklist');
-            checklist.innerHTML = '';
-            
-            Object.entries(allRotas).forEach(([id, r]) => {
-                if(r.ativo === false) return;
-                const div = document.createElement('div');
-                div.className = 'checklist-item';
-                const isChecked = (r.unidade === unitName) ? 'checked' : '';
-                
-                div.innerHTML = `<input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> <label for="chk-${id}" style="margin:0;font-weight:normal;">${r.nome} (${r.posto})</label>`;
-                checklist.appendChild(div);
-            });
-            document.getElementById('modal-unit-manager').style.display = 'flex';
-        }
+        // Exemplo: Função que é executada ao clicar no usuário na lista
+// Se o nome da sua função for diferente de 'abrirGestaoUsuario', use o seu nome.
+async function abrirGestaoUsuario(docId) { 
+    // ... (Seu código de busca do userDocId e obtenção do userData) ...
+    
+    // Seus campos originais que buscam dados:
+    document.getElementById('edit-user-doc-id').value = docId;
+    document.getElementById('edit-user-email').value = userData.email || '';
+    
+    // --- MUDANÇAS AQUI: Para os Novos SELECTs e Readonly ---
+    
+    // Posto/Graduação (Agora SELECT: ID 'edit-posto-grad')
+    document.getElementById('edit-posto-grad').value = userData.posto || ''; 
+    
+    // Quadro (Novo SELECT: ID 'edit-quadro')
+    document.getElementById('edit-quadro').value = userData.quadro || ''; 
+    
+    // Nome de Guerra (Mantido)
+    document.getElementById('edit-user-guerra').value = userData.nome_guerra || '';
 
-        async function salvarAlteracoesUnidade() {
-            const oldName = document.getElementById('edit-unit-original-name').value;
-            const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
-            if(!newName) return alert("Nome inválido");
-            
-            try {
-                const unitsRef = db.collection('config_geral').doc('unidades');
-                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayRemove(oldName) });
-                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayUnion(newName) });
-                
-                const rotasRef = db.collection('config_geral').doc('rotas');
-                const rotasSnap = await rotasRef.get();
-                const rotasData = rotasSnap.data();
-                const checkboxes = document.querySelectorAll('#unit-lists-checklist input[type="checkbox"]');
-                
-                checkboxes.forEach(chk => {
-                    const id = chk.value;
-                    if (chk.checked) {
-                        rotasData[id].unidade = newName; 
-                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: newName });
-                    } else if (rotasData[id].unidade === oldName) {
-                        rotasData[id].unidade = null; 
-                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: null });
-                    }
-                });
-                
-                await rotasRef.set(rotasData);
-                alert("Atualizado!"); 
-                document.getElementById('modal-unit-manager').style.display = 'none'; 
-                carregarUnidadesVisuais();
-            } catch(e) { 
-                alert("Erro: " + e.message);
-            }
-        }
+    // Nome Completo (Somente Leitura: ID 'edit-user-completo')
+    document.getElementById('edit-user-completo').value = userData.nome_completo || '';
+    // A propriedade readonly foi aplicada diretamente no HTML, mas garantimos o valor
+    
+    // Perfil e Unidade (Mantidos)
+    document.getElementById('edit-user-role').value = userData.role || 'operacional';
+    // ... (restante da lógica de carregamento de Unidade e Permissões) ...
+    
+    // Exibe o modal:
+    document.getElementById('modal-user-manager').style.display = 'flex';
+}
+
+        async function salvarAlteracoesUsuario() {
+    const docId = document.getElementById('edit-user-doc-id').value;
+    
+    // --- LENDO DOS NOVOS SELECTs ---
+    const novoPosto = document.getElementById('edit-posto-grad').value; // Lê do SELECT
+    const novoQuadro = document.getElementById('edit-quadro').value;     // Lê do NOVO SELECT
+    // -------------------------------
+    
+    const novoNomeGuerra = document.getElementById('edit-user-guerra').value.trim();
+    const novoRole = document.getElementById('edit-user-role').value;
+    const novaUnidade = document.getElementById('edit-user-unit').value; // Se usada
+    
+    // ... (Seu código de validação) ...
+    
+    try {
+        // ... (Seu código de loader) ...
+
+        // Envia atualização para o Firestore
+        await db.collection('users').doc(docId).update({
+            nome_guerra: novoNomeGuerra,
+            posto: novoPosto,   // Atualiza Posto
+            quadro: novoQuadro, // Atualiza Quadro
+            role: novoRole,
+            unidade: novaUnidade, // Se usada
+            // nome_completo não é atualizado pois é 'readonly'
+        });
+
+        // ... (Seu código de sucesso) ...
+        
+    } catch (error) {
+        // ... (Seu código de tratamento de erro) ...
+    }
+}
 
         async function excluirUnidade() {
             const name = document.getElementById('edit-unit-original-name').value;
@@ -3321,50 +3365,66 @@ document.getElementById('glob-hist-end').valueAsDate = new Date();
 }
         
         async function abrirGestaoUsuario(docId) {
-            try {
-                const doc = await db.collection('usuarios').doc(docId).get();
-                if (!doc.exists) return alert("Usuário não encontrado.");
-                
-                const u = doc.data();
-                const permissoes = u.permissoes || {}; // Inicializa o objeto de permissões
-                
-                // Preenche o campo de unidades
-                await carregarUnidadesSelect('edit-user-unit');
+    try {
+        const doc = await db.collection('usuarios').doc(docId).get();
+        if (!doc.exists) return alert("Usuário não encontrado.");
+        
+        const u = doc.data();
+        const permissoes = u.permissoes || {}; // Inicializa o objeto de permissões
+        
+        // Preenche o campo de unidades
+        await carregarUnidadesSelect('edit-user-unit');
 
-                document.getElementById('edit-user-doc-id').value = docId;
-                document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
-                document.getElementById('edit-user-posto').value = u.posto || '';
-                document.getElementById('edit-user-completo').value = u.nome_militar_completo || '';
-                document.getElementById('edit-user-email').value = u.email || 'N/D';
-                document.getElementById('edit-user-role').value = u.role || 'operacional';
-                document.getElementById('edit-user-unit').value = u.unidade || '';
+        document.getElementById('edit-user-doc-id').value = docId;
+        
+        // --- PREENCHIMENTO DOS NOVOS CAMPOS SELECT ---
+        
+        // Posto/Graduação (Novo SELECT: ID 'edit-posto-grad')
+        document.getElementById('edit-posto-grad').value = u.posto || ''; 
+        
+        // Quadro (Novo SELECT: ID 'edit-quadro')
+        document.getElementById('edit-quadro').value = u.quadro || ''; 
+        
+        // Nome de Guerra (Mantido)
+        document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
+        
+        // Nome Completo (READONLY)
+        document.getElementById('edit-user-completo').value = u.nome_militar_completo || '';
+        // Nota: O 'readonly' foi adicionado no HTML, o JS apenas preenche o valor.
 
-                // --- NOVA LÓGICA DE PERMISSÕES ---
-                const roleSelect = document.getElementById('edit-user-role');
-                const permFields = document.getElementById('user-permissions-fields');
-                
-                // Mostra o bloco de permissões apenas se a role for 'gestor' ou 'admin'
-                permFields.style.display = (u.role === 'gestor' || u.role === 'admin') ? 'block' : 'none';
+        // E-mail (Mantido disabled)
+        document.getElementById('edit-user-email').value = u.email || 'N/D';
+        
+        // Perfil e Unidade (Mantidos)
+        document.getElementById('edit-user-role').value = u.role || 'operacional';
+        document.getElementById('edit-user-unit').value = u.unidade || '';
 
-                // Preenche os checkboxes com base nos dados do Firestore (se existir)
-                document.getElementById('perm-view-cards').checked = permissoes.canViewDashboardCards || false;
-                document.getElementById('perm-view-history').checked = permissoes.canViewUnitHistory || false;
-                document.getElementById('perm-manage-posts').checked = permissoes.canManagePosts || false;
-                document.getElementById('perm-manage-users').checked = permissoes.canManageUnitUsers || false;
-                document.getElementById('perm-manage-lists').checked = permissoes.canManageUnitLists || false;
+        // --- LÓGICA DE PERMISSÕES ---
+        const roleSelect = document.getElementById('edit-user-role');
+        const permFields = document.getElementById('user-permissions-fields');
+        
+        // Mostra o bloco de permissões apenas se a role for 'gestor' ou 'admin'
+        permFields.style.display = (u.role === 'gestor' || u.role === 'admin') ? 'block' : 'none';
 
-                // Listener para mostrar/ocultar as permissões ao mudar a Role
-                roleSelect.onchange = function() {
-                    permFields.style.display = (this.value === 'gestor' || this.value === 'admin') ? 'block' : 'none';
-                };
-                // ---------------------------------
+        // Preenche os checkboxes com base nos dados do Firestore (se existir)
+        document.getElementById('perm-view-cards').checked = permissoes.canViewDashboardCards || false;
+        document.getElementById('perm-view-history').checked = permissoes.canViewUnitHistory || false;
+        document.getElementById('perm-manage-posts').checked = permissoes.canManagePosts || false;
+        document.getElementById('perm-manage-users').checked = permissoes.canManageUnitUsers || false;
+        document.getElementById('perm-manage-lists').checked = permissoes.canManageUnitLists || false;
 
-                document.getElementById('modal-user-manager').style.display = 'flex';
-            } catch(e) {
-                console.error(e);
-                alert("Erro ao abrir edição: " + e.message);
-            }
-        }
+        // Listener para mostrar/ocultar as permissões ao mudar a Role
+        roleSelect.onchange = function() {
+            permFields.style.display = (this.value === 'gestor' || this.value === 'admin') ? 'block' : 'none';
+        };
+        // ---------------------------------
+
+        document.getElementById('modal-user-manager').style.display = 'flex';
+    } catch(e) {
+        console.error(e);
+        alert("Erro ao abrir edição: " + e.message);
+    }
+}
         
         async function salvarAlteracoesUsuario() {
             const docId = document.getElementById('edit-user-doc-id').value;
