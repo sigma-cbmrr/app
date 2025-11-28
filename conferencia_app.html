@@ -414,62 +414,57 @@
 
         async function finalizarConferencia() {
             const btn = document.getElementById('btn-finalizar');
-if (btn.disabled) return;
-            btn.textContent = "Salvando..."; btn.disabled = true;
+            if (btn.disabled) return;
+                btn.textContent = "Salvando..."; btn.disabled = true;
             try {
                 const p = userInfo;
-const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+                const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
                 const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
-const clean = (val) => val === undefined ? null : val;
+                const clean = (val) => val === undefined ? null : val;
                 let updated = false;
                 let itensRelatorio = [];
-let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+                let itensCaa = []; let itemsCount = 0; let cA_count = 0;
                 
                 // FUNÇÃO ATUALIZADA: GARANTE A PERSISTÊNCIA E PRESERVAÇÃO
-const atualizarListaDB = (itemOuTomb, uid) => {
+            const atualizarListaDB = (itemOuTomb, uid) => {
                     const s = window.itemStatus[uid];
-if(!s) return;
+                    if(!s) return;
                     
                     if (s.status === 'C/A' || s.status === 'KEEP') {
-                        let old = itemOuTomb.pendencia ||
-{};
-                        let obsOriginalCarimbo = old.obsOriginalCarimbo; // 1. Preserva o carimbo existente
+                        let old = itemOuTomb.pendencia || {};
+                        let obsOriginalCarimbo = old.obsOriginalCarimbo;
                         
-                        // 2. Se for o primeiro lançamento de C/A (o campo ainda não existe), cria o carimbo original
-                        if 
-(!obsOriginalCarimbo) {
-                            // Usa o conferente e a data ATUAL como carimbo de quem iniciou o C/A
+                        // 1. LÓGICA CRÍTICA DE PRESERVAÇÃO: Se a observação antiga existe E o novo texto (s.obs) é vazio, 
+                        // assume-se que o usuário quer manter o histórico. Isso previne o bug do campo vazio na re-confirmação.
+                        let novoTextoCru = s.obs;
+                        if (old.obs && !novoTextoCru) { 
+                            novoTextoCru = old.obs;
+                        }
+
+                        // 2. Persiste o Carimbo Original
+                        if (!obsOriginalCarimbo) {
                             obsOriginalCarimbo = `${conferente}|${new Date().toLocaleDateString('pt-BR')}`;
-}
+                        }
                         
-                        // 3. Monta o novo objeto pendencia (reemplaçando o antigo) E INCLUI O CAMPO PERSISTIDO:
+                        // 3. GERA O HISTÓRICO LINEAR E MONTA O NOVO OBJETO PENDENCIA
+                        // A função montarHistoricoLinear é chamada aqui, usando o texto antigo e o novo texto (que agora pode ser o antigo, se estava vazio)
+                        const obsComHistorico = montarHistoricoLinear(old.obs, novoTextoCru, conferente, new Date().toLocaleString('pt-BR'));
+                        
                         itemOuTomb.pendencia = { 
-           
-                 obs: s.obs, 
+                            obs: obsComHistorico, // <--- CAMPO CRÍTICO: Agora salva a string de histórico completa
                             quem: conferente, 
                             data: firebase.firestore.Timestamp.now(), 
-                     
-       statusAdmin: clean(old.statusAdmin), 
+                            statusAdmin: clean(old.statusAdmin), 
                             adminObs: clean(old.adminObs),
-                            // CAMPO CRÍTICO: Persiste o carimbo original no novo objeto
-                         
-   obsOriginalCarimbo: obsOriginalCarimbo // <-- CORREÇÃO: Garante que o campo exista no itemOuTomb.pendencia
+                            obsOriginalCarimbo: obsOriginalCarimbo
                         };
-updated=true;
+                        updated=true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) { 
-                        // Se o status é S/A e havia pendência, deleta tudo.
-delete itemOuTomb.pendencia; 
+                        delete itemOuTomb.pendencia; 
                         updated=true;
                     }
                 };
-dadosConferencia.forEach(setor => {
-                    setor.itens.forEach(item => {
-                        if(item.tipo === 'single') atualizarListaDB(item, item.id);
-                        else if(item.tombamentos) item.tombamentos.forEach(t => atualizarListaDB(t, `${item.id}-${t.tomb}`));
-                   
- });
-                });
                 
                 // ----------------------------------------------------------------------
                 // SEGUNDO LOOP: Constrói os arrays de relatório (itensRelatorio e itensCaa)
@@ -478,29 +473,34 @@ dadosConferencia.forEach(setor => {
                 dadosConferencia.forEach(setor => {
                     setor.itens.forEach(item => {
                         const process = (id, nome, pend) => {
-                 
-           const s = window.itemStatus[id];
+                            const s = window.itemStatus[id];
                             if (s && s.status !== 'pending') {
                                 itemsCount++;
                     
-            let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
+                                let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
                                 if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
-                                let finalObs = s.obs;
-    
-                            if (s.status === 'KEEP' && pend) finalObs = pend.obs;
-                                if (s.status === 'S/A') finalObs = null;
+                                let finalObs = s.obs; // Removida a atribuição inicial
+
+                                // LÓGICA CORRIGIDA: Usa o PEND.OBS se o status for C/A ou KEEP.
+                                if ((s.status === 'C/A' || s.status === 'KEEP') && pend) {
+                                    // PEND é a pendência ATUALIZADA no loop anterior (atualizarListaDB).
+                                    // Garante que o histórico completo seja usado para o relatório.
+                                    finalObs = pend.obs;
+                                } else {
+                                    // Caso contrário, usa a observação local ou nula.
+                                    finalObs = s.obs;
+                                }
+                                
+                                if (s.status === 'S/A') finalObs = null; 
 
                           
-      const dadosItem = { 
+                                const dadosItem = { 
                                     nomeCompleto: nome, status: finalStatus, obs: finalObs, quantidade: item.quantidadeEsperada || 1, id: id,
-                                    statusAdmin: (s.status !== 'S/A' && pend) ?
-clean(pend.statusAdmin) : null, 
-                                    adminObs: (s.status !== 'S/A' && pend) ?
-clean(pend.adminObs) : null,
-                                    setor: setor.nome, // <--- AQUI ESTÁ A CORREÇÃO PARA O PDF!
-                                    // CAMPO CRÍTICO ADICIONADO: Garante que o carimbo original chegue ao relatório
+                                    statusAdmin: (s.status !== 'S/A' && pend) ? clean(pend.statusAdmin) : null, 
+                                    adminObs: (s.status !== 'S/A' && pend) ? clean(pend.adminObs) : null,
+                                    setor: setor.nome, 
                                     obsOriginalCarimbo: pend ? pend.obsOriginalCarimbo : null
-};
+                                };
                                 itensRelatorio.push(dadosItem);
                                 if (s.status === 'C/A' || s.status === 'KEEP') itensCaa.push(dadosItem);
 }
