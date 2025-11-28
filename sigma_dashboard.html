@@ -2932,13 +2932,17 @@ function reimprimirPDF(data) {
     }
 }
         // --- FUNÇÃO PARA FORMATAR OBSERVAÇÕES C/A NO DASHBOARD ---
-        function formatarObsHistorico(dataItem, conferente, dataConferencia) { 
+        function formatarObsHistorico(dataItem) { 
             const obsBruta = dataItem.obs || '';
             if (!obsBruta) return '-';
 
+            // NOVO: Pega o carimbo original persistido no item (ex: "Autor|Data")
+            const originalCarimbo = dataItem.obsOriginalCarimbo ? dataItem.obsOriginalCarimbo.split('|') : null;
+            const conferenteOriginal = originalCarimbo ? originalCarimbo[0] : 'Desconhecido';
+            const dataOriginal = originalCarimbo ? originalCarimbo[1] : 'S/D';
+            
             const adminObs = dataItem.adminObs;
             const statusAdmin = dataItem.statusAdmin;
-            
             const separador = ' | + NOVA: ';
             let linhasHtml = '';
             
@@ -2958,24 +2962,21 @@ function reimprimirPDF(data) {
                 const match = p.match(regex);
 
                 if (match) {
-                    // Carimbo existente: "DESCRIÇÃO" (Por: AUTOR em DATA)
-                    // Usa <strong> no autor
+                    // Carimbo existente (Cadeia): OK
                     linhasHtml += `<li><strong>${match[2]}</strong> em ${match[3]}: ${match[1]}</li>`;
                 } else if (p.trim() !== '') {
-                    // Texto Cru (Primeiro Carimbo): Usa o conferente e a data da conferência como fallback
-                    linhasHtml += `<li><strong>${conferente}</strong> em ${dataConferencia}: ${p}</li>`; 
+                    // Texto Cru (Primeiro Carimbo): USA O CARIMBO ORIGINAL PERSISTIDO
+                    linhasHtml += `<li><strong>${conferenteOriginal}</strong> em ${dataOriginal}: ${p}</li>`; 
                 }
             });
 
             // 3. Adiciona a resposta da gestão, se houver
             if (statusAdmin && adminObs) {
                 const adminStatus = statusAdmin.toUpperCase();
-                // Usa <strong> para destacar a resposta da gestão
                 linhasHtml += `<li><strong style="color:#0d47a1;">[${adminStatus}] Gestão:</strong> ${adminObs}</li>`;
             }
 
             if (linhasHtml) {
-                 // Retorna o HTML completo em formato de lista (consistente com o App de Conferência)
                  return `<ul style="list-style:none; padding:0; margin:0; font-size:0.9em; line-height:1.3;">${linhasHtml}</ul>`;
             }
             return '-';
@@ -3111,7 +3112,7 @@ document.getElementById('no-issues-msg').style.display = 'none';
                     // REMOVIDA: const obsFormatada = (i.obs || '').replace(/\n/g, '<br>');
                     
                     // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO E CORREÇÃO DA REFERÊNCIA
-                    const obsFormatadaHtml = formatarObsHistorico(i, data.conferente, data.date.split(' ')[0]);
+                    const obsFormatadaHtml = formatarObsHistorico(i);
                     const itemComDocId = { ...i, docId: data.docId }; 
                     
                     // USO CORRETO DO obsFormatadaHtml NA CÉLULA DA OBSERVAÇÃO
