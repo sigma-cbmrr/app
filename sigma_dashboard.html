@@ -2930,7 +2930,55 @@ function reimprimirPDF(data) {
         alert("Erro ao gerar PDF: " + e.message);
     }
 }
+        // --- FUNÇÃO PARA FORMATAR OBSERVAÇÕES C/A NO DASHBOARD ---
+        function formatarObsHistorico(dataItem) {
+            const obsBruta = dataItem.obs || '';
+            if (!obsBruta) return '-';
 
+            const adminObs = dataItem.adminObs;
+            const statusAdmin = dataItem.statusAdmin;
+            
+            // Simulação da lógica de carimbo do conferencia_app
+            const separador = ' | + NOVA: ';
+            let linhasHtml = '';
+            
+            // 1. Processa a observação do militar
+            let partes = [];
+            if (obsBruta.includes(separador)) {
+                partes = obsBruta.split(separador);
+            } else if (obsBruta.trim() !== '') {
+                partes.push(obsBruta);
+            }
+
+            // 2. Transforma cada parte em uma linha formatada (incluindo o carimbo)
+            partes.forEach(p => {
+                p = p.trim();
+                // Regex para identificar o formato assinado: "DESCRIÇÃO" (Por: AUTOR em DATA)
+                const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
+                const match = p.match(regex);
+
+                if (match) {
+                    // Item com carimbo
+                    linhasHtml += `<li><strong>${match[2]}</strong> em ${match[3]}: ${match[1]}</li>`;
+                } else if (p.trim() !== '') {
+                    // Item sem carimbo (Provavelmente o primeiro lançamento)
+                    // Usamos os dados da conferência original (conferente/data) como fallback
+                    linhasHtml += `<li>${p}</li>`; 
+                }
+            });
+
+            // 3. Adiciona a resposta da gestão, se houver
+            if (statusAdmin && adminObs) {
+                const adminStatus = statusAdmin.toUpperCase();
+                // Usa <br> para separar
+                linhasHtml += `<li><strong style="color:#0d47a1;">[${adminStatus}] Gestão:</strong> ${adminObs}</li>`;
+            }
+
+            if (linhasHtml) {
+                 return `<ul style="list-style:none; padding:0; margin:0; font-size:0.9em; line-height:1.3;">${linhasHtml}</ul>`;
+            }
+            return '-';
+        }
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
         
         function sairDoSistema() { 
@@ -3063,7 +3111,7 @@ const activeLink = document.getElementById(`link-${v}`);
                   
                     const itemComDocId = { ...i, docId: data.docId }; 
                     
-                    tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
+                    tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatadaHtml}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
                     const td = tr.insertCell(); 
                     
                     // Passa o item enriquecido
