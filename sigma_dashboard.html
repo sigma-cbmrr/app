@@ -1984,26 +1984,37 @@ async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
     
-    // (Aproveita a lógica de carregarConferenciasHoje, mas apenas conta)
     try {
-        const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(20).get();
+        // --- 1. CONTAGEM TOTAL (NOVO) ---
+        // Busca TODAS as conferências do usuário (sem filtro de data)
+        const snapTotal = await db.collection(COLECAO_RESULTADOS)
+            .where('conferente', '==', currentUserData.nome_militar_completo)
+            .get();
+            
+        const totalConferences = snapTotal.size; // ✅ Captura o tamanho total da coleção
+        if (countEl) countEl.textContent = totalConferences; // Atualiza o card com o total
+        
+        // --- 2. CONTAGEM E LISTAGEM DO DIA (EXISTENTE) ---
+        // Reutilizamos o snapTotal para filtrar APENAS os documentos de hoje, 
+        // evitando uma segunda requisição grande ao Firestore.
+        
         const hojeStr = new Date().toLocaleDateString('pt-BR');
-        let count = 0;
+        let countToday = 0; // Contagem das conferências de hoje
         let html = '';
         
-        snap.forEach(d => {
+        snapTotal.forEach(d => {
             const dt = d.data().timestamp.toDate();
+            // Filtro de data para listar apenas as de hoje
             if(dt.toLocaleDateString('pt-BR') === hojeStr) {
                 html += criarItemHistoricoHTML(d.data());
-                count++;
+                countToday++; // Contagem de hoje
             }
         });
         
-        // Atualiza o Card
-        if(countEl) countEl.textContent = count;
-        
         // Atualiza a lista de hoje
-        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+        ul.innerHTML = html ||
+        '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+        
     } catch(e) { 
         console.error("Erro ao carregar dados operacionais:", e);
         if(countEl) countEl.textContent = 'Erro';
