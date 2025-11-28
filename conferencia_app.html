@@ -243,12 +243,44 @@
             linhas.forEach(l => { if (l.includes('(Admin):')) { const parts = l.split('): '); html += `<li><span class="texto-admin">⚠️ ${parts[0]}):</span> Resp: ${parts[1]}</li>`; } else { html += `<li class="linha-obs">• ${l}</li>`; } });
             html += '</ul>'; return html;
         };
-        const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
-            const separator = ' | + NOVA: ';
-            if (obsAnterior.includes(separator)) {
-                let partes = obsAnterior.split(separator); let ultimaParte = partes.pop(); let resto = partes.join(separator); let ultimaAssinada = `"${ultimaParte}" (Por: ${autorAnterior} em ${dataAnterior})`; return `${resto}${separator}${ultimaAssinada}${separator}${novoTexto}`;
-            } else { let anteriorAssinado = `"${obsAnterior}" (Por: ${autorAnterior} em ${dataAnterior})`; return `${anteriorAssinado}${separator}${novoTexto}`; }
-        };
+        function montarHistoricoLinear(textoAntigo, novoTexto, autorAtual, dataAtual) {
+            // Supondo que a função clean(texto) exista para limpar texto para comparação
+            const clean = (val) => val ? val.replace(/\s+/g, ' ').trim() : ''; 
+            const cleanAntigo = clean(textoAntigo); 
+            const cleanNovo = clean(novoTexto);
+            
+            // Pega apenas a data para o carimbo (formato dd/mm/aaaa)
+            const carimboData = dataAtual.split(' ')[0]; 
+            const separador = ' | + NOVA: ';
+
+            // 1. Caso de ALTERAÇÃO no texto (Conteúdo mudou): 
+            if (textoAntigo && cleanAntigo !== cleanNovo) {
+                // Assina o texto antigo (que pode ser uma cadeia de histórico completa) antes de adicionar o novo.
+                const carimboAntigo = `"${textoAntigo}" (Por: ${autorAtual} em ${carimboData})`; 
+                return carimboAntigo + separador + novoTexto;
+            }
+            
+            // 2. Caso de RE-CONFIRMAÇÃO (Texto Idêntico): STARTING THE CHAIN
+            if (textoAntigo && cleanAntigo === cleanNovo) {
+                
+                // CRÍTICO: Verifica se o texto é RAW (não formatado como histórico)
+                // Se a string não contém o separador de histórico E não começa com aspas (formato de carimbo assinado)
+                const isRawText = !textoAntigo.includes(separador) && textoAntigo.charAt(0) !== '"';
+
+                if (isRawText) {
+                    // Transforma o texto RAW (ex: "teste") no primeiro carimbo: "teste" (Por: AutorAtual em Data)
+                    // Este carimbo é de QUEM ESTÁ AGORA CONFERINDO (o militar atual), que está atestando a permanência do texto.
+                    return `"${textoAntigo}" (Por: ${autorAtual} em ${carimboData})`;
+                }
+
+                // Se já faz parte de uma cadeia de histórico (e o novo é idêntico), 
+                // simplesmente retorna o texto antigo para evitar carimbos duplicados.
+                return textoAntigo; 
+            }
+
+            // 3. Caso padrão (texto novo ou texto antigo vazio)
+            return novoTexto;
+        }
 
         function renderizarConferencia() {
             const mainContent = document.getElementById('main-content'); const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
