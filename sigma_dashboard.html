@@ -2435,7 +2435,59 @@ sortedUnits.forEach(unit => {
     }
 }
 
-        loadGlobalHistory
+    async function loadGlobalHistory() {
+    const ul = document.getElementById('global-history-list');
+    ul.innerHTML = '<li>Buscando...</li>';
+    
+    const dI = new Date(document.getElementById('glob-hist-start').value + 'T00:00:00');
+    const dF = new Date(document.getElementById('glob-hist-end').value + 'T23:59:59');
+    const localFilter = document.getElementById('glob-hist-local').value;
+    const conferenteFilter = document.getElementById('glob-hist-user').value; // ✅ NOVO: Captura o valor do Conferente
+
+    try {
+        // 1. Inicia a consulta com os filtros de data (obrigatório para orderBy)
+        let queryRef = db.collection(COLECAO_RESULTADOS)
+            .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(dI))
+            .where('timestamp', '<=', firebase.firestore.Timestamp.fromDate(dF))
+            .orderBy('timestamp', 'desc');
+
+        // 2. ✅ CORREÇÃO: Aplica o filtro 'where' se um Conferente específico for selecionado
+        if (conferenteFilter) {
+            // Se um conferente for selecionado, adicionamos o filtro 'where'
+            queryRef = queryRef.where('conferente', '==', conferenteFilter);
+        }
+
+        const snap = await queryRef.limit(100).get(); // Limita a 100 resultados no máximo
+        
+        // Carrega o mapeamento de Unidades (necessário para o filtro de Gestor)
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const rotas = rotasDoc.data() || {};
+        const listToUnitMap = {};
+        Object.keys(rotas).forEach(key => listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL');
+
+        let docs = [];
+        snap.forEach(d => docs.push(d.data()));
+
+        let html = '';
+        docs.forEach(d => {
+            const localNome = d.local.split(' - ')[1] || d.local;
+            const unit = listToUnitMap[localNome] || 'GERAL';
+
+            // Filtro de segurança (Gestor) e Filtro Local
+            if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; 
+            
+            // Filtro Local: só aplica na memória se for necessário, mas a consulta já foi reduzida
+            if(!localFilter || localNome === localFilter) {
+                html += criarItemHistoricoHTML(d);
+            }
+        });
+
+        ul.innerHTML = html || '<li>Nada encontrado.</li>';
+    } catch(e){ 
+        console.error("Erro ao carregar histórico global:", e);
+        ul.innerHTML='Erro.';
+    }
+}
 
         function criarItemHistoricoHTML(data) {
             const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
