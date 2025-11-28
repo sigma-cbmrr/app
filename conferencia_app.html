@@ -426,24 +426,26 @@
                     const s = window.itemStatus[uid];
                     if(!s) return;
                     
-                    // Condição para persistir o carimbo original:
                     if (s.status === 'C/A' || s.status === 'KEEP') {
                         let old = itemOuTomb.pendencia || {};
+                        let obsOriginalCarimbo = old.obsOriginalCarimbo; // 1. Preserva o carimbo existente
                         
-                        // NOVO: Persiste o autor original do C/A se for o primeiro lançamento (Raw)
-                        if (!old.obsOriginalCarimbo) {
-                            // O carimbo é o conferente da conferência ATUAL, garantindo que o autor inicial seja logado
-                            itemOuTomb.pendencia = itemOuTomb.pendencia || {}; // Garante que o objeto exista
-                            itemOuTomb.pendencia.obsOriginalCarimbo = `${conferente}|${new Date().toLocaleDateString('pt-BR')}`;
+                        // 2. Se for o primeiro lançamento de C/A (o campo ainda não existe), cria o carimbo original
+                        if (!obsOriginalCarimbo) {
+                            // Usa o conferente e a data ATUAL como carimbo de quem iniciou o C/A
+                            obsOriginalCarimbo = `${conferente}|${new Date().toLocaleDateString('pt-BR')}`;
                         }
-
-                        // Atualiza/Cria a pendência no objeto 'itemOuTomb'
-                        itemOuTomb.pendencia = itemOuTomb.pendencia || {}; // Garante que o objeto exista
-                        itemOuTomb.pendencia.obs = s.obs;
-                        itemOuTomb.pendencia.quem = conferente; // Salva quem está confirmando a pendência
-                        itemOuTomb.pendencia.data = firebase.firestore.Timestamp.now(); 
-                        itemOuTomb.pendencia.statusAdmin = clean(old.statusAdmin);
-                        itemOuTomb.pendencia.adminObs = clean(old.adminObs);
+                        
+                        // 3. Monta o novo objeto pendencia (reemplaçando o antigo) E INCLUI O CAMPO PERSISTIDO:
+                        itemOuTomb.pendencia = { 
+                            obs: s.obs, 
+                            quem: conferente, 
+                            data: firebase.firestore.Timestamp.now(), 
+                            statusAdmin: clean(old.statusAdmin), 
+                            adminObs: clean(old.adminObs),
+                            // CAMPO CRÍTICO: Persiste o carimbo original no novo objeto
+                            obsOriginalCarimbo: obsOriginalCarimbo
+                        };
                         updated=true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) { 
