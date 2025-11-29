@@ -422,62 +422,124 @@
             } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message; }
         }
 
-        async function finalizarConferencia() {
-            const btn = document.getElementById('btn-finalizar'); if (btn.disabled) return;
-            btn.textContent = "Salvando..."; btn.disabled = true;
-            try {
-                const p = userInfo; const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
-                const localNome = `${infoLocal.posto} - ${infoLocal.nome}`; 
-                const clean = (val) => val === undefined ? null : val;
-                let updated = false;
-                let itensRelatorio = []; let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+        Async function finalizarConferencia() {
+    const btn = document.getElementById('btn-finalizar'); 
+    if (btn.disabled) return;
+    btn.textContent = "Salvando..."; 
+    btn.disabled = true;
+    
+    try {
+        const p = userInfo; 
+        const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        const localNome = `${infoLocal.posto} - ${infoLocal.nome}`; 
+        const clean = (val) => val === undefined ? null : val;
+        
+        let updated = false;
+        let itensRelatorio = []; 
+        let itensCaa = []; 
+        let itemsCount = 0; 
+        let cA_count = 0;
 
-                const atualizarListaDB = (itemOuTomb, uid) => {
-                    const s = window.itemStatus[uid]; if(!s) return;
-                    if(s.status === 'C/A') { 
-                        let old = itemOuTomb.pendencia || {};
-                        itemOuTomb.pendencia = { obs: s.obs, quem: conferente, data: firebase.firestore.Timestamp.now(), statusAdmin: clean(old.statusAdmin), adminObs: clean(old.adminObs) }; updated=true; 
-                    } else if(s.status === 'S/A' && itemOuTomb.pendencia) { delete itemOuTomb.pendencia; updated=true; }
+        // Função de Processamento Unificada (Substitui o loop incompleto e a função atualizarListaDB)
+        const processItem = (id, nome, pend) => {
+            const s = window.itemStatus[id];
+            if(!s) return;
+            
+            // 1. Encontra o Item ou Tombamento que será atualizado na lista principal
+            let itemOuTomb;
+            let setorItem = dadosConferencia.find(s => s.itens.some(i => i.id === id.split('-')[0]));
+            
+            if (setorItem) {
+                let item = setorItem.itens.find(i => i.id === id.split('-')[0]);
+                if (item.tipo === 'multi' && item.tombamentos) {
+                    itemOuTomb = item.tombamentos.find(t => `${item.id}-${t.tomb}` === id);
+                } else {
+                    itemOuTomb = item;
+                }
+            }
+            if (!itemOuTomb) return;
+            
+            itemsCount++; // Conta todos os itens conferidos
+            
+            // 2. Determina o Status Final e o Histórico de Observações
+            let finalStatus = s.status;
+            let oldPend = pend || {};
+            let finalObs = null;
+            
+            // Variável para armazenar o autor da última alteração (para o carimbo)
+            const autorCarimbo = oldPend.quem || conferente;
+            const dataCarimbo = oldPend.data ? formatarDataSimples(oldPend.data) : formatarDataSimples(firebase.firestore.Timestamp.now());
+
+            // 3. ATUALIZA A PENDÊNCIA (LISTA PRINCIPAL)
+            if (finalStatus === 'C/A' || finalStatus === 'KEEP') {
+                
+                // CORREÇÃO CRÍTICA: Monta a string de histórico completo.
+                // Isso garante o carimbo padronizado e a concatenação.
+                finalObs = montarHistoricoLinear(
+                    oldPend.obs || '', // Histórico anterior (vazio se novo C/A)
+                    s.obs, // Nova observação
+                    autorCarimbo, // Autor da última alteração
+                    dataCarimbo // Data da última alteração
+                );
+
+                // Atualiza o objeto de pendência do item/tombamento (Persistência)
+                itemOuTomb.pendencia = { 
+                    obs: finalObs, // <-- HISTÓRICO COMPLETO
+                    quem: conferente, 
+                    data: firebase.firestore.Timestamp.now(), 
+                    statusAdmin: clean(oldPend.statusAdmin), 
+                    adminObs: clean(oldPend.adminObs) 
                 };
+                updated = true;
+                cA_count++;
+            } else if (finalStatus === 'S/A' && itemOuTomb.pendencia) { 
+                // Remove pendência se foi marcada S/A
+                delete itemOuTomb.pendencia; 
+                updated=true;
+            }
+            
+            // 4. CONSTRÓI O OBJETO DE RELATÓRIO (itensRelatorio/itensCaa)
+            const dadosItem = { 
+                nomeCompleto: nome, 
+                status: finalStatus, 
+                obs: finalObs || s.obs || '', // Garante que a observação seja a string de histórico
+                quantidade: itemOuTomb.quantidadeEsperada || 1, 
+                id: id,
+                statusAdmin: clean(oldPend.statusAdmin), 
+                adminObs: clean(oldPend.adminObs),
+                setor: setorItem.nome
+            };
+            
+            itensRelatorio.push(dadosItem);
+            if (finalStatus === 'C/A' || finalStatus === 'KEEP') itensCaa.push(dadosItem);
+        };
 
-                dadosConferencia.forEach(setor => {
-                    setor.itens.forEach(item => {
-                        let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
-                            if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
-                            
-                            // NOVO: Usa a observação do rascunho (s.obs) se for C/A, ou 
-                            // o histórico já persistido na lista (pend.obs) se for KEEP
-                            let finalObs = (s.status === 'C/A' || s.status === 'PENDING_CA') ? 
-                                s.obs : 
-                                (pend ? pend.obs : null); // Se KEEP, usa o histórico da pendência persistida
-                            
-                            if (s.status === 'S/A') finalObs = null;
+        // === LOOP PRINCIPAL COM AS CHAMADAS CORRIGIDAS ===
+        dadosConferencia.forEach(setor => {
+            setor.itens.forEach(item => {
+                if (item.tipo === 'multi' && item.tombamentos) {
+                    item.tombamentos.forEach(t => processItem(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia));
+                } else {
+                    processItem(item.id, item.nome, item.pendencia);
+                }
+            });
+        });
+        // === FIM DO LOOP PRINCIPAL ===
 
+        // [CÓDIGO DE SALVAMENTO ORIGINAL]
+        if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
 
-                                const dadosItem = { 
-                                    nomeCompleto: nome, status: finalStatus, obs: finalObs, quantidade: item.quantidadeEsperada || 1, id: id,
-                                    statusAdmin: (s.status !== 'S/A' && pend) ? clean(pend.statusAdmin) : null, 
-                                    adminObs: (s.status !== 'S/A' && pend) ? clean(pend.adminObs) : null,
-                                    setor: setor.nome // <--- AQUI ESTÁ A CORREÇÃO PARA O PDF!
-                                };
-                                itensRelatorio.push(dadosItem);
-                                if (s.status === 'C/A' || s.status === 'KEEP') itensCaa.push(dadosItem);
-                            }
-                        };
-                        if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia));
-                        else process(item.id, item.nome, item.pendencia);
-                    });
-                });
+        limparRascunho();
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html"; }
 
-                if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-                await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
-
-                limparRascunho();
-                window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-                if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html"; }
-
-            } catch (e) { console.error(e); alert("Erro: " + e.message); btn.disabled = false; }
-        }
+    } catch (e) { 
+        console.error(e); 
+        alert("Erro: " + e.message); 
+        btn.disabled = false; 
+    }
+}
 
         window.onload = carregarDadosRemotos;
     </script>
