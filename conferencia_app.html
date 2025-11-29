@@ -243,41 +243,12 @@
             linhas.forEach(l => { if (l.includes('(Admin):')) { const parts = l.split('): '); html += `<li><span class="texto-admin">⚠️ ${parts[0]}):</span> Resp: ${parts[1]}</li>`; } else { html += `<li class="linha-obs">• ${l}</li>`; } });
             html += '</ul>'; return html;
         };
-        function montarHistoricoLinear(textoAntigo, novoTexto, autorAtual, dataAtual) {
-            // Supondo que a função clean(texto) exista para limpar texto para comparação
-            const clean = (val) => val ? val.replace(/\s+/g, ' ').trim() : ''; 
-            const cleanAntigo = clean(textoAntigo); 
-            const cleanNovo = clean(novoTexto);
-            
-            // Pega apenas a data (formato dd/mm/aaaa)
-            const carimboData = dataAtual.split(' ')[0]; 
-            const separador = ' | + NOVA: ';
-
-            // 1. O texto MUDOU. Assina o antigo e adiciona o novo.
-            if (textoAntigo && cleanAntigo !== cleanNovo) {
-                const carimboAntigo = `"${textoAntigo}" (Por: ${autorAtual} em ${carimboData})`; 
-                return carimboAntigo + separador + novoTexto;
-            }
-            
-            // 2. O texto NÃO MUDOU (Re-confirmação).
-            if (textoAntigo && cleanAntigo === cleanNovo) {
-                
-                // CRÍTICO: Verifica se o texto é RAW (não formatado como histórico)
-                // O texto RAW não deve conter o separador E não deve estar no formato de carimbo assinado
-                const isRawText = !textoAntigo.includes(separador) && !textoAntigo.match(/^"(.*)" \(Por: (.*) em (.*)\)$/);
-
-                if (isRawText) {
-                    // CRIA O PRIMEIRO CARIMBO: Assina o texto RAW com a informação do militar ATUAL.
-                    return `"${textoAntigo}" (Por: ${autorAtual} em ${carimboData})`;
-                }
-
-                // Se já é uma cadeia de histórico ou já tem carimbo, retorna o texto sem modificação
-                return textoAntigo; 
-            }
-
-            // 3. Caso padrão (texto novo ou texto antigo vazio)
-            return novoTexto;
-        }
+        const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
+            const separator = ' | + NOVA: ';
+            if (obsAnterior.includes(separator)) {
+                let partes = obsAnterior.split(separator); let ultimaParte = partes.pop(); let resto = partes.join(separator); let ultimaAssinada = `"${ultimaParte}" (Por: ${autorAnterior} em ${dataAnterior})`; return `${resto}${separator}${ultimaAssinada}${separator}${novoTexto}`;
+            } else { let anteriorAssinado = `"${obsAnterior}" (Por: ${autorAnterior} em ${dataAnterior})`; return `${anteriorAssinado}${separator}${novoTexto}`; }
+        };
 
         function renderizarConferencia() {
             const mainContent = document.getElementById('main-content'); const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
@@ -442,120 +413,69 @@
         }
 
         async function finalizarConferencia() {
-            const btn = document.getElementById('btn-finalizar');
-            if (btn.disabled) return;
-                btn.textContent = "Salvando..."; btn.disabled = true;
+            const btn = document.getElementById('btn-finalizar'); if (btn.disabled) return;
+            btn.textContent = "Salvando..."; btn.disabled = true;
             try {
-                const p = userInfo;
-                const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
-                const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
+                const p = userInfo; const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+                const localNome = `${infoLocal.posto} - ${infoLocal.nome}`; 
                 const clean = (val) => val === undefined ? null : val;
                 let updated = false;
-                let itensRelatorio = [];
-                let itensCaa = []; let itemsCount = 0; let cA_count = 0;
-                
-                // FUNÇÃO ATUALIZADA: GARANTE A PERSISTÊNCIA E PRESERVAÇÃO
-            const atualizarListaDB = (itemOuTomb, uid) => {
-                    const s = window.itemStatus[uid];
-                    if(!s) return;
-                    
-                    if (s.status === 'C/A' || s.status === 'KEEP') {
+                let itensRelatorio = []; let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+
+                const atualizarListaDB = (itemOuTomb, uid) => {
+                    const s = window.itemStatus[uid]; if(!s) return;
+                    if(s.status === 'C/A') { 
                         let old = itemOuTomb.pendencia || {};
-                        let obsOriginalCarimbo = old.obsOriginalCarimbo;
-                        
-                        // 1. LÓGICA CRÍTICA DE PRESERVAÇÃO: Se a observação antiga existe E o novo texto (s.obs) é vazio, 
-                        // assume-se que o usuário quer manter o histórico.
-                        let novoTextoCru = s.obs;
-                        if (old.obs && !novoTextoCru) { 
-                            novoTextoCru = old.obs;
-                        }
-
-                        // 2. Persiste o Carimbo Original
-                        if (!obsOriginalCarimbo) {
-                            // CORREÇÃO: Força o formato DD/MM/AAAA para persistência
-                            const dataObj = new Date();
-                            const dia = String(dataObj.getDate()).padStart(2, '0');
-                            const mes = String(dataObj.getMonth() + 1).padStart(2, '0'); // Mês é 0-baseado
-                            const ano = dataObj.getFullYear();
-                            const dataFormatada = `${dia}/${mes}/${ano}`;
-
-                            obsOriginalCarimbo = `${conferente}|${dataFormatada}`; // <-- NOVO FORMATO GARANTIDO
-                        }
-                        
-                        // 3. GERA O HISTÓRICO LINEAR E MONTA O NOVO OBJETO PENDENCIA
-                        const obsComHistorico = montarHistoricoLinear(old.obs, novoTextoCru, conferente, new Date().toLocaleString('pt-BR'));
-                        
-                        itemOuTomb.pendencia = { 
-                            obs: obsComHistorico, // Salva a string de histórico completa (para uso do PDF e reconf.)
-                            quem: conferente, 
-                            data: firebase.firestore.Timestamp.now(), 
-                            statusAdmin: clean(old.statusAdmin), 
-                            adminObs: clean(old.adminObs),
-                            obsOriginalCarimbo: obsOriginalCarimbo // Persiste o carimbo original com formato de data robusto
-                        };
-                        updated=true;
-
-                    } else if (s.status === 'S/A' && itemOuTomb.pendencia) { 
-                        delete itemOuTomb.pendencia; 
-                        updated=true;
-                    }
+                        itemOuTomb.pendencia = { obs: s.obs, quem: conferente, data: firebase.firestore.Timestamp.now(), statusAdmin: clean(old.statusAdmin), adminObs: clean(old.adminObs) }; updated=true; 
+                    } else if(s.status === 'S/A' && itemOuTomb.pendencia) { delete itemOuTomb.pendencia; updated=true; }
                 };
+
+                dadosConferencia.forEach(setor => {
+                    setor.itens.forEach(item => {
+                        if(item.tipo === 'single') atualizarListaDB(item, item.id);
+                        else if(item.tombamentos) item.tombamentos.forEach(t => atualizarListaDB(t, `${item.id}-${t.tomb}`));
+                    });
+                });
                 
-                // ----------------------------------------------------------------------
-                // SEGUNDO LOOP: Constrói os arrays de relatório (itensRelatorio e itensCaa)
-                // ----------------------------------------------------------------------
-// NOVA LÓGICA DE SALVAMENTO: INCLUI O NOME DO SETOR EM CADA ITEM
+                // NOVA LÓGICA DE SALVAMENTO: INCLUI O NOME DO SETOR EM CADA ITEM
                 dadosConferencia.forEach(setor => {
                     setor.itens.forEach(item => {
                         const process = (id, nome, pend) => {
                             const s = window.itemStatus[id];
                             if (s && s.status !== 'pending') {
                                 itemsCount++;
-                    
                                 let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
                                 if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
-                                let finalObs = s.obs; // Removida a atribuição inicial
+                                let finalObs = s.obs;
+                                if (s.status === 'KEEP' && pend) finalObs = pend.obs;
+                                if (s.status === 'S/A') finalObs = null;
 
-                                // LÓGICA CORRIGIDA: Usa o PEND.OBS se o status for C/A ou KEEP.
-                                if ((s.status === 'C/A' || s.status === 'KEEP') && pend) {
-                                    // PEND é a pendência ATUALIZADA no loop anterior (atualizarListaDB).
-                                    // Garante que o histórico completo seja usado para o relatório.
-                                    finalObs = pend.obs;
-                                } else {
-                                    // Caso contrário, usa a observação local ou nula.
-                                    finalObs = s.obs;
-                                }
-                                
-                                if (s.status === 'S/A') finalObs = null; 
-
-                          
                                 const dadosItem = { 
                                     nomeCompleto: nome, status: finalStatus, obs: finalObs, quantidade: item.quantidadeEsperada || 1, id: id,
                                     statusAdmin: (s.status !== 'S/A' && pend) ? clean(pend.statusAdmin) : null, 
                                     adminObs: (s.status !== 'S/A' && pend) ? clean(pend.adminObs) : null,
-                                    setor: setor.nome, 
-                                    obsOriginalCarimbo: pend ? pend.obsOriginalCarimbo : null
+                                    setor: setor.nome // <--- AQUI ESTÁ A CORREÇÃO PARA O PDF!
                                 };
                                 itensRelatorio.push(dadosItem);
                                 if (s.status === 'C/A' || s.status === 'KEEP') itensCaa.push(dadosItem);
-}
+                            }
                         };
-if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia));
+                        if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia));
                         else process(item.id, item.nome, item.pendencia);
                     });
                 });
-if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-                await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
-limparRascunho();
-                window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-                if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html";
-}
 
-            } catch (e) { console.error(e);
-alert("Erro: " + e.message); btn.disabled = false; }
+                if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+                await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
+
+                limparRascunho();
+                window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+                if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html"; }
+
+            } catch (e) { console.error(e); alert("Erro: " + e.message); btn.disabled = false; }
         }
 
         window.onload = carregarDadosRemotos;
-</script>
+    </script>
 </body>
 </html>
