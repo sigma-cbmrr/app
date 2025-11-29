@@ -2844,85 +2844,48 @@ function reimprimirPDF(data) {
         if (listaParaImprimir.length > 0) {
             let currentSector = null;
             listaParaImprimir.forEach(item => {
-                // Lógica de Agrupamento por Setor (MANTIDO)
+                // Lógica de Agrupamento por Setor
                 let setorItem = item.setor || "ITENS GERAIS";
                 if(setorItem !== currentSector) {
                     tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
                     currentSector = setorItem;
                 }
 
-                // === INÍCIO DA LÓGICA DE PADRONIZAÇÃO DE OBSERVAÇÕES (CORRIGIDA) ===
+                // Lógica de Formatação de Observações
                 let finalObs = item.obs || '-';
-                let adminObsText = null;
-
-                // 1. Prepara a observação de Gestão (se existir)
-                if (item.adminObs) {
-                    // Prepara o texto da Gestão para ser inserido ao final do bloco
-                    adminObsText = item.adminObs;
-                    // Se o item.obs não for '-', adicionamos a observação de gestão para ser tratada na regex
-                    if (finalObs !== '-') {
-                        finalObs += '\n\n' + 'Gestão: ' + adminObsText; 
-                    } else {
-                        // Caso só tenha observação de gestão, o conteúdo final será só ela
-                        finalObs = 'Gestão: ' + adminObsText; 
-                    }
+                // Adiciona observação de gestão (se existir)
+                if (item.adminObs) 
+                {
+                   finalObs += (finalObs === '-' ? '' : '\n\n') + 'Gestão: ' + item.adminObs;
                 }
 
                 if(finalObs === '-') finalObs = '';
 
-                // 2. Processa o Histórico de C/A (com carimbo) se os separadores estiverem presentes.
-                // A condição também cobre o caso de a observação ser SOMENTE a de Gestão
-                if (finalObs.includes(' | + NOVA: ') || (finalObs.includes('(Por:') && !finalObs.includes('\n\nGestão: ')) || finalObs.startsWith('Gestão: ')) {
-                    
-                    const separator = ' | + NOVA: ';
-                    const linhas = [];
-                    // O histórico é a string completa.
-                    let partesHistorico = finalObs.split(separator);
-                    
-                    // Verifica se a última parte contém a observação de gestão (que foi concatenada)
-                    let lastPart = partesHistorico[partesHistorico.length - 1];
-                    const adminObsRegex = /(.*)\n\nGestão: (.*)/s;
-                    const adminMatch = lastPart.match(adminObsRegex);
-
-                    if (adminMatch) {
-                        // Se a observação de gestão foi encontrada, separamos ela para inserção posterior
-                        lastPart = adminMatch[1].trim(); 
-                        adminObsText = adminMatch[2].trim(); // Pega apenas o texto da Gestão (sem o label inicial)
-                        partesHistorico[partesHistorico.length - 1] = lastPart; 
-                    }
-                    
-                    // Processa cada parte do histórico (Carimbada)
-                    partesHistorico.forEach(p => { 
-                        p = p.trim();
-                        if (p === '') return;
-
-                        // Regex para o formato carimbado: "descrição" (Por: Usuário em Data)
+                if (finalObs.includes(' | + NOVA: ')) {
+                    let partes = finalObs.split(' | + NOVA: '); 
+                    let formatado = "";
+                    partes.forEach(p => { 
+                        p = p.trim(); 
                         const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-                        const match = p.match(regex);
-                        
-                        if(match) {
-                            // Formato carimbado encontrado
-                            linhas.push(`• Por: ${match[2]} em ${match[3]}: "${match[1]}"`); 
-                        } else if (!p.includes('Gestão: ') && p !== '-') { 
-                            // Caso seja uma observação antiga que não tem carimbo, ou uma linha não carimbada
-                            linhas.push(`• Observação: ${p}`);
-                        }
+                        const match = p.match(regex); 
+                        if(match) formatado += `• Por: ${match[2]} em ${match[3]}: "${match[1]}"\n`; 
+                        else formatado += `• ${p}\n`; 
                     });
-                    
-                    // Adiciona a observação de gestão (se houver) ao final, como um bloco separado
-                    if (adminObsText) {
-                         // Re-adiciona o label "Gestão: " para manter o formato do item.adminObs
-                         linhas.push(`\nGestão: ${adminObsText}`); 
+                    finalObs = formatado.trim();
+                } else if (finalObs.trim() !== '') {
+                    const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
+                    const match = finalObs.match(regex);
+                    if(match) { 
+                        finalObs = `• Por: ${match[2]} em ${match[3]}: "${match[1]}"`;
+                    } else if (!finalObs.startsWith('Gestão: ')) {
+                        finalObs = `• Por: ${data.conferente} em ${dataTimestamp.toLocaleDateString('pt-BR')}: "${finalObs}"`;
                     }
-                    
-                    finalObs = linhas.join('\n');
-                } 
-                // === FIM DA LÓGICA DE PADRONIZAÇÃO ===
+                }
                 
                 let bgStatus = GREEN_FILL;
                 if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
                 
-                // Adiciona a linha à tabela (MANTIDO)
+                // Adiciona a linha à tabela
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
                     { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center', valign: 'middle' } }, 
@@ -2932,7 +2895,7 @@ function reimprimirPDF(data) {
             });
         }
         
-        // Configuração e Geração da Tabela (MANTIDO)
+        // Configuração e Geração da Tabela
         doc.autoTable({ 
             startY: 70, 
             head: [['Item', 'Quantidade', 'Status', 'Observação']], 
@@ -2948,7 +2911,7 @@ function reimprimirPDF(data) {
             headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
         });
 
-        // Rodapé com Paginação (MANTIDO)
+        // Rodapé com Paginação
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
@@ -2958,7 +2921,7 @@ function reimprimirPDF(data) {
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
         }
         
-        // Nome do Arquivo (MANTIDO)
+        // Nome do Arquivo
         const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataTimestamp.toISOString().split('T')[0]}.pdf`;
         doc.save(nomeArquivo);
         
@@ -3146,96 +3109,96 @@ const activeLink = document.getElementById(`link-${v}`);
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
         async function salvarGestaoCa(){
-    [cite_start]const docId = document.getElementById('gestao-doc-id').value; [cite: 939]
-    [cite_start]const itemId = document.getElementById('gestao-item-id-lista').value; [cite: 939]
-    [cite_start]const status = document.getElementById('gestao-status').value; [cite: 939]
-    [cite_start]const obsRaw = document.getElementById('gestao-obs').value.trim(); [cite: 939]
-    [cite_start]const qtdRemover = parseInt(document.getElementById('gestao-qtd').value); [cite: 939]
-    [cite_start]if(!obsRaw) return alert("Digite uma observação."); [cite: 940]
+            const docId = document.getElementById('gestao-doc-id').value;
+            const itemId = document.getElementById('gestao-item-id-lista').value;
+            const status = document.getElementById('gestao-status').value;
+            const obsRaw = document.getElementById('gestao-obs').value.trim();
+            const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
+            
+            if(!obsRaw) return alert("Digite uma observação.");
 
-    // --- CORREÇÃO DE CARIMBO DA GESTÃO ---
-    const dataHoje = new Date().toLocaleDateString('pt-BR');
-    // Usamos o formato padronizado (que é mais legível para a Gestão)
-    const carimbo = `[${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra} - ${dataHoje}]`;
-    const obsFinal = `${carimbo}: ${obsRaw}` + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
-    // --------------------------------------
+            // --- CARIMBO AUTOMÁTICO ---
+            const dataHoje = new Date().toLocaleDateString('pt-BR');
+            const carimbo = `Por ${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra} em ${dataHoje}`;
+            const obsFinal = `${carimbo}: "${obsRaw}"` + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
+            
+            try {
+                const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
+                const snap = await ref.get();
+                if(!snap.exists) return alert("Erro: Conferência não encontrada.");
+                
+                const resData = snap.data();
+                const items = resData.itensCaa || [];
+                
+                // BUSCA INTELIGENTE (Pelo ID e não apenas pelo índice)
+                let targetIndex = -1;
+                // 1. Tenta achar pelo ID
+                targetIndex = items.findIndex(i => i.id === itemId);
+                // 2. Se não achar, tenta pelo Nome + Obs (Fallback)
+                if (targetIndex === -1) {
+                    const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
+                    targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
+                }
 
-    try {
-        [cite_start]const ref = db.collection(COLECAO_RESULTADOS).doc(docId); [cite: 942]
-        [cite_start]const snap = await ref.get(); [cite: 943]
-        [cite_start]if(!snap.exists) return alert("Erro: Conferência não encontrada."); [cite: 943]
+                if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
+                
+                items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
+                items[targetIndex].adminObs = obsFinal;
+                
+                await ref.update({ itensCaa: items });
+                
+                if(status === 'Remover' || status === 'Solucionado') {
+                    const listaId = resData.lista_id;
+                    if(listaId) {
+                        const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
+                        const listSnap = await listRef.get();
+                        
+                        if(listSnap.exists) {
+                            let listaData = listSnap.data().list;
+                            let updated = false;
 
-        [cite_start]const resData = snap.data(); [cite: 944]
-        const items = resData.itensCaa || [cite_start][]; [cite: 944]
-
-        // BUSCA INTELIGENTE (Pelo ID e não apenas pelo índice)
-        [cite_start]let targetIndex = -1; [cite: 945]
-        // 1. Tenta achar pelo ID
-        [cite_start]targetIndex = items.findIndex(i => i.id === itemId); [cite: 945]
-        // 2. Se não achar, tenta pelo Nome + Obs (Fallback)
-        [cite_start]if (targetIndex === -1) { [cite: 946]
-            [cite_start]const nomeAlvo = document.getElementById('gestao-item-nome').textContent; [cite: 946]
-            [cite_start]targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo); [cite: 947]
-        }
-
-        [cite_start]if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes."); [cite: 947]
-        [cite_start]items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); [cite: 948]
-        [cite_start]items[targetIndex].adminObs = obsFinal; [cite: 948]
-
-        [cite_start]await ref.update({ itensCaa: items }); [cite: 949]
-        [cite_start]if(status === 'Remover' || status === 'Solucionado') { [cite: 949]
-            [cite_start]const listaId = resData.lista_id; [cite: 950]
-            [cite_start]if(listaId) { [cite: 950]
-                [cite_start]const listRef = db.collection(COLECAO_LISTAS).doc(listaId); [cite: 951]
-                [cite_start]const listSnap = await listRef.get(); [cite: 951]
-
-                [cite_start]if(listSnap.exists) { [cite: 952]
-                    [cite_start]let listaData = listSnap.data().list; [cite: 952]
-                    [cite_start]let updated = false; [cite: 952]
-
-                    [cite_start]for(let s of listaData) { [cite: 953]
-                        [cite_start]for(let i = s.itens.length - 1; i >= 0; i--) { [cite: 953]
-                            [cite_start]const item = s.itens[i]; [cite: 953]
-                            [cite_start]if(item.tipo === 'single' && item.id === itemId) { [cite: 953]
-                                [cite_start]if(status === 'Remover') { [cite: 954]
-                                    [cite_start]item.quantidadeEsperada -= qtdRemover; [cite: 954]
-                                    [cite_start]delete item.pendencia; [cite: 954]
-                                    [cite_start]if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1); [cite: 954]
-                                } else {
-                                    [cite_start]delete item.pendencia; [cite: 955]
-                                }
-                                [cite_start]updated = true; [cite: 955, 956]
-                            }
-                            [cite_start]else if(item.tipo === 'multi' && item.tombamentos) { [cite: 956]
-                                [cite_start]const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId); [cite: 957]
-                                [cite_start]if(tIndex > -1) { [cite: 957]
-                                    [cite_start]if(status === 'Remover') { [cite: 957]
-                                        [cite_start]item.tombamentos.splice(tIndex, 1); [cite: 958]
-                                        [cite_start]item.quantidadeEsperada = item.tombamentos.length; [cite: 958]
-                                        [cite_start]if(item.tombamentos.length === 0) s.itens.splice(i, 1); [cite: 958]
-                                    } else {
-                                        [cite_start]delete item.tombamentos[tIndex].pendencia; [cite: 959]
+                            for(let s of listaData) {
+                                for(let i = s.itens.length - 1; i >= 0; i--) {
+                                    const item = s.itens[i];
+                                    if(item.tipo === 'single' && item.id === itemId) {
+                                        if(status === 'Remover') {
+                                            item.quantidadeEsperada -= qtdRemover;
+                                            delete item.pendencia; 
+                                            if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
+                                        } else {
+                                            delete item.pendencia;
+                                        }
+                                        updated = true;
                                     }
-                                    [cite_start]updated = true; [cite: 959, 960]
+                                    else if(item.tipo === 'multi' && item.tombamentos) {
+                                        const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
+                                        if(tIndex > -1) {
+                                            if(status === 'Remover') {
+                                                item.tombamentos.splice(tIndex, 1);
+                                                item.quantidadeEsperada = item.tombamentos.length;
+                                                if(item.tombamentos.length === 0) s.itens.splice(i, 1);
+                                            } else {
+                                                delete item.tombamentos[tIndex].pendencia;
+                                            }
+                                            updated = true;
+                                        }
+                                    }
                                 }
                             }
+                            if(updated) await listRef.update({ list: listaData });
                         }
                     }
-
-                    [cite_start]if(updated) await listRef.update({ list: listaData }); [cite: 961]
                 }
+
+                alert("Salvo com sucesso!");
+                fecharModalGestao();
+                fecharTabela();
+                loadCaaData(); 
+            } catch(e) { 
+                console.error(e); 
+                alert("Erro ao salvar: " + e.message);
             }
         }
-
-        [cite_start]alert("Salvo com sucesso!"); [cite: 963]
-        [cite_start]fecharModalGestao(); [cite: 963]
-        [cite_start]fecharTabela(); [cite: 963]
-        [cite_start]loadCaaData(); [cite: 963]
-    } catch(e) { 
-        [cite_start]console.error(e); [cite: 964]
-        [cite_start]alert("Erro ao salvar: " + e.message); [cite: 964]
-    }
-}
 
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
         function abrirEditor(id, nome, unidadeLista) { 
