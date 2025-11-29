@@ -2844,48 +2844,85 @@ function reimprimirPDF(data) {
         if (listaParaImprimir.length > 0) {
             let currentSector = null;
             listaParaImprimir.forEach(item => {
-                // Lógica de Agrupamento por Setor
+                // Lógica de Agrupamento por Setor (MANTIDO)
                 let setorItem = item.setor || "ITENS GERAIS";
                 if(setorItem !== currentSector) {
                     tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
                     currentSector = setorItem;
                 }
 
-                // Lógica de Formatação de Observações
+                // === INÍCIO DA LÓGICA DE PADRONIZAÇÃO DE OBSERVAÇÕES (CORRIGIDA) ===
                 let finalObs = item.obs || '-';
-                // Adiciona observação de gestão (se existir)
-                if (item.adminObs) 
-                {
-                   finalObs += (finalObs === '-' ? '' : '\n\n') + 'Gestão: ' + item.adminObs;
+                let adminObsText = null;
+
+                // 1. Prepara a observação de Gestão (se existir)
+                if (item.adminObs) {
+                    // Prepara o texto da Gestão para ser inserido ao final do bloco
+                    adminObsText = item.adminObs;
+                    // Se o item.obs não for '-', adicionamos a observação de gestão para ser tratada na regex
+                    if (finalObs !== '-') {
+                        finalObs += '\n\n' + 'Gestão: ' + adminObsText; 
+                    } else {
+                        // Caso só tenha observação de gestão, o conteúdo final será só ela
+                        finalObs = 'Gestão: ' + adminObsText; 
+                    }
                 }
 
                 if(finalObs === '-') finalObs = '';
 
-                if (finalObs.includes(' | + NOVA: ')) {
-                    let partes = finalObs.split(' | + NOVA: '); 
-                    let formatado = "";
-                    partes.forEach(p => { 
-                        p = p.trim(); 
-                        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-                        const match = p.match(regex); 
-                        if(match) formatado += `• Por: ${match[2]} em ${match[3]}: "${match[1]}"\n`; 
-                        else formatado += `• ${p}\n`; 
-                    });
-                    finalObs = formatado.trim();
-                } else if (finalObs.trim() !== '') {
-                    const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
-                    const match = finalObs.match(regex);
-                    if(match) { 
-                        finalObs = `• Por: ${match[2]} em ${match[3]}: "${match[1]}"`;
-                    } else if (!finalObs.startsWith('Gestão: ')) {
-                        finalObs = `• Por: ${data.conferente} em ${dataTimestamp.toLocaleDateString('pt-BR')}: "${finalObs}"`;
+                // 2. Processa o Histórico de C/A (com carimbo) se os separadores estiverem presentes.
+                // A condição também cobre o caso de a observação ser SOMENTE a de Gestão
+                if (finalObs.includes(' | + NOVA: ') || (finalObs.includes('(Por:') && !finalObs.includes('\n\nGestão: ')) || finalObs.startsWith('Gestão: ')) {
+                    
+                    const separator = ' | + NOVA: ';
+                    const linhas = [];
+                    // O histórico é a string completa.
+                    let partesHistorico = finalObs.split(separator);
+                    
+                    // Verifica se a última parte contém a observação de gestão (que foi concatenada)
+                    let lastPart = partesHistorico[partesHistorico.length - 1];
+                    const adminObsRegex = /(.*)\n\nGestão: (.*)/s;
+                    const adminMatch = lastPart.match(adminObsRegex);
+
+                    if (adminMatch) {
+                        // Se a observação de gestão foi encontrada, separamos ela para inserção posterior
+                        lastPart = adminMatch[1].trim(); 
+                        adminObsText = adminMatch[2].trim(); // Pega apenas o texto da Gestão (sem o label inicial)
+                        partesHistorico[partesHistorico.length - 1] = lastPart; 
                     }
-                }
+                    
+                    // Processa cada parte do histórico (Carimbada)
+                    partesHistorico.forEach(p => { 
+                        p = p.trim();
+                        if (p === '') return;
+
+                        // Regex para o formato carimbado: "descrição" (Por: Usuário em Data)
+                        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
+                        const match = p.match(regex);
+                        
+                        if(match) {
+                            // Formato carimbado encontrado
+                            linhas.push(`• Por: ${match[2]} em ${match[3]}: "${match[1]}"`); 
+                        } else if (!p.includes('Gestão: ') && p !== '-') { 
+                            // Caso seja uma observação antiga que não tem carimbo, ou uma linha não carimbada
+                            linhas.push(`• Observação: ${p}`);
+                        }
+                    });
+                    
+                    // Adiciona a observação de gestão (se houver) ao final, como um bloco separado
+                    if (adminObsText) {
+                         // Re-adiciona o label "Gestão: " para manter o formato do item.adminObs
+                         linhas.push(`\nGestão: ${adminObsText}`); 
+                    }
+                    
+                    finalObs = linhas.join('\n');
+                } 
+                // === FIM DA LÓGICA DE PADRONIZAÇÃO ===
                 
                 let bgStatus = GREEN_FILL;
                 if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
                 
-                // Adiciona a linha à tabela
+                // Adiciona a linha à tabela (MANTIDO)
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
                     { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center', valign: 'middle' } }, 
@@ -2895,7 +2932,7 @@ function reimprimirPDF(data) {
             });
         }
         
-        // Configuração e Geração da Tabela
+        // Configuração e Geração da Tabela (MANTIDO)
         doc.autoTable({ 
             startY: 70, 
             head: [['Item', 'Quantidade', 'Status', 'Observação']], 
@@ -2911,7 +2948,7 @@ function reimprimirPDF(data) {
             headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
         });
 
-        // Rodapé com Paginação
+        // Rodapé com Paginação (MANTIDO)
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
@@ -2921,7 +2958,7 @@ function reimprimirPDF(data) {
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
         }
         
-        // Nome do Arquivo
+        // Nome do Arquivo (MANTIDO)
         const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataTimestamp.toISOString().split('T')[0]}.pdf`;
         doc.save(nomeArquivo);
         
