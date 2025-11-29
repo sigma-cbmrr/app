@@ -249,32 +249,29 @@
             const cleanAntigo = clean(textoAntigo); 
             const cleanNovo = clean(novoTexto);
             
-            // Pega apenas a data para o carimbo (formato dd/mm/aaaa)
+            // Pega apenas a data (formato dd/mm/aaaa)
             const carimboData = dataAtual.split(' ')[0]; 
             const separador = ' | + NOVA: ';
 
-            // 1. Caso de ALTERAÇÃO no texto (Conteúdo mudou): 
+            // 1. O texto MUDOU. Assina o antigo e adiciona o novo.
             if (textoAntigo && cleanAntigo !== cleanNovo) {
-                // Assina o texto antigo (que pode ser uma cadeia de histórico completa) antes de adicionar o novo.
                 const carimboAntigo = `"${textoAntigo}" (Por: ${autorAtual} em ${carimboData})`; 
                 return carimboAntigo + separador + novoTexto;
             }
             
-            // 2. Caso de RE-CONFIRMAÇÃO (Texto Idêntico): STARTING THE CHAIN
+            // 2. O texto NÃO MUDOU (Re-confirmação).
             if (textoAntigo && cleanAntigo === cleanNovo) {
                 
                 // CRÍTICO: Verifica se o texto é RAW (não formatado como histórico)
-                // Se a string não contém o separador de histórico E não começa com aspas (formato de carimbo assinado)
-                const isRawText = !textoAntigo.includes(separador) && textoAntigo.charAt(0) !== '"';
+                // O texto RAW não deve conter o separador E não deve estar no formato de carimbo assinado
+                const isRawText = !textoAntigo.includes(separador) && !textoAntigo.match(/^"(.*)" \(Por: (.*) em (.*)\)$/);
 
                 if (isRawText) {
-                    // Transforma o texto RAW (ex: "teste") no primeiro carimbo: "teste" (Por: AutorAtual em Data)
-                    // Este carimbo é de QUEM ESTÁ AGORA CONFERINDO (o militar atual), que está atestando a permanência do texto.
+                    // CRIA O PRIMEIRO CARIMBO: Assina o texto RAW com a informação do militar ATUAL.
                     return `"${textoAntigo}" (Por: ${autorAtual} em ${carimboData})`;
                 }
 
-                // Se já faz parte de uma cadeia de histórico (e o novo é idêntico), 
-                // simplesmente retorna o texto antigo para evitar carimbos duplicados.
+                // Se já é uma cadeia de histórico ou já tem carimbo, retorna o texto sem modificação
                 return textoAntigo; 
             }
 
@@ -467,7 +464,7 @@
                         let obsOriginalCarimbo = old.obsOriginalCarimbo;
                         
                         // 1. LÓGICA CRÍTICA DE PRESERVAÇÃO: Se a observação antiga existe E o novo texto (s.obs) é vazio, 
-                        // assume-se que o usuário quer manter o histórico. Isso previne o bug do campo vazio na re-confirmação.
+                        // assume-se que o usuário quer manter o histórico.
                         let novoTextoCru = s.obs;
                         if (old.obs && !novoTextoCru) { 
                             novoTextoCru = old.obs;
@@ -475,20 +472,26 @@
 
                         // 2. Persiste o Carimbo Original
                         if (!obsOriginalCarimbo) {
-                            obsOriginalCarimbo = `${conferente}|${new Date().toLocaleDateString('pt-BR')}`;
+                            // CORREÇÃO: Força o formato DD/MM/AAAA para persistência
+                            const dataObj = new Date();
+                            const dia = String(dataObj.getDate()).padStart(2, '0');
+                            const mes = String(dataObj.getMonth() + 1).padStart(2, '0'); // Mês é 0-baseado
+                            const ano = dataObj.getFullYear();
+                            const dataFormatada = `${dia}/${mes}/${ano}`;
+
+                            obsOriginalCarimbo = `${conferente}|${dataFormatada}`; // <-- NOVO FORMATO GARANTIDO
                         }
                         
                         // 3. GERA O HISTÓRICO LINEAR E MONTA O NOVO OBJETO PENDENCIA
-                        // A função montarHistoricoLinear é chamada aqui, usando o texto antigo e o novo texto (que agora pode ser o antigo, se estava vazio)
                         const obsComHistorico = montarHistoricoLinear(old.obs, novoTextoCru, conferente, new Date().toLocaleString('pt-BR'));
                         
                         itemOuTomb.pendencia = { 
-                            obs: obsComHistorico, // <--- CAMPO CRÍTICO: Agora salva a string de histórico completa
+                            obs: obsComHistorico, // Salva a string de histórico completa (para uso do PDF e reconf.)
                             quem: conferente, 
                             data: firebase.firestore.Timestamp.now(), 
                             statusAdmin: clean(old.statusAdmin), 
                             adminObs: clean(old.adminObs),
-                            obsOriginalCarimbo: obsOriginalCarimbo
+                            obsOriginalCarimbo: obsOriginalCarimbo // Persiste o carimbo original com formato de data robusto
                         };
                         updated=true;
 
