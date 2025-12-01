@@ -3195,7 +3195,7 @@ const activeLink = document.getElementById(`link-${v}`);
     try {
         // [3] RECUPERAÇÃO DE METADADOS DO GESTOR E DATA/HORA
         const nomeGestor = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
-        // Usamos toLocaleString para um carimbo mais preciso no histórico linear
+        // Usamos toLocaleString para um carimbo de histórico mais preciso e completo
         const dataHoraStr = new Date().toLocaleString('pt-BR');
         
         // Texto que será carimbado na linha do HISTÓRICO (item.obs)
@@ -3205,10 +3205,8 @@ const activeLink = document.getElementById(`link-${v}`);
         // A linha completa a ser adicionada no histórico linear (formato padronizado)
         const novaLinhaObs = `"${carimboTextoHistorico}" (Por: ${nomeGestor} em ${dataHoraStr})`;
         
-        // Texto que será salvo em item.adminObs (formato antigo/padrão do dashboard)
-        const dataHoje = new Date().toLocaleDateString('pt-BR');
-        const carimboDisplay = `Por ${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra} em ${dataHoje}`;
-        const obsFinalDisplay = `${carimboDisplay}: "${obsRaw}"` + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
+        // Texto para exibição no campo adminObs (mantemos o carimbo simples, pois a exibição é feita via gerarHtmlVisual)
+        const obsFinalDisplay = obsRaw; 
 
 
         // [4] BUSCA DO DOCUMENTO PAI NO FIREBASE
@@ -3243,7 +3241,7 @@ const activeLink = document.getElementById(`link-${v}`);
 
         // Atualiza campos específicos do Administrador (para uso no Dashboard)
         itemParaAtualizar.statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
-        itemParaAtualizar.adminObs = obsFinalDisplay; // Usa o formato de carimbo que o dashboard espera
+        itemParaAtualizar.adminObs = obsFinalDisplay; 
         
         
         // [7] SALVA AS MUDANÇAS NO FIREBASE
@@ -3270,7 +3268,12 @@ const activeLink = document.getElementById(`link-${v}`);
                                     delete item.pendencia; 
                                     if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
                                 } else {
-                                    delete item.pendencia;
+                                    // Adiciona a ação do gestor no histórico da lista mestra também!
+                                    // Isso é CRUCIAL para que a próxima conferência carregue o histórico!
+                                    if(item.pendencia && item.pendencia.obs) {
+                                         item.pendencia.obs = obsAtualizada;
+                                    }
+                                    delete item.pendencia; // Pendência resolvida, campo limpo na lista mestra
                                 }
                                 updated = true;
                             }
@@ -3282,6 +3285,10 @@ const activeLink = document.getElementById(`link-${v}`);
                                         item.quantidadeEsperada = item.tombamentos.length;
                                         if(item.tombamentos.length === 0) s.itens.splice(i, 1);
                                     } else {
+                                        // Adiciona a ação do gestor no histórico da lista mestra também!
+                                        if(item.tombamentos[tIndex].pendencia && item.tombamentos[tIndex].pendencia.obs) {
+                                            item.tombamentos[tIndex].pendencia.obs = obsAtualizada;
+                                        }
                                         delete item.tombamentos[tIndex].pendencia;
                                     }
                                     updated = true;
