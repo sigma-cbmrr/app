@@ -2744,8 +2744,62 @@ sortedUnits.forEach(unit => {
             }
         }
 
-        // --- PDF GENERATOR ---
-        // --- PDF GENERATOR ---
+        // --- FUNÇÕES DE FORMATAÇÃO DE TEXTO (NECESSÁRIAS PARA O PDF) ---
+
+function formatarDataSimples(timestamp) {
+    if (!timestamp) return "";
+    // Adicionando a função formatarDataSimples do outro arquivo
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('pt-BR');
+}
+
+const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+    const linhas = [];
+    // Lógica para incluir a resposta do admin no topo (Linhas 127-128 do app)
+    if (adminStatus) linhas.push(`⚠️ [${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
+    
+    const separator = ' | + NOVA: ';
+    // Lógica para separar as observações concatenadas (Linhas 128-134 do app)
+    if (textoBruto.includes(separator)) {
+        const partes = textoBruto.split(separator);
+        partes.forEach(p => {
+            p = p.trim();
+            const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
+            const match = p.match(regex);
+            // Se estiver assinada (formato mais antigo/incompleto)
+            if (match) linhas.push(`• Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+            // Se for apenas texto (mais novo) ou texto quebrado do histórico
+            else linhas.push(`• Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+        });
+    } else {
+        const p = textoBruto.trim();
+        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
+        const match = p.match(regex);
+        // Se for a primeira observação completa (novo padrão)
+        if (match) linhas.push(`• Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+        // Se for um texto simples sem assinatura
+        else linhas.push(`• Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+    }
+    return linhas;
+};
+
+// Função wrapper apenas para manter a consistência com o app (não usada no PDF)
+const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+    const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
+    let html = '<ul class="lista-pendencias">';
+    linhas.forEach(l => { 
+        if (l.includes('(Admin):')) { 
+            const parts = l.split('): ');
+            html += `<li><span class="texto-admin">⚠️ ${parts[0]}):</span> Resp: ${parts[1]}</li>`; 
+        } else { 
+            html += `<li class="linha-obs">${l}</li>`; 
+        } 
+    });
+    html += '</ul>';
+    return html;
+};
+
+// --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
 function reimprimirPDF(data) {
     try {
         const { jsPDF } = window.jspdf;
@@ -2871,6 +2925,7 @@ function reimprimirPDF(data) {
                 }
                 
                 // 2. Transforma o array de linhas em uma string separada por quebra de linha
+                // O prefixo '•' já está incluso na função gerarLinhasFormatadas para observações.
                 finalObs = linhasFormatadas.map(l => {
                     // Substitui o prefixo de admin (ex: "⚠️ [SOLUCIONADO] (Admin):") para um formato de relatório mais limpo
                     if(l.includes('(Admin):')) {
