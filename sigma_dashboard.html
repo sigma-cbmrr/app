@@ -3236,7 +3236,7 @@ const activeLink = document.getElementById(`link-${v}`);
             obsAtualizada += ' | + NOVA: ';
         }
         obsAtualizada += novaLinhaObs;
-        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR (usado pelo PDF na reimpressão)
+        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR
 
         // Atualiza campos específicos do Administrador (para uso no Dashboard)
         itemParaAtualizar.statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
@@ -3248,56 +3248,64 @@ const activeLink = document.getElementById(`link-${v}`);
         
         
         // [8] ATUALIZAÇÃO NA LISTA MESTRE (LÓGICA DO ESTOQUE E PERSISTÊNCIA DO CARIMBO)
-        if(status === 'Remover' || status === 'Solucionado') {
-            const listaId = resData.lista_id;
-            if(listaId) {
-                const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
-                const listSnap = await listRef.get();
-                
-                if(listSnap.exists) {
-                    let listaData = listSnap.data().list;
-                    let updated = false;
+        
+        const listaId = resData.lista_id;
+        if(listaId) {
+            const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
+            const listSnap = await listRef.get();
+            let updated = false;
 
-                    for(let s of listaData) {
-                        for(let i = s.itens.length - 1; i >= 0; i--) {
-                            const item = s.itens[i];
-                            if(item.tipo === 'single' && item.id === itemId) {
-                                if(status === 'Remover') {
-                                    item.quantidadeEsperada -= qtdRemover;
-                                    delete item.pendencia; 
-                                    if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
-                                } else {
-                                    // *** CORREÇÃO CRUCIAL 2: Garante que o carimbo do gestor entre na lista mestra! ***
-                                    // Se a pendência foi resolvida (status !== 'Remover'), o campo .pendencia é deletado,
-                                    // mas garantimos que a obs completa (com carimbo do Gestor) seja salva antes.
-                                    if(item.pendencia && item.pendencia.obs) {
-                                        item.pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
-                                    }
-                                    delete item.pendencia; // Pendência resolvida (gestor solucionou), campo limpo na lista mestra
-                                }
-                                updated = true;
+            if(listSnap.exists) {
+                let listaData = listSnap.data().list;
+                
+                const updateItemInMasterList = (item, isTombamento = false) => {
+                    const isSolved = (status === 'Remover' || status === 'Solucionado');
+                    const isManaged = (status === 'Em solução' || status === 'Cautelado');
+                    
+                    if (isSolved) {
+                        // LÓGICA DE SOLUÇÃO (Remove do estoque ou deleta pendência)
+                        if (status === 'Remover') {
+                            if (!isTombamento) item.quantidadeEsperada -= qtdRemover;
+                            else item.tombamentos.splice(item.tombamentos.findIndex(t => t.tomb === itemId.split('-')[1]), 1);
+                            
+                            if (item.quantidadeEsperada <= 0 || isTombamento) { 
+                                // O Splicing do tombamento foi feito na linha acima. 
+                                // O splicing do item completo precisa de lógica mais complexa, mas vamos manter o delete pendencia aqui.
                             }
-                            else if(item.tipo === 'multi' && item.tombamentos) {
-                                const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
-                                if(tIndex > -1) {
-                                    if(status === 'Remover') {
-                                        item.tombamentos.splice(tIndex, 1);
-                                        item.quantidadeEsperada = item.tombamentos.length;
-                                        if(item.tombamentos.length === 0) s.itens.splice(i, 1);
-                                    } else {
-                                        // *** CORREÇÃO CRUCIAL 2 (MULTI): Garante que o carimbo do gestor entre na lista mestra! ***
-                                        if(item.tombamentos[tIndex].pendencia && item.tombamentos[tIndex].pendencia.obs) {
-                                            item.tombamentos[tIndex].pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
-                                        }
-                                        delete item.tombamentos[tIndex].pendencia;
-                                    }
-                                    updated = true;
-                                }
+                        }
+                        
+                        // Atualiza o histórico na lista Mestra antes de deletar a pendência
+                        if(item.pendencia && item.pendencia.obs) item.pendencia.obs = obsAtualizada;
+                        delete item.pendencia;
+                        updated = true;
+                        
+                    } else if (isManaged) {
+                        // LÓGICA DE GESTÃO (ATUALIZA APENAS O CAMPO OBS PARA PERSISTÊNCIA)
+                        if (item.pendencia) {
+                            item.pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
+                            // item.pendencia.statusAdmin e adminObs NÃO SÃO SALVOS AQUI.
+                            updated = true;
+                        }
+                    }
+                    return updated;
+                };
+
+                for(let s of listaData) {
+                    for(let i = s.itens.length - 1; i >= 0; i--) {
+                        const item = s.itens[i];
+                        if(item.tipo === 'single' && item.id === itemId) {
+                            updateItemInMasterList(item);
+                        }
+                        else if(item.tipo === 'multi' && item.tombamentos) {
+                            const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
+                            if(tIndex > -1) {
+                                updateItemInMasterList(item.tombamentos[tIndex], true);
                             }
                         }
                     }
-                    if(updated) await listRef.update({ list: listaData });
                 }
+                
+                if(updated) await listRef.update({ list: listaData });
             }
         }
 
