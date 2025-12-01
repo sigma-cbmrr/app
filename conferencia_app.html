@@ -96,19 +96,7 @@
         let dadosConferencia = []; let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
 
         function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
-
-// 1. Lê o nome de guerra diretamente do URL (valor: SIGMA:396).
-let nomeGuerraRaw = getUrlParameter('nome_guerra');
-
-// 2. Garante que o nome de guerra seja limpo e em MAIÚSCULAS para consistência.
-// O nome do rascunho (linha 2123) deve ser limpo de dois pontos.
-const nomeGuerraLimpo = (nomeGuerraRaw || 'ND').toUpperCase().replace(/:/g, '');
-
-const userInfo = { 
-    postoGraduacao: getUrlParameter('posto_grad') || "ND", 
-    quadro: getUrlParameter('quadro_mil') || "ND", 
-    nomeGuerra: nomeGuerraLimpo // Usa a variável limpa
-};
+        const userInfo = { postoGraduacao: getUrlParameter('posto_grad') || "ND", quadro: getUrlParameter('quadro_mil') || "ND", nomeGuerra: getUrlParameter('nome_guerra') || "ND" };
 
         function formatarDataSimples(timestamp) {
             if (!timestamp) return "";
@@ -255,12 +243,23 @@ const userInfo = {
             linhas.forEach(l => { if (l.includes('(Admin):')) { const parts = l.split('): '); html += `<li><span class="texto-admin">⚠️ ${parts[0]}):</span> Resp: ${parts[1]}</li>`; } else { html += `<li class="linha-obs">• ${l}</li>`; } });
             html += '</ul>'; return html;
         };
-        const montarHistoricoLinear = (obsAnterior, novoTextoAssinado, autorAnterior, dataAnterior) => {
+        const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
     const separator = ' | + NOVA: ';
     
-    // A única lógica aqui é a concatenação, pois todas as partes já foram assinadas
-    // antes de serem passadas para esta função (ou no primeiro salvamento).
-    return `${obsAnterior}${separator}${novoTextoAssinado}`;
+    // Este bloco lida com a adição a uma cadeia de observações
+    if (obsAnterior.includes(separator)) {
+        let partes = obsAnterior.split(separator); 
+        let ultimaParte = partes.pop(); 
+        let resto = partes.join(separator); 
+        // Assina a última parte não assinada (o texto puro)
+        let ultimaAssinada = `"${ultimaParte}" (Por: ${autorAnterior} em ${dataAnterior})`; 
+        return `${resto}${separator}${ultimaAssinada}${separator}${novoTexto}`;
+    } else { 
+        // CORREÇÃO: Este bloco é ativado na primeira adição. 
+        // Como 'obsAnterior' já está assinado pela função salvarItem/salvarTombamento, 
+        // apenas anexamos o novo texto com o separador, sem re-assinar.
+        return `${obsAnterior}${separator}${novoTexto}`; 
+    }
 };
 
         function renderizarConferencia() {
@@ -356,19 +355,14 @@ const userInfo = {
 
     if(hist && hist.dataset.meta) {
         // Lógica de Acrescentar (Quando há uma pendência anterior)
-        if(obs.length < 3) return alert("Digite a alteração em detalhes (mínimo 3 caracteres)."); 
-        const meta=JSON.parse(decodeURIComponent(hist.dataset.meta));
-        
-        // 💡 CORREÇÃO CRÍTICA: Assina o NOVO texto antes de passá-lo para concatenação
-        const novoTextoAssinado = `"${obs}" (Por: ${conf} em ${now})`;
-
-        // O 'meta.obs' é a string anterior já assinada. 
-        // A função montarHistoricoLinear (agora simplificada) apenas concatena as partes assinadas.
-        final=montarHistoricoLinear(meta.obs, novoTextoAssinado, meta.autor, meta.data);
+        if(obs.length < 3) return alert("Digite a alteração."); 
+        const meta=JSON.parse(decodeURIComponent(hist.dataset.meta)); 
+        // Usa montarHistoricoLinear para manter o histórico formatado
+        final=montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
     } else {
         // Lógica de Nova Alteração (Primeira ocorrência)
         if(obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
-        // Garante que a PRIMEIRA observação seja salva já assinada
+        // 💡 NOVO: Formata a PRIMEIRA observação com o padrão completo
         final = `"${obs}" (Por: ${conf} em ${now})`; 
     } 
 
@@ -377,8 +371,8 @@ const userInfo = {
 
     const d=item.querySelector('.descricao-salva'); 
     
-    // O gerarHtmlVisual recebe a string 'final' que está sempre assinada (primeira vez) 
-    // ou é uma cadeia de strings assinadas (acrescentar).
+    // O gerarHtmlVisual agora recebe a string 'final' já formatada.
+    // Passamos 'null' para autor e data, pois o nome e data já estão embutidos em 'final'.
     d.innerHTML=gerarHtmlVisual(final, conf, now, null, null); 
     d.style.display='block'; 
     salvarRascunho(); 
@@ -387,6 +381,7 @@ const userInfo = {
     updateOverallStatus(); 
     checkSetorCompletion(btn.closest('.setor'), item.dataset.id);
 }
+
         function salvarTombamento(btn) { 
     const tomb=btn.closest('.tombamento-container'); 
     const item=btn.closest('.item-conferencia'); 
@@ -394,24 +389,20 @@ const userInfo = {
     const hist=tomb.querySelector('.historico-fixo'); 
     let final=obs; 
 
-    // Dados do usuário e data atual para padronização
-    const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; [cite: 178]
-    const now=formatarDataSimples(new Date()); [cite: 178]
+    [cite_start]// Dados do usuário e data atual para padronização [cite: 178]
+    const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; 
+    const now=formatarDataSimples(new Date()); 
 
     if(hist && hist.dataset.meta) {
-        // Lógica de Acrescentar (Quando há uma pendência anterior)
-        if(obs.length < 3) return alert("Digite a alteração em detalhes (mínimo 3 caracteres)."); [cite: 177]
+        [cite_start]// Lógica de Acrescentar (Quando há uma pendência anterior) [cite: 176]
+        if(obs.length < 3) return alert("Digite a alteração."); 
         const meta=JSON.parse(decodeURIComponent(hist.dataset.meta));
-        
-        // 💡 CORREÇÃO CRÍTICA: Assina o NOVO texto antes de concatenar
-        const novoTextoAssinado = `"${obs}" (Por: ${conf} em ${now})`;
-
-        // Passamos a string já assinada (novoTextoAssinado) para a função.
-        final=montarHistoricoLinear(meta.obs, novoTextoAssinado, meta.autor, meta.data); [cite: 177]
+        [cite_start]// Usa montarHistoricoLinear para concatenar a nova observação [cite: 177]
+        final=montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
     } else {
-        // Lógica de Nova Alteração (Primeira ocorrência)
-        if(obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres)."); [cite: 177]
-        // Garante que a PRIMEIRA observação seja salva já assinada
+        [cite_start]// Lógica de Nova Alteração (Primeira ocorrência) [cite: 177]
+        if(obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
+        // 💡 NOVO: Formata a PRIMEIRA observação com o padrão completo
         final = `"${obs}" (Por: ${conf} em ${now})`; 
     } 
 
@@ -420,10 +411,10 @@ const userInfo = {
 
     const d=tomb.querySelector('.tombamento-descricao-salva');
     
-    // O gerarHtmlVisual recebe a string 'final' que está sempre assinada.
-    d.innerHTML=gerarHtmlVisual(final, conf, now, null, null); [cite: 178]
+    [cite_start]// O gerarHtmlVisual agora recebe a string 'final' já formatada. [cite: 178]
+    d.innerHTML=gerarHtmlVisual(final, conf, now, null, null); 
     d.style.display='block'; 
-    salvarRascunho(); [cite: 178]
+    salvarRascunho(); 
 
     updateItemMainStatusDisplay(item); 
     updateSetorStatus(btn.closest('.setor')); 
