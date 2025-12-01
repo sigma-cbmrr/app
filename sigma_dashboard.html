@@ -3195,7 +3195,6 @@ const activeLink = document.getElementById(`link-${v}`);
     try {
         // [3] RECUPERAÇÃO DE METADADOS DO GESTOR E DATA/HORA
         const nomeGestor = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
-        // Usamos toLocaleString para um carimbo de histórico mais preciso e completo
         const dataHoraStr = new Date().toLocaleString('pt-BR');
         
         // Texto que será carimbado na linha do HISTÓRICO (item.obs)
@@ -3205,7 +3204,7 @@ const activeLink = document.getElementById(`link-${v}`);
         // A linha completa a ser adicionada no histórico linear (formato padronizado)
         const novaLinhaObs = `"${carimboTextoHistorico}" (Por: ${nomeGestor} em ${dataHoraStr})`;
         
-        // Texto para exibição no campo adminObs (mantemos o carimbo simples, pois a exibição é feita via gerarHtmlVisual)
+        // Texto para exibição no campo adminObs (apenas o raw)
         const obsFinalDisplay = obsRaw; 
 
 
@@ -3231,13 +3230,13 @@ const activeLink = document.getElementById(`link-${v}`);
         // [6] ATUALIZAÇÃO DOS CAMPOS DO ITEM
         const itemParaAtualizar = items[targetIndex];
 
-        // *** CORREÇÃO CRUCIAL: Atualiza o campo de histórico linear (item.obs) ***
+        // *** CORREÇÃO CRUCIAL 1: Atualiza o campo de histórico linear (item.obs) no resultados_conferencias ***
         let obsAtualizada = itemParaAtualizar.obs || '';
         if (obsAtualizada.trim() !== '') {
             obsAtualizada += ' | + NOVA: ';
         }
         obsAtualizada += novaLinhaObs;
-        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR
+        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR (usado pelo PDF na reimpressão)
 
         // Atualiza campos específicos do Administrador (para uso no Dashboard)
         itemParaAtualizar.statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
@@ -3248,7 +3247,7 @@ const activeLink = document.getElementById(`link-${v}`);
         await ref.update({ itensCaa: items });
         
         
-        // [8] ATUALIZAÇÃO NA LISTA MESTRE (LÓGICA DO ESTOQUE, SE NECESSÁRIO)
+        // [8] ATUALIZAÇÃO NA LISTA MESTRE (LÓGICA DO ESTOQUE E PERSISTÊNCIA DO CARIMBO)
         if(status === 'Remover' || status === 'Solucionado') {
             const listaId = resData.lista_id;
             if(listaId) {
@@ -3268,12 +3267,13 @@ const activeLink = document.getElementById(`link-${v}`);
                                     delete item.pendencia; 
                                     if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
                                 } else {
-                                    // Adiciona a ação do gestor no histórico da lista mestra também!
-                                    // Isso é CRUCIAL para que a próxima conferência carregue o histórico!
+                                    // *** CORREÇÃO CRUCIAL 2: Garante que o carimbo do gestor entre na lista mestra! ***
+                                    // Se a pendência foi resolvida (status !== 'Remover'), o campo .pendencia é deletado,
+                                    // mas garantimos que a obs completa (com carimbo do Gestor) seja salva antes.
                                     if(item.pendencia && item.pendencia.obs) {
-                                         item.pendencia.obs = obsAtualizada;
+                                        item.pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
                                     }
-                                    delete item.pendencia; // Pendência resolvida, campo limpo na lista mestra
+                                    delete item.pendencia; // Pendência resolvida (gestor solucionou), campo limpo na lista mestra
                                 }
                                 updated = true;
                             }
@@ -3285,9 +3285,9 @@ const activeLink = document.getElementById(`link-${v}`);
                                         item.quantidadeEsperada = item.tombamentos.length;
                                         if(item.tombamentos.length === 0) s.itens.splice(i, 1);
                                     } else {
-                                        // Adiciona a ação do gestor no histórico da lista mestra também!
+                                        // *** CORREÇÃO CRUCIAL 2 (MULTI): Garante que o carimbo do gestor entre na lista mestra! ***
                                         if(item.tombamentos[tIndex].pendencia && item.tombamentos[tIndex].pendencia.obs) {
-                                            item.tombamentos[tIndex].pendencia.obs = obsAtualizada;
+                                            item.tombamentos[tIndex].pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
                                         }
                                         delete item.tombamentos[tIndex].pendencia;
                                     }
