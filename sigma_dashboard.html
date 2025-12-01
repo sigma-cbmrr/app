@@ -2751,7 +2751,7 @@ function reimprimirPDF(data) {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
-        
+
         // MANTÉM A LÓGICA DE BUSCA DE IMAGEM DO DASHBOARD
         // Busca a imagem já carregada no DOM para desenhar no PDF
         const logoDraw = (domId, x) => { 
@@ -2776,7 +2776,7 @@ function reimprimirPDF(data) {
         
         // --- CHAMADAS PARA DESENHAR AS LOGOS ---
         // 1. Logo CBM-RR (Esquerda)
-        logoDraw('cbmrr.png', MARGIN); 
+        logoDraw('cbmrr.png', MARGIN);
         // 2. Logo SIGMA (Direita)
         logoDraw('logo_sigma.png', PG_W-MARGIN-LOGO_S);
         
@@ -2785,13 +2785,13 @@ function reimprimirPDF(data) {
         doc.setTextColor(51); 
         doc.setFont('helvetica','bold');
         doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
-        doc.setTextColor(217,15,35); 
+        doc.setTextColor(217,15,35);
         doc.text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
         doc.setTextColor(51); 
         doc.setFont('helvetica','italic');
         doc.text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
         doc.setFontSize(14); 
-        doc.setTextColor(0); 
+        doc.setTextColor(0);
         doc.setFont('helvetica','bold'); 
         doc.text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
 
@@ -2827,7 +2827,7 @@ function reimprimirPDF(data) {
         
         // TOTALIZADOR
         doc.setFont('helvetica','bold');
-        doc.setTextColor(128, 0, 32); 
+        doc.setTextColor(128, 0, 32);
         doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
 
         // TABELA DE ITENS
@@ -2853,34 +2853,35 @@ function reimprimirPDF(data) {
 
                 // Lógica de Formatação de Observações
                 let finalObs = item.obs || '-';
-                // Adiciona observação de gestão (se existir)
-                if (item.adminObs) 
-                {
-                   finalObs += (finalObs === '-' ? '' : '\n\n') + 'Gestão: ' + item.adminObs;
+                
+                // ADICIONADO: Variáveis de contexto para a formatação
+                const dataConf = dataTimestamp.toLocaleDateString('pt-BR');
+                const conf = data.conferente; 
+                
+                // 1. Usa a função padrão para obter o array de linhas formatadas
+                let linhasFormatadas = [];
+                if (finalObs !== '-') {
+                    linhasFormatadas = gerarLinhasFormatadas(
+                        finalObs, 
+                        conf, 
+                        dataConf,
+                        item.statusAdmin, 
+                        item.adminObs
+                    );
                 }
-
-                if(finalObs === '-') finalObs = '';
-
-                if (finalObs.includes(' | + NOVA: ')) {
-                    let partes = finalObs.split(' | + NOVA: '); 
-                    let formatado = "";
-                    partes.forEach(p => { 
-                        p = p.trim(); 
-                        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-                        const match = p.match(regex); 
-                        if(match) formatado += `• Por: ${match[2]} em ${match[3]}: "${match[1]}"\n`; 
-                        else formatado += `• ${p}\n`; 
-                    });
-                    finalObs = formatado.trim();
-                } else if (finalObs.trim() !== '') {
-                    const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
-                    const match = finalObs.match(regex);
-                    if(match) { 
-                        finalObs = `• Por: ${match[2]} em ${match[3]}: "${match[1]}"`;
-                    } else if (!finalObs.startsWith('Gestão: ')) {
-                        finalObs = `• Por: ${data.conferente} em ${dataTimestamp.toLocaleDateString('pt-BR')}: "${finalObs}"`;
+                
+                // 2. Transforma o array de linhas em uma string separada por quebra de linha
+                finalObs = linhasFormatadas.map(l => {
+                    // Substitui o prefixo de admin (ex: "⚠️ [SOLUCIONADO] (Admin):") para um formato de relatório mais limpo
+                    if(l.includes('(Admin):')) {
+                        return l.replace('⚠️ ', 'RESPOSTA DA GESTÃO: ');
                     }
-                }
+                    return l;
+                }).join('\n');
+                
+                if (finalObs.trim() === '') finalObs = '-'; // Volta para '-' se ficar vazio.
+
+                // FIM DA LÓGICA DE FORMATAÇÃO DE OBSERVAÇÕES
                 
                 let bgStatus = GREEN_FILL;
                 if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
@@ -2930,7 +2931,6 @@ function reimprimirPDF(data) {
         alert("Erro ao gerar PDF: " + e.message);
     }
 }
-
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
         
         function sairDoSistema() { 
