@@ -4290,19 +4290,22 @@ function loadNewCautelaForm() {
     const menuContainer = document.getElementById('cautelas-options-container');
     const contentArea = document.getElementById('cautelas-content');
 
-    // 1. Oculta o menu de botões
     if (menuContainer) {
         menuContainer.style.display = 'none';
     }
 
-    // 2. Carrega o formulário HTML na área de conteúdo
     if (contentArea) {
         contentArea.innerHTML = getNovaCautelaFormHTML();
         contentArea.style.display = 'block'; 
         
-        // 3. ATIVAÇÃO DAS BUSCAS DE DADOS
+        // 1. Carrega os locais de custódia do usuário
         loadCustodiaLocais(); 
-        loadUsersForSearch();
+        
+        // 2. Carrega a lista de usuários para pesquisa
+        loadUsersForSearch(); 
+        
+        // 3. ADICIONA O LISTENER: Ao selecionar um local, carrega os itens
+        document.getElementById('cautela-local-origem').addEventListener('change', handleLocalChange); 
     }
 }
 
@@ -4381,6 +4384,7 @@ function showCautelasDashboard(type) {
         console.error("Erro ao carregar usuários para a pesquisa:", error);
     }
 }
+        
         window.addEventListener('popstate', function (event) {
             // 1. Reinsere o estado no histórico para neutralizar a navegação de "Voltar"
             history.pushState(null, null, location.href);
@@ -4395,15 +4399,15 @@ function showCautelasDashboard(type) {
             }
         });
         async function loadUsersForSearch() {
-    const datalist = document.getElementById('lista-usuarios');
-    if (!datalist) return;
+            const datalist = document.getElementById('lista-usuarios');
+            if (!datalist) return;
 
-    try {
-        // Assume que a coleção 'users' armazena todos os usuários.
-        // Se a coleção for diferente (ex: 'militares'), ajuste aqui.
-        const usersSnapshot = await db.collection('users').get(); 
+            try {
+            // Assume que a coleção 'users' armazena todos os usuários.
+            // Se a coleção for diferente (ex: 'militares'), ajuste aqui.
+            const usersSnapshot = await db.collection('users').get(); 
         
-        let optionsHtml = '';
+            let optionsHtml = '';
         usersSnapshot.forEach(doc => {
             const user = doc.data();
             const matricula = user.matricula || doc.id; // Assume que o UID ou matrícula é o valor.
@@ -4420,6 +4424,149 @@ function showCautelasDashboard(type) {
         console.error("Erro ao carregar usuários para a pesquisa:", error);
         // Opcional: Mostrar uma mensagem de erro no formulário
     }
+}
+        /**
+ * Busca e preenche a lista de itens sob custódia do usuário no local selecionado.
+ * Esta função deve ser chamada quando o local de origem for selecionado.
+ * @param {string} local - O nome do local (ex: 'ABT-17').
+ */
+async function loadItensCustodia(local) {
+    const itemListContainer = document.getElementById('itens-custodia-list');
+    const btnEnviar = document.getElementById('btn-iniciar-cautela');
+    
+    if (!itemListContainer || !local) {
+        itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #999;">Selecione um Local de Origem.</p>';
+        btnEnviar.disabled = true;
+        btnEnviar.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Cautela (0 itens)';
+        return;
+    }
+
+    itemListContainer.innerHTML = '<p style="text-align: center;"><i class="fas fa-spinner fa-spin"></i> Carregando materiais...</p>';
+    btnEnviar.disabled = true;
+
+    try {
+        // 1. Encontra a última lista de conferência salva para este local.
+        const listaSnapshot = await db.collection(COLECAO_LISTAS)
+            .where('local', '==', local)
+            .where('conferente', '==', conferente) // Garante que é a lista sob a custódia do usuário logado
+            .limit(1)
+            .get();
+
+        if (listaSnapshot.empty) {
+            itemListContainer.innerHTML = '<p style="color: red; text-align: center;">Não foi encontrada uma lista de custódia ativa para este local em seu nome.</p>';
+            return;
+        }
+
+        const listaDoc = listaSnapshot.docs[0];
+        const lista = listaDoc.data().list || [];
+
+        let itemsHtml = '';
+        let itemsDisponiveis = 0;
+        const listaId = listaDoc.id; // ID da lista de origem (usado no envio)
+
+        // 2. Itera sobre os itens da lista para criar os checkboxes
+        lista.forEach(item => {
+            // VERIFICAÇÃO DE CAUTELA: Se o item já tem o carimbo de cautela, ele não pode ser cautelado novamente.
+            if (item.status && item.status.includes('CAUTELADO')) return; 
+
+            // a. ITENS COM TOMBAMENTO (tipo: unico)
+            if (item.tipo !== 'multi' && item.tombamentos && item.tombamentos.length > 0) {
+                item.tombamentos.forEach(tomb => {
+                    // Verifica se o tombamento está disponível ou se não possui pendência que o impeça
+                    if (tomb.pendencia === null || tomb.pendencia.status === 'S/A') { 
+                        const itemId = `${item.id}-${tomb.tomb}`;
+                        itemsHtml += `
+                            <div class="item-cautela-row" data-id="${item.id}" data-tombamento="${tomb.tomb}" data-nome="${item.nome} **Tomb: ${tomb.tomb}**" data-listaid="${listaId}" data-local="${local}" data-tipo="unico">
+                                <label style="display: flex; align-items: center; justify-content: space-between;">
+                                    <input type="checkbox" onchange="updateCautelaCount()">
+                                    <span style="flex-grow: 1; margin-left: 10px;">${item.nome} **Tomb: ${tomb.tomb}**</span>
+                                    <span style="font-weight: bold; color: #1a9c3d;">1 UN</span>
+                                </label>
+                            </div>
+                        `;
+                        itemsDisponiveis++;
+                    }
+                });
+            } 
+            
+            // b. ITENS SEM TOMBAMENTO (tipo: multi)
+            else if (item.tipo === 'multi') {
+                const itemId = item.id;
+                // Usamos o campo que você tem para a quantidade (ajuste se for outro nome)
+                const quantidadeDisponivel = item.quantidade_atual || item.quantidade_base || 1; 
+                
+                // Ignora se não houver quantidade 
+                if (quantidadeDisponivel > 0) {
+                    itemsHtml += `
+                        <div class="item-cautela-row item-multi" data-id="${itemId}" data-nome="${item.nome}" data-max="${quantidadeDisponivel}" data-listaid="${listaId}" data-local="${local}" data-tipo="multi">
+                            <label style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;">
+                                <input type="checkbox" onchange="toggleMultiItemInput(this)">
+                                <span style="flex-grow: 1; margin-left: 10px;">${item.nome}</span>
+                                <span style="color: #999;">Disp: ${quantidadeDisponivel} UN</span>
+                            </label>
+                            <input type="number" min="1" max="${quantidadeDisponivel}" value="1" placeholder="Qtd a cautelar" data-item-id="${itemId}" oninput="updateCautelaCount()" style="width: 100%; padding: 5px; box-sizing: border-box; display: none;">
+                        </div>
+                    `;
+                    itemsDisponiveis++;
+                }
+            }
+        });
+
+        itemListContainer.innerHTML = itemsHtml || '<p style="text-align: center; color: #999;">Nenhum material disponível para cautela neste local.</p>';
+        
+        // A contagem é feita automaticamente no final do carregamento
+        updateCautelaCount();
+        
+    } catch (error) {
+        console.error("Erro ao carregar itens sob custódia:", error);
+        itemListContainer.innerHTML = '<p style="color: red; text-align: center;">Erro ao carregar materiais.</p>';
+    }
+}
+
+/**
+ * Manipulador de evento para a mudança no select de Local de Origem.
+ */
+function handleLocalChange() {
+    const selectLocal = document.getElementById('cautela-local-origem');
+    loadItensCustodia(selectLocal.value);
+}
+
+/**
+ * Mostra/Esconde o campo de input numérico para itens do tipo 'multi'.
+ * @param {HTMLInputElement} checkbox - O checkbox do item.
+ */
+function toggleMultiItemInput(checkbox) {
+    const row = checkbox.closest('.item-multi');
+    const input = row.querySelector('input[type="number"]');
+    if (checkbox.checked) {
+        input.style.display = 'block';
+    } else {
+        input.style.display = 'none';
+        input.value = 1; // Reseta para evitar envio de valor incorreto
+    }
+    updateCautelaCount();
+}
+
+/**
+ * Atualiza o texto do botão de envio com a contagem de itens selecionados.
+ */
+function updateCautelaCount() {
+    const itensSelecionados = Array.from(document.querySelectorAll('#itens-custodia-list input[type="checkbox"]:checked')).filter(cb => {
+        // Para itens 'multi', garante que a quantidade seja maior que zero
+        const row = cb.closest('.item-multi');
+        if (row) {
+            const input = row.querySelector('input[type="number"]');
+            const qty = parseInt(input.value);
+            return qty > 0 && qty <= parseInt(row.dataset.max);
+        }
+        return true;
+    });
+
+    const count = itensSelecionados.length;
+    const btnEnviar = document.getElementById('btn-iniciar-cautela');
+
+    btnEnviar.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Cautela (${count} itens)`;
+    btnEnviar.disabled = count === 0;
 }
 
 
