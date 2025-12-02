@@ -101,7 +101,7 @@
         function formatarDataSimples(timestamp) {
             if (!timestamp) return "";
             const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-            return date.toLocaleDateString('pt-BR');
+            return date.toLocaleDateString('pt-BR'); 
         }
 
         function updateHeaderInfo() { 
@@ -216,96 +216,33 @@
         function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
         function salvarRascunho() { try { localStorage.setItem(getStorageKey(), JSON.stringify({ timestamp: Date.now(), status: window.itemStatus })); } catch (e) {} }
         function limparRascunho() { try { localStorage.removeItem(getStorageKey()); } catch (e) {} }
-        const getStatusIconAndText = (statusText) => {
-            switch(statusText.toUpperCase().trim()) {
-                case 'SOLUCIONADO':
-                case 'REMOVER':
-                return { icon: '✅️', text: 'Solucionado', color: '#1b8a3e' }; // Verde
-                case 'CAUTELADO':
-                return { icon: '🔃', text: 'Cautelado', color: '#0d47a1' }; // Azul
-                case 'EM SOLUÇÃO':
-                default:
-                return { icon: '⚠️', text: 'Em Solução', color: '#f57c00' }; // Amarelo/Laranja
-            }
-        }
+
         const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
             const linhas = [];
-
-            // 1. LINHA DO GESTOR (ADMIN) - Prioridade e Limpa
-            if (adminStatus) {
-                const { icon, text: statusDisplay } = getStatusIconAndText(adminStatus);
-        
-                // Formato para PDF/Texto: • **Gestor**: ⚠️ Em Solução: Observação
-                // O PDF processará o **negrito** (Markdown) e aceitará o ícone.
-                const gestorLinha = `• **Gestor**: ${icon} ${statusDisplay}: ${adminObs}`; 
-                linhas.push(gestorLinha);
-            }
-    
-    // 2. OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
+            if (adminStatus) linhas.push(`[${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
             const separator = ' | + NOVA: ';
-            let partes = [textoBruto.trim()];
-            if (textoBruto.includes(separator)) partes = textoBruto.split(separator);
-
+            if (textoBruto.includes(separator)) {
+                const partes = textoBruto.split(separator);
                 partes.forEach(p => {
                     p = p.trim();
-                    const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-                    const match = p.match(regex);
-        
-                    if (match) {
-                    // Verifica se é a AÇÃO GESTOR salva no histórico (para evitar duplicidade)
-                    if (match[1].includes('[AÇÃO GESTOR:')) {
-                    return;
-                }
-            
-            // Formato para PDF/Texto: • **Por NOME em DATA:** "OBS"
-            // O PDF processará o **negrito** (Markdown).
-                linhas.push(`• **Por ${match[2]} em ${match[3]}:** "${match[1]}"`);
-                } else if (p) {
-            // Fallback (texto simples sem carimbo, deve ser a primeira OBS)
-            linhas.push(`• **Por ${autorAtual} em ${dataAtual}:** "${p}"`);
-        }
-    });
-
-    return linhas;
-};
-        const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    // 1. Usa a função padrão para obter as linhas limpas e padronizadas
-    const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
-    let html = '<ul class="lista-pendencias">';
-    
-    linhas.forEach(l => { 
-        if (l.includes('**Gestor**')) { 
-            // Linha do Gestor: • **Gestor**: ⚠️ Em Solução: Observação
-            const [prefixo, statusObs] = l.split(':');
-            const statusMatch = statusObs.match(/(\w+) (.+):/); // Captura o status (Ex: Em Solução)
-            
-            if (statusMatch) {
-                const statusText = statusMatch[2].trim();
-                const { icon, color } = getStatusIconAndText(statusText);
-
-                // Formatado como: <span style="color: red;"><b>Gestor</b></span>: <span style="color: StatusColor;"><i>⚠️ Status</i></span>: Observação
-                html += `<li>
-                            <span style="color: #d90f23;"><b>Gestor</b></span>: 
-                            <span style="color: ${color}; font-style: italic;">
-                                ${icon} ${statusText}
-                            </span>
-                            : ${statusObs.split(':').slice(1).join(':').trim()}
-                        </li>`; 
+                    const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; const match = p.match(regex);
+                    if (match) linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+                    else linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+                });
+            } else {
+                const p = textoBruto.trim();
+                const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; const match = p.match(regex);
+                if (match) linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+                else linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
             }
-        } else { 
-            // Linha do Conferente: • **Por [Usuário + Data]:** "Observação"
-            const [carimbo, ...resto] = l.split(':');
-            
-            // Substitui o Markdown **negrito** por tag <b>
-            const carimboBoldHtml = carimbo.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-            
-            html += `<li class="linha-obs">${carimboBoldHtml}:${resto.join(':')}</li>`;
-        } 
-    });
-    
-    html += '</ul>';
-    return html;
-};
+            return linhas;
+        };
+        const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+            const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
+            let html = '<ul class="lista-pendencias">';
+            linhas.forEach(l => { if (l.includes('(Admin):')) { const parts = l.split('): '); html += `<li><span class="texto-admin">⚠️ ${parts[0]}):</span> Resp: ${parts[1]}</li>`; } else { html += `<li class="linha-obs">• ${l}</li>`; } });
+            html += '</ul>'; return html;
+        };
         const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
     const separator = ' | + NOVA: ';
     
