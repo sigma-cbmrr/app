@@ -2755,30 +2755,54 @@ function formatarDataSimples(timestamp) {
 
 const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
     const linhas = [];
-    // Lógica para incluir a resposta do admin no topo (Linhas 127-128 do app)
-    if (adminStatus) linhas.push(`⚠️ [${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
+    
+    // 1. FORMATAÇÃO DA RESPOSTA DO GESTOR (ADMIN)
+    if (adminStatus) {
+        // Armazenamos o Status e a Observação separados para facilitar a formatação no HTML
+        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`; 
+        linhas.push(gestorLinha);
+    }
     
     const separator = ' | + NOVA: ';
-    // Lógica para separar as observações concatenadas (Linhas 128-134 do app)
+    
+    // 2. FORMATAÇÃO DAS OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
     if (textoBruto.includes(separator)) {
         const partes = textoBruto.split(separator);
         partes.forEach(p => {
             p = p.trim();
             const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
             const match = p.match(regex);
-            // Se estiver assinada (formato mais antigo/incompleto)
-            if (match) linhas.push(`• Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
-            // Se for apenas texto (mais novo) ou texto quebrado do histórico
-            else linhas.push(`• Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+            
+            // Verifica se é a AÇÃO GESTOR já salva no histórico.
+            if (match && match[1].includes('[AÇÃO GESTOR:')) {
+                return; 
+            }
+
+            // Se for observação de Conferente:
+            if (match) {
+                // Formato padrão: Por: NOME em DATA: "OBS"
+                linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+            } else {
+                // Se for texto simples (fallback, não deve acontecer com o padrão atual)
+                linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+            }
         });
     } else {
         const p = textoBruto.trim();
         const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
         const match = p.match(regex);
-        // Se for a primeira observação completa (novo padrão)
-        if (match) linhas.push(`• Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
-        // Se for um texto simples sem assinatura
-        else linhas.push(`• Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+
+        // Verifica se é uma AÇÃO GESTOR na primeira linha 
+        if (match && match[1].includes('[AÇÃO GESTOR:')) {
+            return; // Já tratado na seção 1
+        }
+        
+        // Se for a primeira observação de Conferente:
+        if (match) {
+            linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+        } else {
+            linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+        }
     }
     return linhas;
 };
@@ -2787,14 +2811,54 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
     const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
     let html = '<ul class="lista-pendencias">';
+    
     linhas.forEach(l => { 
         if (l.includes('(Admin):')) { 
-            const parts = l.split('): ');
-            html += `<li><span class="texto-admin">⚠️ ${parts[0]}):</span> Resp: ${parts[1]}</li>`; 
+            // Formato de entrada: [STATUS] (Admin): Observação do Gestor
+            const [carimboStatus, obsText] = l.split(':');
+            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
+            
+            let icon = '';
+            let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
+            let obsColor = '#555';
+
+            // Mapeamento dos Ícones e Cores
+            switch(statusText.toUpperCase().trim()) {
+                case 'SOLUCIONADO':
+                case 'REMOVER':
+                    icon = '✅️';
+                    statusColor = '#1b8a3e'; // Verde
+                    break;
+                case 'CAUTELADO':
+                    icon = '🔃';
+                    statusColor = '#0d47a1'; // Azul
+                    break;
+                case 'EM SOLUÇÃO':
+                default:
+                    icon = '⚠️';
+                    break;
+            }
+            
+            // Formatado como: **Gestor** <span style="color: StatusColor;">⚠️ *Status*: </span> Observação
+            html += `<li>
+                        <span style="color: #d90f23;"><b>Gestor</b></span>:
+                        <span style="color: ${statusColor}; font-style: italic;">
+                            ${icon} ${statusText}
+                        </span>
+                        : ${obsText.trim()}
+                    </li>`; 
         } else { 
-            html += `<li class="linha-obs">${l}</li>`; 
+            // Formato Conferente: • **Por [Usuário + Data]:**
+            // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
+            const [carimbo, ...resto] = l.split(':');
+            
+            // Aplica BOLD no Carimbo: "Por: NOME em DATA"
+            const carimboBold = carimbo.replace('Por:', '**Por**');
+            
+            html += `<li class="linha-obs">• ${carimboBold}:${resto.join(':')}</li>`;
         } 
     });
+    
     html += '</ul>';
     return html;
 };
