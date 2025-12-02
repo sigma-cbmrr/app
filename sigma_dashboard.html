@@ -2744,132 +2744,14 @@ sortedUnits.forEach(unit => {
             }
         }
 
-        // --- FUNÇÕES DE FORMATAÇÃO DE TEXTO (NECESSÁRIAS PARA O PDF) ---
-
-function formatarDataSimples(timestamp) {
-    if (!timestamp) return "";
-    // Adicionando a função formatarDataSimples do outro arquivo
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString('pt-BR');
-}
-
-const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    const linhas = [];
-    
-    // 1. FORMATAÇÃO DA RESPOSTA DO GESTOR (ADMIN)
-    if (adminStatus) {
-        // Armazenamos o Status e a Observação separados para facilitar a formatação no HTML
-        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`; 
-        linhas.push(gestorLinha);
-    }
-    
-    const separator = ' | + NOVA: ';
-    
-    // 2. FORMATAÇÃO DAS OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
-    if (textoBruto.includes(separator)) {
-        const partes = textoBruto.split(separator);
-        partes.forEach(p => {
-            p = p.trim();
-            const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-            const match = p.match(regex);
-            
-            // Verifica se é a AÇÃO GESTOR já salva no histórico.
-            if (match && match[1].includes('[AÇÃO GESTOR:')) {
-                return; 
-            }
-
-            // Se for observação de Conferente:
-            if (match) {
-                // Formato padrão: Por: NOME em DATA: "OBS"
-                linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
-            } else {
-                // Se for texto simples (fallback, não deve acontecer com o padrão atual)
-                linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
-            }
-        });
-    } else {
-        const p = textoBruto.trim();
-        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-        const match = p.match(regex);
-
-        // Verifica se é uma AÇÃO GESTOR na primeira linha 
-        if (match && match[1].includes('[AÇÃO GESTOR:')) {
-            return; // Já tratado na seção 1
-        }
-        
-        // Se for a primeira observação de Conferente:
-        if (match) {
-            linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
-        } else {
-            linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
-        }
-    }
-    return linhas;
-};
-
-// Função wrapper apenas para manter a consistência com o app (não usada no PDF)
-const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
-    let html = '<ul class="lista-pendencias">';
-    
-    linhas.forEach(l => { 
-        if (l.includes('(Admin):')) { 
-            // Formato de entrada: [STATUS] (Admin): Observação do Gestor
-            const [carimboStatus, obsText] = l.split(':');
-            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
-            
-            let icon = '';
-            let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
-            let obsColor = '#555';
-
-            // Mapeamento dos Ícones e Cores
-            switch(statusText.toUpperCase().trim()) {
-                case 'SOLUCIONADO':
-                case 'REMOVER':
-                    icon = '✅️';
-                    statusColor = '#1b8a3e'; // Verde
-                    break;
-                case 'CAUTELADO':
-                    icon = '🔃';
-                    statusColor = '#0d47a1'; // Azul
-                    break;
-                case 'EM SOLUÇÃO':
-                default:
-                    icon = '⚠️';
-                    break;
-            }
-            
-            // Formatado como: **Gestor** <span style="color: StatusColor;">⚠️ *Status*: </span> Observação
-            html += `<li>
-                        <span style="color: #d90f23;"><b>Gestor</b></span>:
-                        <span style="color: ${statusColor}; font-style: italic;">
-                            ${icon} ${statusText}
-                        </span>
-                        : ${obsText.trim()}
-                    </li>`; 
-        } else { 
-            // Formato Conferente: • **Por [Usuário + Data]:**
-            // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
-            const [carimbo, ...resto] = l.split(':');
-            
-            // Aplica BOLD no Carimbo: "Por: NOME em DATA"
-            const carimboBold = carimbo.replace('Por:', '**Por**');
-            
-            html += `<li class="linha-obs">• ${carimboBold}:${resto.join(':')}</li>`;
-        } 
-    });
-    
-    html += '</ul>';
-    return html;
-};
-
-// --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
+        // --- PDF GENERATOR ---
+        // --- PDF GENERATOR ---
 function reimprimirPDF(data) {
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
-
+        
         // MANTÉM A LÓGICA DE BUSCA DE IMAGEM DO DASHBOARD
         // Busca a imagem já carregada no DOM para desenhar no PDF
         const logoDraw = (domId, x) => { 
@@ -2894,7 +2776,7 @@ function reimprimirPDF(data) {
         
         // --- CHAMADAS PARA DESENHAR AS LOGOS ---
         // 1. Logo CBM-RR (Esquerda)
-        logoDraw('cbmrr.png', MARGIN);
+        logoDraw('cbmrr.png', MARGIN); 
         // 2. Logo SIGMA (Direita)
         logoDraw('logo_sigma.png', PG_W-MARGIN-LOGO_S);
         
@@ -2903,13 +2785,13 @@ function reimprimirPDF(data) {
         doc.setTextColor(51); 
         doc.setFont('helvetica','bold');
         doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
-        doc.setTextColor(217,15,35);
+        doc.setTextColor(217,15,35); 
         doc.text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
         doc.setTextColor(51); 
         doc.setFont('helvetica','italic');
         doc.text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
         doc.setFontSize(14); 
-        doc.setTextColor(0);
+        doc.setTextColor(0); 
         doc.setFont('helvetica','bold'); 
         doc.text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
 
@@ -2945,7 +2827,7 @@ function reimprimirPDF(data) {
         
         // TOTALIZADOR
         doc.setFont('helvetica','bold');
-        doc.setTextColor(128, 0, 32);
+        doc.setTextColor(128, 0, 32); 
         doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
 
         // TABELA DE ITENS
@@ -2971,36 +2853,34 @@ function reimprimirPDF(data) {
 
                 // Lógica de Formatação de Observações
                 let finalObs = item.obs || '-';
-                
-                // ADICIONADO: Variáveis de contexto para a formatação
-                const dataConf = dataTimestamp.toLocaleDateString('pt-BR');
-                const conf = data.conferente; 
-                
-                // 1. Usa a função padrão para obter o array de linhas formatadas
-                let linhasFormatadas = [];
-                if (finalObs !== '-') {
-                    linhasFormatadas = gerarLinhasFormatadas(
-                        finalObs, 
-                        conf, 
-                        dataConf,
-                        item.statusAdmin, 
-                        item.adminObs
-                    );
+                // Adiciona observação de gestão (se existir)
+                if (item.adminObs) 
+                {
+                   finalObs += (finalObs === '-' ? '' : '\n\n') + 'Gestão: ' + item.adminObs;
                 }
-                
-                // 2. Transforma o array de linhas em uma string separada por quebra de linha
-                // O prefixo '•' já está incluso na função gerarLinhasFormatadas para observações.
-                finalObs = linhasFormatadas.map(l => {
-                    // Substitui o prefixo de admin (ex: "⚠️ [SOLUCIONADO] (Admin):") para um formato de relatório mais limpo
-                    if(l.includes('(Admin):')) {
-                        return l.replace('⚠️ ', 'RESPOSTA DA GESTÃO: ');
-                    }
-                    return l;
-                }).join('\n');
-                
-                if (finalObs.trim() === '') finalObs = '-'; // Volta para '-' se ficar vazio.
 
-                // FIM DA LÓGICA DE FORMATAÇÃO DE OBSERVAÇÕES
+                if(finalObs === '-') finalObs = '';
+
+                if (finalObs.includes(' | + NOVA: ')) {
+                    let partes = finalObs.split(' | + NOVA: '); 
+                    let formatado = "";
+                    partes.forEach(p => { 
+                        p = p.trim(); 
+                        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
+                        const match = p.match(regex); 
+                        if(match) formatado += `• Por: ${match[2]} em ${match[3]}: "${match[1]}"\n`; 
+                        else formatado += `• ${p}\n`; 
+                    });
+                    finalObs = formatado.trim();
+                } else if (finalObs.trim() !== '') {
+                    const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/;
+                    const match = finalObs.match(regex);
+                    if(match) { 
+                        finalObs = `• Por: ${match[2]} em ${match[3]}: "${match[1]}"`;
+                    } else if (!finalObs.startsWith('Gestão: ')) {
+                        finalObs = `• Por: ${data.conferente} em ${dataTimestamp.toLocaleDateString('pt-BR')}: "${finalObs}"`;
+                    }
+                }
                 
                 let bgStatus = GREEN_FILL;
                 if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
@@ -3050,6 +2930,7 @@ function reimprimirPDF(data) {
         alert("Erro ao gerar PDF: " + e.message);
     }
 }
+
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
         
         function sairDoSistema() { 
@@ -3160,56 +3041,38 @@ const activeLink = document.getElementById(`link-${v}`);
         
         // --- FUNÇÕES DO MODAL GESTÃO C/A ---
         function mostrarTabela(data) {
-    const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
-    document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; 
-    tbody.innerHTML = '';
-    
-    // Garante array
-    const items = data.items || [];
-    const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
-    
-    if (itemsToShow.length === 0) { 
-        wrapper.querySelector('table').style.display = 'none';
-        document.getElementById('no-issues-msg').style.display = 'block';
-    } else {
-        wrapper.querySelector('table').style.display = 'table';
-        document.getElementById('no-issues-msg').style.display = 'none';
-        
-        itemsToShow.forEach(i => {
-            const tr = tbody.insertRow();
+            const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
+            document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; 
+            tbody.innerHTML = '';
             
-            // 1. Formata o histórico de observações usando a função padronizada (HTML)
-            const obsHtmlFormatada = gerarHtmlVisual(
-                i.obs || '', 
-                data.conferente, // Nome do conferente original (fallback)
-                data.date, // Data da conferência original (fallback)
-                i.statusAdmin, 
-                i.adminObs
-            );
-
-            // 2. Define a classe do badge para o status de gestão
-            const statusAdmin = i.statusAdmin || 'Pendente';
-            // Garante que o status do Firebase (Ex: Em solução, Cautelado) seja minúsculo e com traço (Ex: em-solucao)
-            const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(' ', '-');
+            // Garante array
+            const items = data.items || [];
+            const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
             
-            // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
-            const itemComDocId = { ...i, docId: data.docId }; 
-            
-            tr.innerHTML = `
-                <td><strong>${i.nomeCompleto}</strong></td>
-                <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
-                <td>${obsHtmlFormatada}</td>
-                <td><small>${data.conferente}<br>${data.date}</small></td>
-            `;
-            
-            const td = tr.insertCell(); 
-            // Passa o item enriquecido para o modal de gestão
-            td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
-        });
-    }
-    wrapper.style.display = 'block';
-    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
+            if (itemsToShow.length === 0) { 
+                wrapper.querySelector('table').style.display = 'none'; 
+                document.getElementById('no-issues-msg').style.display = 'block';
+            } else {
+                wrapper.querySelector('table').style.display = 'table';
+                document.getElementById('no-issues-msg').style.display = 'none';
+                
+                itemsToShow.forEach(i => {
+                    const tr = tbody.insertRow();
+                    const obsFormatada = (i.obs || '').replace(/\n/g, '<br>');
+                    // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
+                  
+                    const itemComDocId = { ...i, docId: data.docId }; 
+                    
+                    tr.innerHTML = `<td><strong>${i.nomeCompleto}</strong></td><td><span class="status-badge">${i.statusAdmin||'Pendente'}</span></td><td>${obsFormatada}</td><td><small>${data.conferente}<br>${data.date}</small></td>`;
+                    const td = tr.insertCell(); 
+                    
+                    // Passa o item enriquecido
+                    td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
+                });
+            }
+            wrapper.style.display = 'block';
+            wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
         function fecharTabela(){ 
             document.getElementById('ca-table-wrapper').style.display='none';
         }
@@ -3246,143 +3109,97 @@ const activeLink = document.getElementById(`link-${v}`);
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
         async function salvarGestaoCa(){
-    // [1] RECUPERAÇÃO DE DADOS DO MODAL
-    const docId = document.getElementById('gestao-doc-id').value;
-    const itemId = document.getElementById('gestao-item-id-lista').value;
-    const status = document.getElementById('gestao-status').value;
-    const obsRaw = document.getElementById('gestao-obs').value.trim();
-    const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
-    
-    // [2] VALIDAÇÃO BÁSICA
-    if(!obsRaw) return alert("Digite uma observação.");
+            const docId = document.getElementById('gestao-doc-id').value;
+            const itemId = document.getElementById('gestao-item-id-lista').value;
+            const status = document.getElementById('gestao-status').value;
+            const obsRaw = document.getElementById('gestao-obs').value.trim();
+            const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
+            
+            if(!obsRaw) return alert("Digite uma observação.");
 
-    try {
-        // [3] RECUPERAÇÃO DE METADADOS DO GESTOR E DATA/HORA
-        const nomeGestor = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
-        const dataHoraStr = new Date().toLocaleString('pt-BR');
-        
-        // Texto que será carimbado na linha do HISTÓRICO (item.obs)
-        const carimboTextoHistorico = `[AÇÃO GESTOR: ${status.toUpperCase()}] ${obsRaw}` + 
-                                    (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
-
-        // A linha completa a ser adicionada no histórico linear (formato padronizado)
-        const novaLinhaObs = `"${carimboTextoHistorico}" (Por: ${nomeGestor} em ${dataHoraStr})`;
-        
-        // Texto para exibição no campo adminObs (apenas o raw)
-        const obsFinalDisplay = obsRaw; 
-
-
-        // [4] BUSCA DO DOCUMENTO PAI NO FIREBASE
-        const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
-        const snap = await ref.get();
-        if(!snap.exists) return alert("Erro: Conferência não encontrada.");
-        
-        const resData = snap.data();
-        const items = resData.itensCaa || [];
-        
-        // [5] BUSCA INTELIGENTE DO ITEM (Pelo ID)
-        let targetIndex = -1;
-        targetIndex = items.findIndex(i => i.id === itemId);
-        
-        if (targetIndex === -1) {
-            const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
-            targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
-        }
-
-        if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
-        
-        // [6] ATUALIZAÇÃO DOS CAMPOS DO ITEM
-        const itemParaAtualizar = items[targetIndex];
-
-        // *** CORREÇÃO CRUCIAL 1: Atualiza o campo de histórico linear (item.obs) no resultados_conferencias ***
-        let obsAtualizada = itemParaAtualizar.obs || '';
-        if (obsAtualizada.trim() !== '') {
-            obsAtualizada += ' | + NOVA: ';
-        }
-        obsAtualizada += novaLinhaObs;
-        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR
-
-        // Atualiza campos específicos do Administrador (para uso no Dashboard)
-        itemParaAtualizar.statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
-        itemParaAtualizar.adminObs = obsFinalDisplay; 
-        
-        
-        // [7] SALVA AS MUDANÇAS NO FIREBASE
-        await ref.update({ itensCaa: items });
-        
-        
-        // [8] ATUALIZAÇÃO NA LISTA MESTRE (LÓGICA DO ESTOQUE E PERSISTÊNCIA DO CARIMBO)
-        
-        const listaId = resData.lista_id;
-        if(listaId) {
-            const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
-            const listSnap = await listRef.get();
-            let updated = false;
-
-            if(listSnap.exists) {
-                let listaData = listSnap.data().list;
+            // --- CARIMBO AUTOMÁTICO ---
+            const dataHoje = new Date().toLocaleDateString('pt-BR');
+            const carimbo = `Por ${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra} em ${dataHoje}`;
+            const obsFinal = `${carimbo}: "${obsRaw}"` + (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
+            
+            try {
+                const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
+                const snap = await ref.get();
+                if(!snap.exists) return alert("Erro: Conferência não encontrada.");
                 
-                const updateItemInMasterList = (item, isTombamento = false) => {
-                    const isSolved = (status === 'Remover' || status === 'Solucionado');
-                    const isManaged = (status === 'Em solução' || status === 'Cautelado');
-                    
-                    if (isSolved) {
-                        // LÓGICA DE SOLUÇÃO (Remove do estoque ou deleta pendência)
-                        if (status === 'Remover') {
-                            if (!isTombamento) item.quantidadeEsperada -= qtdRemover;
-                            else item.tombamentos.splice(item.tombamentos.findIndex(t => t.tomb === itemId.split('-')[1]), 1);
-                            
-                            if (item.quantidadeEsperada <= 0 || isTombamento) { 
-                                // O Splicing do tombamento foi feito na linha acima. 
-                                // O splicing do item completo precisa de lógica mais complexa, mas vamos manter o delete pendencia aqui.
-                            }
-                        }
-                        
-                        // Atualiza o histórico na lista Mestra antes de deletar a pendência
-                        if(item.pendencia && item.pendencia.obs) item.pendencia.obs = obsAtualizada;
-                        delete item.pendencia;
-                        updated = true;
-                        
-                    } else if (isManaged) {
-                        // LÓGICA DE GESTÃO (ATUALIZA APENAS O CAMPO OBS PARA PERSISTÊNCIA)
-                        if (item.pendencia) {
-                            item.pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
-                            // item.pendencia.statusAdmin e adminObs NÃO SÃO SALVOS AQUI.
-                            updated = true;
-                        }
-                    }
-                    return updated;
-                };
+                const resData = snap.data();
+                const items = resData.itensCaa || [];
+                
+                // BUSCA INTELIGENTE (Pelo ID e não apenas pelo índice)
+                let targetIndex = -1;
+                // 1. Tenta achar pelo ID
+                targetIndex = items.findIndex(i => i.id === itemId);
+                // 2. Se não achar, tenta pelo Nome + Obs (Fallback)
+                if (targetIndex === -1) {
+                    const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
+                    targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
+                }
 
-                for(let s of listaData) {
-                    for(let i = s.itens.length - 1; i >= 0; i--) {
-                        const item = s.itens[i];
-                        if(item.tipo === 'single' && item.id === itemId) {
-                            updateItemInMasterList(item);
-                        }
-                        else if(item.tipo === 'multi' && item.tombamentos) {
-                            const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
-                            if(tIndex > -1) {
-                                updateItemInMasterList(item.tombamentos[tIndex], true);
+                if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
+                
+                items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
+                items[targetIndex].adminObs = obsFinal;
+                
+                await ref.update({ itensCaa: items });
+                
+                if(status === 'Remover' || status === 'Solucionado') {
+                    const listaId = resData.lista_id;
+                    if(listaId) {
+                        const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
+                        const listSnap = await listRef.get();
+                        
+                        if(listSnap.exists) {
+                            let listaData = listSnap.data().list;
+                            let updated = false;
+
+                            for(let s of listaData) {
+                                for(let i = s.itens.length - 1; i >= 0; i--) {
+                                    const item = s.itens[i];
+                                    if(item.tipo === 'single' && item.id === itemId) {
+                                        if(status === 'Remover') {
+                                            item.quantidadeEsperada -= qtdRemover;
+                                            delete item.pendencia; 
+                                            if(item.quantidadeEsperada <= 0) s.itens.splice(i, 1);
+                                        } else {
+                                            delete item.pendencia;
+                                        }
+                                        updated = true;
+                                    }
+                                    else if(item.tipo === 'multi' && item.tombamentos) {
+                                        const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
+                                        if(tIndex > -1) {
+                                            if(status === 'Remover') {
+                                                item.tombamentos.splice(tIndex, 1);
+                                                item.quantidadeEsperada = item.tombamentos.length;
+                                                if(item.tombamentos.length === 0) s.itens.splice(i, 1);
+                                            } else {
+                                                delete item.tombamentos[tIndex].pendencia;
+                                            }
+                                            updated = true;
+                                        }
+                                    }
+                                }
                             }
+                            if(updated) await listRef.update({ list: listaData });
                         }
                     }
                 }
-                
-                if(updated) await listRef.update({ list: listaData });
+
+                alert("Salvo com sucesso!");
+                fecharModalGestao();
+                fecharTabela();
+                loadCaaData(); 
+            } catch(e) { 
+                console.error(e); 
+                alert("Erro ao salvar: " + e.message);
             }
         }
 
-        // [9] FINALIZAÇÃO
-        alert("Salvo com sucesso!");
-        fecharModalGestao();
-        fecharTabela();
-        loadCaaData(); 
-    } catch(e) { 
-        console.error(e); 
-        alert("Erro ao salvar: " + e.message);
-    }
-}
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
         function abrirEditor(id, nome, unidadeLista) { 
     
