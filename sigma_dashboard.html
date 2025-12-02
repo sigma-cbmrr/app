@@ -4266,9 +4266,9 @@ function loadNewCautelaForm() {
         contentArea.innerHTML = getNovaCautelaFormHTML();
         contentArea.style.display = 'block'; 
         
-        // 3. (PRÓXIMO PASSO): Iniciamos o carregamento dos locais sob custódia e usuários
-        // loadCustodiaLocais(); 
-        // loadUsersForSearch();
+        // 3. ATIVAÇÃO DAS BUSCAS DE DADOS
+        loadCustodiaLocais(); 
+        loadUsersForSearch();
     }
 }
 
@@ -4332,6 +4332,90 @@ function showCautelasDashboard(type) {
                 logout(); 
             }
         });
+        async function loadUsersForSearch() {
+    const datalist = document.getElementById('lista-usuarios');
+    if (!datalist) return;
+
+    try {
+        // Assume que a coleção 'users' armazena todos os usuários.
+        // Se a coleção for diferente (ex: 'militares'), ajuste aqui.
+        const usersSnapshot = await db.collection('users').get(); 
+        
+        let optionsHtml = '';
+        usersSnapshot.forEach(doc => {
+            const user = doc.data();
+            const matricula = user.matricula || doc.id; // Assume que o UID ou matrícula é o valor.
+            const nomeCompleto = user.nome_completo || user.nome;
+
+            // Formato: Nome Completo (Matrícula)
+            const displayValue = nomeCompleto ? `${nomeCompleto} (${matricula})` : matricula;
+
+            optionsHtml += `<option data-uid="${doc.id}" value="${displayValue}"></option>`;
+        });
+
+        datalist.innerHTML = optionsHtml;
+    } catch (error) {
+        console.error("Erro ao carregar usuários para a pesquisa:", error);
+        // Opcional: Mostrar uma mensagem de erro no formulário
+    }
+}
+
+
+/**
+ * Busca os locais onde o usuário logado foi o último conferente
+ * e preenche o <select> de Local de Origem.
+ */
+async function loadCustodiaLocais() {
+    const selectLocal = document.getElementById('cautela-local-origem');
+    
+    // **CORREÇÃO APLICADA:** Usamos a variável 'conferente' encontrada no seu código.
+    const currentUserId = conferente; 
+
+    if (!selectLocal || !currentUserId) {
+        console.warn("UID do usuário (conferente) não encontrado ou seletor de local ausente.");
+        // Opcional: Desabilita o campo e mostra uma mensagem de erro
+        selectLocal.innerHTML = '<option value="" disabled selected>Erro: Usuário não identificado.</option>';
+        return;
+    }
+    
+    selectLocal.disabled = true;
+    selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
+
+
+    try {
+        // Busca no campo 'conferente' da coleção 'resultados_conferencias'
+        // Ordenamos pela data para garantir que a custódia seja a mais recente (mesmo que só precisemos do local)
+        const resultsSnapshot = await db.collection('resultados_conferencias')
+            .where('conferente', '==', currentUserId) 
+            .orderBy('timestamp', 'desc')
+            .get();
+
+        const locaisDeCustodia = new Set();
+        
+        // Coleta apenas os locais únicos onde o usuário conferiu por último.
+        resultsSnapshot.forEach(doc => {
+            locaisDeCustodia.add(doc.data().local);
+        });
+
+        // Monta as opções do SELECT.
+        let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
+        if (locaisDeCustodia.size === 0) {
+            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia.</option>';
+        } else {
+            locaisDeCustodia.forEach(local => {
+                optionsHtml += `<option value="${local}">${local}</option>`;
+            });
+        }
+        
+
+        selectLocal.innerHTML = optionsHtml;
+        selectLocal.disabled = false; 
+    } catch (error) {
+        console.error("Erro ao carregar locais sob custódia:", error);
+        selectLocal.disabled = false;
+        selectLocal.innerHTML = '<option value="" disabled selected>Erro ao carregar locais.</option>';
+    }
+}
     </script>
 </body>
 </html>
