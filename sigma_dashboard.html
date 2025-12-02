@@ -4430,11 +4430,18 @@ function showCautelasDashboard(type) {
  * Esta função deve ser chamada quando o local de origem for selecionado.
  * @param {string} local - O nome do local (ex: 'ABT-17').
  */
+/**
+ * Busca e preenche a lista de itens sob custódia do usuário no local selecionado.
+ * @param {string} local - O nome do local (ex: 'ABT-17').
+ */
 async function loadItensCustodia(local) {
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnEnviar = document.getElementById('btn-iniciar-cautela');
     
-    if (!itemListContainer || !local) {
+    // **CORREÇÃO:** Obtém o UID do usuário logado diretamente do Firebase Auth.
+    const currentUserId = firebase.auth().currentUser ? firebase.auth().currentUser.uid : null;
+
+    if (!itemListContainer || !local || !currentUserId) {
         itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #999;">Selecione um Local de Origem.</p>';
         btnEnviar.disabled = true;
         btnEnviar.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Cautela (0 itens)';
@@ -4448,7 +4455,7 @@ async function loadItensCustodia(local) {
         // 1. Encontra a última lista de conferência salva para este local.
         const listaSnapshot = await db.collection(COLECAO_LISTAS)
             .where('local', '==', local)
-            .where('conferente', '==', conferente) // Garante que é a lista sob a custódia do usuário logado
+            .where('conferente', '==', currentUserId) // Usa o UID corrigido
             .limit(1)
             .get();
 
@@ -4457,24 +4464,21 @@ async function loadItensCustodia(local) {
             return;
         }
 
+        // ... (o restante da função loadItensCustodia permanece inalterado) ...
         const listaDoc = listaSnapshot.docs[0];
         const lista = listaDoc.data().list || [];
 
         let itemsHtml = '';
         let itemsDisponiveis = 0;
-        const listaId = listaDoc.id; // ID da lista de origem (usado no envio)
+        const listaId = listaDoc.id; 
 
-        // 2. Itera sobre os itens da lista para criar os checkboxes
         lista.forEach(item => {
-            // VERIFICAÇÃO DE CAUTELA: Se o item já tem o carimbo de cautela, ele não pode ser cautelado novamente.
             if (item.status && item.status.includes('CAUTELADO')) return; 
 
             // a. ITENS COM TOMBAMENTO (tipo: unico)
             if (item.tipo !== 'multi' && item.tombamentos && item.tombamentos.length > 0) {
                 item.tombamentos.forEach(tomb => {
-                    // Verifica se o tombamento está disponível ou se não possui pendência que o impeça
                     if (tomb.pendencia === null || tomb.pendencia.status === 'S/A') { 
-                        const itemId = `${item.id}-${tomb.tomb}`;
                         itemsHtml += `
                             <div class="item-cautela-row" data-id="${item.id}" data-tombamento="${tomb.tomb}" data-nome="${item.nome} **Tomb: ${tomb.tomb}**" data-listaid="${listaId}" data-local="${local}" data-tipo="unico">
                                 <label style="display: flex; align-items: center; justify-content: space-between;">
@@ -4492,10 +4496,8 @@ async function loadItensCustodia(local) {
             // b. ITENS SEM TOMBAMENTO (tipo: multi)
             else if (item.tipo === 'multi') {
                 const itemId = item.id;
-                // Usamos o campo que você tem para a quantidade (ajuste se for outro nome)
                 const quantidadeDisponivel = item.quantidade_atual || item.quantidade_base || 1; 
                 
-                // Ignora se não houver quantidade 
                 if (quantidadeDisponivel > 0) {
                     itemsHtml += `
                         <div class="item-cautela-row item-multi" data-id="${itemId}" data-nome="${item.nome}" data-max="${quantidadeDisponivel}" data-listaid="${listaId}" data-local="${local}" data-tipo="multi">
@@ -4513,8 +4515,6 @@ async function loadItensCustodia(local) {
         });
 
         itemListContainer.innerHTML = itemsHtml || '<p style="text-align: center; color: #999;">Nenhum material disponível para cautela neste local.</p>';
-        
-        // A contagem é feita automaticamente no final do carregamento
         updateCautelaCount();
         
     } catch (error) {
@@ -4577,23 +4577,21 @@ function updateCautelaCount() {
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
     
-    // **CORREÇÃO APLICADA:** Usamos a variável 'conferente' encontrada no seu código.
-    const currentUserId = conferente; 
+    // **CORREÇÃO:** Obtém o UID do usuário logado diretamente do Firebase Auth.
+    const currentUserId = firebase.auth().currentUser ? firebase.auth().currentUser.uid : null;
 
     if (!selectLocal || !currentUserId) {
-        console.warn("UID do usuário (conferente) não encontrado ou seletor de local ausente.");
-        // Opcional: Desabilita o campo e mostra uma mensagem de erro
+        // Se o usuário não estiver logado ou o seletor não existir, exibe erro.
         selectLocal.innerHTML = '<option value="" disabled selected>Erro: Usuário não identificado.</option>';
+        selectLocal.disabled = true;
         return;
     }
     
     selectLocal.disabled = true;
     selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
 
-
     try {
-        // Busca no campo 'conferente' da coleção 'resultados_conferencias'
-        // Ordenamos pela data para garantir que a custódia seja a mais recente (mesmo que só precisemos do local)
+        // Busca no campo 'conferente' (que salva o UID) da coleção 'resultados_conferencias'
         const resultsSnapshot = await db.collection('resultados_conferencias')
             .where('conferente', '==', currentUserId) 
             .orderBy('timestamp', 'desc')
@@ -4601,12 +4599,10 @@ async function loadCustodiaLocais() {
 
         const locaisDeCustodia = new Set();
         
-        // Coleta apenas os locais únicos onde o usuário conferiu por último.
         resultsSnapshot.forEach(doc => {
             locaisDeCustodia.add(doc.data().local);
         });
 
-        // Monta as opções do SELECT.
         let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
         if (locaisDeCustodia.size === 0) {
             optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia.</option>';
@@ -4616,7 +4612,6 @@ async function loadCustodiaLocais() {
             });
         }
         
-
         selectLocal.innerHTML = optionsHtml;
         selectLocal.disabled = false; 
     } catch (error) {
