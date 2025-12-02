@@ -2748,102 +2748,121 @@ sortedUnits.forEach(unit => {
 
 function formatarDataSimples(timestamp) {
     if (!timestamp) return "";
+    // Adicionando a função formatarDataSimples do outro arquivo
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleDateString('pt-BR');
-}
-const getStatusIconAndText = (statusText) => {
-    switch(statusText.toUpperCase().trim()) {
-        case 'SOLUCIONADO':
-        case 'REMOVER':
-            return { icon: '✅️', text: 'Solucionado', color: '#1b8a3e' }; // Verde
-        case 'CAUTELADO':
-            return { icon: '🔃', text: 'Cautelado', color: '#0d47a1' }; // Azul
-        case 'EM SOLUÇÃO':
-        default:
-            return { icon: '⚠️', text: 'Em Solução', color: '#f57c00' }; // Amarelo/Laranja
-    }
 }
 
 const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
     const linhas = [];
-
-    // 1. LINHA DO GESTOR (ADMIN) - Prioridade e Limpa
+    
+    // 1. FORMATAÇÃO DA RESPOSTA DO GESTOR (ADMIN)
     if (adminStatus) {
-        const { icon, text: statusDisplay } = getStatusIconAndText(adminStatus);
-        
-        // Formato para PDF/Texto: • **Gestor**: ⚠️ Em Solução: Observação
-        // O PDF processará o **negrito** (Markdown) e aceitará o ícone.
-        const gestorLinha = `• **Gestor**: ${icon} ${statusDisplay}: ${adminObs}`; 
+        // Armazenamos o Status e a Observação separados para facilitar a formatação no HTML
+        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`; 
         linhas.push(gestorLinha);
     }
     
-    // 2. OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
     const separator = ' | + NOVA: ';
-    let partes = [textoBruto.trim()];
-    if (textoBruto.includes(separator)) partes = textoBruto.split(separator);
+    
+    // 2. FORMATAÇÃO DAS OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
+    if (textoBruto.includes(separator)) {
+        const partes = textoBruto.split(separator);
+        partes.forEach(p => {
+            p = p.trim();
+            const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
+            const match = p.match(regex);
+            
+            // Verifica se é a AÇÃO GESTOR já salva no histórico.
+            if (match && match[1].includes('[AÇÃO GESTOR:')) {
+                return; 
+            }
 
-    partes.forEach(p => {
-        p = p.trim();
+            // Se for observação de Conferente:
+            if (match) {
+                // Formato padrão: Por: NOME em DATA: "OBS"
+                linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+            } else {
+                // Se for texto simples (fallback, não deve acontecer com o padrão atual)
+                linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+            }
+        });
+    } else {
+        const p = textoBruto.trim();
         const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
         const match = p.match(regex);
-        
-        if (match) {
-            // Verifica se é a AÇÃO GESTOR salva no histórico (para evitar duplicidade)
-            if (match[1].includes('[AÇÃO GESTOR:')) {
-                return;
-            }
-            
-            // Formato para PDF/Texto: • **Por NOME em DATA:** "OBS"
-            // O PDF processará o **negrito** (Markdown).
-            linhas.push(`• **Por ${match[2]} em ${match[3]}:** "${match[1]}"`);
-        } else if (p) {
-            // Fallback (texto simples sem carimbo, deve ser a primeira OBS)
-            linhas.push(`• **Por ${autorAtual} em ${dataAtual}:** "${p}"`);
-        }
-    });
 
+        // Verifica se é uma AÇÃO GESTOR na primeira linha 
+        if (match && match[1].includes('[AÇÃO GESTOR:')) {
+            return; // Já tratado na seção 1
+        }
+        
+        // Se for a primeira observação de Conferente:
+        if (match) {
+            linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+        } else {
+            linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+        }
+    }
     return linhas;
 };
 
 // Função wrapper apenas para manter a consistência com o app (não usada no PDF)
 const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    // 1. Usa a função padrão para obter as linhas limpas e padronizadas
     const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
     let html = '<ul class="lista-pendencias">';
     
     linhas.forEach(l => { 
-        if (l.includes('**Gestor**')) { 
-            // Linha do Gestor: • **Gestor**: ⚠️ Em Solução: Observação
-            const [prefixo, statusObs] = l.split(':');
-            const statusMatch = statusObs.match(/(\w+) (.+):/); // Captura o status (Ex: Em Solução)
+        if (l.includes('(Admin):')) { 
+            // Formato de entrada: [STATUS] (Admin): Observação do Gestor
+            const [carimboStatus, obsText] = l.split(':');
+            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
             
-            if (statusMatch) {
-                const statusText = statusMatch[2].trim();
-                const { icon, color } = getStatusIconAndText(statusText);
+            let icon = '';
+            let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
+            let obsColor = '#555';
 
-                // Formatado como: <span style="color: red;"><b>Gestor</b></span>: <span style="color: StatusColor;"><i>⚠️ Status</i></span>: Observação
-                html += `<li>
-                            <span style="color: #d90f23;"><b>Gestor</b></span>: 
-                            <span style="color: ${color}; font-style: italic;">
-                                ${icon} ${statusText}
-                            </span>
-                            : ${statusObs.split(':').slice(1).join(':').trim()}
-                        </li>`; 
+            // Mapeamento dos Ícones e Cores
+            switch(statusText.toUpperCase().trim()) {
+                case 'SOLUCIONADO':
+                case 'REMOVER':
+                    icon = '✅️';
+                    statusColor = '#1b8a3e'; // Verde
+                    break;
+                case 'CAUTELADO':
+                    icon = '🔃';
+                    statusColor = '#0d47a1'; // Azul
+                    break;
+                case 'EM SOLUÇÃO':
+                default:
+                    icon = '⚠️';
+                    break;
             }
+            
+            // Formatado como: **Gestor** <span style="color: StatusColor;">⚠️ *Status*: </span> Observação
+            html += `<li>
+                        <span style="color: #d90f23;"><b>Gestor</b></span>:
+                        <span style="color: ${statusColor}; font-style: italic;">
+                            ${icon} ${statusText}
+                        </span>
+                        : ${obsText.trim()}
+                    </li>`; 
         } else { 
-            // Linha do Conferente: • **Por [Usuário + Data]:** "Observação"
+            // Formato Conferente: • **Por [Usuário + Data]:**
+            // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
             const [carimbo, ...resto] = l.split(':');
             
-            // Substitui o Markdown **negrito** por tag <b>
-            const carimboBoldHtml = carimbo.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+            // Aplica BOLD no Carimbo: "Por: NOME em DATA"
+            const carimboBold = carimbo.replace('Por:', '**Por**');
             
-            html += `<li class="linha-obs">${carimboBoldHtml}:${resto.join(':')}</li>`;
+            html += `<li class="linha-obs">• ${carimboBold}:${resto.join(':')}</li>`;
         } 
     });
     
     html += '</ul>';
     return html;
 };
+
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
 function reimprimirPDF(data) {
     try {
