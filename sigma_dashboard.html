@@ -2963,63 +2963,79 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 };
 
 // Função wrapper apenas para manter a consistência com o app (não usada no PDF)
-const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    // ESSENCIAL: Usa a função corrigida para filtrar linhas vazias
-    const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
-    let html = '<ul class="lista-pendencias">';
-    
-    linhas.forEach(l => { 
-        if (l.includes('(Admin):')) { 
-            // Lógica do Administrador (Preservada)
-            const [carimboStatus, obsText] = l.split(':');
-            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; 
-            
-            let icon = '';
-            let statusColor = '#f57c00'; 
+function gerarHtmlVisual(obsRaw, conferente, date, statusAdmin, adminObs) {
+    // Retorna vazio se não houver dados relevantes para exibir.
+    if (!obsRaw && !statusAdmin) return '';
 
-            switch(statusText.toUpperCase().trim()) {
-                case 'SOLUCIONADO':
-                case 'REMOVER':
-                    icon = '✅️';
-                    statusColor = '#1b8a3e'; // Verde
-                    break;
-                case 'CAUTELADO':
-                    icon = '🔃';
-                    statusColor = '#0d47a1'; // Azul
-                    break;
-                case 'EM SOLUÇÃO':
-                default:
-                    icon = '⚠️';
-                    break;
-            }
-            
-            html += `<li>
-                        <span style="color: #d90f23;"><b>Gestor</b></span>:
-                        <span style="color: ${statusColor}; font-style: italic;">
-                            ${icon} ${statusText}
-                        </span>
-                        : ${obsText.trim()}
-                    </li>`; 
-        } else { 
-            // Lógica do Conferente 
-            const [carimbo, ...resto] = l.split(':');
-            let textoObsCompleto = resto.join(':').trim(); 
-            
-            // 🚨 Correção de display: Remove as aspas externas se existirem
-            if (textoObsCompleto.startsWith('"') && textoObsCompleto.endsWith('"')) {
-                 textoObsCompleto = textoObsCompleto.substring(1, textoObsCompleto.length - 1).trim();
-            }
-            
-            const carimboBold = carimbo.replace('Por:', '**Por**');
-            
-            // Renderiza o texto (que agora não será vazio se a CRÍTICA 1/2 foi aplicada)
-            html += `<li class="linha-obs">• ${carimboBold}: "${textoObsCompleto}"</li>`;
-        } 
-    });
+    let html = '<ul>';
+    // É crucial que gerarLinhasFormatadas esteja funcionando corretamente para retornar um array de strings.
+    let linhas = gerarLinhasFormatadas(obsRaw || '', conferente, date); 
     
+    // 1. Adiciona o status/observação do Gestor no topo, se houver
+    if (statusAdmin && statusAdmin.toLowerCase() !== 'pendente') {
+        const statusClean = statusAdmin.toUpperCase().replace(/\s/g, '-');
+        const badgeClass = `status-badge badge-${statusClean.toLowerCase()}`;
+        const adminObsText = adminObs ? `<span style="font-weight: normal; color: #555;">: ${adminObs}</span>` : '';
+        html += `<li class="linha-admin" style="color: #800020; font-weight: bold;">
+                    <span class="${badgeClass}" style="margin-right: 5px;">${statusAdmin.toUpperCase()}</span>
+                    ${adminObsText}
+                 </li>`;
+    }
+
+    // 2. Processa o histórico de observações (C/A)
+    linhas.forEach(l => {
+        if (!l || l.trim() === '') return;
+
+        // Linha de fallback (primeira conferência)
+        if (l.startsWith('[PRIMEIRA CONFERÊNCIA]')) {
+            html += `<li class="linha-obs-fallback" style="font-style: italic; color: #666;">${l}</li>`;
+        } else {
+            // Lógica para linhas de histórico formatadas (Ex: Por: Nome em Data: "texto")
+            
+            // Quebra o carimbo de data/usuário do resto da string
+            const partes = l.split(':');
+            
+            // Checagem de robustez (deve ter pelo menos o carimbo e o texto)
+            if (partes.length < 3) {
+                 html += `<li class="linha-obs-bruta" style="color: red; font-size: 0.8em;">[Erro de Formato - Linha Bruta]: ${l}</li>`;
+                 return;
+            }
+            
+            // Pega o carimbo (as 2 primeiras partes) e o texto da observação (o resto)
+            // Carimbo: "Por: Nome em Data"
+            const carimbo = partes.slice(0, 2).join(':').trim(); 
+            // Texto: " "Observação do Usuário"" (ou " Data: "Observação do Usuário"")
+            let textoObsCompleto = partes.slice(2).join(':').trim(); 
+
+            // 🚨 CORREÇÃO CRÍTICA: Extração Agressiva do Conteúdo DENTRO das aspas
+            // Tenta extrair o texto DENTRO das aspas duplas, onde o texto real do usuário está.
+            const matchContent = textoObsCompleto.match(/"(.*?)"/); 
+
+            if (matchContent && matchContent[1]) {
+                // Se a regex achar conteúdo dentro das aspas, usa SÓ o conteúdo.
+                textoObsCompleto = matchContent[1].trim(); 
+            } else {
+                 // Se o formato for inesperado, remove as aspas duplas de forma simples.
+                 textoObsCompleto = textoObsCompleto.replace(/"/g, '').trim();
+                 // Tenta remover o carimbo de data do início, se estiver colado
+                 textoObsCompleto = textoObsCompleto.replace(/Data:/i, '').trim();
+            }
+            
+            // Aplica BOLD no Carimbo: "Por: NOME em DATA"
+            const carimboFormatado = carimbo.replace('Por:', '<strong>Por</strong>');
+            
+            // Renderiza o texto limpo, adicionando aspas de volta APENAS para formatação visual.
+            html += `<li class="linha-obs">• ${carimboFormatado}: "${textoObsCompleto}"</li>`;
+        }
+    });
+
     html += '</ul>';
+    
+    // Se o HTML gerado for muito curto, o fallback da mostrarTabela ainda é acionado
+    if (html.length < 30 && linhas.length === 0) return '';
+    
     return html;
-};
+}
 
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
 /**
