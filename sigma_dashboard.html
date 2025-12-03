@@ -2545,7 +2545,7 @@ async function carregarConferenciasHoje() {
     const ul = document.getElementById('my-history-list');
     ul.innerHTML = '<li>Buscando...</li>';
     
-    // 1. Cria objetos Date dos campos de input, garantindo o início e fim do dia
+    // 1. Cria objetos Date dos campos de input, garantindo o início e fim do dia (linhas 807-810)
     const startDateInput = document.getElementById('my-hist-start').value;
     const endDateInput = document.getElementById('my-hist-end').value;
 
@@ -2554,28 +2554,28 @@ async function carregarConferenciasHoje() {
         return;
     }
 
-    // 2. Cria Timestamps para filtro do Firestore
-    // dI: Começo do dia (00:00:00)
-    const dI = new Date(startDateInput + 'T00:00:00'); 
-    // dF: Final do dia (23:59:59), adicionamos um segundo extra para garantir a inclusão
-    const dF = new Date(endDateInput + 'T23:59:59'); 
-
-    // Converte para Timestamps do Firebase
+    const dI = new Date(startDateInput + 'T00:00:00');
+    const dF = new Date(endDateInput + 'T23:59:59');
     const startTimestamp = firebase.firestore.Timestamp.fromDate(dI);
     const endTimestamp = firebase.firestore.Timestamp.fromDate(dF);
-
+    
     try {
         // 3. Executa a consulta no Firestore com o filtro de data (query otimizada)
         const snap = await db.collection(COLECAO_RESULTADOS)
             .where('conferente', '==', currentUserData.nome_militar_completo)
             .where('timestamp', '>=', startTimestamp) // Data de início
             .where('timestamp', '<=', endTimestamp)   // Data de fim
-            .orderBy('timestamp', 'desc') // Ordena (necessário ao usar where em timestamp)
+            .orderBy('timestamp', 'desc') 
             .limit(100)
             .get();
             
         let docs = [];
-        snap.forEach(doc => docs.push(doc.data()));
+        snap.forEach(doc => {
+            const data = doc.data();
+            // 🔑 CORREÇÃO CRÍTICA: Anexa o ID do documento ao objeto de dados
+            data.id = doc.id; 
+            docs.push(data);
+        });
 
         let html = '';
         docs.forEach(d => {
@@ -2583,7 +2583,6 @@ async function carregarConferenciasHoje() {
         });
         
         ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nada encontrado no período selecionado.</li>';
-        
     } catch(e){ 
         console.error("Erro no loadMyHistory:", e);
         ul.innerHTML='<li>Erro ao carregar histórico.</li>';
@@ -2594,11 +2593,11 @@ async function carregarConferenciasHoje() {
     const ul = document.getElementById('global-history-list');
     ul.innerHTML = '<li>Buscando...</li>';
     
-    // Captura o valor dos filtros
+    // Captura o valor dos filtros (linhas 818-820)
     const dI = new Date(document.getElementById('glob-hist-start').value + 'T00:00:00');
     const dF = new Date(document.getElementById('glob-hist-end').value + 'T23:59:59');
     const localFilter = document.getElementById('glob-hist-local').value;
-    const conferenteFilter = document.getElementById('glob-hist-user').value; // Valor do Conferente
+    const conferenteFilter = document.getElementById('glob-hist-user').value;
 
     try {
         // 1. Inicia a consulta com os filtros de data (obrigatório para orderBy)
@@ -2606,37 +2605,37 @@ async function carregarConferenciasHoje() {
             .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(dI))
             .where('timestamp', '<=', firebase.firestore.Timestamp.fromDate(dF))
             .orderBy('timestamp', 'desc');
-
-        // 2. CORREÇÃO: Aplica o filtro 'where' se um Conferente específico for selecionado
+            
         if (conferenteFilter) {
             queryRef = queryRef.where('conferente', '==', conferenteFilter);
         }
 
         const snap = await queryRef.limit(100).get();
-        
-        // Carrega o mapeamento de Unidades (necessário para o filtro de Gestor)
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         const listToUnitMap = {};
         Object.keys(rotas).forEach(key => listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL');
-
+        
         let docs = [];
-        snap.forEach(d => docs.push(d.data()));
+        snap.forEach(doc => {
+            const data = doc.data();
+            data.id = doc.id; // 🔑 CORREÇÃO CRÍTICA: Anexa o ID do documento
+            docs.push(data);
+        });
 
         let html = '';
         docs.forEach(d => {
             const localNome = d.local.split(' - ')[1] || d.local;
             const unit = listToUnitMap[localNome] || 'GERAL';
 
-            // Filtro de segurança (Gestor)
+            // Filtro de segurança (Gestor) e Filtro Local
             if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; 
             
-            // Filtro Local: só aplica na memória se for necessário
             if(!localFilter || localNome === localFilter) {
                 html += criarItemHistoricoHTML(d);
             }
         });
-
+        
         ul.innerHTML = html || '<li>Nada encontrado.</li>';
     } catch(e){ 
         console.error("Erro ao carregar histórico global:", e);
@@ -2644,11 +2643,12 @@ async function carregarConferenciasHoje() {
     }
 }
         function criarItemHistoricoHTML(data) {
-            const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
-            const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
-            
-            return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF("${data.id}")'><i class="fas fa-file-pdf"></i></button></div></li>`;
-        }
+    const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
+    const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
+    
+    // ATENÇÃO: O botão agora passa data.id como string simples.
+    return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF("${data.id}")'><i class="fas fa-file-pdf"></i></button></div></li>`;
+}
 
         // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
@@ -2901,9 +2901,13 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
     const linhas = [];
     if (adminStatus) linhas.push(`[${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
     const separator = ' | + NOVA: ';
-        if (textoBruto.includes(separator)) {
-            const partes = textoBruto.split(separator);
-            partes.forEach(p => {
+    
+    // CORREÇÃO: Usa uma variável para o texto processado para evitar bugs de variável local
+    const pBruto = textoBruto.trim();
+
+    if (pBruto.includes(separator)) {
+        const partes = pBruto.split(separator);
+        partes.forEach(p => {
             p = p.trim();
             const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
             const match = p.match(regex);
@@ -2912,14 +2916,25 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
             if (match && match[1].includes('[AÇÃO GESTOR:')) {
                 return; 
             }
+            
             if (match) {
-                linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+                const textoObservacao = match[1].trim();
+                // 🚨 CORREÇÃO CRÍTICA 1/2: Ignora a linha se a observação for vazia
+                if (textoObservacao.length === 0) {
+                    return; 
+                }
+                
+                linhas.push(`Por: ${match[2]} em ${match[3]}: "${textoObservacao}"`);
             } else {
+                // Trata observações não formatadas, garantindo que não são vazias.
+                if (p.length === 0) {
+                    return; 
+                }
                 linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
             }
         });
     } else { // Trata o caso de uma única observação (onde o bug do texto fantasma acontece se match[1] for vazio)
-        const p = textoBruto.trim();
+        const p = pBruto;
         const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
         const match = p.match(regex);
         
@@ -2928,12 +2943,18 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
             return;
         }
         
-        // Se for a primeira observação de Conferente:
         if (match) {
-            // match[1] contém o texto DENTRO das aspas. Se estiver em branco, o texto da obs será vazio.
-            linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+             const textoObservacao = match[1].trim();
+             // 🚨 CORREÇÃO CRÍTICA 2/2: Ignora a linha se a observação for vazia (caso único)
+            if (textoObservacao.length === 0) {
+                return;
+            }
+            linhas.push(`Por: ${match[2]} em ${match[3]}: "${textoObservacao}"`);
         } else {
-            // Este bloco trata observações não formatadas.
+            // Este bloco trata observações não formatadas, garantindo que não são vazias.
+            if (p.length === 0) {
+                return;
+            }
             linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
         }
     }
@@ -2942,21 +2963,19 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 
 // Função wrapper apenas para manter a consistência com o app (não usada no PDF)
 const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+    // ESSENCIAL: Usa a função corrigida para filtrar linhas vazias
     const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
     let html = '<ul class="lista-pendencias">';
     
     linhas.forEach(l => { 
         if (l.includes('(Admin):')) { 
-            // Lógica do Administrador (MANUTENÇÃO: Lógica original preservada)
-            // Formato de entrada: [STATUS] (Admin): Observação do Gestor
+            // Lógica do Administrador (Preservada)
             const [carimboStatus, obsText] = l.split(':');
-            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
+            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; 
             
             let icon = '';
-            let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
-            // let obsColor = '#555'; // Variável não utilizada
+            let statusColor = '#f57c00'; 
 
-            // Mapeamento dos Ícones e Cores
             switch(statusText.toUpperCase().trim()) {
                 case 'SOLUCIONADO':
                 case 'REMOVER':
@@ -2973,7 +2992,6 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
                     break;
             }
             
-            // Formatado como: **Gestor** <span style="color: StatusColor;">⚠️ *Status*: </span> Observação
             html += `<li>
                         <span style="color: #d90f23;"><b>Gestor</b></span>:
                         <span style="color: ${statusColor}; font-style: italic;">
@@ -2982,24 +3000,18 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
                         : ${obsText.trim()}
                     </li>`; 
         } else { 
-            // Lógica do Conferente (CORREÇÃO DE EXTRAÇÃO DE TEXTO)
-            
-            // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
+            // Lógica do Conferente 
             const [carimbo, ...resto] = l.split(':');
-            
-            // 1. Pega o texto da observação (com as aspas externas)
             let textoObsCompleto = resto.join(':').trim(); 
             
-            // 2. CORREÇÃO CRÍTICA: Remove as aspas externas se existirem (resolve o problema do texto em branco/vazio)
+            // 🚨 Correção de display: Remove as aspas externas se existirem
             if (textoObsCompleto.startsWith('"') && textoObsCompleto.endsWith('"')) {
-                 // Remove o primeiro e o último caractere (as aspas) e limpa espaços
                  textoObsCompleto = textoObsCompleto.substring(1, textoObsCompleto.length - 1).trim();
             }
             
-            // 3. Aplica BOLD no Carimbo: "Por: NOME em DATA"
             const carimboBold = carimbo.replace('Por:', '**Por**');
             
-            // 4. Renderiza a observação limpa, adicionando aspas de volta para formatação visual.
+            // Renderiza o texto (que agora não será vazio se a CRÍTICA 1/2 foi aplicada)
             html += `<li class="linha-obs">• ${carimboBold}: "${textoObsCompleto}"</li>`;
         } 
     });
@@ -3016,7 +3028,7 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
 async function reimprimirPDF(input) {
     const { jsPDF } = window.jspdf;
     
-    // --- 1. VERIFICAÇÃO DE FLUXO E EXTRAÇÃO DE ID ---
+    // --- 1. EXTRAÇÃO E VALIDAÇÃO CRÍTICA DO ID ---
     const urlParams = new URLSearchParams(window.location.search);
     const pdfCautelaId = urlParams.get('pdfCautelaId');
 
@@ -3029,13 +3041,14 @@ async function reimprimirPDF(input) {
         documentID = pdfCautelaId.trim();
         collectionName = 'cautelas_abertas'; 
         isCautela = true;
+        // Limpa a URL após a leitura para evitar reimpressão em recarregamento
         history.replaceState({}, document.title, "sigma_dashboard.html");
     } 
-    // B. Input Check (para Histórico/Botões com ID String)
+    // B. Input Check (ID string vindo do botão: onclick='reimprimirPDF("${data.id}")')
     else if (typeof input === 'string' && input.trim().length > 0) {
         documentID = input.trim();
     } 
-    // C. Input Check (para Botões com data-id)
+    // C. Input Check (Elemento HTML com data-id - Ex: para futuros botões)
     else if (input && input.dataset && input.dataset.id) {
         documentID = input.dataset.id.trim();
         if (input.dataset.type === 'cautela') { 
@@ -3043,35 +3056,34 @@ async function reimprimirPDF(input) {
             isCautela = true;
         }
     } 
-    // D. Alerta genérico se a entrada for inválida e retorna, mantendo documentID como null
+    // D. Entrada inválida
     else {
-        alert("ID do documento não fornecido ou inválido (ex: [object Object]).");
+        alert("ID do documento não fornecido ou inválido.");
         return;
     }
 
-    // CORREÇÃO: Garante que o ID não é nulo/undefined antes de prosseguir
-    if (!documentID) {
-        alert("Erro interno: O ID não pôde ser extraído.");
-        return;
-    }
-
-    // CRÍTICO: Conversão e verificação para evitar o string "undefined"
+    // 🚨 VERIFICAÇÃO FINAL CRÍTICA (Bloqueia ID vazio ou a string literal "undefined")
     const safeDocumentID = String(documentID).trim();
-    if (safeDocumentID === 'undefined' || safeDocumentID.length === 0) {
-         alert("Erro: O ID do documento é inválido ou vazio. Não é possível gerar o PDF.");
+    if (safeDocumentID.length === 0 || safeDocumentID.toLowerCase() === 'undefined' || safeDocumentID.toLowerCase() === 'null') {
+         alert("Erro: O ID do documento é inválido ou vazio. Não é possível gerar o PDF. Verifique a função de carregamento do Histórico.");
          return;
     }
     
-    // --- Variáveis de Saída (Mantidas) ---
-    let docTitle = 'RELATÓRIO DE CONFERÊNCIA'; 
+    // --- 2. VARIÁVEIS DE DADOS E CONSTANTES DO PDF ---
+    let docTitle = isCautela ? 'TERMO DE CAUTELA' : 'RELATÓRIO DE CONFERÊNCIA'; 
     let local = 'NÃO IDENTIFICADO'; 
     let conferente = 'NÃO IDENTIFICADO'; 
+    let emitente = 'N/A';
     let observacoes = 'Nenhuma observação registrada.'; 
     let itensRelatorio = []; 
     let timestamp = null; 
+    
+    const MARGIN = 14; 
+    const PG_W = 210; 
+    const LOGO_S = 15;
 
     try {
-        // --- 2. BUSCA DE DADOS ---
+        // --- 3. BUSCA DE DADOS NO FIRESTORE ---
         const docRef = db.collection(collectionName).doc(safeDocumentID); 
         const docSnapshot = await docRef.get();
 
@@ -3082,18 +3094,19 @@ async function reimprimirPDF(input) {
 
         const data = docSnapshot.data();
 
-        // --- 3. MAPEAMENTO DE DADOS (Cautela vs. Conferência Padrão) ---
+        // --- 4. MAPEAMENTO DE DADOS (CONFERÊNCIA vs CAUTELA) ---
         if (isCautela) {
-            local = `Origem: ${data.local_origem} | Destino: ${data.destinatario}`;
-            conferente = data.conferente_destino || data.destinatario; 
+            local = `Origem: ${data.local_origem || 'N/A'} | Destino: ${data.destinatario || 'N/A'}`;
+            conferente = data.conferente_destino || data.destinatario || 'N/A'; 
+            emitente = data.emitente || 'N/A';
             timestamp = data.timestamp_finalizacao || data.timestamp_emissao;
             observacoes = data.observacoes_emissao || 'Emissão sem observações.';
             
-            itensRelatorio = data.itens.map(item => ({
+            itensRelatorio = (data.itens || []).map(item => ({
                 id: item.id_completo,
                 nomeCompleto: item.nome,
                 quantidade: item.quantidade,
-                status: item.status_conferido || 'ABERTA (Cautelado)', 
+                status: item.status_conferido || 'ABERTA', 
                 obs: item.obs_conferido || '-'
             }));
 
@@ -3107,27 +3120,51 @@ async function reimprimirPDF(input) {
             // Mapeamento para Conferência Padrão
             local = data.local;
             conferente = data.conferente;
+            emitente = data.emitente || 'N/A';
             timestamp = data.timestamp;
-            observacoes = 'Nenhuma observação de relatório.'; 
-            itensRelatorio = data.itensRelatorio;
+            observacoes = 'Nenhuma observação de relatório de conferência.'; 
+            // O campo 'itensRelatorio' já é um array pronto para uso
+            itensRelatorio = data.itensRelatorio || [];
             docTitle = `RELATÓRIO DE CONFERÊNCIA (ID: ${safeDocumentID})`;
         }
 
 
-        // --- 4. GERAÇÃO DO PDF (JSPDF) ---
+        // --- 5. GERAÇÃO DO PDF (JSPDF) ---
         const doc = new jsPDF();
         
-        // Cabeçalho e Rodapé... (o restante do código PDF permanece o mesmo)
+        // Função para desenhar o Logo (se estiver no DOM) - MANTIDA
+        const logoDraw = (domId, x) => { 
+            const el = document.querySelector(`img[src*="${domId}"]`);
+            if(el) { 
+                try{
+                    const c=document.createElement('canvas');
+                    c.width=160; c.height=160;
+                    c.getContext('2d').drawImage(el,0,0,160,160);
+                    doc.addImage(c.toDataURL('image/png'),'PNG',x,10,LOGO_S,LOGO_S);
+                }catch(e){
+                    console.warn(`Falha ao desenhar imagem ${domId}:`, e);
+                } 
+            }
+        };
+
+        logoDraw('logo_sigma.png', MARGIN);
         
+        const timestampFormatado = timestamp 
+            ? new Date(timestamp.toDate()).toLocaleDateString('pt-BR') + ' ' + 
+              new Date(timestamp.toDate()).toLocaleTimeString('pt-BR') 
+            : 'Data não registrada';
+
         // Cabeçalho
         doc.setFontSize(14);
-        doc.text(docTitle, 105, 20, null, null, 'center');
+        doc.text(docTitle, PG_W / 2, 20, null, null, 'center');
+        
         doc.setFontSize(10);
-        doc.text(`Documento ID: ${safeDocumentID}`, 20, 30);
-        doc.text(`Local/Destinatário: ${local}`, 20, 35);
-        doc.text(`Conferente (Destino): ${conferente}`, 20, 40);
-        doc.text(`Data: ${new Date(timestamp.toDate()).toLocaleDateString('pt-BR')}`, 160, 30);
-        doc.text(`Emitente: ${data.emitente || 'N/A'}`, 160, 35);
+        doc.text(`Documento ID: ${safeDocumentID}`, MARGIN, 30);
+        doc.text(`Local/Destinatário: ${local}`, MARGIN, 35);
+        doc.text(`Conferente (Destino): ${conferente}`, MARGIN, 40);
+        
+        doc.text(`Data/Hora: ${timestampFormatado}`, 160, 30, null, null, 'right');
+        doc.text(`Emitente: ${emitente}`, 160, 35, null, null, 'right');
         
         // Tabela de Itens
         const tableBody = itensRelatorio.map(item => [
@@ -3152,7 +3189,7 @@ async function reimprimirPDF(input) {
                 textColor: [255, 255, 255]
             },
             columnStyles: {
-                0: { halign: 'center', cellWidth: 15 },
+                0: { halign: 'center', cellWidth: 20 },
                 2: { halign: 'center', cellWidth: 10 },
                 3: { halign: 'center', cellWidth: 15 },
                 4: { halign: 'left' }
@@ -3163,14 +3200,26 @@ async function reimprimirPDF(input) {
 
         // Rodapé / Assinaturas / Observações
         doc.setFontSize(10);
-        doc.text(`Observações da Emissão: ${observacoes}`, 20, finalY + 10);
+        // Adiciona as observações gerais do documento (Cautela ou Padrão)
+        doc.text(`Observações: ${observacoes}`, MARGIN, finalY + 10);
         
-        doc.text('________________________________', 20, finalY + 40);
+        // Linhas de Assinatura
+        doc.text('________________________________', MARGIN, finalY + 40);
         doc.text('________________________________', 130, finalY + 40);
         
         doc.setFontSize(8);
-        doc.text(`Assinatura do Emitente: ${data.emitente || 'N/A'}`, 25, finalY + 45);
+        doc.text(`Assinatura do Emitente: ${emitente}`, MARGIN + 5, finalY + 45);
         doc.text(`Assinatura do Destinatário/Conferente: ${conferente}`, 135, finalY + 45);
+
+        // Paginação (Se necessário) - MANTIDA
+        const totalPages = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8); 
+            doc.setTextColor(100);
+            doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-5);
+            doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-5, {align:'right'});
+        }
 
         // Salva o PDF
         doc.save(`${docTitle} - ${safeDocumentID}.pdf`);
