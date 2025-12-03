@@ -3339,105 +3339,80 @@ const activeLink = document.getElementById(`link-${v}`);
 }
         
         // --- FUNÇÕES DO MODAL GESTÃO C/A ---
-        /**
- * Exibe os detalhes da pendência em formato de tabela no painel de detalhes.
- * @param {object} data - Objeto contendo os dados da pendência (itensRelatorio, conferente, date, etc.).
- */
-function mostrarTabela(data) {
-    const tableContainer = document.getElementById('table-detail-container');
-    const tableBody = document.getElementById('table-detail-body');
-    const tableHeader = document.getElementById('table-detail-header');
+        function mostrarTabela(data) {
+    const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
     
-    // Atualiza o cabeçalho
-    tableHeader.innerHTML = `
-        <h3>Detalhes da Conferência/Cautela</h3>
-        <p><strong>Local:</strong> ${data.local || 'N/A'}</p>
-        <p><strong>Conferente:</strong> ${data.conferente || 'N/A'}</p>
-        <p><strong>Data:</strong> ${data.date || 'N/A'}</p>
-        <button class="btn-primary" onclick='reimprimirPDF("${data.id}")' style="margin-top: 10px;">
-             <i class="fas fa-file-pdf"></i> Reimprimir PDF
-        </button>
-    `;
-
-    // 1. Prepara a lista de itens a serem exibidos (apenas itens com C/A, Cautela, ou Admin Status)
-    const itemsToShow = (data.itensRelatorio || []).filter(i => 
-        i.status === 'C/A' || 
-        i.statusAdmin || 
-        (i.obs && i.obs.trim().length > 0) ||
-        (i.status && i.status.includes('CAUTELA'))
-    );
-
-    tableBody.innerHTML = ''; // Limpa o corpo da tabela
-
-    if (itemsToShow.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">Nenhuma Alteração (C/A) ou Pendência Ativa encontrada neste relatório.</td></tr>';
+    // 🚨 CORREÇÃO CRÍTICA: Se o tbody não for encontrado, a função deve retornar imediatamente.
+    if (!tbody || !wrapper) {
+        console.error("ERRO CRÍTICO: Elementos visuais da tabela (#ca-list-body ou #ca-table-wrapper) não encontrados. Falha ao exibir pendências.");
+        alert("Falha ao abrir o detalhe da pendência. Tente recarregar a página.");
         return;
     }
 
-    // 2. Itera sobre os itens para criar as linhas da tabela
-    itemsToShow.forEach(i => {
-        const tr = document.createElement('tr');
+    // O código original pode continuar, pois agora 'tbody' e 'wrapper' são garantidos
+    document.getElementById('table-title').textContent = `Detalhes: ${data.local}`;
+    tbody.innerHTML = '';
+    
+    // Garante array
+    const items = data.items || [];
+    const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
+    
+    if (itemsToShow.length === 0) { 
+        wrapper.querySelector('table').style.display = 'none';
+        document.getElementById('no-issues-msg').style.display = 'block';
+    } else {
+        wrapper.querySelector('table').style.display = 'table';
+        document.getElementById('no-issues-msg').style.display = 'none';
         
-        // Determina o status administrativo
-        let statusAdmin = i.statusAdmin ? i.statusAdmin.toUpperCase() : 'AGUARDANDO AÇÃO';
-        let badgeClass = '';
-        
-        if (statusAdmin === 'SOLUCIONADO' || statusAdmin === 'REMOVER') {
-            badgeClass = 'status-ok';
-        } else if (statusAdmin === 'CAUTELADO' || statusAdmin === 'KEEP') {
-            badgeClass = 'status-cautela';
-        } else if (statusAdmin === 'EM SOLUÇÃO') {
-             badgeClass = 'status-alert';
-        } else {
-            statusAdmin = i.status || 'S/A'; // Usa o status da conferência como fallback
-            badgeClass = statusAdmin === 'C/A' ? 'status-alert' : 'status-pending';
-        }
-
-        // 3. Geração do HTML de observação (Ponto de falha anterior)
-        const obsHtmlFormatada = gerarHtmlVisual(
-            i.obs || '', 
-            data.conferente,
-            data.date, 
-            i.statusAdmin, 
-            i.adminObs
-        );
-        
-        // 4. LÓGICA DE FALLBACK CRÍTICA (CORREÇÃO)
-        let displayObs = obsHtmlFormatada;
-        
-        // Se o HTML formatado for muito curto (provavelmente vazio ou só com tags <ul></ul>)
-        if (obsHtmlFormatada.length < 30 && i.obs && i.obs.trim().length > 0) {
-            let textoSimples = i.obs.trim();
+        itemsToShow.forEach(i => {
+            const tr = tbody.insertRow();
             
-            // Tenta limpar a string para pegar apenas a observação do usuário, se estiver no formato "" (Por:...)
-            const matchSimples = textoSimples.match(/^"(.*?)"/);
-            if (matchSimples && matchSimples[1]) {
-                textoSimples = matchSimples[1].trim(); 
+            // 1. Formata o histórico de observações usando a função padronizada (HTML)
+            const obsHtmlFormatada = gerarHtmlVisual(
+                i.obs || '',
+                data.conferente, // Nome do conferente original (fallback)
+                data.date, // Data da conferência original (fallback)
+                i.statusAdmin,
+                i.adminObs
+            );
+
+            // 2. Define a classe do badge para o status de gestão
+            const statusAdmin = i.statusAdmin || 'Pendente';
+            const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(' ', '-');
+            
+            // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
+            const itemComDocId = { ...i, docId: data.docId };
+            
+            // 3. Lógica de Fallback para Observação (para evitar texto em branco)
+            let displayObs = obsHtmlFormatada;
+            // Se o HTML for muito curto E a observação bruta existir, usa o texto simples como fallback.
+            if (obsHtmlFormatada.length < 30 && i.obs && i.obs.trim().length > 0) {
+                 let textoSimples = i.obs.trim();
+                 const matchSimples = textoSimples.match(/^"(.*?)"/);
+                 if (matchSimples && matchSimples[1]) {
+                     textoSimples = matchSimples[1].trim(); 
+                 }
+                displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[Texto: ${textoSimples}]</p>`;
+            } else if (obsHtmlFormatada.length < 30 && (!i.obs || i.obs.trim().length === 0)) {
+                // Caso não haja observação alguma
+                displayObs = '<p style="font-style: italic; color: #999; font-size: 0.85em;">Nenhuma observação detalhada registrada.</p>';
             }
 
-            // Exibe a informação bruta com destaque de cor
-            displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[Observação Bruta/Não Formatada]: <strong>${textoSimples}</strong></p>`;
-        } else if (obsHtmlFormatada.length < 30 && (!i.obs || i.obs.trim().length === 0)) {
-             // Caso não haja observação alguma
-             displayObs = '<p style="font-style: italic; color: #999; font-size: 0.85em;">Nenhuma observação detalhada registrada.</p>';
-        }
-
-        // 5. Monta a linha da tabela (Tr)
-        tr.innerHTML = `
-            <td><strong>${i.nomeCompleto}</strong> (${i.quantidade || 1} un.)</td>
-            <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
-            <td>
-                ${displayObs}
-            </td>
-            <td style="text-align:center;">
-                <button class="btn-small" onclick="abrirModalAcaoGestor(event, '${i.id}', '${i.nomeCompleto}', '${i.statusAdmin || ''}', '${i.adminObs || ''}')">
-                    <i class="fas fa-edit"></i> Ação Gestor
-                </button>
-            </td>
-        `;
-
-        tableBody.appendChild(tr);
-    });
+            // Monta a linha
+            tr.innerHTML = `
+                <td><strong>${i.nomeCompleto}</strong></td>
+                <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
+                <td>${displayObs}</td>
+                <td><small>${data.conferente}<br>${data.date}</small></td>
+            `;
+            
+            const td = tr.insertCell();
+            // Passa o item enriquecido para o modal de gestão
+            td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
+        });
+    }
+    wrapper.style.display = 'block';
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
         function fecharTabela(){ 
             document.getElementById('ca-table-wrapper').style.display='none';
