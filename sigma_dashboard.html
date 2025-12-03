@@ -4647,16 +4647,18 @@ function updateCautelaItemCount() {
     updateCautelaItemCount();
 }
         async function getListaIdFromLocalName(localNomeCompleto) {
+    // Busca o documento 'rotas' onde está o mapeamento dos nomes de local para os IDs.
     const rotasDoc = await db.collection('config_geral').doc('rotas').get();
     const rotas = rotasDoc.data() || {};
 
     for (const [id, info] of Object.entries(rotas)) {
+        // Recria o nome completo para comparação (Ex: "ALFA - PERMANÊNCIA")
         const nomeCompletoRota = `${info.posto} - ${info.nome}`;
         if (nomeCompletoRota === localNomeCompleto) {
             return id;
         }
     }
-    return null;
+    return null; // Retorna null se não encontrar o mapeamento
 }
 
 
@@ -4667,27 +4669,30 @@ function getSelectedCautelaItemsData() {
     const itens = [];
     
     // 1. Coleta itens com Tombamento (tipo 'multi')
+    // Usa o nome 'cautela-item-multi' definido no renderizador
     document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
         itens.push({
             id_completo: chk.getAttribute('data-id'), // Ex: 1000-01 (ID_base-Tomb)
             id_base: chk.getAttribute('data-id').split('-')[0], // Ex: 1000
             tombamento: chk.getAttribute('data-id').split('-')[1], // Ex: 01
             nome: chk.getAttribute('data-nome'),
-            quantidade: 1, 
+            quantidade: 1, // Sempre 1 para tombamento
             tipo: 'multi',
         });
     });
 
     // 2. Coleta itens Únicos (tipo 'single')
+    // Usa o nome 'cautela-item-base' definido no renderizador
     document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
         const li = chk.closest('li');
         const inputQtd = li.querySelector('.input-qtd-cautela');
         
         let qtd = parseInt(inputQtd.value) || 0;
         
-        if (qtd > 0) {
+        // Verifica se a quantidade é válida (o 'updateCautelaItemCount' já faz a validação visual, mas a final é aqui)
+        if (qtd > 0 && qtd <= parseInt(chk.getAttribute('data-max-qtd'))) {
             itens.push({
-                id_completo: chk.getAttribute('data-id'), // Ex: 1001
+                id_completo: chk.getAttribute('data-id'), // ID base é o ID completo para itens únicos
                 id_base: chk.getAttribute('data-id'),
                 nome: chk.getAttribute('data-nome'),
                 quantidade: qtd,
@@ -4705,68 +4710,58 @@ function getSelectedCautelaItemsData() {
 
     const destinatarioInput = document.getElementById('cautela-destinatario').value.trim();
     const localOrigem = document.getElementById('cautela-local-origem').value;
+    const obsRaw = document.getElementById('cautela-obs').value.trim(); // Captura a observação
     const itensParaCautela = getSelectedCautelaItemsData();
     const listaId = await getListaIdFromLocalName(localOrigem);
 
     if (!destinatarioInput || itensParaCautela.length === 0 || !listaId) {
         alert('Falha na validação dos dados. Verifique o destinatário e a seleção de itens.');
-        updateCautelaItemCount(); // Reabilita o botão (chamando a contagem)
+        updateCautelaItemCount(); 
         return;
     }
 
     try {
-        // === TRANSAÇÃO FIRESTORE ===
-        // Garante que o contador, a cautela ativa e a lista mestra sejam atualizados juntos.
         await db.runTransaction(async (transaction) => {
             
-            // 1. Geração do ID Sequencial (CAUTELA-00000X)
+            // =========================================================
+            // 1. FASE DE LEITURA (TODOS OS `transaction.get()` AQUI!)
+            // =========================================================
             const configRef = db.collection('config_geral').doc('contadores');
-            const configDoc = await transaction.get(configRef);
-            if (!configDoc.exists) throw new Error("Documento de contadores não encontrado! Configure 'contadores' em config_geral.");
-
-            const novoContador = (configDoc.data().cautela_seq || 0) + 1;
-            const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
-            
-            // 2. Criação do Documento Ativo (Coleção cautelas_abertas)
-            const cautelaData = {
-                cautela_id: cautelaIdSequencial,
-                emitente: currentUserData.nome_militar_completo,
-                destinatario: destinatarioInput,
-                local_origem: localOrigem,
-                local_origem_id: listaId,
-                timestamp_emissao: firebase.firestore.Timestamp.now(),
-                status: 'ABERTA', // Destinatário precisa conferir
-                itens: itensParaCautela,
-            };
-            transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            transaction.update(configRef, { cautela_seq: novoContador });
-
-
-            // 3. Atualização da Lista Mestra (Subtração do Estoque e Carimbo)
             const listaMestraRef = db.collection('listas_conferencia').doc(listaId);
+            
+            // Executa as leituras em sequência (await)
+            const configDoc = await transaction.get(configRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
+            
+            // Verifica a existência do documento do contador
+            if (!configDoc.exists) throw new Error("Documento de contadores não encontrado! Configure 'contadores' em config_geral.");
             if (!listaMestraDoc.exists) throw new Error("Lista Mestra de Conferência não encontrada!");
+            
+            // =========================================================
+            // 2. FASE DE PROCESSAMENTO (LÓGICA NA MEMÓRIA)
+            // =========================================================
+            let novoContador = (configDoc.data().cautela_seq || 0) + 1;
+            const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
             let listaMestra = listaMestraDoc.data().list;
             let totalItensMovimentados = 0;
-
+            const dataEmissao = new Date().toISOString().split('T')[0];
+            
             itensParaCautela.forEach(cItem => {
                 // Percorre a lista mestra para encontrar e atualizar o item
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
                         if (mItem.id === cItem.id_base) {
+                            // Subtração de Estoque e Carimbo
                             if (cItem.tipo === 'single') {
-                                // Subtrai a quantidade
                                 mItem.quantidadeEsperada -= cItem.quantidade;
-                                
-                                // Adiciona o carimbo (array de cautelas)
                                 mItem.cautelas = mItem.cautelas || [];
                                 mItem.cautelas.push({
                                     id: cautelaIdSequencial,
                                     destinatario: destinatarioInput,
                                     quantidade: cItem.quantidade,
-                                    data: new Date().toISOString().split('T')[0]
+                                    data: dataEmissao
                                 });
                                 totalItensMovimentados += cItem.quantidade;
 
@@ -4777,7 +4772,7 @@ function getSelectedCautelaItemsData() {
                                         tomb.cautela = {
                                             id: cautelaIdSequencial,
                                             destinatario: destinatarioInput,
-                                            data: new Date().toISOString().split('T')[0]
+                                            data: dataEmissao
                                         };
                                     }
                                     return tomb;
@@ -4789,21 +4784,46 @@ function getSelectedCautelaItemsData() {
                     })
                 }));
             });
+            
+            // Dados da Cautela Ativa (Documento a ser criado)
+            const cautelaData = {
+                cautela_id: cautelaIdSequencial,
+                emitente: currentUserData.nome_militar_completo,
+                destinatario: destinatarioInput,
+                local_origem: localOrigem,
+                local_origem_id: listaId,
+                observacoes_emissao: obsRaw, // Adicionado observação
+                timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
+                status: 'ABERTA', 
+                itens: itensParaCautela,
+            };
 
-            // Persiste a lista mestra atualizada no Firestore
+            // =========================================================
+            // 3. FASE DE ESCRITA (TODOS OS `transaction.set()`/`update()` AQUI!)
+            // =========================================================
+            
+            // 3.1. Atualiza o contador sequencial
+            transaction.update(configRef, { cautela_seq: novoContador });
+            
+            // 3.2. Cria o documento da cautela ativa
+            transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
+
+            // 3.3. Persiste a lista mestra atualizada no Firestore
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
             alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
-            document.getElementById('cautela-modal').style.display = 'none';
-            // showCautelasDashboard(); // Opcional: Redirecionar para o dashboard de cautelas
-
+            
         }); // Fim da Transação
-
+        
+        // A transação foi bem-sucedida. Agora atualiza a UI.
+        document.getElementById('modal-cautela').style.display = 'none'; // Assumindo que você tem um modal cautela
+        showMainMenu(); // Volta ao menu de cautelas
+        
     } catch (error) {
         console.error("Erro CRÍTICO no processo de Cautela:", error);
-        alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Verifique o console. Erro: ${error.message}`);
-        updateCautelaItemCount(); // Reabilita o botão
+        alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Erro: ${error.message}`);
+        updateCautelaItemCount();
     }
 }
     </script>
