@@ -532,39 +532,39 @@
             }
         }
         async function finalizarCautela() {
-            const btn = document.getElementById('finalizar-btn');
-            btn.disabled = true;
-            btn.textContent = 'Finalizando Cautela...';
+    const btn = document.getElementById('finalizar-btn');
+    btn.disabled = true;
+    btn.textContent = 'Finalizando Cautela...';
 
-            const ID_ALVO = CAUTELA_ID; // CAUTELA-00000X
-            const COLECAO_FINAL = COLECAO_CAUTELAS; // cautelas_abertas
+    const ID_ALVO = CAUTELA_ID; // CAUTELA-00000X
+    const COLECAO_FINAL = COLECAO_CAUTELAS; // 'cautelas_abertas'
 
-            if (!ID_ALVO) {
-                alert("Erro: ID da Cautela não encontrado.");
-                btn.disabled = false;
-                btn.textContent = 'FINALIZAR CONFERÊNCIA';
-                return;
-            }
-
-    // 1. Processar os resultados da conferência (apenas para obter o status e observações)
-            const resultados = processarResultadosConferencia();
-            if (resultados.itemsCount === 0) {
-        alert("Nenhum item foi conferido. Por favor, confira os itens antes de finalizar.");
+    if (!ID_ALVO) {
+        alert("Erro: ID da Cautela não encontrado.");
         btn.disabled = false;
         btn.textContent = 'FINALIZAR CONFERÊNCIA';
         return;
     }
 
     try {
+        // 1. Processar os resultados da conferência (Chamada à função auxiliar)
+        const resultados = processarResultadosConferencia();
+        if (resultados.itemsCount === 0) {
+            alert("Nenhum item foi conferido. Por favor, confira os itens antes de finalizar.");
+            btn.disabled = false;
+            btn.textContent = 'FINALIZAR CONFERÊNCIA';
+            return;
+        }
+
         const cautelaRef = db.collection(COLECAO_FINAL).doc(ID_ALVO);
 
-        // 2. Atualizar o documento da Cautela com os resultados
+        // 2. Atualizar o documento da Cautela com os resultados (ESCRITA NO FIRESTORE)
         await cautelaRef.update({
             // O campo 'itens' é atualizado com as pendências (S/A, C/A, Obs)
             itens: resultados.itensRelatorio.map(item => ({
                 id_completo: item.id_completo,
                 id_base: item.id_base,
-                nome: item.nome_completo, // Mantém o nome original
+                nome: item.nomeCompleto, // Usa o nome completo mapeado
                 quantidade: item.quantidadeEsperada,
                 tipo: item.tipo,
                 // Inclui o resultado da conferência
@@ -574,16 +574,18 @@
             })),
             totalItensConferidos: resultados.itemsCount,
             totalCaa: resultados.cA_count,
-            conferente_destino: infoUser.nome_completo, // O destinatário é o conferente
+            // infoUser é o objeto do conferente que acessou a página (o destinatário)
+            conferente_destino: userInfo.nome_militar_completo, 
             status: 'CONCLUÍDA',
             timestamp_finalizacao: firebase.firestore.Timestamp.now()
         });
         
+        // 3. Conclusão e Redirecionamento
         limparRascunho();
         
         alert(`✅ Cautela ${ID_ALVO} finalizada com sucesso. Gerando PDF...`);
         
-        // 3. Redirecionar para o Dashboard para gerar o PDF (Lógica de PDF está lá)
+        // Redireciona para o Dashboard com o parâmetro especial para geração de PDF
         const pdfUrl = `sigma_dashboard.html?pdfCautelaId=${ID_ALVO}`;
         window.location.href = pdfUrl;
 
