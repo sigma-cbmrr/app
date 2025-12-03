@@ -3342,7 +3342,7 @@ const activeLink = document.getElementById(`link-${v}`);
         function mostrarTabela(data) {
     const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
     
-    // 🚨 CORREÇÃO DE ESTABILIDADE (do passo anterior): Garante que os elementos existem.
+    // CRITICAL FIX: Check for the target elements before manipulating them (Preservado)
     if (!tbody || !wrapper) {
         console.error("ERRO CRÍTICO: Elementos visuais da tabela (#ca-list-body ou #ca-table-wrapper) não encontrados. Falha ao exibir pendências.");
         return;
@@ -3353,6 +3353,7 @@ const activeLink = document.getElementById(`link-${v}`);
     
     // Garante array
     const items = data.items || [];
+    // Filtra itens não solucionados
     const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
     
     if (itemsToShow.length === 0) { 
@@ -3368,8 +3369,8 @@ const activeLink = document.getElementById(`link-${v}`);
             // 1. Formata o histórico de observações usando a função padronizada (HTML)
             const obsHtmlFormatada = gerarHtmlVisual(
                 i.obs || '',
-                data.conferente, // Nome do conferente original (fallback)
-                data.date, // Data da conferência original (fallback)
+                data.conferente, 
+                data.date, 
                 i.statusAdmin,
                 i.adminObs
             );
@@ -3380,28 +3381,25 @@ const activeLink = document.getElementById(`link-${v}`);
             
             // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
             const itemComDocId = { ...i, docId: data.docId };
-            
-            // 3. Lógica de Fallback CRÍTICA (CORREÇÃO para coluna vazia)
-            let displayObs = obsHtmlFormatada;
-            
-            // Se o HTML formatado for nulo ou muito curto (menos que 5 caracteres visíveis, como <ul></ul>),
-            // E a observação bruta existir, usa o texto simples como fallback.
-            if (!obsHtmlFormatada || obsHtmlFormatada.trim().length < 5) {
-                if (i.obs && i.obs.trim().length > 0) {
-                    let textoSimples = i.obs.trim();
-                    const matchSimples = textoSimples.match(/^"(.*?)"/);
-                    if (matchSimples && matchSimples[1]) {
-                         textoSimples = matchSimples[1].trim(); 
-                    }
-                    
-                    // Exibe a observação bruta com um aviso de formatação em destaque
-                    displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[OBS BRUTA]: <strong>${textoSimples}</strong></p>`;
-                } else {
-                    // Sem observação alguma (apenas status C/A)
-                    displayObs = '<p style="font-style: italic; color: #999; font-size: 0.85em;">Nenhuma observação detalhada registrada.</p>';
-                }
-            }
 
+            // 3. RECUPERAÇÃO INCONDICIONAL DO TEXTO BRUTO PARA FALLBACK
+            // Se o HTML for vazio, exibe o texto bruto para que algo apareça.
+            let displayObs = obsHtmlFormatada;
+            let textoSimples = '';
+            
+            if (!obsHtmlFormatada || obsHtmlFormatada.trim().length < 20) {
+                 textoSimples = (i.obs || 'Observação não formatada.').trim();
+                 
+                 // Tenta extrair a observação do usuário que está entre aspas no formato histórico
+                 const matchSimples = textoSimples.match(/^"(.*?)"/);
+                 if (matchSimples && matchSimples[1]) {
+                     textoSimples = matchSimples[1].trim(); 
+                 }
+                 
+                 // Exibe a observação bruta com um aviso de formatação em destaque
+                 displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[Texto Bruto]: <strong>${textoSimples}</strong></p>`;
+            }
+            
             // 4. Montagem da Linha
             tr.innerHTML = `
                 <td><strong>${i.nomeCompleto}</strong></td>
