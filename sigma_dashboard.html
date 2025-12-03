@@ -4292,17 +4292,25 @@ function loadNewCautelaForm() {
     const menuContainer = document.getElementById('cautelas-options-container');
     const contentArea = document.getElementById('cautelas-content');
 
-    // 1. Oculta o menu de botões
     if (menuContainer) {
         menuContainer.style.display = 'none';
     }
 
-    // 2. Carrega o formulário HTML na área de conteúdo
     if (contentArea) {
         contentArea.innerHTML = getNovaCautelaFormHTML();
         contentArea.style.display = 'block'; 
         
-        // 3. ATIVAÇÃO DAS BUSCAS DE DADOS
+        // CORREÇÃO DE UI: Adicionar um pequeno atraso para garantir que o DOM esteja pronto 
+        // e o campo de observações seja habilitado, caso alguma regra de estilo o tenha desativado.
+        setTimeout(() => {
+            const obsField = document.getElementById('cautela-obs');
+            if (obsField) {
+                 // Força remoção de qualquer bloqueio de leitura
+                obsField.removeAttribute('readonly'); 
+                obsField.removeAttribute('disabled');
+            }
+        }, 50);
+
         loadCustodiaLocais(); 
         loadUsersForSearch();
     }
@@ -4710,7 +4718,7 @@ function getSelectedCautelaItemsData() {
 
     const destinatarioInput = document.getElementById('cautela-destinatario').value.trim();
     const localOrigem = document.getElementById('cautela-local-origem').value;
-    const obsRaw = document.getElementById('cautela-obs').value.trim(); // Captura a observação
+    const obsRaw = document.getElementById('cautela-obs').value.trim();
     const itensParaCautela = getSelectedCautelaItemsData();
     const listaId = await getListaIdFromLocalName(localOrigem);
 
@@ -4723,23 +4731,17 @@ function getSelectedCautelaItemsData() {
     try {
         await db.runTransaction(async (transaction) => {
             
-            // =========================================================
-            // 1. FASE DE LEITURA (TODOS OS `transaction.get()` AQUI!)
-            // =========================================================
+            // 1. FASE DE LEITURA (TODOS OS `transaction.get()` PRIMEIRO)
             const configRef = db.collection('config_geral').doc('contadores');
             const listaMestraRef = db.collection('listas_conferencia').doc(listaId);
             
-            // Executa as leituras em sequência (await)
             const configDoc = await transaction.get(configRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
             
-            // Verifica a existência do documento do contador
             if (!configDoc.exists) throw new Error("Documento de contadores não encontrado! Configure 'contadores' em config_geral.");
             if (!listaMestraDoc.exists) throw new Error("Lista Mestra de Conferência não encontrada!");
             
-            // =========================================================
             // 2. FASE DE PROCESSAMENTO (LÓGICA NA MEMÓRIA)
-            // =========================================================
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
@@ -4748,7 +4750,6 @@ function getSelectedCautelaItemsData() {
             const dataEmissao = new Date().toISOString().split('T')[0];
             
             itensParaCautela.forEach(cItem => {
-                // Percorre a lista mestra para encontrar e atualizar o item
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
@@ -4798,29 +4799,23 @@ function getSelectedCautelaItemsData() {
                 itens: itensParaCautela,
             };
 
-            // =========================================================
             // 3. FASE DE ESCRITA (TODOS OS `transaction.set()`/`update()` AQUI!)
-            // =========================================================
-            
-            // 3.1. Atualiza o contador sequencial
             transaction.update(configRef, { cautela_seq: novoContador });
-            
-            // 3.2. Cria o documento da cautela ativa
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-
-            // 3.3. Persiste a lista mestra atualizada no Firestore
             transaction.update(listaMestraRef, { list: listaMestra });
 
-            // 4. Conclusão e Feedback
+            // 4. Conclusão e Feedback (DENTRO DA TRANSAÇÃO, SEM MANIPULAÇÃO DO DOM)
+            // Usamos alert aqui pois está dentro da transação e o console.log não seria prático
             alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
             
         }); // Fim da Transação
-        
+
         // A transação foi bem-sucedida. Agora atualiza a UI.
-        document.getElementById('modal-cautela').style.display = 'none'; // Assumindo que você tem um modal cautela
-        showMainMenu(); // Volta ao menu de cautelas
+        // CORREÇÃO: Chamamos showMainMenu() para voltar para a tela de botões, que apaga o formulário injetado.
+        showMainMenu(); 
         
     } catch (error) {
+        // CORREÇÃO: O alerta de erro final
         console.error("Erro CRÍTICO no processo de Cautela:", error);
         alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Erro: ${error.message}`);
         updateCautelaItemCount();
