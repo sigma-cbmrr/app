@@ -1459,6 +1459,36 @@
     border-radius: 5px;
     margin-bottom: 15px;
 }
+        /* ==================================== */
+/* ESTILOS PARA AUTOCOMPLETE MANUAL DE USUÁRIOS */
+/* ==================================== */
+.sugestao-container {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #ccc;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-top: -1px;
+    position: relative; 
+    z-index: 100; 
+    background-color: #fff;
+}
+.sugestao-item {
+    padding: 10px;
+    cursor: pointer;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+.sugestao-item:hover, .sugestao-item.selected {
+    background-color: #e0e0e0;
+    font-weight: bold;
+}
+.sugestao-matricula {
+    font-size: 0.8em;
+    color: #888;
+    margin-left: 5px;
+}
     </style>
 </head>
 <body>
@@ -1930,6 +1960,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script>
+        let ALL_USERS_DATA = []; // Variável para armazenar todos os usuários.
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore(); 
@@ -4248,8 +4279,8 @@ function getNovaCautelaFormHTML() {
             <div class="form-grid-2-columns">
                 <div class="form-group">
                     <label for="cautela-destinatario">Destinatário da Cautela (Quem irá receber):</label>
-                    <input type="text" id="cautela-destinatario" list="lista-usuarios" placeholder="Digite o nome ou matrícula do usuário" required>
-                    <datalist id="lista-usuarios"></datalist>
+                    <input type="text" id="cautela-destinatario" placeholder="Digite o nome ou matrícula do usuário" required>
+                    <div id="destinatario-sugestoes" class="sugestao-container"></div>
                 </div>
                 
                 <div class="form-group">
@@ -4357,31 +4388,82 @@ function showCautelasDashboard(type) {
     }
 }
         async function loadUsersForSearch() {
-    const datalist = document.getElementById('lista-usuarios');
-    if (!datalist) return;
+    const input = document.getElementById('cautela-destinatario');
+    const sugestoesDiv = document.getElementById('destinatario-sugestoes');
+    
+    if (!input || !sugestoesDiv) return;
 
     try {
-        // Assume que a coleção 'users' armazena todos os usuários.
         const usersSnapshot = await db.collection('users').get(); 
         
-        let optionsHtml = '';
-        usersSnapshot.forEach(doc => {
+        // 1. Armazena os dados para uso posterior no filtro
+        ALL_USERS_DATA = usersSnapshot.docs.map(doc => {
             const user = doc.data();
-            const uid = doc.id; // O ID de autenticação do Firebase (o 'conferente')
-            const matricula = user.matricula || '';
-            const nomeCompleto = user.nome_completo || user.nome || 'Usuário Sem Nome';
-
-            // O 'value' é o que o usuário digita e vê.
-            const displayValue = `${nomeCompleto} (${matricula})`; 
-
-            // data-uid armazena o UID real para ser usado no envio da cautela.
-            optionsHtml += `<option data-uid="${uid}" value="${displayValue}"></option>`;
+            return {
+                uid: doc.id,
+                matricula: user.matricula || '',
+                nome: user.nome_completo || user.nome || 'Usuário Sem Nome',
+            };
+        });
+        
+        // 2. Adiciona o listener para filtrar a cada tecla
+        input.addEventListener('input', filterUsers);
+        
+        // 3. Adiciona listener para fechar sugestões ao clicar fora
+        document.addEventListener('click', (event) => {
+            if (!input.contains(event.target) && !sugestoesDiv.contains(event.target)) {
+                sugestoesDiv.style.display = 'none';
+                sugestoesDiv.innerHTML = '';
+            }
         });
 
-        datalist.innerHTML = optionsHtml;
-        console.log(`[Cautela] ${usersSnapshot.size} usuários carregados para pesquisa.`);
     } catch (error) {
         console.error("Erro ao carregar usuários para a pesquisa:", error);
+    }
+}
+        function filterUsers() {
+    const input = document.getElementById('cautela-destinatario');
+    const sugestoesDiv = document.getElementById('destinatario-sugestoes');
+    const termo = input.value.toLowerCase().trim();
+    
+    sugestoesDiv.innerHTML = '';
+
+    if (termo.length < 3) {
+        sugestoesDiv.style.display = 'none';
+        return;
+    }
+
+    const resultados = ALL_USERS_DATA.filter(user => 
+        user.nome.toLowerCase().includes(termo) || 
+        user.matricula.includes(termo)
+    ).slice(0, 10); // Limita a 10 resultados
+
+    if (resultados.length > 0) {
+        resultados.forEach(user => {
+            const item = document.createElement('div');
+            item.className = 'sugestao-item';
+            item.innerHTML = `${user.nome} <span class="sugestao-matricula">(${user.matricula})</span>`;
+            
+            // Define o que acontece ao clicar na sugestão
+            item.onclick = () => {
+                // Preenche o campo de texto com o valor formatado
+                input.value = `${user.nome} (${user.matricula})`; 
+                
+                // Armazena o UID no próprio input (usando um atributo data) para uso no envio
+                input.setAttribute('data-destinatario-uid', user.uid);
+                
+                // Esconde a lista
+                sugestoesDiv.style.display = 'none';
+                sugestoesDiv.innerHTML = '';
+
+                // Opcional: Garante que a lista de itens sob custódia seja atualizada (se já houver local selecionado)
+                updateCautelaCount(); 
+            };
+            sugestoesDiv.appendChild(item);
+        });
+        sugestoesDiv.style.display = 'block';
+    } else {
+        sugestoesDiv.style.display = 'none';
     }
 }
         
