@@ -127,26 +127,73 @@
             if(el) el.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
         }
 
-        function updateOverallStatus() { 
-            let total = 0, completed = 0; 
-            document.querySelectorAll('.setor').forEach(s => { 
-                total += parseInt(s.dataset.totalItems || 0); 
-                completed += parseInt(s.querySelector('.setor-status').dataset.completed || 0); 
-            }); 
-            const btn = document.getElementById('btn-finalizar'); 
-            if(btn) {
-                btn.textContent = `FINALIZAR CONFERÊNCIA (${completed}/${total} ITENS)`; 
-                if (total > 0 && completed >= total) {
-                    btn.disabled = false;
-                    btn.style.backgroundColor = '#1b8a3e'; 
-                    btn.style.cursor = 'pointer';
+        function updateOverallStatus() {
+    const totalItems = Object.keys(window.itemStatus).length;
+    let itemsCompleted = 0;
+    
+    // 1. Contar itens concluídos
+    for (const id in window.itemStatus) {
+        // Um item é considerado completo se o status NÃO for 'pending'
+        if (window.itemStatus[id].status !== 'pending') {
+            itemsCompleted++;
+        }
+    }
+    
+    // 2. Atualizar o status geral do cabeçalho
+    const overallEl = document.getElementById('overall-status');
+    if (overallEl) {
+        overallEl.textContent = `${itemsCompleted}/${totalItems} Conferidos`;
+        overallEl.style.backgroundColor = (itemsCompleted === totalItems) ? '#4CAF50' : '#FF9800';
+    }
+
+    // 3. Habilitar/Desabilitar o botão Finalizar
+    const finalizarBtn = document.getElementById('finalizar-btn'); // ID CORRETO: #finalizar-btn
+    if (finalizarBtn) {
+        const isComplete = itemsCompleted === totalItems;
+        finalizarBtn.disabled = !isComplete; // Desabilita se NÃO estiver completo
+        
+        // Atualiza a mensagem do botão (feedback visual)
+        if (isComplete) {
+            finalizarBtn.textContent = 'FINALIZAR CONFERÊNCIA';
+        } else {
+            // Mostra o progresso no botão
+            finalizarBtn.textContent = `FINALIZAR CONFERÊNCIA (${itemsCompleted}/${totalItems})`;
+        }
+    }
+    
+    // Chama a atualização do status do setor (necessário para o painel de status)
+    dadosConferencia.forEach(setor => {
+        const setorEl = document.querySelector(`.setor[data-id="${setor.id}"]`);
+        if (setorEl) {
+            let setorCompleted = 0;
+            let setorTotal = parseInt(setorEl.dataset.totalItems, 10);
+            
+            setor.itens.forEach(item => {
+                const checkStatus = (id) => {
+                    if (window.itemStatus[id] && window.itemStatus[id].status !== 'pending') {
+                        setorCompleted++;
+                    }
+                };
+                
+                if (item.tipo === 'multi' && item.tombamentos) {
+                    item.tombamentos.forEach(t => checkStatus(`${item.id}-${t.tomb}`));
                 } else {
-                    btn.disabled = true;
-                    btn.style.backgroundColor = '#d90f23'; 
-                    btn.style.cursor = 'not-allowed';
+                    checkStatus(item.id);
                 }
+            });
+            
+            setorEl.querySelector('.setor-status').textContent = `${setorCompleted}/${setorTotal}`;
+            setorEl.dataset.completed = setorCompleted;
+            
+            // Adiciona classe de setor completo para feedback visual (opcional)
+            if (setorCompleted === setorTotal) {
+                setorEl.classList.add('setor-completo');
+            } else {
+                setorEl.classList.remove('setor-completo');
             }
         }
+    });
+}
 
         function updateSetorStatus(setorEl) { 
             const items = setorEl.querySelectorAll('.item-conferencia'); 
