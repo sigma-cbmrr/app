@@ -4370,27 +4370,48 @@ function showCautelasDashboard(type) {
     const datalist = document.getElementById('lista-usuarios');
     if (!datalist) return;
 
+    // --- NOVO: FILTRO DE UNIDADE PARA O GESTOR (Segurança) ---
+    const isGestor = currentUserData.role === 'gestor'; // Assume que currentUserData está carregado
+    const unidadeGestor = currentUserData.unidade; // Assume que currentUserData está carregado
+
+    let userQuery = db.collection('usuarios'); 
+    
+    if (isGestor) {
+        // Se for Gestor, filtre para buscar usuários APENAS na sua unidade
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
+    }
+    // ---------------------------------------------------------
+    
     try {
-        // Assume que a coleção 'users' armazena todos os usuários.
-        // Se a coleção for diferente (ex: 'militares'), ajuste aqui.
-        const usersSnapshot = await db.collection('users').get(); 
+        // CORREÇÃO: Usamos a coleção 'usuarios'
+        const usersSnapshot = await userQuery.get(); 
         
         let optionsHtml = '';
         usersSnapshot.forEach(doc => {
             const user = doc.data();
-            const matricula = user.matricula || doc.id; // Assume que o UID ou matrícula é o valor.
-            const nomeCompleto = user.nome_completo || user.nome;
+            const uid = doc.id;
+            // O sistema usa nome_militar_completo (Ex: 3º SGT QPCBM JHONATH) como identificador [cite: 896, 1172]
+            const nomeCompleto = user.nome_militar_completo; 
+            const nomeGuerra = user.nome_guerra;
+            const postoGrad = user.posto;
+            const email = user.email;
 
-            // Formato: Nome Completo (Matrícula)
-            const displayValue = nomeCompleto ? `${nomeCompleto} (${matricula})` : matricula;
-
-            optionsHtml += `<option data-uid="${doc.id}" value="${displayValue}"></option>`;
+            if (nomeCompleto) {
+                // Opção 1: Nome Completo
+                optionsHtml += `<option data-uid="${uid}" value="${nomeCompleto}"></option>`;
+            }
+            if (nomeGuerra) {
+                // Opção 2: Posto/Graduação + Nome de Guerra
+                optionsHtml += `<option data-uid="${uid}" value="${postoGrad} ${nomeGuerra}"></option>`;
+            }
+             if (email) {
+                // Opção 3: Email (login)
+                optionsHtml += `<option data-uid="${uid}" value="${email}"></option>`;
+            }
         });
-
         datalist.innerHTML = optionsHtml;
     } catch (error) {
         console.error("Erro ao carregar usuários para a pesquisa:", error);
-        // Opcional: Mostrar uma mensagem de erro no formulário
     }
 }
 
