@@ -1947,6 +1947,7 @@
         let allLists = [];
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
+        let conferente = '';
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -1955,6 +1956,7 @@
                     const doc = await db.collection('usuarios').doc(user.uid).get();
                     if (doc.exists) {
                         currentUserData = doc.data();
+                        conferente = currentUserData.nome_militar_completo;
                         setupUIBasedOnRole();
                     } else {
                         alert("Usuário sem registro no banco."); 
@@ -4254,7 +4256,7 @@ function getNovaCautelaFormHTML() {
                 
                 <div class="form-group">
                     <label for="cautela-local-origem">Local de Origem (Sua Custódia):</label>
-                    <select id="cautela-local-origem" required>
+                    <select id="cautela-local-origem" required onchange="loadCustodiaItens()">
                         <option value="" disabled selected>Selecione um local...</option>
                     </select>
                 </div>
@@ -4456,6 +4458,123 @@ async function loadCustodiaLocais() {
         selectLocal.innerHTML = '<option value="" disabled selected>Erro ao carregar locais.</option>';
     }
 }
+     async function loadCustodiaItens() {
+    const selectLocal = document.getElementById('cautela-local-origem');
+    const localNomeCompleto = selectLocal.value; // Ex: ALFA - PERMANÊNCIA
+    const itemListContainer = document.getElementById('itens-custodia-list');
+    const btnIniciar = document.getElementById('btn-iniciar-cautela');
+
+    itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
+    btnIniciar.disabled = true;
+
+    if (!localNomeCompleto) return;
+
+    try {
+        // 1. Encontrar o LISTA_ID único a partir do NOME COMPLETO do local
+        // Isso requer buscar o mapeamento na coleção 'rotas'.
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const rotas = rotasDoc.data() || {};
+        
+        let listaId = null;
+        for (const [id, info] of Object.entries(rotas)) {
+            // Reconstroi o nome completo do local para a comparação
+            const nomeCompletoRota = `${info.posto} - ${info.nome}`;
+            if (nomeCompletoRota === localNomeCompleto) {
+                listaId = id;
+                break;
+            }
+        }
+        
+        if (!listaId) {
+            itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Erro: ID da Lista não encontrado para este Local.</p>';
+            return;
+        }
+
+        // 2. Buscar a lista mestra (a estrutura completa de setores/itens)
+        const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
+        if (!listaDoc.exists) {
+            itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Lista Mestra de Materiais não encontrada.</p>';
+            return;
+        }
+        const listaMestra = listaDoc.data().list || [];
+
+        // 3. Renderizar o HTML para seleção (Checkboxes)
+        let htmlContent = '';
+        let totalItens = 0;
+
+        listaMestra.forEach(setor => {
+            if (setor.itens && setor.itens.length > 0) {
+                htmlContent += `<h4 style="margin-top: 15px; font-size: 1em; color: #2c7399;">${setor.nome}</h4>`;
+                htmlContent += `<ul style="list-style: none; padding: 0;">`;
+
+                setor.itens.forEach(item => {
+                    const itemIdBase = item.id;
+
+                    if (item.tipo === 'single') {
+                        // Item Único (ex: Extintor PQS)
+                        if (item.quantidadeEsperada > 0) {
+                             htmlContent += `
+                                <li style="padding: 5px 0; border-bottom: 1px dotted #eee;">
+                                    <label>
+                                        <input type="checkbox" name="cautela-item" data-id="${itemIdBase}" 
+                                               data-nome="${item.nome}" data-tipo="single" 
+                                               data-max-qtd="${item.quantidadeEsperada}">
+                                        ${item.nome} (QTD: ${item.quantidadeEsperada})
+                                    </label>
+                                </li>`;
+                            totalItens++;
+                        }
+                    } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
+                        // Item com Tombamento (ex: EPR)
+                        item.tombamentos.forEach(tomb => {
+                            const itemIdTombado = `${itemIdBase}-${tomb.tomb}`;
+                            htmlContent += `
+                                <li style="padding: 5px 0 5px 15px; border-bottom: 1px dotted #eee; background-color:#f9f9f9;">
+                                    <label>
+                                        <input type="checkbox" name="cautela-item" data-id="${itemIdTombado}" 
+                                               data-nome="${item.nome} (Tomb: ${tomb.tomb})" data-tipo="multi" 
+                                               data-max-qtd="1">
+                                        ${item.nome} (Tombamento: ${tomb.tomb})
+                                    </label>
+                                </li>`;
+                            totalItens++;
+                        });
+                    }
+                });
+                htmlContent += `</ul>`;
+            }
+        });
+
+        if (totalItens === 0) {
+             itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green;">✅ Nenhum material disponível para cautela neste local.</p>';
+        } else {
+             itemListContainer.innerHTML = htmlContent;
+             // Adicionar o listener para atualizar a contagem de itens
+             document.querySelectorAll('input[name="cautela-item"]').forEach(chk => {
+                 chk.addEventListener('change', updateCautelaItemCount);
+             });
+             updateCautelaItemCount(); // Inicializa a contagem
+        }
+
+    } catch (error) {
+        console.error("Erro ao carregar itens de custódia:", error);
+        itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Erro ao carregar lista de materiais.</p>';
+    }
+}
+
+
+/**
+ * Atualiza o texto do botão de iniciar cautela com a contagem de itens selecionados.
+ */
+function updateCautelaItemCount() {
+    const selectedCount = document.querySelectorAll('input[name="cautela-item"]:checked').length;
+    const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    
+    btnIniciar.textContent = `▶️ Enviar Cautela (${selectedCount} itens)`;
+    
+    // Habilita o botão se pelo menos um item estiver selecionado
+    btnIniciar.disabled = (selectedCount === 0);
+}   
     </script>
 </body>
 </html>
