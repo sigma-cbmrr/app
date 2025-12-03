@@ -3018,190 +3018,155 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
 };
 
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
-function reimprimirPDF(data) {
+/**
+ * Gera o PDF de um documento de histórico ou de uma Cautela finalizada.
+ * Adapta a busca e o cabeçalho conforme o tipo de documento.
+ */
+async function reimprimirPDF(idDoc = null, isCautela = false) {
+    const { jsPDF } = window.jspdf;
+    
+    // --- 1. VERIFICAÇÃO DE FLUXO (URL) ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const pdfCautelaId = urlParams.get('pdfCautelaId');
+    if (pdfCautelaId) {
+    // Chama a função com o ID da cautela detectado
+    reimprimirPDF(pdfCautelaId, true); 
+    }
+
+    let documentID = idDoc;
+    let collectionName = 'resultados_conferencias';
+    let docTitle = 'RELATÓRIO DE CONFERÊNCIA';
+    let local = 'NÃO IDENTIFICADO';
+    let conferente = 'NÃO IDENTIFICADO';
+    let observacoes = 'Nenhuma observação registrada.';
+    let itensRelatorio = [];
+    let timestamp = null;
+
+    if (pdfCautelaId) {
+        documentID = pdfCautelaId;
+        collectionName = 'cautelas_abertas'; // Busca na coleção onde a cautela finalizada foi salva
+        isCautela = true;
+        
+        // Limpa o parâmetro da URL para evitar re-gatilho em caso de F5
+        history.replaceState({}, document.title, "sigma_dashboard.html"); 
+    }
+
+    if (!documentID) {
+        alert("ID do documento não fornecido.");
+        return;
+    }
+
     try {
-        const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('p', 'mm', 'a4');
-        const MARGIN = 14, PG_W = 210, LOGO_S = 15;
+        // --- 2. BUSCA DE DADOS ---
+        const docRef = db.collection(collectionName).doc(documentID);
+        const docSnapshot = await docRef.get();
 
-        // MANTÉM A LÓGICA DE BUSCA DE IMAGEM DO DASHBOARD
-        // Busca a imagem já carregada no DOM para desenhar no PDF
-        const logoDraw = (domId, x) => { 
-            // Utilizamos uma consulta que verifica se o src contém o domId
-            const el = document.querySelector(`img[src*="${domId}"]`);
-            if(el) { 
-                try{
-                    const c=document.createElement('canvas');
-                    c.width=160;
-                    c.height=160;
-                    c.getContext('2d').drawImage(el,0,0,160,160);
-                    // Adiciona a imagem ao PDF
-                    doc.addImage(c.toDataURL('image/png'),'PNG',x,10,LOGO_S,LOGO_S);
-                }catch(e){
-                    // Em caso de falha no canvas (como CORS), o processo continua
-                    console.warn(`Falha ao desenhar imagem ${domId}`);
-                } 
-            } else {
-                 console.warn(`Elemento img[src*="${domId}"] não encontrado no DOM. O logo não será exibido.`);
-            }
-        };
-        
-        // --- CHAMADAS PARA DESENHAR AS LOGOS ---
-        // 1. Logo CBM-RR (Esquerda)
-        logoDraw('cbmrr.png', MARGIN);
-        // 2. Logo SIGMA (Direita)
-        logoDraw('logo_sigma.png', PG_W-MARGIN-LOGO_S);
-        
-        // CABEÇALHO
-        doc.setFontSize(10);
-        doc.setTextColor(51); 
-        doc.setFont('helvetica','bold');
-        doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
-        doc.setTextColor(217,15,35);
-        doc.text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
-        doc.setTextColor(51); 
-        doc.setFont('helvetica','italic');
-        doc.text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
-        doc.setFontSize(14); 
-        doc.setTextColor(0);
-        doc.setFont('helvetica','bold'); 
-        doc.text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
-
-        // INFORMAÇÕES DE BASE
-        doc.setFillColor(240, 240, 240);
-        doc.setDrawColor(200, 200, 200); 
-        doc.roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
-        
-        doc.setFontSize(10); 
-        doc.setTextColor(50);
-        let y = 46;
-        const X_LABEL = MARGIN + 5; 
-        const X_VAL = MARGIN + 30;
-        
-        const dataTimestamp = data.timestamp ?
-        new Date(data.timestamp.seconds * 1000) : new Date();
-        const dataHoraStr = dataTimestamp.toLocaleString('pt-BR');
-        
-        doc.setFont('helvetica','bold'); 
-        doc.text('Local:', X_LABEL, y); 
-        doc.setFont('helvetica','normal');
-        doc.text(data.local || '', X_VAL, y); 
-        y+=6; 
-        doc.setFont('helvetica','bold'); 
-        doc.text('Conferente:', X_LABEL, y); 
-        doc.setFont('helvetica','normal'); 
-        doc.text(data.conferente || '', X_VAL, y); 
-        y+=6; 
-        doc.setFont('helvetica','bold');
-        doc.text('Data/Hora:', X_LABEL, y); 
-        doc.setFont('helvetica','normal'); 
-        doc.text(dataHoraStr, X_VAL, y); 
-        
-        // TOTALIZADOR
-        doc.setFont('helvetica','bold');
-        doc.setTextColor(128, 0, 32);
-        doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
-
-        // TABELA DE ITENS
-        let tableBody = [];
-        const RED_FILL = [217, 15, 35]; 
-        const GREEN_FILL = [27, 138, 62]; 
-        const SECTOR_BG = [60, 60, 60];
-        let listaParaImprimir = [];
-        
-        if (data.itensRelatorio && data.itensRelatorio.length > 0) listaParaImprimir = data.itensRelatorio;
-        else if (data.itensCaa && data.itensCaa.length > 0) listaParaImprimir = data.itensCaa;
-        else tableBody.push([{ content: 'CONFERÊNCIA REALIZADA SEM ALTERAÇÕES (REGISTRO LEGADO)', colSpan: 4, styles: { halign: 'center', fillColor: GREEN_FILL, textColor: 255, fontStyle: 'bold', cellPadding: 5 } }]);
-        
-        if (listaParaImprimir.length > 0) {
-            let currentSector = null;
-            listaParaImprimir.forEach(item => {
-                // Lógica de Agrupamento por Setor
-                let setorItem = item.setor || "ITENS GERAIS";
-                if(setorItem !== currentSector) {
-                    tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
-                    currentSector = setorItem;
-                }
-
-                // Lógica de Formatação de Observações
-                let finalObs = item.obs || '-';
-                
-                // ADICIONADO: Variáveis de contexto para a formatação
-                const dataConf = dataTimestamp.toLocaleDateString('pt-BR');
-                const conf = data.conferente; 
-                
-                // 1. Usa a função padrão para obter o array de linhas formatadas
-                let linhasFormatadas = [];
-                if (finalObs !== '-') {
-                    linhasFormatadas = gerarLinhasFormatadas(
-                        finalObs, 
-                        conf, 
-                        dataConf,
-                        item.statusAdmin, 
-                        item.adminObs
-                    );
-                }
-                
-                // 2. Transforma o array de linhas em uma string separada por quebra de linha
-                // O prefixo '•' já está incluso na função gerarLinhasFormatadas para observações.
-                finalObs = linhasFormatadas.map(l => {
-                    // Substitui o prefixo de admin (ex: "⚠️ [SOLUCIONADO] (Admin):") para um formato de relatório mais limpo
-                    if(l.includes('(Admin):')) {
-                        return l.replace('⚠️ ', 'RESPOSTA DA GESTÃO: ');
-                    }
-                    return l;
-                }).join('\n');
-                
-                if (finalObs.trim() === '') finalObs = '-'; // Volta para '-' se ficar vazio.
-
-                // FIM DA LÓGICA DE FORMATAÇÃO DE OBSERVAÇÕES
-                
-                let bgStatus = GREEN_FILL;
-                if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
-                
-                // Adiciona a linha à tabela
-                tableBody.push([ 
-                    item.nomeCompleto || 'Item', 
-                    { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center', valign: 'middle' } }, 
-                    { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle' } }, 
-                    { content: finalObs, styles: { halign: 'left', valign: 'middle' } } 
-                ]);
-            });
+        if (!docSnapshot.exists) {
+            alert(`Documento ${documentID} não encontrado em ${collectionName}.`);
+            return;
         }
+
+        const data = docSnapshot.data();
+
+        // --- 3. MAPEAMENTO DE DADOS (Cautela vs. Conferência Padrão) ---
+        if (isCautela) {
+            local = `Origem: ${data.local_origem} | Destino: ${data.destinatario}`;
+            // Usa o conferente final (destinatário) se a cautela foi concluída
+            conferente = data.conferente_destino || data.destinatario; 
+            timestamp = data.timestamp_finalizacao || data.timestamp_emissao;
+            observacoes = data.observacoes_emissao || 'Emissão sem observações.';
+            
+            // Mapeia os itens da cautela para o formato do relatório
+            itensRelatorio = data.itens.map(item => ({
+                id: item.id_completo,
+                nomeCompleto: item.nome,
+                quantidade: item.quantidade,
+                // Status final da conferência
+                status: item.status_conferido || 'ABERTA (Cautelado)', 
+                obs: item.obs_conferido || '-'
+            }));
+
+            // Determina o título do documento
+            if (data.status === 'CONCLUÍDA') {
+                 docTitle = `TERMO DE CAUTELA E DEVOLUÇÃO (ID: ${documentID})`;
+            } else {
+                 docTitle = `TERMO DE CAUTELA (EMISSÃO) (ID: ${documentID})`;
+            }
+
+        } else {
+            // Mapeamento para Conferência Padrão
+            local = data.local;
+            conferente = data.conferente;
+            timestamp = data.timestamp;
+            // Assumimos que o campo de observações de relatório exista ou é padrão.
+            observacoes = 'Nenhuma observação de relatório.'; 
+            itensRelatorio = data.itensRelatorio;
+            docTitle = `RELATÓRIO DE CONFERÊNCIA (ID: ${documentID})`;
+        }
+
+
+        // --- 4. GERAÇÃO DO PDF (JSPDF) ---
+        const doc = new jsPDF();
         
-        // Configuração e Geração da Tabela
-        doc.autoTable({ 
-            startY: 70, 
-            head: [['Item', 'Quantidade', 'Status', 'Observação']], 
-            body: tableBody, 
-            theme: 'striped', 
-            styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 1.5 }, 
-            columnStyles: { 
-                0:{cellWidth:80, halign:'left'}, 
-                1:{cellWidth:20,halign:'center'}, 
-                2:{cellWidth:20,halign:'center'}, 
-                3:{cellWidth:'auto',halign:'left'} 
-            }, 
-            headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
+        // Cabeçalho
+        doc.setFontSize(14);
+        doc.text(docTitle, 105, 20, null, null, 'center');
+        doc.setFontSize(10);
+        doc.text(`Documento ID: ${documentID}`, 20, 30);
+        doc.text(`Local/Destinatário: ${local}`, 20, 35);
+        doc.text(`Conferente (Destino): ${conferente}`, 20, 40);
+        doc.text(`Data: ${new Date(timestamp.toDate()).toLocaleDateString('pt-BR')}`, 160, 30);
+        doc.text(`Emitente: ${data.emitente || 'N/A'}`, 160, 35);
+        
+        // Tabela de Itens
+        const tableBody = itensRelatorio.map(item => [
+            item.id,
+            item.nomeCompleto,
+            item.quantidade,
+            item.status,
+            item.obs || '-'
+        ]);
+
+        doc.autoTable({
+            startY: 45,
+            head: [['ID', 'Item', 'Qtd.', 'Status', 'Observações']],
+            body: tableBody,
+            styles: {
+                fontSize: 8,
+                cellPadding: 2,
+                halign: 'center'
+            },
+            headStyles: {
+                fillColor: [128, 0, 32], // Bordeaux
+                textColor: [255, 255, 255]
+            },
+            columnStyles: {
+                0: { halign: 'center', cellWidth: 15 },
+                2: { halign: 'center', cellWidth: 10 },
+                3: { halign: 'center', cellWidth: 15 },
+                4: { halign: 'left' }
+            },
         });
 
-        // Rodapé com Paginação
-        const totalPages = doc.internal.getNumberOfPages();
-        for (let i = 1; i <= totalPages; i++) {
-            doc.setPage(i);
-            doc.setFontSize(8); 
-            doc.setTextColor(100);
-            doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-10);
-            doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
-        }
+        const finalY = doc.autoTable.previous.finalY;
+
+        // Rodapé / Assinaturas / Observações
+        doc.setFontSize(10);
+        doc.text(`Observações da Emissão: ${observacoes}`, 20, finalY + 10);
         
-        // Nome do Arquivo
-        const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataTimestamp.toISOString().split('T')[0]}.pdf`;
-        doc.save(nomeArquivo);
+        doc.text('________________________________', 20, finalY + 40);
+        doc.text('________________________________', 130, finalY + 40);
         
-    } catch(e) { 
-        console.error(e);
-        alert("Erro ao gerar PDF: " + e.message);
+        doc.setFontSize(8);
+        doc.text(`Assinatura do Emitente: ${data.emitente || 'N/A'}`, 25, finalY + 45);
+        doc.text(`Assinatura do Destinatário/Conferente: ${conferente}`, 135, finalY + 45);
+
+        // Salva o PDF
+        doc.save(`${docTitle} - ${documentID}.pdf`);
+
+    } catch (error) {
+        console.error("Erro ao gerar PDF:", error);
+        alert(`Falha ao gerar o PDF. Verifique o console. Erro: ${error.message}`);
     }
 }
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
