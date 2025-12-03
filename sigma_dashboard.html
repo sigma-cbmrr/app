@@ -2006,8 +2006,7 @@
 // Oculta o Rótulo e Links de Admin se for Operacional
     if (role === 'operacional') {
         renderOperacionalCards();
-        carregarConferenciasHoje();
-    } else {
+ } else {
         // Para Admin e Gestor
         renderAdminGestorCards(canViewDashboardCards);
         // ✅ CORREÇÃO: Removido carregarConferenciasHoje() para evitar TypeError: Cannot set properties of null
@@ -2070,95 +2069,109 @@
     // Garante que a visão seja o dashboard ao logar
     switchView('dashboard');
 }
-            /**
- * Renderiza a estrutura HTML dos cards para a visão Operacional (Conferente).
- * Esta função apenas injeta a estrutura estática no DOM.
- * O preenchimento dinâmico dos cards é feito APÓS esta função, em setupUIBasedOnRole().
- */
+            // --- NOVO: Cards Específicos para Operacional ---
 function renderOperacionalCards() {
-    // Presumindo que o container é o '#main-content' ou similar
-    const container = document.getElementById('main-content');
+    const container = document.getElementById('operacional-cards-container');
+    if (!container) return;
     
-    // 1. HTML da Estrutura Operacional.
-    const html = `
-        <div id="op-dashboard-cards" class="dashboard-cards">
-            <div class="card-op card-conferencias">
-                <h3>Conferências de Hoje: <span id="op-conf-count">0</span></h3>
-                <ul id="today-list" class="list-op">
-                    <li style="padding:15px; text-align:center; color:#999;">Carregando conferências...</li>
-                </ul>
-                <button class="btn-op-action" onclick="showConferenceSelect()">Iniciar Nova Conferência</button>
+    // Esconde o container de Admin/Gestor se existir
+    const adminContainer = document.getElementById('admin-gestor-cards-container');
+    if(adminContainer) adminContainer.style.display = 'none';
+
+    container.innerHTML = `
+        
+        <div class="op-card history">
+            <h2 class="op-card-title"><i class="fas fa-calendar-day"></i> Conferências Realizadas Hoje (Minhas)</h2>
+            <ul id="today-list" class="history-list">
+                <li style="text-align:center; color:#999; padding:20px;">Carregando...</li>
+            </ul>
+        </div>
+
+        <div class="op-card history" style="margin-top: 25px;">
+            <h2 class="op-card-title" style="margin-bottom: 15px;"><i class="fas fa-chart-bar"></i> Dashboard Operacional</h2>
+            <div class="cards-grid">
+                
+                <div class="sector-card status-ok" onclick="switchView('my-history')">
+                    <h3>Minhas Conferências</h3>
+                    <div class="main-stat">
+                        <span class="count-value" id="op-conf-count">0</span>
+                        <i class="fas fa-history fa-2x" style="color:#1b8a3e;"></i>
+                    </div>
+                    <div class="card-footer">
+                        Clique para ver o histórico completo.
+                    </div>
+                </div>
+
+                <div class="sector-card status-unit" onclick="alert('Implementação futura: Minhas Cautelas Ativas')">
+                    <h3>Minhas Cautelas Ativas</h3>
+                    <div class="main-stat">
+                        <span class="count-value">0</span>
+                        <i class="fas fa-shield-alt fa-2x" style="color:#2c7399;"></i>
+                    </div>
+                    <div class="card-footer">
+                        Itens que estão sob sua cautela.
+                    </div>
+                </div>
+
+                <div class="sector-card status-posto" onclick="alert('Implementação futura: Cautelas Recebidas')">
+                    <h3>Cautelas Recebidas</h3>
+                    <div class="main-stat">
+                        <span class="count-value">0</span>
+                        <i class="fas fa-box-open fa-2x" style="color:#8e44ad;"></i>
+                    </div>
+                    <div class="card-footer">
+                        Itens pendentes de recebimento/transferência.
+                    </div>
+                </div>
+                
             </div>
-            
-            <div class="card-op card-cautela-receber">
-                <h3>Cautelas a Receber: <span id="cautela-receive-count">0</span></h3>
-                <ul id="cautela-receive-list" class="list-op">
-                    <li class="no-result">Nenhuma cautela pendente.</li>
-                </ul>
-            </div>
-            
         </div>
     `;
-
-    // 2. Remove o conteúdo anterior (menu principal, se houver) e injeta a nova estrutura.
-    // É importante garantir que o container correto seja limpo.
-    const existingCards = document.getElementById('op-dashboard-cards');
-    if (existingCards) existingCards.remove();
     
-    container.insertAdjacentHTML('beforeend', html);
-    
-    // **IMPORTANTE:** A chamada para o conteúdo dinâmico (carregarConferenciasHoje/updateOperacionalCards) 
-    // FOI REMOVIDA DAQUI. Ela deve ser feita APÓS esta função, dentro de setupUIBasedOnRole(), 
-    // para que o DOM tenha tempo de processar #today-list.
+    // [NOVO] Adicionar lógica para atualizar a contagem de conferências hoje no card
+    updateOperacionalCards();
+    container.style.display = 'block';
 }
 // [NOVO] Atualiza a contagem do Card "Minhas Conferências"
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
-
-    // CORREÇÃO CRÍTICA: Se a UI não estiver totalmente carregada, a função retorna
-    // sem causar um erro fatal de 'null'.
-    if (!ul || !countEl || !currentUserData) {
-        return;
-    }
-
+    
     try {
-        const currentUserId = currentUserData.nome_militar_completo;
-        const today = new Date().toISOString().split('T')[0];
-        
-        // 1. Busca por conferências de hoje
-        const resultsRef = db.collection('resultados_conferencias');
-        const snapTotal = await resultsRef
-            .where('conferente', '==', currentUserId)
-            .where('timestamp', '>', new Date(today))
+        // --- 1. CONTAGEM TOTAL (NOVO) ---
+        // Busca TODAS as conferências do usuário (sem filtro de data)
+        const snapTotal = await db.collection(COLECAO_RESULTADOS)
+            .where('conferente', '==', currentUserData.nome_militar_completo)
             .get();
-
-        const totalConferences = snapTotal.size;
-        countEl.textContent = totalConferences;
-        ul.innerHTML = ''; // Limpa antes de adicionar
-
-        if (totalConferences === 0) {
-            ul.insertAdjacentHTML('beforeend', '<li class="no-result">Nenhuma conferência iniciada hoje.</li>');
-        } else {
-            snapTotal.docs.forEach(doc => {
-                const data = doc.data();
-                const hora = new Date(data.timestamp.toDate()).toLocaleTimeString('pt-BR').substring(0, 5);
-                const html = `
-                    <li onclick="loadConferenciaView('${doc.id}', false)" title="Clique para reabrir">
-                        <span><i class="fas fa-list-check"></i> ${data.local}</span>
-                        <span>${hora}</span>
-                    </li>
-                `;
-                ul.insertAdjacentHTML('beforeend', html);
-            });
-        }
+            
+        const totalConferences = snapTotal.size; // ✅ Captura o tamanho total da coleção
+        if (countEl) countEl.textContent = totalConferences; // Atualiza o card com o total
         
-        // 2. [A SER IMPLEMENTADO]: Busca por Cautelas a Receber (status: ABERTA)
-        // ...
+        // --- 2. CONTAGEM E LISTAGEM DO DIA (EXISTENTE) ---
+        // Reutilizamos o snapTotal para filtrar APENAS os documentos de hoje, 
+        // evitando uma segunda requisição grande ao Firestore.
         
-    } catch (error) {
-        console.error("Erro ao carregar dados operacionais:", error);
-        ul.innerHTML = '<li class="error-result">Erro ao carregar lista.</li>';
+        const hojeStr = new Date().toLocaleDateString('pt-BR');
+        let countToday = 0; // Contagem das conferências de hoje
+        let html = '';
+        
+        snapTotal.forEach(d => {
+            const dt = d.data().timestamp.toDate();
+            // Filtro de data para listar apenas as de hoje
+            if(dt.toLocaleDateString('pt-BR') === hojeStr) {
+                html += criarItemHistoricoHTML(d.data());
+                countToday++; // Contagem de hoje
+            }
+        });
+        
+        // Atualiza a lista de hoje
+        ul.innerHTML = html ||
+        '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+        
+    } catch(e) { 
+        console.error("Erro ao carregar dados operacionais:", e);
+        if(countEl) countEl.textContent = 'Erro';
+        ul.innerHTML = 'Erro.';
     }
 }
             // --- NOVO: Cards Específicos para Admin/Gestor ---
@@ -2513,39 +2526,36 @@ sortedUnits.forEach(unit => {
         });
         
         // --- 5. HISTÓRICOS ---
-async function carregarConferenciasHoje() {
-    const ul = document.getElementById('today-list');
-    
-    // CORREÇÃO: Checa se o elemento existe antes de tentar manipulá-lo
-    if (!ul || !currentUserData) return; 
-
-    ul.innerHTML = '<li>Carregando...</li>';
-    try {
-        const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(20).get();
-        const hojeStr = new Date().toLocaleDateString('pt-BR');
-        let docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
-        let html = '';
-        docs.forEach(d => {
-            const dt = d.timestamp.toDate();
-            if(dt.toLocaleDateString('pt-BR') === hojeStr) {
-                html += criarItemHistoricoHTML(d);
+        async function carregarConferenciasHoje() {
+            const ul = document.getElementById('today-list');
+            ul.innerHTML = '<li>Carregando...</li>';
+            try {
+                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(20).get();
+                const hojeStr = new Date().toLocaleDateString('pt-BR');
+                let docs = [];
+                snap.forEach(d => docs.push(d.data()));
+                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+                
+                let html = '';
+                docs.forEach(d => {
+                    const dt = d.timestamp.toDate();
+                    if(dt.toLocaleDateString('pt-BR') === hojeStr) {
+                        html += criarItemHistoricoHTML(d);
+                    }
+                });
+                
+                ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+            } catch(e){ 
+                console.error(e); 
+                ul.innerHTML = 'Erro.';
             }
-        });
-        
-        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
-    } catch(e){ 
-        console.error(e);
-        ul.innerHTML = 'Erro.';
-    }
-}
+        }
 
         async function loadMyHistory() {
     const ul = document.getElementById('my-history-list');
     ul.innerHTML = '<li>Buscando...</li>';
     
-    // 1. Cria objetos Date dos campos de input, garantindo o início e fim do dia (linhas 807-810)
+    // 1. Cria objetos Date dos campos de input, garantindo o início e fim do dia
     const startDateInput = document.getElementById('my-hist-start').value;
     const endDateInput = document.getElementById('my-hist-end').value;
 
@@ -2554,28 +2564,28 @@ async function carregarConferenciasHoje() {
         return;
     }
 
-    const dI = new Date(startDateInput + 'T00:00:00');
-    const dF = new Date(endDateInput + 'T23:59:59');
+    // 2. Cria Timestamps para filtro do Firestore
+    // dI: Começo do dia (00:00:00)
+    const dI = new Date(startDateInput + 'T00:00:00'); 
+    // dF: Final do dia (23:59:59), adicionamos um segundo extra para garantir a inclusão
+    const dF = new Date(endDateInput + 'T23:59:59'); 
+
+    // Converte para Timestamps do Firebase
     const startTimestamp = firebase.firestore.Timestamp.fromDate(dI);
     const endTimestamp = firebase.firestore.Timestamp.fromDate(dF);
-    
+
     try {
         // 3. Executa a consulta no Firestore com o filtro de data (query otimizada)
         const snap = await db.collection(COLECAO_RESULTADOS)
             .where('conferente', '==', currentUserData.nome_militar_completo)
             .where('timestamp', '>=', startTimestamp) // Data de início
             .where('timestamp', '<=', endTimestamp)   // Data de fim
-            .orderBy('timestamp', 'desc') 
+            .orderBy('timestamp', 'desc') // Ordena (necessário ao usar where em timestamp)
             .limit(100)
             .get();
             
         let docs = [];
-        snap.forEach(doc => {
-            const data = doc.data();
-            // 🔑 CORREÇÃO CRÍTICA: Anexa o ID do documento ao objeto de dados
-            data.id = doc.id; 
-            docs.push(data);
-        });
+        snap.forEach(doc => docs.push(doc.data()));
 
         let html = '';
         docs.forEach(d => {
@@ -2583,6 +2593,7 @@ async function carregarConferenciasHoje() {
         });
         
         ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nada encontrado no período selecionado.</li>';
+        
     } catch(e){ 
         console.error("Erro no loadMyHistory:", e);
         ul.innerHTML='<li>Erro ao carregar histórico.</li>';
@@ -2593,11 +2604,11 @@ async function carregarConferenciasHoje() {
     const ul = document.getElementById('global-history-list');
     ul.innerHTML = '<li>Buscando...</li>';
     
-    // Captura o valor dos filtros (linhas 818-820)
+    // Captura o valor dos filtros
     const dI = new Date(document.getElementById('glob-hist-start').value + 'T00:00:00');
     const dF = new Date(document.getElementById('glob-hist-end').value + 'T23:59:59');
     const localFilter = document.getElementById('glob-hist-local').value;
-    const conferenteFilter = document.getElementById('glob-hist-user').value;
+    const conferenteFilter = document.getElementById('glob-hist-user').value; // Valor do Conferente
 
     try {
         // 1. Inicia a consulta com os filtros de data (obrigatório para orderBy)
@@ -2605,37 +2616,37 @@ async function carregarConferenciasHoje() {
             .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(dI))
             .where('timestamp', '<=', firebase.firestore.Timestamp.fromDate(dF))
             .orderBy('timestamp', 'desc');
-            
+
+        // 2. CORREÇÃO: Aplica o filtro 'where' se um Conferente específico for selecionado
         if (conferenteFilter) {
             queryRef = queryRef.where('conferente', '==', conferenteFilter);
         }
 
         const snap = await queryRef.limit(100).get();
+        
+        // Carrega o mapeamento de Unidades (necessário para o filtro de Gestor)
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         const listToUnitMap = {};
         Object.keys(rotas).forEach(key => listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL');
-        
+
         let docs = [];
-        snap.forEach(doc => {
-            const data = doc.data();
-            data.id = doc.id; // 🔑 CORREÇÃO CRÍTICA: Anexa o ID do documento
-            docs.push(data);
-        });
+        snap.forEach(d => docs.push(d.data()));
 
         let html = '';
         docs.forEach(d => {
             const localNome = d.local.split(' - ')[1] || d.local;
             const unit = listToUnitMap[localNome] || 'GERAL';
 
-            // Filtro de segurança (Gestor) e Filtro Local
+            // Filtro de segurança (Gestor)
             if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; 
             
+            // Filtro Local: só aplica na memória se for necessário
             if(!localFilter || localNome === localFilter) {
                 html += criarItemHistoricoHTML(d);
             }
         });
-        
+
         ul.innerHTML = html || '<li>Nada encontrado.</li>';
     } catch(e){ 
         console.error("Erro ao carregar histórico global:", e);
@@ -2643,12 +2654,11 @@ async function carregarConferenciasHoje() {
     }
 }
         function criarItemHistoricoHTML(data) {
-    const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
-    const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
-    
-    // ATENÇÃO: O botão agora passa data.id como string simples.
-    return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF("${data.id}")'><i class="fas fa-file-pdf"></i></button></div></li>`;
-}
+            const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
+            const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
+            
+            return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'><i class="fas fa-file-pdf"></i></button></div></li>`;
+        }
 
         // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
@@ -2899,13 +2909,19 @@ function formatarDataSimples(timestamp) {
 
 const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
     const linhas = [];
-    if (adminStatus) linhas.push(`[${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
+    
+    // 1. FORMATAÇÃO DA RESPOSTA DO GESTOR (ADMIN)
+    if (adminStatus) {
+        // Armazenamos o Status e a Observação separados para facilitar a formatação no HTML
+        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`; 
+        linhas.push(gestorLinha);
+    }
+    
     const separator = ' | + NOVA: ';
     
-    const pBruto = textoBruto.trim();
-
-    if (pBruto.includes(separator)) {
-        const partes = pBruto.split(separator);
+    // 2. FORMATAÇÃO DAS OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
+    if (textoBruto.includes(separator)) {
+        const partes = textoBruto.split(separator);
         partes.forEach(p => {
             p = p.trim();
             const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
@@ -2913,337 +2929,279 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
             
             // Verifica se é a AÇÃO GESTOR já salva no histórico.
             if (match && match[1].includes('[AÇÃO GESTOR:')) {
-                return; // Pula a iteração, mas a função principal continua.
+                return; 
             }
-            
+
+            // Se for observação de Conferente:
             if (match) {
-                const textoObservacao = match[1].trim();
-                
-                // Ignora a linha se a observação for vazia
-                if (textoObservacao.length === 0) {
-                    return; 
-                }
-                
-                linhas.push(`Por: ${match[2]} em ${match[3]}: "${textoObservacao}"`);
+                // Formato padrão: Por: NOME em DATA: "OBS"
+                linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
             } else {
-                // Trata observações não formatadas, garantindo que não são vazias.
-                if (p.length === 0) {
-                    return; 
-                }
-                linhas.push(`Por: ${autorAtual} em dataAtual: "${p}"`);
+                // Se for texto simples (fallback, não deve acontecer com o padrão atual)
+                linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
             }
         });
-    } else { // Trata o caso de uma única observação (Bloco 'else')
-        const p = pBruto;
+    } else {
+        const p = textoBruto.trim();
         const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
         const match = p.match(regex);
-        
+
         // Verifica se é uma AÇÃO GESTOR na primeira linha 
         if (match && match[1].includes('[AÇÃO GESTOR:')) {
-            return linhas; // ⬅️ CORREÇÃO: Retorna o array para evitar 'undefined'
+            return; // Já tratado na seção 1
         }
         
         // Se for a primeira observação de Conferente:
         if (match) {
-             const textoObservacao = match[1].trim();
-            if (textoObservacao.length === 0) {
-                return linhas; // ⬅️ Retorna array para evitar 'undefined' se observação for vazia
-            }
-            linhas.push(`Por: ${match[2]} em ${match[3]}: "${textoObservacao}"`);
+            linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
         } else {
-            // Este bloco trata observações não formatadas.
-            if (p.length === 0) {
-                return linhas; // ⬅️ Retorna array para evitar 'undefined' se string é vazia
-            }
-            linhas.push(`Por: ${autorAtual} em dataAtual: "${p}"`);
+            linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
         }
     }
-    
-    return linhas; // Garante que um array é sempre retornado
+    return linhas;
 };
 
 // Função wrapper apenas para manter a consistência com o app (não usada no PDF)
-function gerarHtmlVisual(obsRaw, conferente, date, statusAdmin, adminObs) {
-    // Retorna vazio se não houver dados relevantes para exibir.
-    if (!obsRaw && !statusAdmin) return '';
-
-    let html = '<ul>';
-    // É crucial que gerarLinhasFormatadas esteja funcionando corretamente para retornar um array de strings.
-    let linhas = gerarLinhasFormatadas(obsRaw || '', conferente, date); 
+const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+    const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
+    let html = '<ul class="lista-pendencias">';
     
-    // 1. Adiciona o status/observação do Gestor no topo, se houver
-    if (statusAdmin && statusAdmin.toLowerCase() !== 'pendente') {
-        const statusClean = statusAdmin.toUpperCase().replace(/\s/g, '-');
-        const badgeClass = `status-badge badge-${statusClean.toLowerCase()}`;
-        const adminObsText = adminObs ? `<span style="font-weight: normal; color: #555;">: ${adminObs}</span>` : '';
-        html += `<li class="linha-admin" style="color: #800020; font-weight: bold;">
-                    <span class="${badgeClass}" style="margin-right: 5px;">${statusAdmin.toUpperCase()}</span>
-                    ${adminObsText}
-                 </li>`;
-    }
-
-    // 2. Processa o histórico de observações (C/A)
-    linhas.forEach(l => {
-        if (!l || l.trim() === '') return;
-
-        // Linha de fallback (primeira conferência)
-        if (l.startsWith('[PRIMEIRA CONFERÊNCIA]')) {
-            html += `<li class="linha-obs-fallback" style="font-style: italic; color: #666;">${l}</li>`;
-        } else {
-            // Lógica para linhas de histórico formatadas (Ex: Por: Nome em Data: "texto")
+    linhas.forEach(l => { 
+        if (l.includes('(Admin):')) { 
+            // Formato de entrada: [STATUS] (Admin): Observação do Gestor
+            const [carimboStatus, obsText] = l.split(':');
+            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
             
-            // Quebra o carimbo de data/usuário do resto da string
-            const partes = l.split(':');
-            
-            // Checagem de robustez (deve ter pelo menos o carimbo e o texto)
-            if (partes.length < 3) {
-                 html += `<li class="linha-obs-bruta" style="color: red; font-size: 0.8em;">[Erro de Formato - Linha Bruta]: ${l}</li>`;
-                 return;
+            let icon = '';
+            let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
+            let obsColor = '#555';
+
+            // Mapeamento dos Ícones e Cores
+            switch(statusText.toUpperCase().trim()) {
+                case 'SOLUCIONADO':
+                case 'REMOVER':
+                    icon = '✅️';
+                    statusColor = '#1b8a3e'; // Verde
+                    break;
+                case 'CAUTELADO':
+                    icon = '🔃';
+                    statusColor = '#0d47a1'; // Azul
+                    break;
+                case 'EM SOLUÇÃO':
+                default:
+                    icon = '⚠️';
+                    break;
             }
             
-            // Pega o carimbo (as 2 primeiras partes) e o texto da observação (o resto)
-            // Carimbo: "Por: Nome em Data"
-            const carimbo = partes.slice(0, 2).join(':').trim(); 
-            // Texto: " "Observação do Usuário"" (ou " Data: "Observação do Usuário"")
-            let textoObsCompleto = partes.slice(2).join(':').trim(); 
-
-            // 🚨 CORREÇÃO CRÍTICA: Extração Agressiva do Conteúdo DENTRO das aspas
-            // Tenta extrair o texto DENTRO das aspas duplas, onde o texto real do usuário está.
-            const matchContent = textoObsCompleto.match(/"(.*?)"/); 
-
-            if (matchContent && matchContent[1]) {
-                // Se a regex achar conteúdo dentro das aspas, usa SÓ o conteúdo.
-                textoObsCompleto = matchContent[1].trim(); 
-            } else {
-                 // Se o formato for inesperado, remove as aspas duplas de forma simples.
-                 textoObsCompleto = textoObsCompleto.replace(/"/g, '').trim();
-                 // Tenta remover o carimbo de data do início, se estiver colado
-                 textoObsCompleto = textoObsCompleto.replace(/Data:/i, '').trim();
-            }
+            // Formatado como: **Gestor** <span style="color: StatusColor;">⚠️ *Status*: </span> Observação
+            html += `<li>
+                        <span style="color: #d90f23;"><b>Gestor</b></span>:
+                        <span style="color: ${statusColor}; font-style: italic;">
+                            ${icon} ${statusText}
+                        </span>
+                        : ${obsText.trim()}
+                    </li>`; 
+        } else { 
+            // Formato Conferente: • **Por [Usuário + Data]:**
+            // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
+            const [carimbo, ...resto] = l.split(':');
             
             // Aplica BOLD no Carimbo: "Por: NOME em DATA"
-            const carimboFormatado = carimbo.replace('Por:', '<strong>Por</strong>');
+            const carimboBold = carimbo.replace('Por:', '**Por**');
             
-            // Renderiza o texto limpo, adicionando aspas de volta APENAS para formatação visual.
-            html += `<li class="linha-obs">• ${carimboFormatado}: "${textoObsCompleto}"</li>`;
-        }
+            html += `<li class="linha-obs">• ${carimboBold}:${resto.join(':')}</li>`;
+        } 
     });
-
+    
     html += '</ul>';
-    
-    // Se o HTML gerado for muito curto, o fallback da mostrarTabela ainda é acionado
-    if (html.length < 30 && linhas.length === 0) return '';
-    
     return html;
-}
+};
 
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
-/**
- * Gera o PDF de um documento de histórico ou de uma Cautela finalizada.
- * Adapta a busca e o cabeçalho conforme o tipo de documento.
- */
-async function reimprimirPDF(input) {
-    const { jsPDF } = window.jspdf;
-    
-    // --- 1. EXTRAÇÃO E VALIDAÇÃO CRÍTICA DO ID ---
-    const urlParams = new URLSearchParams(window.location.search);
-    const pdfCautelaId = urlParams.get('pdfCautelaId');
-
-    let documentID = null;
-    let collectionName = 'resultados_conferencias'; // Padrão
-    let isCautela = false;
-
-    // A. Prioriza ID vindo do parâmetro 'pdfCautelaId' da URL (Fluxo de Conclusão da Cautela)
-    if (pdfCautelaId) {
-        documentID = pdfCautelaId.trim();
-        collectionName = 'cautelas_abertas'; 
-        isCautela = true;
-        // Limpa a URL após a leitura para evitar reimpressão em recarregamento
-        history.replaceState({}, document.title, "sigma_dashboard.html");
-    } 
-    // B. Input Check (ID string vindo do botão: onclick='reimprimirPDF("${data.id}")')
-    else if (typeof input === 'string' && input.trim().length > 0) {
-        documentID = input.trim();
-    } 
-    // C. Input Check (Elemento HTML com data-id - Ex: para futuros botões)
-    else if (input && input.dataset && input.dataset.id) {
-        documentID = input.dataset.id.trim();
-        if (input.dataset.type === 'cautela') { 
-            collectionName = 'cautelas_abertas';
-            isCautela = true;
-        }
-    } 
-    // D. Entrada inválida
-    else {
-        alert("ID do documento não fornecido ou inválido.");
-        return;
-    }
-
-    // 🚨 VERIFICAÇÃO FINAL CRÍTICA (Bloqueia ID vazio ou a string literal "undefined")
-    const safeDocumentID = String(documentID).trim();
-    if (safeDocumentID.length === 0 || safeDocumentID.toLowerCase() === 'undefined' || safeDocumentID.toLowerCase() === 'null') {
-         alert("Erro: O ID do documento é inválido ou vazio. Não é possível gerar o PDF. Verifique a função de carregamento do Histórico.");
-         return;
-    }
-    
-    // --- 2. VARIÁVEIS DE DADOS E CONSTANTES DO PDF ---
-    let docTitle = isCautela ? 'TERMO DE CAUTELA' : 'RELATÓRIO DE CONFERÊNCIA'; 
-    let local = 'NÃO IDENTIFICADO'; 
-    let conferente = 'NÃO IDENTIFICADO'; 
-    let emitente = 'N/A';
-    let observacoes = 'Nenhuma observação registrada.'; 
-    let itensRelatorio = []; 
-    let timestamp = null; 
-    
-    const MARGIN = 14; 
-    const PG_W = 210; 
-    const LOGO_S = 15;
-
+function reimprimirPDF(data) {
     try {
-        // --- 3. BUSCA DE DADOS NO FIRESTORE ---
-        const docRef = db.collection(collectionName).doc(safeDocumentID); 
-        const docSnapshot = await docRef.get();
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        const MARGIN = 14, PG_W = 210, LOGO_S = 15;
 
-        if (!docSnapshot.exists) {
-            alert(`Documento ${safeDocumentID} não encontrado em ${collectionName}.`); 
-            return;
-        }
-
-        const data = docSnapshot.data();
-
-        // --- 4. MAPEAMENTO DE DADOS (CONFERÊNCIA vs CAUTELA) ---
-        if (isCautela) {
-            local = `Origem: ${data.local_origem || 'N/A'} | Destino: ${data.destinatario || 'N/A'}`;
-            conferente = data.conferente_destino || data.destinatario || 'N/A'; 
-            emitente = data.emitente || 'N/A';
-            timestamp = data.timestamp_finalizacao || data.timestamp_emissao;
-            observacoes = data.observacoes_emissao || 'Emissão sem observações.';
-            
-            itensRelatorio = (data.itens || []).map(item => ({
-                id: item.id_completo,
-                nomeCompleto: item.nome,
-                quantidade: item.quantidade,
-                status: item.status_conferido || 'ABERTA', 
-                obs: item.obs_conferido || '-'
-            }));
-
-            if (data.status === 'CONCLUÍDA') {
-                 docTitle = `TERMO DE CAUTELA E DEVOLUÇÃO (ID: ${safeDocumentID})`;
-            } else {
-                 docTitle = `TERMO DE CAUTELA (EMISSÃO) (ID: ${safeDocumentID})`;
-            }
-
-        } else {
-            // Mapeamento para Conferência Padrão
-            local = data.local;
-            conferente = data.conferente;
-            emitente = data.emitente || 'N/A';
-            timestamp = data.timestamp;
-            observacoes = 'Nenhuma observação de relatório de conferência.'; 
-            // O campo 'itensRelatorio' já é um array pronto para uso
-            itensRelatorio = data.itensRelatorio || [];
-            docTitle = `RELATÓRIO DE CONFERÊNCIA (ID: ${safeDocumentID})`;
-        }
-
-
-        // --- 5. GERAÇÃO DO PDF (JSPDF) ---
-        const doc = new jsPDF();
-        
-        // Função para desenhar o Logo (se estiver no DOM) - MANTIDA
+        // MANTÉM A LÓGICA DE BUSCA DE IMAGEM DO DASHBOARD
+        // Busca a imagem já carregada no DOM para desenhar no PDF
         const logoDraw = (domId, x) => { 
+            // Utilizamos uma consulta que verifica se o src contém o domId
             const el = document.querySelector(`img[src*="${domId}"]`);
             if(el) { 
                 try{
                     const c=document.createElement('canvas');
-                    c.width=160; c.height=160;
+                    c.width=160;
+                    c.height=160;
                     c.getContext('2d').drawImage(el,0,0,160,160);
+                    // Adiciona a imagem ao PDF
                     doc.addImage(c.toDataURL('image/png'),'PNG',x,10,LOGO_S,LOGO_S);
                 }catch(e){
-                    console.warn(`Falha ao desenhar imagem ${domId}:`, e);
+                    // Em caso de falha no canvas (como CORS), o processo continua
+                    console.warn(`Falha ao desenhar imagem ${domId}`);
                 } 
+            } else {
+                 console.warn(`Elemento img[src*="${domId}"] não encontrado no DOM. O logo não será exibido.`);
             }
         };
-
-        logoDraw('logo_sigma.png', MARGIN);
         
-        const timestampFormatado = timestamp 
-            ? new Date(timestamp.toDate()).toLocaleDateString('pt-BR') + ' ' + 
-              new Date(timestamp.toDate()).toLocaleTimeString('pt-BR') 
-            : 'Data não registrada';
-
-        // Cabeçalho
-        doc.setFontSize(14);
-        doc.text(docTitle, PG_W / 2, 20, null, null, 'center');
+        // --- CHAMADAS PARA DESENHAR AS LOGOS ---
+        // 1. Logo CBM-RR (Esquerda)
+        logoDraw('cbmrr.png', MARGIN);
+        // 2. Logo SIGMA (Direita)
+        logoDraw('logo_sigma.png', PG_W-MARGIN-LOGO_S);
         
+        // CABEÇALHO
         doc.setFontSize(10);
-        doc.text(`Documento ID: ${safeDocumentID}`, MARGIN, 30);
-        doc.text(`Local/Destinatário: ${local}`, MARGIN, 35);
-        doc.text(`Conferente (Destino): ${conferente}`, MARGIN, 40);
-        
-        doc.text(`Data/Hora: ${timestampFormatado}`, 160, 30, null, null, 'right');
-        doc.text(`Emitente: ${emitente}`, 160, 35, null, null, 'right');
-        
-        // Tabela de Itens
-        const tableBody = itensRelatorio.map(item => [
-            item.id,
-            item.nomeCompleto,
-            item.quantidade,
-            item.status,
-            item.obs || '-'
-        ]);
+        doc.setTextColor(51); 
+        doc.setFont('helvetica','bold');
+        doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
+        doc.setTextColor(217,15,35);
+        doc.text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
+        doc.setTextColor(51); 
+        doc.setFont('helvetica','italic');
+        doc.text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
+        doc.setFontSize(14); 
+        doc.setTextColor(0);
+        doc.setFont('helvetica','bold'); 
+        doc.text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
 
-        doc.autoTable({
-            startY: 45,
-            head: [['ID', 'Item', 'Qtd.', 'Status', 'Observações']],
-            body: tableBody,
-            styles: {
-                fontSize: 8,
-                cellPadding: 2,
-                halign: 'center'
-            },
-            headStyles: {
-                fillColor: [128, 0, 32], 
-                textColor: [255, 255, 255]
-            },
-            columnStyles: {
-                0: { halign: 'center', cellWidth: 20 },
-                2: { halign: 'center', cellWidth: 10 },
-                3: { halign: 'center', cellWidth: 15 },
-                4: { halign: 'left' }
-            },
+        // INFORMAÇÕES DE BASE
+        doc.setFillColor(240, 240, 240);
+        doc.setDrawColor(200, 200, 200); 
+        doc.roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
+        
+        doc.setFontSize(10); 
+        doc.setTextColor(50);
+        let y = 46;
+        const X_LABEL = MARGIN + 5; 
+        const X_VAL = MARGIN + 30;
+        
+        const dataTimestamp = data.timestamp ?
+        new Date(data.timestamp.seconds * 1000) : new Date();
+        const dataHoraStr = dataTimestamp.toLocaleString('pt-BR');
+        
+        doc.setFont('helvetica','bold'); 
+        doc.text('Local:', X_LABEL, y); 
+        doc.setFont('helvetica','normal');
+        doc.text(data.local || '', X_VAL, y); 
+        y+=6; 
+        doc.setFont('helvetica','bold'); 
+        doc.text('Conferente:', X_LABEL, y); 
+        doc.setFont('helvetica','normal'); 
+        doc.text(data.conferente || '', X_VAL, y); 
+        y+=6; 
+        doc.setFont('helvetica','bold');
+        doc.text('Data/Hora:', X_LABEL, y); 
+        doc.setFont('helvetica','normal'); 
+        doc.text(dataHoraStr, X_VAL, y); 
+        
+        // TOTALIZADOR
+        doc.setFont('helvetica','bold');
+        doc.setTextColor(128, 0, 32);
+        doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
+
+        // TABELA DE ITENS
+        let tableBody = [];
+        const RED_FILL = [217, 15, 35]; 
+        const GREEN_FILL = [27, 138, 62]; 
+        const SECTOR_BG = [60, 60, 60];
+        let listaParaImprimir = [];
+        
+        if (data.itensRelatorio && data.itensRelatorio.length > 0) listaParaImprimir = data.itensRelatorio;
+        else if (data.itensCaa && data.itensCaa.length > 0) listaParaImprimir = data.itensCaa;
+        else tableBody.push([{ content: 'CONFERÊNCIA REALIZADA SEM ALTERAÇÕES (REGISTRO LEGADO)', colSpan: 4, styles: { halign: 'center', fillColor: GREEN_FILL, textColor: 255, fontStyle: 'bold', cellPadding: 5 } }]);
+        
+        if (listaParaImprimir.length > 0) {
+            let currentSector = null;
+            listaParaImprimir.forEach(item => {
+                // Lógica de Agrupamento por Setor
+                let setorItem = item.setor || "ITENS GERAIS";
+                if(setorItem !== currentSector) {
+                    tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
+                    currentSector = setorItem;
+                }
+
+                // Lógica de Formatação de Observações
+                let finalObs = item.obs || '-';
+                
+                // ADICIONADO: Variáveis de contexto para a formatação
+                const dataConf = dataTimestamp.toLocaleDateString('pt-BR');
+                const conf = data.conferente; 
+                
+                // 1. Usa a função padrão para obter o array de linhas formatadas
+                let linhasFormatadas = [];
+                if (finalObs !== '-') {
+                    linhasFormatadas = gerarLinhasFormatadas(
+                        finalObs, 
+                        conf, 
+                        dataConf,
+                        item.statusAdmin, 
+                        item.adminObs
+                    );
+                }
+                
+                // 2. Transforma o array de linhas em uma string separada por quebra de linha
+                // O prefixo '•' já está incluso na função gerarLinhasFormatadas para observações.
+                finalObs = linhasFormatadas.map(l => {
+                    // Substitui o prefixo de admin (ex: "⚠️ [SOLUCIONADO] (Admin):") para um formato de relatório mais limpo
+                    if(l.includes('(Admin):')) {
+                        return l.replace('⚠️ ', 'RESPOSTA DA GESTÃO: ');
+                    }
+                    return l;
+                }).join('\n');
+                
+                if (finalObs.trim() === '') finalObs = '-'; // Volta para '-' se ficar vazio.
+
+                // FIM DA LÓGICA DE FORMATAÇÃO DE OBSERVAÇÕES
+                
+                let bgStatus = GREEN_FILL;
+                if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
+                
+                // Adiciona a linha à tabela
+                tableBody.push([ 
+                    item.nomeCompleto || 'Item', 
+                    { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center', valign: 'middle' } }, 
+                    { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle' } }, 
+                    { content: finalObs, styles: { halign: 'left', valign: 'middle' } } 
+                ]);
+            });
+        }
+        
+        // Configuração e Geração da Tabela
+        doc.autoTable({ 
+            startY: 70, 
+            head: [['Item', 'Quantidade', 'Status', 'Observação']], 
+            body: tableBody, 
+            theme: 'striped', 
+            styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 1.5 }, 
+            columnStyles: { 
+                0:{cellWidth:80, halign:'left'}, 
+                1:{cellWidth:20,halign:'center'}, 
+                2:{cellWidth:20,halign:'center'}, 
+                3:{cellWidth:'auto',halign:'left'} 
+            }, 
+            headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
         });
 
-        const finalY = doc.autoTable.previous.finalY;
-
-        // Rodapé / Assinaturas / Observações
-        doc.setFontSize(10);
-        // Adiciona as observações gerais do documento (Cautela ou Padrão)
-        doc.text(`Observações: ${observacoes}`, MARGIN, finalY + 10);
-        
-        // Linhas de Assinatura
-        doc.text('________________________________', MARGIN, finalY + 40);
-        doc.text('________________________________', 130, finalY + 40);
-        
-        doc.setFontSize(8);
-        doc.text(`Assinatura do Emitente: ${emitente}`, MARGIN + 5, finalY + 45);
-        doc.text(`Assinatura do Destinatário/Conferente: ${conferente}`, 135, finalY + 45);
-
-        // Paginação (Se necessário) - MANTIDA
+        // Rodapé com Paginação
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
             doc.setFontSize(8); 
             doc.setTextColor(100);
-            doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-5);
-            doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-5, {align:'right'});
+            doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-10);
+            doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
         }
-
-        // Salva o PDF
-        doc.save(`${docTitle} - ${safeDocumentID}.pdf`);
-
-    } catch (error) {
-        console.error("Erro CRÍTICO ao gerar PDF:", error);
-        alert(`Falha CRÍTICA ao gerar o PDF. Verifique o console. Erro: ${error.message}`);
+        
+        // Nome do Arquivo
+        const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataTimestamp.toISOString().split('T')[0]}.pdf`;
+        doc.save(nomeArquivo);
+        
+    } catch(e) { 
+        console.error(e);
+        alert("Erro ao gerar PDF: " + e.message);
     }
 }
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
@@ -3357,14 +3315,7 @@ const activeLink = document.getElementById(`link-${v}`);
         // --- FUNÇÕES DO MODAL GESTÃO C/A ---
         function mostrarTabela(data) {
     const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
-    
-    // 🚨 CORREÇÃO DE ESTABILIDADE (do passo anterior): Garante que os elementos existem.
-    if (!tbody || !wrapper) {
-        console.error("ERRO CRÍTICO: Elementos visuais da tabela (#ca-list-body ou #ca-table-wrapper) não encontrados. Falha ao exibir pendências.");
-        return;
-    }
-    
-    document.getElementById('table-title').textContent = `Detalhes: ${data.local}`;
+    document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; 
     tbody.innerHTML = '';
     
     // Garante array
@@ -3383,49 +3334,29 @@ const activeLink = document.getElementById(`link-${v}`);
             
             // 1. Formata o histórico de observações usando a função padronizada (HTML)
             const obsHtmlFormatada = gerarHtmlVisual(
-                i.obs || '',
+                i.obs || '', 
                 data.conferente, // Nome do conferente original (fallback)
                 data.date, // Data da conferência original (fallback)
-                i.statusAdmin,
+                i.statusAdmin, 
                 i.adminObs
             );
 
             // 2. Define a classe do badge para o status de gestão
             const statusAdmin = i.statusAdmin || 'Pendente';
+            // Garante que o status do Firebase (Ex: Em solução, Cautelado) seja minúsculo e com traço (Ex: em-solucao)
             const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(' ', '-');
             
             // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
-            const itemComDocId = { ...i, docId: data.docId };
+            const itemComDocId = { ...i, docId: data.docId }; 
             
-            // 3. Lógica de Fallback CRÍTICA (CORREÇÃO para coluna vazia)
-            let displayObs = obsHtmlFormatada;
-            
-            // Se o HTML formatado falhou (vazio ou muito curto) E a observação bruta existir, usa o texto simples como fallback.
-            if (!obsHtmlFormatada || obsHtmlFormatada.trim().length < 5) {
-                if (i.obs && i.obs.trim().length > 0) {
-                    let textoSimples = i.obs.trim();
-                    const matchSimples = textoSimples.match(/^"(.*?)"/);
-                    if (matchSimples && matchSimples[1]) {
-                         textoSimples = matchSimples[1].trim(); 
-                    }
-                    
-                    // Exibe a observação bruta com um aviso de formatação em destaque
-                    displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[OBS BRUTA]: <strong>${textoSimples}</strong></p>`;
-                } else {
-                    // Sem observação alguma (caso de status C/A sem texto)
-                    displayObs = '<p style="font-style: italic; color: #999; font-size: 0.85em;">Nenhuma observação detalhada registrada.</p>';
-                }
-            }
-
-            // 4. Montagem da Linha
             tr.innerHTML = `
                 <td><strong>${i.nomeCompleto}</strong></td>
                 <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
-                <td>${displayObs}</td>
+                <td>${obsHtmlFormatada}</td>
                 <td><small>${data.conferente}<br>${data.date}</small></td>
             `;
             
-            const td = tr.insertCell();
+            const td = tr.insertCell(); 
             // Passa o item enriquecido para o modal de gestão
             td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
         });
@@ -3730,18 +3661,14 @@ const activeLink = document.getElementById(`link-${v}`);
             const tombamento = inputElement.value.trim().toUpperCase();
             if (!tombamento) return; 
             const item = encontrarItemPorId(itemId); 
-    
-            if (item) {
-                if (item.tombamentos.some(t => t.tomb === tombamento)) {
-                return alert("Duplicado!");
-            }
-            item.tombamentos.push({ tomb: tombamento, status: "pending", obs: "" }); 
-            item.quantidadeEsperada = item.tombamentos.length;
-            salvarDados(false); 
-            renderizarLista();
+            if (item) { 
+                if (item.tombamentos.some(t => t.tomb === tombamento)) return alert("Duplicado!");
+                item.tombamentos.push({ tomb: tombamento, status: "pending", obs: "" }); 
+                item.quantidadeEsperada = item.tombamentos.length; 
+                salvarDados(false); 
+                renderizarLista();
             } 
         }
-        
         function removerTombamento(itemId, tombamento) { 
             if (!confirm("Remover tombamento?")) return;
             const item = encontrarItemPorId(itemId); 
@@ -4827,20 +4754,16 @@ function getSelectedCautelaItemsData() {
                     ...setor,
                     itens: setor.itens.map(mItem => {
                         if (mItem.id === cItem.id_base) {
-                            
-                            // 1. SUBTRAÇÃO DE ESTOQUE & CARIMBO (Lógica Existente)
+                            // Subtração de Estoque e Carimbo
                             if (cItem.tipo === 'single') {
                                 mItem.quantidadeEsperada -= cItem.quantidade;
                                 mItem.cautelas = mItem.cautelas || [];
-                                
-                                // Adiciona o carimbo (Array de Cautelas)
                                 mItem.cautelas.push({
                                     id: cautelaIdSequencial,
                                     destinatario: destinatarioInput,
                                     quantidade: cItem.quantidade,
                                     data: dataEmissao
                                 });
-                                
                                 totalItensMovimentados += cItem.quantidade;
 
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
@@ -4857,26 +4780,6 @@ function getSelectedCautelaItemsData() {
                                 });
                                 totalItensMovimentados += 1;
                             }
-
-
-                            // 2. NOVO: CRIAÇÃO DA PENDÊNCIA ADMINISTRATIVA (C/A) PARA RASTREAMENTO
-                            
-                            mItem.pendencia = mItem.pendencia || {}; // Garante que o objeto pendencia exista
-                            
-                            const cautelaObs = `Cautelado: ${cItem.quantidade} UN para ${destinatarioInput}.`;
-
-                            // O sistema de histórico espera o formato: "Observação" (Por: Conferente em Data)
-                            const formattedObs = `"${cautelaObs}" (Por: ${currentUserData.nome_militar_completo} em ${dataEmissao})`;
-
-                            mItem.pendencia.status = 'C/A';
-                            mItem.pendencia.obs = formattedObs;
-                            mItem.pendencia.conferente = currentUserData.nome_militar_completo;
-                            mItem.pendencia.timestamp = firebase.firestore.Timestamp.now();
-                            mItem.pendencia.data = dataEmissao;
-                            
-                            // Define como C/A com resposta de admin para dar visibilidade imediata
-                            mItem.pendencia.statusAdmin = 'Cautelado'; 
-                            mItem.pendencia.adminObs = 'Transferência de custódia realizada.'; 
                         }
                         return mItem;
                     })
