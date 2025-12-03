@@ -3342,14 +3342,12 @@ const activeLink = document.getElementById(`link-${v}`);
         function mostrarTabela(data) {
     const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
     
-    // 🚨 CORREÇÃO CRÍTICA: Se o tbody não for encontrado, a função deve retornar imediatamente.
+    // 🚨 CORREÇÃO DE ESTABILIDADE (do passo anterior): Garante que os elementos existem.
     if (!tbody || !wrapper) {
         console.error("ERRO CRÍTICO: Elementos visuais da tabela (#ca-list-body ou #ca-table-wrapper) não encontrados. Falha ao exibir pendências.");
-        alert("Falha ao abrir o detalhe da pendência. Tente recarregar a página.");
         return;
     }
-
-    // O código original pode continuar, pois agora 'tbody' e 'wrapper' são garantidos
+    
     document.getElementById('table-title').textContent = `Detalhes: ${data.local}`;
     tbody.innerHTML = '';
     
@@ -3383,22 +3381,28 @@ const activeLink = document.getElementById(`link-${v}`);
             // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
             const itemComDocId = { ...i, docId: data.docId };
             
-            // 3. Lógica de Fallback para Observação (para evitar texto em branco)
+            // 3. Lógica de Fallback CRÍTICA (CORREÇÃO para coluna vazia)
             let displayObs = obsHtmlFormatada;
-            // Se o HTML for muito curto E a observação bruta existir, usa o texto simples como fallback.
-            if (obsHtmlFormatada.length < 30 && i.obs && i.obs.trim().length > 0) {
-                 let textoSimples = i.obs.trim();
-                 const matchSimples = textoSimples.match(/^"(.*?)"/);
-                 if (matchSimples && matchSimples[1]) {
-                     textoSimples = matchSimples[1].trim(); 
-                 }
-                displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[Texto: ${textoSimples}]</p>`;
-            } else if (obsHtmlFormatada.length < 30 && (!i.obs || i.obs.trim().length === 0)) {
-                // Caso não haja observação alguma
-                displayObs = '<p style="font-style: italic; color: #999; font-size: 0.85em;">Nenhuma observação detalhada registrada.</p>';
+            
+            // Se o HTML formatado for nulo ou muito curto (menos que 5 caracteres visíveis, como <ul></ul>),
+            // E a observação bruta existir, usa o texto simples como fallback.
+            if (!obsHtmlFormatada || obsHtmlFormatada.trim().length < 5) {
+                if (i.obs && i.obs.trim().length > 0) {
+                    let textoSimples = i.obs.trim();
+                    const matchSimples = textoSimples.match(/^"(.*?)"/);
+                    if (matchSimples && matchSimples[1]) {
+                         textoSimples = matchSimples[1].trim(); 
+                    }
+                    
+                    // Exibe a observação bruta com um aviso de formatação em destaque
+                    displayObs = `<p style="font-style: italic; color: #d90f23; font-size: 0.85em;">[OBS BRUTA]: <strong>${textoSimples}</strong></p>`;
+                } else {
+                    // Sem observação alguma (apenas status C/A)
+                    displayObs = '<p style="font-style: italic; color: #999; font-size: 0.85em;">Nenhuma observação detalhada registrada.</p>';
+                }
             }
 
-            // Monta a linha
+            // 4. Montagem da Linha
             tr.innerHTML = `
                 <td><strong>${i.nomeCompleto}</strong></td>
                 <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
