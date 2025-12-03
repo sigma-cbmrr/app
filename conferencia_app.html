@@ -92,8 +92,12 @@
 
         const urlParams = new URLSearchParams(window.location.search);
         const LISTA_ID = urlParams.get('id'); 
-        const COLECAO_LISTAS = 'listas_conferencia'; 
-        let dadosConferencia = []; let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
+        const COLECAO_LISTAS = 'listas_conferencia';
+        const CAUTELA_ID = urlParams.get('cautelaId');
+        const COLECAO_CAUTELAS = 'cautelas_abertas';
+        let dadosConferencia = [];
+        let isCautela = !!CAUTELA_ID;
+        let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
 
         function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
         const userInfo = { postoGraduacao: getUrlParameter('posto_grad') || "ND", quadro: getUrlParameter('quadro_mil') || "ND", nomeGuerra: getUrlParameter('nome_guerra') || "ND" };
@@ -468,21 +472,62 @@
                 document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s)); updateOverallStatus();
             } catch (e) { console.error("Erro restore", e); }
         }
+        function adaptarCautelaParaRender(cautelaData) {
+            if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
 
+            // Cria um setor único chamado "ITENS DA CAUTELA"
+            const setorCautela = {
+                id: cautelaData.cautela_id,
+                nome: "ITENS CAUTELADOS",
+                itens: cautelaData.itens.map(cItem => {
+                    // Mapeia os dados da cautela para o formato esperado de um item de conferência
+                    return {
+                        id: cItem.id_completo || cItem.id_base, // Usa o ID completo (incluindo tombamento se multi)
+                        nome: cItem.nome_completo,
+                        quantidadeEsperada: cItem.quantidade,
+                        // Define como 'single' ou 'multi' dependendo se tem um tombamento ID ou se a quantidade é 1
+                        tipo: cItem.tipo, 
+                        // A cautela é tratada como um item novo, então não há 'pendencia' inicial.
+                    };
+                })
+            };
+
+            return [setorCautela]; // Retorna a lista encapsulada em um array de setores.
+        }
         async function carregarDadosRemotos() {
-            if (!LISTA_ID) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>"; return; }
+            // Se for uma cautela, o ID base é o CAUTELA_ID. Caso contrário, é o LISTA_ID.
+            const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
+            const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
+            
+            if (!ID_ALVO) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>";
+                return; }
+                
             document.getElementById('loading-message').innerHTML = "Conectando...";
             try {
-                const doc = await db.collection(COLECAO_LISTAS).doc(LISTA_ID).get();
-                if (!doc.exists) throw new Error("Lista não encontrada.");
-                const data = doc.data(); dadosConferencia = data.list || [];
-                infoLocal = { nome: data.nome_local || "DESCONHECIDO", posto: data.posto || "Geral" };
+                const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
+                if (!doc.exists) throw new Error("Documento não encontrado.");
+                
+                const data = doc.data(); 
+                
+                // Estrutura de dados: 
+                // Se for Lista Mestra, usa data.list. 
+                // Se for Cautela, a estrutura é diferente e precisa ser adaptada para o renderizador.
+                dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
+                
+                // Informações do Local/Título:
+                const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "DESCONHECIDO");
+                const postoLocal = isCautela ? `Destinatário: ${data.destinatario}` : (data.posto || "Geral");
+                
+                infoLocal = { nome: nomeLocal, posto: postoLocal };
+                
                 document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
-                document.title = `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
+                document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
+                
                 document.getElementById('loading-message').innerHTML = "Renderizando...";
                 renderizarConferencia(); updateHeaderInfo(); updateOverallStatus(); restaurarRascunho();
                 document.getElementById('loading-message').style.display='none'; document.getElementById('main-content').style.display='block';
-            } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message; }
+            } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
+            }
         }
 
         async function finalizarConferencia() {
