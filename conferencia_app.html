@@ -650,6 +650,61 @@
         itensRelatorio // Esta é a lista detalhada para atualização da cautela
     };
 }
+        function processarResultadosConferencia() {
+    let itensRelatorio = [];
+    let itemsCount = 0;
+    let cA_count = 0;
+    
+    // Variáveis de contexto para a conferência
+    const p = userInfo;
+    const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+    const clean = (val) => val === undefined ? null : val;
+
+    dadosConferencia.forEach(setor => {
+        setor.itens.forEach(item => {
+            const process = (id, nome, pend) => {
+                const s = window.itemStatus[id];
+                if (s && s.status !== 'pending') {
+                    itemsCount++;
+                    
+                    let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
+                    if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
+                    let finalObs = s.obs;
+                    
+                    if (s.status === 'KEEP' && pend) finalObs = pend.obs;
+                    if (s.status === 'S/A') finalObs = null;
+
+                    const dadosItem = { 
+                        nomeCompleto: nome, 
+                        status: finalStatus, 
+                        observacoes: finalObs, // Campo usado para salvar no Firestore
+                        quantidadeEsperada: item.quantidadeEsperada || 1, 
+                        id_completo: id,
+                        id_base: id.split('-')[0], // Base para itens com tombamento
+                        tipo: item.tipo,
+                        
+                        // Campos de Admin (se existirem)
+                        statusAdmin: pend ? clean(pend.statusAdmin) : null,
+                        adminObs: pend ? clean(pend.adminObs) : null,
+                        setor: setor.nome
+                    };
+                    
+                    itensRelatorio.push(dadosItem);
+                }
+            };
+            
+            // Processa itens multi e single
+            if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia));
+            else process(item.id, item.nome, item.pendencia);
+        });
+    });
+
+    return {
+        itemsCount,
+        cA_count,
+        itensRelatorio // Esta é a lista detalhada para atualização da cautela
+    };
+}
         async function finalizarConferencia() {
     const btn = document.getElementById('finalizar-btn');
     const localNome = infoLocal.nome;
@@ -668,10 +723,12 @@
     btn.textContent = 'Processando...';
 
     try {
-        // 1. COLETA OS RESULTADOS DO RELATÓRIO (USANDO A FUNÇÃO AUXILIAR)
+        // 1. CHAMA A FUNÇÃO AUXILIAR PARA PROCESSAR OS RESULTADOS DA CONFERÊNCIA
         const resultados = processarResultadosConferencia();
         const { itemsCount, cA_count, itensRelatorio } = resultados;
-        let itensCaa = itensRelatorio.filter(i => i.status === 'C/A');
+        
+        // Filtra o relatório para os itens C/A para o campo específico do histórico
+        let itensCaa = itensRelatorio.filter(i => i.status === 'C/A' || i.status === 'KEEP');
 
         if (itemsCount === 0) {
             alert("Nenhum item foi conferido. Por favor, confira os itens antes de finalizar.");
@@ -681,8 +738,8 @@
         }
 
         // 2. ATUALIZAÇÃO DO ESTADO DA LISTA MESTRA (dadosConferencia)
-        // Esta iteração é mantida para garantir que o campo 'pendencia'
-        // da lista mestra seja atualizado com os novos status (S/A, C/A).
+        // Este loop é NECESSÁRIO para garantir que o campo 'pendencia' de CADA ITEM
+        // da lista mestra seja atualizado em memória antes de salvar no Firestore.
         
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
@@ -697,6 +754,7 @@
                         const finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
                         let finalObs = s.obs;
                         
+                        // Garante que a observação de KEEP (manter cautela) seja preservada
                         if (s.status === 'KEEP' && pend) finalObs = pend.obs;
                         if (s.status === 'S/A') finalObs = null;
 
@@ -735,7 +793,7 @@
         }
         
         // 3.2. Cria o DOCUMENTO DE RESULTADO/RELATÓRIO (Histórico)
-        // Mapeia o relatório final para o formato de salvamento (garantindo que 'obs' seja o nome do campo)
+        // Mapeia o relatório final, adaptando o nome do campo 'observacoes' de volta para 'obs'
         await db.collection('resultados_conferencias').add({ 
             local: localNome, 
             lista_id: LISTA_ID, 
@@ -747,7 +805,7 @@
             itensRelatorio: itensRelatorio.map(i => ({ 
                 nomeCompleto: i.nomeCompleto, 
                 status: i.status, 
-                obs: i.observacoes, // Usa o campo correto do relatório
+                obs: i.observacoes, // Usa o campo que criamos no auxiliar
                 quantidade: i.quantidadeEsperada, 
                 id: i.id_completo,
                 statusAdmin: i.statusAdmin,
