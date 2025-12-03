@@ -4646,6 +4646,166 @@ function updateCautelaItemCount() {
     }
     updateCautelaItemCount();
 }
+        async function getListaIdFromLocalName(localNomeCompleto) {
+    const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+    const rotas = rotasDoc.data() || {};
+
+    for (const [id, info] of Object.entries(rotas)) {
+        const nomeCompletoRota = `${info.posto} - ${info.nome}`;
+        if (nomeCompletoRota === localNomeCompleto) {
+            return id;
+        }
+    }
+    return null;
+}
+
+
+/**
+ * Coleta todos os dados dos itens selecionados (incluindo as quantidades dos inputs number).
+ */
+function getSelectedCautelaItemsData() {
+    const itens = [];
+    
+    // 1. Coleta itens com Tombamento (tipo 'multi')
+    document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
+        itens.push({
+            id_completo: chk.getAttribute('data-id'), // Ex: 1000-01 (ID_base-Tomb)
+            id_base: chk.getAttribute('data-id').split('-')[0], // Ex: 1000
+            tombamento: chk.getAttribute('data-id').split('-')[1], // Ex: 01
+            nome: chk.getAttribute('data-nome'),
+            quantidade: 1, 
+            tipo: 'multi',
+        });
+    });
+
+    // 2. Coleta itens Únicos (tipo 'single')
+    document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
+        const li = chk.closest('li');
+        const inputQtd = li.querySelector('.input-qtd-cautela');
+        
+        let qtd = parseInt(inputQtd.value) || 0;
+        
+        if (qtd > 0) {
+            itens.push({
+                id_completo: chk.getAttribute('data-id'), // Ex: 1001
+                id_base: chk.getAttribute('data-id'),
+                nome: chk.getAttribute('data-nome'),
+                quantidade: qtd,
+                tipo: 'single',
+            });
+        }
+    });
+
+    return itens;
+}
+        async function iniciarCautelaProcesso() {
+    const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    btnIniciar.disabled = true;
+    btnIniciar.textContent = 'Processando Transação...';
+
+    const destinatarioInput = document.getElementById('cautela-destinatario').value.trim();
+    const localOrigem = document.getElementById('cautela-local-origem').value;
+    const itensParaCautela = getSelectedCautelaItemsData();
+    const listaId = await getListaIdFromLocalName(localOrigem);
+
+    if (!destinatarioInput || itensParaCautela.length === 0 || !listaId) {
+        alert('Falha na validação dos dados. Verifique o destinatário e a seleção de itens.');
+        updateCautelaItemCount(); // Reabilita o botão (chamando a contagem)
+        return;
+    }
+
+    try {
+        // === TRANSAÇÃO FIRESTORE ===
+        // Garante que o contador, a cautela ativa e a lista mestra sejam atualizados juntos.
+        await db.runTransaction(async (transaction) => {
+            
+            // 1. Geração do ID Sequencial (CAUTELA-00000X)
+            const configRef = db.collection('config_geral').doc('contadores');
+            const configDoc = await transaction.get(configRef);
+            if (!configDoc.exists) throw new Error("Documento de contadores não encontrado! Configure 'contadores' em config_geral.");
+
+            const novoContador = (configDoc.data().cautela_seq || 0) + 1;
+            const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
+            
+            // 2. Criação do Documento Ativo (Coleção cautelas_abertas)
+            const cautelaData = {
+                cautela_id: cautelaIdSequencial,
+                emitente: currentUserData.nome_militar_completo,
+                destinatario: destinatarioInput,
+                local_origem: localOrigem,
+                local_origem_id: listaId,
+                timestamp_emissao: firebase.firestore.Timestamp.now(),
+                status: 'ABERTA', // Destinatário precisa conferir
+                itens: itensParaCautela,
+            };
+            transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
+            transaction.update(configRef, { cautela_seq: novoContador });
+
+
+            // 3. Atualização da Lista Mestra (Subtração do Estoque e Carimbo)
+            const listaMestraRef = db.collection('listas_conferencia').doc(listaId);
+            const listaMestraDoc = await transaction.get(listaMestraRef);
+            if (!listaMestraDoc.exists) throw new Error("Lista Mestra de Conferência não encontrada!");
+            
+            let listaMestra = listaMestraDoc.data().list;
+            let totalItensMovimentados = 0;
+
+            itensParaCautela.forEach(cItem => {
+                // Percorre a lista mestra para encontrar e atualizar o item
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
+                        if (mItem.id === cItem.id_base) {
+                            if (cItem.tipo === 'single') {
+                                // Subtrai a quantidade
+                                mItem.quantidadeEsperada -= cItem.quantidade;
+                                
+                                // Adiciona o carimbo (array de cautelas)
+                                mItem.cautelas = mItem.cautelas || [];
+                                mItem.cautelas.push({
+                                    id: cautelaIdSequencial,
+                                    destinatario: destinatarioInput,
+                                    quantidade: cItem.quantidade,
+                                    data: new Date().toISOString().split('T')[0]
+                                });
+                                totalItensMovimentados += cItem.quantidade;
+
+                            } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
+                                // Item com Tombamento: Marca o tombamento específico
+                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                    if (tomb.tomb === cItem.tombamento) {
+                                        tomb.cautela = {
+                                            id: cautelaIdSequencial,
+                                            destinatario: destinatarioInput,
+                                            data: new Date().toISOString().split('T')[0]
+                                        };
+                                    }
+                                    return tomb;
+                                });
+                                totalItensMovimentados += 1;
+                            }
+                        }
+                        return mItem;
+                    })
+                }));
+            });
+
+            // Persiste a lista mestra atualizada no Firestore
+            transaction.update(listaMestraRef, { list: listaMestra });
+
+            // 4. Conclusão e Feedback
+            alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
+            document.getElementById('cautela-modal').style.display = 'none';
+            // showCautelasDashboard(); // Opcional: Redirecionar para o dashboard de cautelas
+
+        }); // Fim da Transação
+
+    } catch (error) {
+        console.error("Erro CRÍTICO no processo de Cautela:", error);
+        alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Verifique o console. Erro: ${error.message}`);
+        updateCautelaItemCount(); // Reabilita o botão
+    }
+}
     </script>
 </body>
 </html>
