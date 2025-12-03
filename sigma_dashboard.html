@@ -4709,16 +4709,20 @@ function getSelectedCautelaItemsData() {
                     ...setor,
                     itens: setor.itens.map(mItem => {
                         if (mItem.id === cItem.id_base) {
-                            // Subtração de Estoque e Carimbo
+                            
+                            // 1. SUBTRAÇÃO DE ESTOQUE & CARIMBO (Lógica Existente)
                             if (cItem.tipo === 'single') {
                                 mItem.quantidadeEsperada -= cItem.quantidade;
                                 mItem.cautelas = mItem.cautelas || [];
+                                
+                                // Adiciona o carimbo (Array de Cautelas)
                                 mItem.cautelas.push({
                                     id: cautelaIdSequencial,
                                     destinatario: destinatarioInput,
                                     quantidade: cItem.quantidade,
                                     data: dataEmissao
                                 });
+                                
                                 totalItensMovimentados += cItem.quantidade;
 
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
@@ -4735,6 +4739,26 @@ function getSelectedCautelaItemsData() {
                                 });
                                 totalItensMovimentados += 1;
                             }
+
+
+                            // 2. NOVO: CRIAÇÃO DA PENDÊNCIA ADMINISTRATIVA (C/A) PARA RASTREAMENTO
+                            
+                            mItem.pendencia = mItem.pendencia || {}; // Garante que o objeto pendencia exista
+                            
+                            const cautelaObs = `Cautelado: ${cItem.quantidade} UN para ${destinatarioInput}.`;
+
+                            // O sistema de histórico espera o formato: "Observação" (Por: Conferente em Data)
+                            const formattedObs = `"${cautelaObs}" (Por: ${currentUserData.nome_militar_completo} em ${dataEmissao})`;
+
+                            mItem.pendencia.status = 'C/A';
+                            mItem.pendencia.obs = formattedObs;
+                            mItem.pendencia.conferente = currentUserData.nome_militar_completo;
+                            mItem.pendencia.timestamp = firebase.firestore.Timestamp.now();
+                            mItem.pendencia.data = dataEmissao;
+                            
+                            // Define como C/A com resposta de admin para dar visibilidade imediata
+                            mItem.pendencia.statusAdmin = 'Cautelado'; 
+                            mItem.pendencia.adminObs = 'Transferência de custódia realizada.'; 
                         }
                         return mItem;
                     })
