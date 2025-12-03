@@ -4471,7 +4471,6 @@ async function loadCustodiaLocais() {
 
     try {
         // 1. Encontrar o LISTA_ID único a partir do NOME COMPLETO do local
-        // Isso requer buscar o mapeamento na coleção 'rotas'.
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         
@@ -4498,9 +4497,9 @@ async function loadCustodiaLocais() {
         }
         const listaMestra = listaDoc.data().list || [];
 
-        // 3. Renderizar o HTML para seleção (Checkboxes)
+        // 3. Renderizar o HTML para seleção (Checkboxes e Campos de QTD)
         let htmlContent = '';
-        let totalItens = 0;
+        let totalItensDisponiveis = 0;
 
         listaMestra.forEach(setor => {
             if (setor.itens && setor.itens.length > 0) {
@@ -4511,33 +4510,44 @@ async function loadCustodiaLocais() {
                     const itemIdBase = item.id;
 
                     if (item.tipo === 'single') {
-                        // Item Único (ex: Extintor PQS)
+                        // === ITENS ÚNICOS (COM CAMPO DE QUANTIDADE) ===
                         if (item.quantidadeEsperada > 0) {
+                             const maxQtd = item.quantidadeEsperada;
                              htmlContent += `
-                                <li style="padding: 5px 0; border-bottom: 1px dotted #eee;">
-                                    <label>
-                                        <input type="checkbox" name="cautela-item" data-id="${itemIdBase}" 
+                                <li style="padding: 5px 0; border-bottom: 1px dotted #eee; display: flex; align-items: center; justify-content: space-between;">
+                                    <label style="flex-grow: 1;">
+                                        <input type="checkbox" name="cautela-item-base" data-id="${itemIdBase}" 
                                                data-nome="${item.nome}" data-tipo="single" 
-                                               data-max-qtd="${item.quantidadeEsperada}">
-                                        ${item.nome} (QTD: ${item.quantidadeEsperada})
+                                               data-max-qtd="${maxQtd}">
+                                        ${item.nome} 
+                                        <span style="font-size: 0.85em; color: #555;">(Disponível: ${maxQtd})</span>
                                     </label>
+                                    
+                                    <input type="number" 
+                                           class="input-qtd-cautela"
+                                           data-item-id="${itemIdBase}"
+                                           min="1" 
+                                           max="${maxQtd}" 
+                                           value="${maxQtd}"
+                                           disabled 
+                                           style="width: 50px; padding: 4px; border-radius: 4px; border: 1px solid #ccc; font-size: 0.9em;">
                                 </li>`;
-                            totalItens++;
+                            totalItensDisponiveis++;
                         }
                     } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
-                        // Item com Tombamento (ex: EPR)
+                        // === ITENS COM TOMBAMENTO (1 CHECKBOX = 1 UNIDADE) ===
                         item.tombamentos.forEach(tomb => {
                             const itemIdTombado = `${itemIdBase}-${tomb.tomb}`;
                             htmlContent += `
                                 <li style="padding: 5px 0 5px 15px; border-bottom: 1px dotted #eee; background-color:#f9f9f9;">
                                     <label>
-                                        <input type="checkbox" name="cautela-item" data-id="${itemIdTombado}" 
+                                        <input type="checkbox" name="cautela-item-multi" data-id="${itemIdTombado}" 
                                                data-nome="${item.nome} (Tomb: ${tomb.tomb})" data-tipo="multi" 
-                                               data-max-qtd="1">
+                                               data-qtd="1">
                                         ${item.nome} (Tombamento: ${tomb.tomb})
                                     </label>
                                 </li>`;
-                            totalItens++;
+                            totalItensDisponiveis++;
                         });
                     }
                 });
@@ -4545,14 +4555,27 @@ async function loadCustodiaLocais() {
             }
         });
 
-        if (totalItens === 0) {
+        if (totalItensDisponiveis === 0) {
              itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green;">✅ Nenhum material disponível para cautela neste local.</p>';
         } else {
              itemListContainer.innerHTML = htmlContent;
-             // Adicionar o listener para atualizar a contagem de itens
-             document.querySelectorAll('input[name="cautela-item"]').forEach(chk => {
-                 chk.addEventListener('change', updateCautelaItemCount);
+             
+             // 4. Adicionar Listeners de Interatividade
+             // Liga o checkbox ao campo de quantidade para itens 'single'
+             document.querySelectorAll('input[name="cautela-item-base"]').forEach(chk => {
+                 chk.addEventListener('change', () => toggleItemQuantity(chk));
              });
+             
+             // Liga o input de quantidade e os checkboxes 'multi' para a contagem no botão
+             document.querySelectorAll('.input-qtd-cautela, input[name="cautela-item-base"], input[name="cautela-item-multi"]').forEach(el => {
+                 if (el.type === 'number') {
+                     el.addEventListener('input', updateCautelaItemCount);
+                     el.addEventListener('change', updateCautelaItemCount);
+                 } else {
+                     el.addEventListener('change', updateCautelaItemCount);
+                 }
+             });
+
              updateCautelaItemCount(); // Inicializa a contagem
         }
 
@@ -4567,14 +4590,62 @@ async function loadCustodiaLocais() {
  * Atualiza o texto do botão de iniciar cautela com a contagem de itens selecionados.
  */
 function updateCautelaItemCount() {
-    const selectedCount = document.querySelectorAll('input[name="cautela-item"]:checked').length;
+    let selectedCount = 0;
+    
+    // 1. Contagem de itens com Tombamento (tipo 'multi')
+    selectedCount += document.querySelectorAll('input[name="cautela-item"]:checked').length;
+    
+    // 2. Contagem de itens Únicos (tipo 'single') - SOMANDO A QUANTIDADE NO INPUT
+    document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
+        const li = chk.closest('li');
+        const inputQtd = li.querySelector('.input-qtd-cautela');
+        
+        let qtd = 0;
+        if (inputQtd && !inputQtd.disabled) {
+            qtd = parseInt(inputQtd.value) || 0;
+            const max = parseInt(inputQtd.getAttribute('max')) || 0;
+            
+            // Validação simples de quantidade
+            if (qtd > max) {
+                alert(`A quantidade máxima disponível é ${max}.`);
+                inputQtd.value = max;
+                qtd = max;
+            }
+            if (qtd < 1) {
+                // Se a quantidade for inválida, desmarca o checkbox
+                chk.checked = false;
+                inputQtd.disabled = true;
+                qtd = 0;
+                // Re-executa a contagem para refletir a desmarcação
+                return updateCautelaItemCount();
+            }
+        }
+        selectedCount += qtd;
+    });
+
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     
     btnIniciar.textContent = `▶️ Enviar Cautela (${selectedCount} itens)`;
     
-    // Habilita o botão se pelo menos um item estiver selecionado
-    btnIniciar.disabled = (selectedCount === 0);
-}   
+    // Habilita o botão se a contagem for maior que zero
+    btnIniciar.disabled = (selectedCount <= 0);
+}
+        function toggleItemQuantity(checkbox) {
+    const li = checkbox.closest('li');
+    const inputQtd = li.querySelector('.input-qtd-cautela');
+
+    if (inputQtd) {
+        inputQtd.disabled = !checkbox.checked;
+        if (checkbox.checked && inputQtd.value < 1) {
+            inputQtd.value = 1; 
+        }
+        // Se desmarcado, remove o valor para evitar contagem (opcional)
+        if (!checkbox.checked) {
+             inputQtd.value = inputQtd.getAttribute('max'); // Reseta para o máximo para evitar confusão.
+        }
+    }
+    updateCautelaItemCount();
+}
     </script>
 </body>
 </html>
