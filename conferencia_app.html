@@ -888,11 +888,10 @@
     btn.textContent = 'Processando...';
 
     try {
-        // 1. CHAMA A FUNÇÃO AUXILIAR PARA PROCESSAR OS RESULTADOS DA CONFERÊNCIA
+        // 1. COLETA OS RESULTADOS DO RELATÓRIO (USANDO A FUNÇÃO AUXILIAR)
         const resultados = processarResultadosConferencia();
         const { itemsCount, cA_count, itensRelatorio } = resultados;
         
-        // Filtra o relatório para os itens C/A para o campo específico do histórico
         let itensCaa = itensRelatorio.filter(i => i.status === 'C/A' || i.status === 'KEEP');
 
         if (itemsCount === 0) {
@@ -902,50 +901,67 @@
             return;
         }
 
-        // 2. ATUALIZAÇÃO DO ESTADO DA LISTA MESTRA (dadosConferencia)
-        // Este loop é NECESSÁRIO para garantir que o campo 'pendencia' de CADA ITEM
-        // da lista mestra seja atualizado em memória antes de salvar no Firestore.
+        // --- NOVO HELPERS PARA CHECAGEM DE STATUS ---
+        const isMarkedSA = (id) => {
+            const s = window.itemStatus[id];
+            return s && s.status === 'S/A';
+        };
+
+        const getItemStatus = (id) => window.itemStatus[id];
         
+        // 2. ATUALIZAÇÃO DO ESTADO DA LISTA MESTRA (dadosConferencia)
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
                 const clean = (val) => val === undefined ? null : val;
                 
-                const applyStatus = (id, pend) => {
-                    const s = window.itemStatus[id];
-                    if (s && s.status !== 'pending') {
-                        updated = true;
-                        
-                        // --- 1. CORREÇÃO CRÍTICA: LIMPAR PENDÊNCIA (S/A) ---
-                        if (s.status === 'S/A') {
-                            // Limpa todas as propriedades do objeto que 'pend' aponta (o pendencia/cautela no item)
-                            // Isso garante que o objeto não seja mais renderizado.
-                            Object.keys(pend).forEach(key => delete pend[key]);
-                            return; // Sai após limpar.
-                        }
-
-                        // --- 2. Lógica de C/A (Se chegou aqui, é C/A ou KEEP) ---
-                        const finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
-                        let finalObs = s.obs;
-                        
-                        // Continua a escrita dos campos C/A (Escrita no objeto 'pend')
-                        
-                        pend.status = finalStatus;
-                        pend.obs = finalObs;
-                        pend.conferente = conferente;
-                        pend.timestamp = firebase.firestore.Timestamp.now();
-                        pend.data = new Date().toISOString().split('T')[0];
-                        
-                        pend.statusAdmin = clean(pend.statusAdmin);
-                        pend.adminObs = clean(pend.adminObs);
-                        
-                    }
+                // Função auxiliar para escrever os dados de C/A no objeto
+                const writeCAPendency = (pend, result) => {
+                    pend.status = result.status;
+                    pend.obs = result.observacoes;
+                    pend.conferente = conferente;
+                    pend.timestamp = firebase.firestore.Timestamp.now();
+                    pend.data = new Date().toISOString().split('T')[0];
+                    pend.statusAdmin = clean(result.statusAdmin);
+                    pend.adminObs = clean(result.adminObs);
                 };
-                
-                // Aplica o status de pendência (que modifica dadosConferencia)
+
+                // --- MULTI ITEMS (TOMBAMENTOS) ---
                 if (item.tipo === 'multi' && item.tombamentos) {
-                    item.tombamentos.forEach(t => applyStatus(`${item.id}-${t.tomb}`, t.pendencia = t.pendencia || {}));
-                } else {
-                    applyStatus(item.id, item.pendencia = item.pendencia || {});
+                    item.tombamentos.forEach(tomb => {
+                        const multiId = `${item.id}-${tomb.tomb}`;
+                        const status = getItemStatus(multiId);
+                        const result = itensRelatorio.find(r => r.id_completo === multiId);
+
+                        if (status && status.status !== 'pending') {
+                            updated = true;
+                            
+                            if (isMarkedSA(multiId)) {
+                                // CORREÇÃO CRÍTICA: DELETA A PROPRIEDADE
+                                delete tomb.pendencia; 
+                            } else if (result) {
+                                tomb.pendencia = tomb.pendencia || {};
+                                writeCAPendency(tomb.pendencia, result);
+                            }
+                        }
+                    });
+                    // Procede para o próximo item do loop
+                    return;
+                }
+
+                // --- SINGLE ITEM ---
+                const status = getItemStatus(item.id);
+                const result = itensRelatorio.find(r => r.id_completo === item.id);
+                
+                if (status && status.status !== 'pending') {
+                    updated = true;
+                    
+                    if (isMarkedSA(item.id)) {
+                        // CORREÇÃO CRÍTICA: DELETA A PROPRIEDADE
+                        delete item.pendencia; 
+                    } else if (result) {
+                        item.pendencia = item.pendencia || {};
+                        writeCAPendency(item.pendencia, result);
+                    }
                 }
             });
         });
@@ -961,7 +977,6 @@
         }
         
         // 3.2. Cria o DOCUMENTO DE RESULTADO/RELATÓRIO (Histórico)
-        // Mapeia o relatório final, adaptando o nome do campo 'observacoes' de volta para 'obs'
         await db.collection('resultados_conferencias').add({ 
             local: localNome, 
             lista_id: LISTA_ID, 
@@ -973,7 +988,7 @@
             itensRelatorio: itensRelatorio.map(i => ({ 
                 nomeCompleto: i.nomeCompleto, 
                 status: i.status, 
-                obs: i.observacoes, // Usa o campo que criamos no auxiliar
+                obs: i.observacoes, 
                 quantidade: i.quantidadeEsperada, 
                 id: i.id_completo,
                 statusAdmin: i.statusAdmin,
