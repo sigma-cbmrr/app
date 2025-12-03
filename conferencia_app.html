@@ -269,41 +269,147 @@
 };
 
         function renderizarConferencia() {
-            const mainContent = document.getElementById('main-content'); const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
-            let htmlSetores = ''; const setorIds = []; dadosConferencia.forEach(s => setorIds.push(s.id)); window.setorIds = setorIds;
+    const mainContent = document.getElementById('main-content'); 
+    const antigos = mainContent.querySelectorAll('.setor'); 
+    antigos.forEach(el => el.remove());
+    
+    let htmlSetores = ''; 
+    const setorIds = []; 
+    dadosConferencia.forEach(s => setorIds.push(s.id)); 
+    window.setorIds = setorIds;
 
-            dadosConferencia.forEach((setor, index) => {
-                const isFirstSetor = (index === 0); let htmlItens = ''; let totalItensNoSetor = 0;
-                setor.itens.forEach(item => {
-                    const montarPendenciaHtml = (uid, pendenciaObj) => {
-                        if (!pendenciaObj) return '';
-                        const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; const quem = pendenciaObj.quem || 'Anônimo'; const dataPend = formatarDataSimples(pendenciaObj.data);
-                        const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); const safeHistorico = encodeURIComponent(dadosHistorico);
-                        const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
-                        let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
-                        return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
-                    };
-                    if (item.tipo === 'multi' && item.tombamentos) {
-                        let htmlTombamentos = '';
-                        item.tombamentos.forEach(tomb => {
-                            const uid = `${item.id}-${tomb.tomb}`; const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
-                            htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options"><button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button></div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
-                            totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
-                        });
-                        htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
-                    } else {
-                        let classExtra = ''; if (item.pendencia) { if (item.pendencia.statusAdmin) classExtra = 'status-admin-response'; else classExtra = 'status-existing-alert'; }
-                        const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
-                        htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options"><button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button></div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
-                        totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
-                    }
+    dadosConferencia.forEach((setor, index) => {
+        const isFirstSetor = (index === 0); 
+        let htmlItens = ''; 
+        let totalItensNoSetor = 0;
+        
+        setor.itens.forEach(item => {
+            
+            // --- NOVO: LÓGICA DE DETECÇÃO DE CAUTELA ---
+            const isCautelado = item.cautelas && item.cautelas.length > 0;
+            
+            const montarCarimboCautela = (cautelaInfo) => {
+                if (!cautelaInfo) return '';
+                // Se for array (itens single), pega o último carimbo
+                const info = Array.isArray(cautelaInfo) ? cautelaInfo[cautelaInfo.length - 1] : cautelaInfo;
+                if (!info || !info.destinatario) return '';
+                
+                return `<div class="historico-fixo" style="display:block; background-color:#ffccb2;">
+                            <i class="fas fa-box-open" style="color:#d90f23;"></i> CAUTELADO para ${info.destinatario} em ${info.data}. Qtd: ${info.quantidade || 1}.
+                        </div>`;
+            };
+            // ------------------------------------------
+
+            const montarPendenciaHtml = (uid, pendenciaObj) => {
+                if (!pendenciaObj) return '';
+                const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; 
+                const quem = pendenciaObj.quem || 'Anônimo'; 
+                const dataPend = formatarDataSimples(pendenciaObj.data);
+                const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); 
+                const safeHistorico = encodeURIComponent(dadosHistorico);
+                const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
+                let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
+                return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
+            };
+            
+            if (item.tipo === 'multi' && item.tombamentos) {
+                let htmlTombamentos = '';
+                item.tombamentos.forEach(tomb => {
+                    // Cautela para Tombamento (lógica mais simples)
+                    const tombCauteladoHtml = montarCarimboCautela(tomb.cautela);
+
+                    const uid = `${item.id}-${tomb.tomb}`; 
+                    const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
+                    
+                    htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}">
+                        ${tombCauteladoHtml}
+                        <div class="tombamento-controls">
+                            <span>Tomb.: ${tomb.tomb}</span>
+                            <div class="tombamento-options">
+                                <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button>
+                                <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>
+                            </div>
+                        </div>
+                        ${pendenciaHtml}
+                        <p class="tombamento-descricao-salva"></p>
+                        <div class="tombamento-obs-container">
+                            <div class="historico-fixo" style="display:none;"></div>
+                            <label>Descreva a alteração:</label>
+                            <textarea placeholder="Detalhe a alteração."></textarea>
+                            <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button>
+                        </div>
+                    </div>`;
+                    totalItensNoSetor++; 
+                    window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
-                const expandedClass = isFirstSetor ? 'expanded' : ''; const arrowChar = isFirstSetor ? '▼' : '►';
-                htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div></div><span class="arrow">${arrowChar}</span></div><div class="setor-content ${expandedClass}">${htmlItens}</div></div>`;
-            });
-            mainContent.querySelector('#btn-finalizar').insertAdjacentHTML('beforebegin', htmlSetores);
-            updateOverallStatus();
-        }
+                
+                htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}">
+                    <div class="item-header">
+                        <span class="status-icon"></span>
+                        <span class="item-label">${item.nome}</span>
+                        <span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span>
+                    </div>
+                    ${htmlTombamentos}
+                </div>`;
+                
+            } else {
+                // Item Single
+                let classExtra = ''; 
+                if (item.pendencia) { 
+                    if (item.pendencia.statusAdmin) classExtra = 'status-admin-response'; 
+                    else classExtra = 'status-existing-alert'; 
+                }
+                const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
+                
+                // NOVO: Carimbo para item único (lê o array .cautelas)
+                const cauteladoHtml = montarCarimboCautela(item.cautelas);
+                
+                htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}">
+                    ${cauteladoHtml}
+                    <div class="item-header">
+                        <span class="status-icon"></span>
+                        <span class="item-label">${item.nome}</span>
+                        <span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span>
+                    </div>
+                    <div class="item-options">
+                        <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button>
+                        <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>
+                    </div>
+                    ${pendenciaHtml}
+                    <p class="descricao-salva"></p>
+                    <div class="alteracao-container">
+                        <div class="historico-fixo" style="display:none;"></div>
+                        <label>Descreva a alteração:</label>
+                        <textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea>
+                        <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
+                    </div>
+                </div>`;
+                totalItensNoSetor++; 
+                window.itemStatus[item.id] = { status: 'pending', obs: '' };
+            }
+        });
+        
+        const expandedClass = isFirstSetor ? 'expanded' : ''; 
+        const arrowChar = isFirstSetor ? '▼' : '►';
+        
+        htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div></div><span class="arrow">${arrowChar}</span></div><div class="setor-content ${expandedClass}">${htmlItens}</div></div>`;
+    });
+    
+    // --- CORREÇÃO DE ROBUSTEZ (RESOLVE O ERRO 'Cannot read properties of null') ---
+    const targetEl = mainContent.querySelector('#btn-finalizar');
+
+    if (targetEl) {
+        // Se o botão for encontrado, injeta os setores antes dele (padrão)
+        targetEl.insertAdjacentHTML('beforebegin', htmlSetores);
+    } else {
+        // Fallback: anexa ao main-content se o botão for nulo (evita crash)
+        mainContent.insertAdjacentHTML('beforeend', htmlSetores);
+        console.error("Erro de renderização: Botão FINALIZAR não encontrado. Inserindo setores no final.");
+    }
+    // -----------------------------------------------------------------------------
+
+    updateOverallStatus();
+}
 
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
