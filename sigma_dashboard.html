@@ -2947,13 +2947,14 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
     
     linhas.forEach(l => { 
         if (l.includes('(Admin):')) { 
+            // Lógica do Administrador (MANUTENÇÃO: Lógica original preservada)
             // Formato de entrada: [STATUS] (Admin): Observação do Gestor
             const [carimboStatus, obsText] = l.split(':');
             const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
             
             let icon = '';
             let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
-            let obsColor = '#555';
+            // let obsColor = '#555'; // Variável não utilizada
 
             // Mapeamento dos Ícones e Cores
             switch(statusText.toUpperCase().trim()) {
@@ -2986,19 +2987,19 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
             // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
             const [carimbo, ...resto] = l.split(':');
             
-            // CORREÇÃO: Garante que o texto da observação seja extraído e limpo das aspas
-            let textoObsCompleto = resto.join(':').trim(); // Pega a parte após o segundo ':'
+            // 1. Pega o texto da observação (com as aspas externas)
+            let textoObsCompleto = resto.join(':').trim(); 
             
-            // Remove as aspas externas se existirem (resolve o problema do texto em branco/vazio)
+            // 2. CORREÇÃO CRÍTICA: Remove as aspas externas se existirem (resolve o problema do texto em branco/vazio)
             if (textoObsCompleto.startsWith('"') && textoObsCompleto.endsWith('"')) {
                  // Remove o primeiro e o último caractere (as aspas) e limpa espaços
                  textoObsCompleto = textoObsCompleto.substring(1, textoObsCompleto.length - 1).trim();
             }
             
-            // Aplica BOLD no Carimbo: "Por: NOME em DATA"
+            // 3. Aplica BOLD no Carimbo: "Por: NOME em DATA"
             const carimboBold = carimbo.replace('Por:', '**Por**');
             
-            // Renderiza a observação limpa, adicionando aspas de volta no HTML para formatação visual.
+            // 4. Renderiza a observação limpa, adicionando aspas de volta para formatação visual.
             html += `<li class="linha-obs">• ${carimboBold}: "${textoObsCompleto}"</li>`;
         } 
     });
@@ -3028,32 +3029,38 @@ async function reimprimirPDF(input) {
         documentID = pdfCautelaId.trim();
         collectionName = 'cautelas_abertas'; 
         isCautela = true;
-        // Limpa o parâmetro da URL para evitar re-gatilho em caso de F5 
         history.replaceState({}, document.title, "sigma_dashboard.html");
     } 
-    // B. Input Check (para Histórico/Botões)
+    // B. Input Check (para Histórico/Botões com ID String)
     else if (typeof input === 'string' && input.trim().length > 0) {
         documentID = input.trim();
-    } else if (input && input.dataset && input.dataset.id) {
-        // Se 'input' for um elemento HTML (ex: botão clicado)
+    } 
+    // C. Input Check (para Botões com data-id)
+    else if (input && input.dataset && input.dataset.id) {
         documentID = input.dataset.id.trim();
-        if (input.dataset.type === 'cautela') { // Checa se o botão tem data-type='cautela' 
+        if (input.dataset.type === 'cautela') { 
             collectionName = 'cautelas_abertas';
             isCautela = true;
         }
-    } else {
-        // C. Alerta se for [object Object] ou nulo, o que causava o erro
+    } 
+    // D. Alerta genérico se a entrada for inválida e retorna, mantendo documentID como null
+    else {
         alert("ID do documento não fornecido ou inválido (ex: [object Object]).");
         return;
     }
 
+    // CORREÇÃO: Garante que o ID não é nulo/undefined antes de prosseguir
     if (!documentID) {
-        alert("ID do documento não fornecido.");
+        alert("Erro interno: O ID não pôde ser extraído.");
         return;
     }
-    
-    // CORREÇÃO CRÍTICA: Garante que o ID usado pelo Firestore seja uma string e evita o erro 'o.indexOf is not a function'
+
+    // CRÍTICO: Conversão e verificação para evitar o string "undefined"
     const safeDocumentID = String(documentID).trim();
+    if (safeDocumentID === 'undefined' || safeDocumentID.length === 0) {
+         alert("Erro: O ID do documento é inválido ou vazio. Não é possível gerar o PDF.");
+         return;
+    }
     
     // --- Variáveis de Saída (Mantidas) ---
     let docTitle = 'RELATÓRIO DE CONFERÊNCIA'; 
@@ -3062,7 +3069,6 @@ async function reimprimirPDF(input) {
     let observacoes = 'Nenhuma observação registrada.'; 
     let itensRelatorio = []; 
     let timestamp = null; 
-
 
     try {
         // --- 2. BUSCA DE DADOS ---
@@ -3079,11 +3085,10 @@ async function reimprimirPDF(input) {
         // --- 3. MAPEAMENTO DE DADOS (Cautela vs. Conferência Padrão) ---
         if (isCautela) {
             local = `Origem: ${data.local_origem} | Destino: ${data.destinatario}`;
-            conferente = data.conferente_destino || data.destinatario; // Usa destinatário se não foi conferido 
+            conferente = data.conferente_destino || data.destinatario; 
             timestamp = data.timestamp_finalizacao || data.timestamp_emissao;
             observacoes = data.observacoes_emissao || 'Emissão sem observações.';
             
-            // Mapeia os itens da cautela para o formato do relatório
             itensRelatorio = data.itens.map(item => ({
                 id: item.id_completo,
                 nomeCompleto: item.nome,
@@ -3092,7 +3097,6 @@ async function reimprimirPDF(input) {
                 obs: item.obs_conferido || '-'
             }));
 
-            // Determina o título do documento
             if (data.status === 'CONCLUÍDA') {
                  docTitle = `TERMO DE CAUTELA E DEVOLUÇÃO (ID: ${safeDocumentID})`;
             } else {
@@ -3112,6 +3116,8 @@ async function reimprimirPDF(input) {
 
         // --- 4. GERAÇÃO DO PDF (JSPDF) ---
         const doc = new jsPDF();
+        
+        // Cabeçalho e Rodapé... (o restante do código PDF permanece o mesmo)
         
         // Cabeçalho
         doc.setFontSize(14);
@@ -3142,7 +3148,7 @@ async function reimprimirPDF(input) {
                 halign: 'center'
             },
             headStyles: {
-                fillColor: [128, 0, 32], // Bordeaux
+                fillColor: [128, 0, 32], 
                 textColor: [255, 255, 255]
             },
             columnStyles: {
@@ -3170,8 +3176,8 @@ async function reimprimirPDF(input) {
         doc.save(`${docTitle} - ${safeDocumentID}.pdf`);
 
     } catch (error) {
-        console.error("Erro ao gerar PDF:", error);
-        alert(`Falha ao gerar o PDF. Verifique o console. Erro: ${error.message}`);
+        console.error("Erro CRÍTICO ao gerar PDF:", error);
+        alert(`Falha CRÍTICA ao gerar o PDF. Verifique o console. Erro: ${error.message}`);
     }
 }
         // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
