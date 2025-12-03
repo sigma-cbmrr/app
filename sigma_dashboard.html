@@ -2006,7 +2006,8 @@
 // Oculta o Rótulo e Links de Admin se for Operacional
     if (role === 'operacional') {
         renderOperacionalCards();
- } else {
+        carregarConferenciasHoje();
+    } else {
         // Para Admin e Gestor
         renderAdminGestorCards(canViewDashboardCards);
         // ✅ CORREÇÃO: Removido carregarConferenciasHoje() para evitar TypeError: Cannot set properties of null
@@ -2069,68 +2070,46 @@
     // Garante que a visão seja o dashboard ao logar
     switchView('dashboard');
 }
-            // --- NOVO: Cards Específicos para Operacional ---
+            /**
+ * Renderiza a estrutura HTML dos cards para a visão Operacional (Conferente).
+ * Esta função apenas injeta a estrutura estática no DOM.
+ * O preenchimento dinâmico dos cards é feito APÓS esta função, em setupUIBasedOnRole().
+ */
 function renderOperacionalCards() {
-    const container = document.getElementById('operacional-cards-container');
-    if (!container) return;
+    // Presumindo que o container é o '#main-content' ou similar
+    const container = document.getElementById('main-content');
     
-    // Esconde o container de Admin/Gestor se existir
-    const adminContainer = document.getElementById('admin-gestor-cards-container');
-    if(adminContainer) adminContainer.style.display = 'none';
-
-    container.innerHTML = `
-        
-        <div class="op-card history">
-            <h2 class="op-card-title"><i class="fas fa-calendar-day"></i> Conferências Realizadas Hoje (Minhas)</h2>
-            <ul id="today-list" class="history-list">
-                <li style="text-align:center; color:#999; padding:20px;">Carregando...</li>
-            </ul>
-        </div>
-
-        <div class="op-card history" style="margin-top: 25px;">
-            <h2 class="op-card-title" style="margin-bottom: 15px;"><i class="fas fa-chart-bar"></i> Dashboard Operacional</h2>
-            <div class="cards-grid">
-                
-                <div class="sector-card status-ok" onclick="switchView('my-history')">
-                    <h3>Minhas Conferências</h3>
-                    <div class="main-stat">
-                        <span class="count-value" id="op-conf-count">0</span>
-                        <i class="fas fa-history fa-2x" style="color:#1b8a3e;"></i>
-                    </div>
-                    <div class="card-footer">
-                        Clique para ver o histórico completo.
-                    </div>
-                </div>
-
-                <div class="sector-card status-unit" onclick="alert('Implementação futura: Minhas Cautelas Ativas')">
-                    <h3>Minhas Cautelas Ativas</h3>
-                    <div class="main-stat">
-                        <span class="count-value">0</span>
-                        <i class="fas fa-shield-alt fa-2x" style="color:#2c7399;"></i>
-                    </div>
-                    <div class="card-footer">
-                        Itens que estão sob sua cautela.
-                    </div>
-                </div>
-
-                <div class="sector-card status-posto" onclick="alert('Implementação futura: Cautelas Recebidas')">
-                    <h3>Cautelas Recebidas</h3>
-                    <div class="main-stat">
-                        <span class="count-value">0</span>
-                        <i class="fas fa-box-open fa-2x" style="color:#8e44ad;"></i>
-                    </div>
-                    <div class="card-footer">
-                        Itens pendentes de recebimento/transferência.
-                    </div>
-                </div>
-                
+    // 1. HTML da Estrutura Operacional.
+    const html = `
+        <div id="op-dashboard-cards" class="dashboard-cards">
+            <div class="card-op card-conferencias">
+                <h3>Conferências de Hoje: <span id="op-conf-count">0</span></h3>
+                <ul id="today-list" class="list-op">
+                    <li style="padding:15px; text-align:center; color:#999;">Carregando conferências...</li>
+                </ul>
+                <button class="btn-op-action" onclick="showConferenceSelect()">Iniciar Nova Conferência</button>
             </div>
+            
+            <div class="card-op card-cautela-receber">
+                <h3>Cautelas a Receber: <span id="cautela-receive-count">0</span></h3>
+                <ul id="cautela-receive-list" class="list-op">
+                    <li class="no-result">Nenhuma cautela pendente.</li>
+                </ul>
+            </div>
+            
         </div>
     `;
+
+    // 2. Remove o conteúdo anterior (menu principal, se houver) e injeta a nova estrutura.
+    // É importante garantir que o container correto seja limpo.
+    const existingCards = document.getElementById('op-dashboard-cards');
+    if (existingCards) existingCards.remove();
     
-    // [NOVO] Adicionar lógica para atualizar a contagem de conferências hoje no card
-    updateOperacionalCards();
-    container.style.display = 'block';
+    container.insertAdjacentHTML('beforeend', html);
+    
+    // **IMPORTANTE:** A chamada para o conteúdo dinâmico (carregarConferenciasHoje/updateOperacionalCards) 
+    // FOI REMOVIDA DAQUI. Ela deve ser feita APÓS esta função, dentro de setupUIBasedOnRole(), 
+    // para que o DOM tenha tempo de processar #today-list.
 }
 // [NOVO] Atualiza a contagem do Card "Minhas Conferências"
 async function updateOperacionalCards() {
@@ -2534,30 +2513,33 @@ sortedUnits.forEach(unit => {
         });
         
         // --- 5. HISTÓRICOS ---
-        async function carregarConferenciasHoje() {
-            const ul = document.getElementById('today-list');
-            ul.innerHTML = '<li>Carregando...</li>';
-            try {
-                const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(20).get();
-                const hojeStr = new Date().toLocaleDateString('pt-BR');
-                let docs = [];
-                snap.forEach(d => docs.push(d.data()));
-                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
-                
-                let html = '';
-                docs.forEach(d => {
-                    const dt = d.timestamp.toDate();
-                    if(dt.toLocaleDateString('pt-BR') === hojeStr) {
-                        html += criarItemHistoricoHTML(d);
-                    }
-                });
-                
-                ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
-            } catch(e){ 
-                console.error(e); 
-                ul.innerHTML = 'Erro.';
+async function carregarConferenciasHoje() {
+    const ul = document.getElementById('today-list');
+    
+    // CORREÇÃO: Checa se o elemento existe antes de tentar manipulá-lo
+    if (!ul || !currentUserData) return; 
+
+    ul.innerHTML = '<li>Carregando...</li>';
+    try {
+        const snap = await db.collection(COLECAO_RESULTADOS).where('conferente', '==', currentUserData.nome_militar_completo).limit(20).get();
+        const hojeStr = new Date().toLocaleDateString('pt-BR');
+        let docs = [];
+        snap.forEach(d => docs.push(d.data()));
+        docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+        let html = '';
+        docs.forEach(d => {
+            const dt = d.timestamp.toDate();
+            if(dt.toLocaleDateString('pt-BR') === hojeStr) {
+                html += criarItemHistoricoHTML(d);
             }
-        }
+        });
+        
+        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+    } catch(e){ 
+        console.error(e);
+        ul.innerHTML = 'Erro.';
+    }
+}
 
         async function loadMyHistory() {
     const ul = document.getElementById('my-history-list');
