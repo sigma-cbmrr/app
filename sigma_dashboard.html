@@ -4380,51 +4380,59 @@ function showCautelasDashboard(type) {
     }
 }
         async function loadUsersForSearch() {
-    const input = document.getElementById('cautela-destinatario');
-    const sugestoesDiv = document.getElementById('destinatario-sugestoes');
+    // LOG DE VERIFICAÇÃO 1: Confirma que a função foi chamada (deve aparecer no console)
+    console.log("[DEBUG - CALL] loadUsersForSearch foi chamada.");
     
-    // **DEBUG CRÍTICO:** Verifica se os elementos HTML existem.
-    if (!input || !sugestoesDiv) {
-        console.error("[DEBUG - HTML] Elementos 'cautela-destinatario' ou 'destinatario-sugestoes' não encontrados.");
-        return;
-    }
-
-    try {
-        const usersSnapshot = await db.collection('users').get(); 
+    // Usamos setTimeout para garantir que o DOM foi renderizado (após o innerHTML)
+    setTimeout(async () => {
+        const input = document.getElementById('cautela-destinatario');
+        const sugestoesDiv = document.getElementById('destinatario-sugestoes');
         
-        // 1. Armazena os dados para uso posterior no filtro
-        ALL_USERS_DATA = usersSnapshot.docs.map(doc => {
-            const user = doc.data();
-            return {
-                uid: doc.id,
-                matricula: user.matricula || '',
-                // VERIFICAÇÃO DE CAMPO DE NOME: Assume nome_completo ou nome
-                nome: user.nome_completo || user.nome || 'Usuário Sem Nome', 
-            };
-        });
-        
-        // LOGS DE DEBUG AQUI:
-        console.log(`[DEBUG - USERS] Total de usuários carregados: ${ALL_USERS_DATA.length}`);
-        if (ALL_USERS_DATA.length > 0) {
-            console.log("[DEBUG - USERS] Exemplo de estrutura do 1º usuário:", ALL_USERS_DATA[0]);
-        } else {
-             console.warn("[DEBUG - USERS] A coleção 'users' retornou zero documentos.");
+        // LOG DE ERRO: Se o HTML ainda estiver errado, este log aparecerá.
+        if (!input || !sugestoesDiv) {
+            console.error("[DEBUG - HTML] Elementos 'cautela-destinatario' ou 'destinatario-sugestoes' não foram encontrados. (Verifique o getNovaCautelaFormHTML)");
+            return;
         }
-        
-        // 2. Adiciona o listener para filtrar a cada tecla
-        input.addEventListener('input', filterUsers);
-        
-        // 3. Adiciona listener para fechar sugestões ao clicar fora
-        document.addEventListener('click', (event) => {
-            if (!input.contains(event.target) && !sugestoesDiv.contains(event.target)) {
-                sugestoesDiv.style.display = 'none';
-                sugestoesDiv.innerHTML = '';
-            }
-        });
 
-    } catch (error) {
-        console.error("[DEBUG - USERS] Erro grave ao carregar usuários (verifique regras do Firebase/conexão):", error);
-    }
+        try {
+            // LOG DE VERIFICAÇÃO 2: Confirma que a busca no Firebase está iniciando
+            console.log("[DEBUG - FIREBASE] Iniciando busca na coleção 'users'.");
+
+            const usersSnapshot = await db.collection('users').get(); 
+            
+            // Mapeamos os dados baseados no seu index.txt (assumindo nome ou nome_completo)
+            ALL_USERS_DATA = usersSnapshot.docs.map(doc => {
+                const user = doc.data();
+                return {
+                    uid: doc.id,
+                    matricula: user.matricula || user.cpf || '', // Assumindo 'cpf' ou 'matricula'
+                    nome: user.nome_completo || user.nome || user.displayName || 'Usuário Sem Nome',
+                };
+            });
+            
+            // LOGS DE DEBUG DE DADOS:
+            console.log(`[DEBUG - USERS] Total de usuários carregados: ${ALL_USERS_DATA.length}`);
+            if (ALL_USERS_DATA.length > 0) {
+                console.log("[DEBUG - USERS] Estrutura do 1º usuário carregado:", ALL_USERS_DATA[0]);
+            } else {
+                 console.warn("[DEBUG - USERS] A coleção 'users' retornou zero documentos.");
+            }
+            
+            // 2. Adiciona o listener para filtrar a cada tecla
+            input.addEventListener('input', filterUsers);
+            
+            // 3. Adiciona listener para fechar sugestões ao clicar fora
+            document.addEventListener('click', (event) => {
+                if (!input.contains(event.target) && !sugestoesDiv.contains(event.target)) {
+                    sugestoesDiv.style.display = 'none';
+                    sugestoesDiv.innerHTML = '';
+                }
+            });
+
+        } catch (error) {
+            console.error("[DEBUG - USERS] Erro grave ao carregar usuários (Regras de Segurança?):", error);
+        }
+    }, 100); // 100ms de atraso para garantir o DOM
 }
         function filterUsers() {
     const input = document.getElementById('cautela-destinatario');
