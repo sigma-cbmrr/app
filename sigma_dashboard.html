@@ -2136,42 +2136,50 @@ function renderOperacionalCards() {
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
-    
+
+    // CORREÇÃO CRÍTICA: Se a UI não estiver totalmente carregada, a função retorna
+    // sem causar um erro fatal de 'null'.
+    if (!ul || !countEl || !currentUserData) {
+        return;
+    }
+
     try {
-        // --- 1. CONTAGEM TOTAL (NOVO) ---
-        // Busca TODAS as conferências do usuário (sem filtro de data)
-        const snapTotal = await db.collection(COLECAO_RESULTADOS)
-            .where('conferente', '==', currentUserData.nome_militar_completo)
+        const currentUserId = currentUserData.nome_militar_completo;
+        const today = new Date().toISOString().split('T')[0];
+        
+        // 1. Busca por conferências de hoje
+        const resultsRef = db.collection('resultados_conferencias');
+        const snapTotal = await resultsRef
+            .where('conferente', '==', currentUserId)
+            .where('timestamp', '>', new Date(today))
             .get();
-            
-        const totalConferences = snapTotal.size; // ✅ Captura o tamanho total da coleção
-        if (countEl) countEl.textContent = totalConferences; // Atualiza o card com o total
+
+        const totalConferences = snapTotal.size;
+        countEl.textContent = totalConferences;
+        ul.innerHTML = ''; // Limpa antes de adicionar
+
+        if (totalConferences === 0) {
+            ul.insertAdjacentHTML('beforeend', '<li class="no-result">Nenhuma conferência iniciada hoje.</li>');
+        } else {
+            snapTotal.docs.forEach(doc => {
+                const data = doc.data();
+                const hora = new Date(data.timestamp.toDate()).toLocaleTimeString('pt-BR').substring(0, 5);
+                const html = `
+                    <li onclick="loadConferenciaView('${doc.id}', false)" title="Clique para reabrir">
+                        <span><i class="fas fa-list-check"></i> ${data.local}</span>
+                        <span>${hora}</span>
+                    </li>
+                `;
+                ul.insertAdjacentHTML('beforeend', html);
+            });
+        }
         
-        // --- 2. CONTAGEM E LISTAGEM DO DIA (EXISTENTE) ---
-        // Reutilizamos o snapTotal para filtrar APENAS os documentos de hoje, 
-        // evitando uma segunda requisição grande ao Firestore.
+        // 2. [A SER IMPLEMENTADO]: Busca por Cautelas a Receber (status: ABERTA)
+        // ...
         
-        const hojeStr = new Date().toLocaleDateString('pt-BR');
-        let countToday = 0; // Contagem das conferências de hoje
-        let html = '';
-        
-        snapTotal.forEach(d => {
-            const dt = d.data().timestamp.toDate();
-            // Filtro de data para listar apenas as de hoje
-            if(dt.toLocaleDateString('pt-BR') === hojeStr) {
-                html += criarItemHistoricoHTML(d.data());
-                countToday++; // Contagem de hoje
-            }
-        });
-        
-        // Atualiza a lista de hoje
-        ul.innerHTML = html ||
-        '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
-        
-    } catch(e) { 
-        console.error("Erro ao carregar dados operacionais:", e);
-        if(countEl) countEl.textContent = 'Erro';
-        ul.innerHTML = 'Erro.';
+    } catch (error) {
+        console.error("Erro ao carregar dados operacionais:", error);
+        ul.innerHTML = '<li class="error-result">Erro ao carregar lista.</li>';
     }
 }
             // --- NOVO: Cards Específicos para Admin/Gestor ---
