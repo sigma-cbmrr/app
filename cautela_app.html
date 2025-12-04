@@ -129,7 +129,6 @@
 
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
-
     <script>
         // Variáveis globais do app (copiadas do conferencia_app.html.txt)
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
@@ -182,7 +181,8 @@
 
         function updateHeaderInfo() { 
             const el = document.getElementById('militar-info');
-            if(el) el.innerHTML = `<strong>Recebedor/Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
+            const role = (VIEW_TYPE === 'devolucao' ? 'Conferente Devolução' : 'Recebedor/Conferente');
+            if(el) el.innerHTML = `<strong>${role}:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
         }
 
         function updateOverallStatus() { 
@@ -423,6 +423,8 @@
                 window.itemStatus = parsed.status; 
                 
                 // Adaptação da lógica de restauração visual (simplificada para o contexto)
+                document.getElementById('loading-message').textContent = "Rascunho recuperado. Carregando UI...";
+
                 Object.keys(window.itemStatus).forEach(uid => {
                     const st = window.itemStatus[uid]; 
                     let container;
@@ -448,7 +450,7 @@
                         const descEl = container.querySelector('.descricao-salva') || container.querySelector('.tombamento-descricao-salva');
                         
                         if (st.status === 'S/A' || st.status === 'KEEP' || st.status === 'C/A') { 
-                            if(btnCA) btnCA.classList.add('active'); // Assume que status salvo requer atenção
+                            if(btnCA) btnCA.classList.add('active'); 
                             if(descEl && st.obs && st.obs.length > 0) {
                                 const conf = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
                                 const now = formatarDataSimples(new Date());
@@ -457,7 +459,6 @@
                             }
                         }
                         
-                        // Atualiza visualmente o status principal
                         if (isTombamento) {
                             updateItemMainStatusDisplay(container.closest('.item-conferencia'));
                         } else if (st.status === 'S/A') {
@@ -476,7 +477,7 @@
         }
         
         function adaptarCautelaParaRender(cautelaData) {
-            // (Lógica copiada do conferencia_app.html.txt)
+            // Cria um setor único "ITENS CAUTELADOS"
             if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
             
             const setorCautela = {
@@ -496,7 +497,6 @@
         }
 
         function renderizarConferencia() {
-            // (Lógica copiada do conferencia_app.html.txt)
             const mainContent = document.getElementById('main-content');
             const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
             let htmlSetores = ''; const setorIds = []; dadosConferencia.forEach(s => setorIds.push(s.id));
@@ -507,29 +507,78 @@
                 setor.itens.forEach(item => {
                     const montarPendenciaHtml = (uid, pendenciaObj) => {
                         if (!pendenciaObj) return '';
-                        const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; const quem = pendenciaObj.quem || 'Anônimo'; const dataPend = formatarDataSimples(pendenciaObj.data);
-                        const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); const safeHistorico = encodeURIComponent(dadosHistorico);
-                        const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
-                        let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
-                        return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}</div>`;
+                        const obs = pendenciaObj.obs_conferencia || 'N/D'; 
+                        const quem = pendenciaObj.recebedor_conf || 'Anônimo'; 
+                        const dataPend = item.data_recebimento ? formatarDataSimples(item.data_recebimento) : '';
+                        
+                        const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); 
+                        const safeHistorico = encodeURIComponent(dadosHistorico);
+                        
+                        const htmlFormatado = `Status anterior: ${pendenciaObj.status_conferencia} ${obs ? `Obs: ${obs}` : ''}`;
+
+                        return `<div class="pendencia-alert-box admin-reply">
+                                    <p style="margin: 0; font-weight: bold; color: #2c7399;">Conferência Anterior (${pendenciaObj.status_conferencia}):</p>
+                                    <p style="margin: 5px 0 0 0; font-size: 0.8em; color: #555;">${obs}</p>
+                                </div>`;
                     };
                     
                     let statusClass = '';
-                    let pendenciaObj = null;
-
+                    let pendenciaHtml = '';
+                    
+                    if (cautelaDadosCompletos && cautelaDadosCompletos.relatorio_recebimento) {
+                         const rel = cautelaDadosCompletos.relatorio_recebimento.find(r => r.id_completo === item.id);
+                         if (rel) {
+                            pendenciaHtml = montarPendenciaHtml(item.id, rel);
+                            statusClass = (rel.status_conferencia === 'C/A' ? 'status-alert' : 'status-ok');
+                         }
+                    }
+                    
                     if (item.tipo === 'multi' && item.tombamentos) {
                         let htmlTombamentos = '';
-                        item.tombamentos.forEach(tomb => {
-                            const uid = `${item.id}-${tomb.tomb}`; const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
-                            htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options"><button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button></div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
-                        totalItensNoSetor++;
-                        window.itemStatus[uid] = { status: 'pending', obs: '' };
-                        });
-                        htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
+                        if(item.quantidadeEsperada > 0) {
+                            for(let i = 1; i <= item.quantidadeEsperada; i++) {
+                                const uid = `${item.id}-${i}`;
+                                htmlTombamentos += `<div class="tombamento-container" data-tomb="${i}" data-item-id="${item.id}">
+                                                        <div class="tombamento-controls"><span>UNIDADE: ${i}</span>
+                                                            <div class="tombamento-options">
+                                                                <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button>
+                                                                <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>
+                                                            </div>
+                                                        </div>
+                                                        <p class="tombamento-descricao-salva"></p>
+                                                        <div class="tombamento-obs-container">
+                                                            <label>Descreva a alteração:</label>
+                                                            <textarea placeholder="Detalhe a alteração."></textarea>
+                                                            <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button>
+                                                        </div>
+                                                    </div>`;
+                                totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
+                            }
+                        }
+                        
+                        htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.quantidadeEsperada}" data-status="pending" data-id="${item.id}">
+                                            <div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>
+                                            ${pendenciaHtml}
+                                            ${htmlTombamentos}
+                                      </div>`;
+
                     } else {
                         // Item Single
                         const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
-                        htmlItens += `<div class="item-conferencia ${statusClass}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options"><button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button></div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
+                        htmlItens += `<div class="item-conferencia ${statusClass}" data-type="single" data-status="pending" data-id="${item.id}">
+                                            <div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>
+                                            <div class="item-options">
+                                                <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button>
+                                                <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>
+                                            </div>
+                                            ${pendenciaHtml}
+                                            <p class="descricao-salva"></p>
+                                            <div class="alteracao-container">
+                                                <label>Descreva a alteração:</label>
+                                                <textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea>
+                                                <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
+                                            </div>
+                                      </div>`;
                         totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
                     }
                 });
@@ -544,7 +593,6 @@
         
         /**
          * Gera o PDF de Cautela com o mesmo layout da Conferência.
-         * @param {object} cautelaData O documento completo da cautela (com relatório de recebimento).
          */
         function imprimirPDF_Cautela(cautelaData) {
             try {
@@ -552,25 +600,19 @@
                 const doc = new jsPDF('p', 'mm', 'a4');
                 const MARGIN = 14, PG_W = 210, LOGO_S = 15;
                 
-                // Variáveis que simulam o objeto 'data' da conferência normal
                 const emitente = cautelaData.emitente;
                 const destinatario = cautelaData.destinatario;
                 const cautelaId = cautelaData.cautela_id;
-                // Usa data de recebimento se existir, senão a de emissão
                 const dataTimestamp = cautelaData.data_recebimento ? cautelaData.data_recebimento.toDate() : cautelaData.timestamp_emissao.toDate();
                 const dataHora = dataTimestamp.toLocaleString('pt-BR');
                 const localOrigem = cautelaData.local_origem;
-                const itensRelatorio = cautelaData.relatorio_recebimento || cautelaData.itens; // Usa itens originais se o relatório não estiver completo
+                const itensRelatorio = cautelaData.relatorio_recebimento || cautelaData.itens;
                 
-                // Simulação da função logoDraw (adaptada do Dashboard)
-                const logoDraw = (domId, x) => { 
-                     // A lógica complexa de canvas/DOM é simplificada aqui para o contexto
-                     // Mas assumimos que os logos são desenhados nas posições corretas.
-                };
+                const logoDraw = (domId, x) => { /* ... */ };
 
-                // --- 1. CABEÇALHO (IDÊNTICO AO PADRÃO DA CONFERÊNCIA) ---
-                logoDraw('cbmrr.png', MARGIN);
-                logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
+                // --- 1. CABEÇALHO ---
+                // logoDraw('cbmrr.png', MARGIN);
+                // logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
                 
                 doc.setFontSize(10);
                 doc.setTextColor(51); 
@@ -589,10 +631,10 @@
                 doc.text(`TERMO DE CAUTELA: ${cautelaId}`, PG_W/2, 35, {align:'center'}); // Título único
                 
 
-                // --- 2. INFORMAÇÕES DE BASE (ADAPTADAS) ---
+                // --- 2. INFORMAÇÕES DE BASE ---
                 doc.setFillColor(240, 240, 240);
                 doc.setDrawColor(200, 200, 200); 
-                doc.roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 30, 2, 2, 'FD'); // Altura maior para 3 linhas
+                doc.roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 30, 2, 2, 'FD'); 
                 
                 doc.setFontSize(10); 
                 doc.setTextColor(50);
@@ -600,28 +642,13 @@
                 const X_LABEL = MARGIN + 5; 
                 const X_VAL = MARGIN + 40; 
                 
-                doc.setFont('helvetica','bold'); 
-                doc.text('Local Origem:', X_LABEL, y); 
-                doc.setFont('helvetica','normal');
-                doc.text(localOrigem || 'N/D', X_VAL, y); 
-                y+=6; 
+                doc.setFont('helvetica','bold'); doc.text('Local Origem:', X_LABEL, y); doc.setFont('helvetica','normal'); doc.text(localOrigem || 'N/D', X_VAL, y); y+=6; 
                 
-                doc.setFont('helvetica','bold'); 
-                doc.text('Emitente:', X_LABEL, y); 
-                doc.setFont('helvetica','normal'); 
-                doc.text(emitente || 'N/D', X_VAL, y); 
-                y+=6; 
+                doc.setFont('helvetica','bold'); doc.text('Emitente:', X_LABEL, y); doc.setFont('helvetica','normal'); doc.text(emitente || 'N/D', X_VAL, y); y+=6; 
                 
-                doc.setFont('helvetica','bold'); 
-                doc.text('Destinatário:', X_LABEL, y); 
-                doc.setFont('helvetica','normal'); 
-                doc.text(destinatario || 'N/D', X_VAL, y); 
-                y+=6; 
+                doc.setFont('helvetica','bold'); doc.text('Destinatário:', X_LABEL, y); doc.setFont('helvetica','normal'); doc.text(destinatario || 'N/D', X_VAL, y); y+=6; 
 
-                doc.setFont('helvetica','bold');
-                doc.text('Data/Hora Conf.:', X_LABEL, y); 
-                doc.setFont('helvetica','normal'); 
-                doc.text(dataHora, X_VAL, y); 
+                doc.setFont('helvetica','bold'); doc.text('Data/Hora Conf.:', X_LABEL, y); doc.setFont('helvetica','normal'); doc.text(dataHora, X_VAL, y); 
                 
                 // TOTALIZADOR 
                 const totalCaa = itensRelatorio.filter(i => i.status_conferencia === 'C/A').length;
@@ -636,7 +663,6 @@
                 const GREEN_FILL = [27, 138, 62]; 
                 const SECTOR_BG = [60, 60, 60];
                 
-                // Setor Único
                 tableBody.push([{ content: 'MATERIAIS CAUTELADOS', colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } 
                 }]);
                 
@@ -653,9 +679,8 @@
                     ]);
                 });
                 
-                // Configuração e Geração da Tabela (IDÊNTICA)
                 doc.autoTable({ 
-                    startY: 75, // Posição inicial da tabela
+                    startY: 75, 
                     head: [['Item', 'Quantidade', 'Status', 'Observação']], 
                     body: tableBody, 
                     theme: 'striped', 
@@ -669,7 +694,7 @@
                     headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
                 });
 
-                // Rodapé com Paginação
+                // Rodapé
                 const totalPages = doc.internal.getNumberOfPages();
                 for (let i = 1; i <= totalPages; i++) {
                     doc.setPage(i);
@@ -679,7 +704,6 @@
                     doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
                 }
                 
-                // Nome do Arquivo
                 const nomeArquivo = `Cautela_Termo_${cautelaId}.pdf`;
                 doc.save(nomeArquivo);
                 
@@ -688,21 +712,78 @@
                 alert("Erro ao gerar PDF: " + e.message);
             }
         }
-        
+
+        async function carregarDadosCautela() {
+            if (!CAUTELA_ID) { 
+                document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID da Cautela não encontrado.</span>";
+                return;
+            }
+                
+            document.getElementById('loading-message').textContent = `Conectando à Cautela ${CAUTELA_ID}...`;
+            try {
+                // Tenta buscar na coleção Ativa e depois na Histórico (para PDF/Histórico)
+                const COLECAO_ALVO = (VIEW_TYPE === 'pdf' || VIEW_TYPE === 'devolucao') ? COLECAO_CAUTELAS : COLECAO_CAUTELAS;
+                let doc = await db.collection(COLECAO_ALVO).doc(CAUTELA_ID).get();
+                
+                if (!doc.exists) {
+                    doc = await db.collection(COLECAO_CAUTELAS_HIST).doc(CAUTELA_ID).get();
+                }
+                
+                if (!doc.exists) throw new Error("Cautela Ativa não encontrada.");
+                
+                cautelaDadosCompletos = doc.data(); // Salva os dados completos
+                const data = cautelaDadosCompletos;
+
+                // 1. Adapta os dados para a estrutura de conferência
+                dadosConferencia = adaptarCautelaParaRender(data);
+                
+                // 2. Atualiza Info do Título
+                let nomeLocal, postoLocal, tipoInfo;
+
+                if (VIEW_TYPE === 'devolucao') {
+                    nomeLocal = `DEVOLUÇÃO: CAUTELA ${CAUTELA_ID}`;
+                    postoLocal = `Emitente: ${data.destinatario} | Destino: ${data.local_origem}`;
+                    tipoInfo = 'Você está conferindo os itens para DEVOLUÇÃO/ENCERRAMENTO ou TRANSFERÊNCIA da cautela.';
+                    document.getElementById('btn-finalizar').onclick = finalizarDevolucaoTransferencia;
+                } else {
+                    nomeLocal = `RECEBIMENTO: CAUTELA ${CAUTELA_ID}`;
+                    postoLocal = `Emitente: ${data.emitente} | Destinatário: ${data.destinatario}`;
+                    tipoInfo = 'A conferência atual registra o recebimento dos materiais da CAUTELA.';
+                    document.getElementById('btn-finalizar').onclick = finalizarRecebimentoCautela;
+                }
+                
+                document.getElementById('local-posto-info').innerHTML = `<span style="color:#2c7399;font-weight:bold">${postoLocal}</span>`;
+                document.getElementById('titulo-conferencia').textContent = nomeLocal;
+                document.getElementById('tipo-fluxo-info').textContent = tipoInfo;
+                document.title = nomeLocal;
+
+
+                // 3. Renderiza e inicializa
+                document.getElementById('loading-message').textContent = "Renderizando materiais...";
+                renderizarConferencia(); 
+                restaurarRascunho(); 
+                updateHeaderInfo(); 
+                updateOverallStatus();
+                
+                document.getElementById('loading-message').style.display='none'; 
+                document.getElementById('main-content').style.display='block';
+            } catch (e) { 
+                document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
+            }
+        }
+
         /**
-         * Função principal que executa a transação de Recebimento.
-         * (PASSO 4/6 - FINALIZADA COM CHAMADA AO PDF)
+         * Função principal que executa a transação de Recebimento (Ativação da Cautela).
          */
         async function finalizarRecebimentoCautela() {
             const btn = document.getElementById('btn-finalizar');
             btn.disabled = true;
             btn.textContent = 'Executando Transação...';
             
-            // 1. Coleta os resultados da conferência (o que o destinatário confirmou)
             const relatorioRecebimento = [];
             const recebedor = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-            let totalItensConferidos = 0;
             
+            // Lógica de coleta de relatorioRecebimento
             for (const setor of dadosConferencia) {
                 for (const itemOriginal of setor.itens) {
                     
@@ -712,7 +793,6 @@
                         
                         if (statusFinal === 'pending') return;
 
-                        totalItensConferidos++;
                         const finalObs = window.itemStatus[uid].obs || null;
                         const finalStatus = (statusFinal === 'KEEP' ? 'C/A' : statusFinal);
                         
@@ -738,35 +818,27 @@
                     
                     // --- A. REFERÊNCIAS E LEITURAS ---
                     const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-                    
                     const cautelaDoc = await transaction.get(cautelaRef);
-                    if (!cautelaDoc.exists) {
-                        throw new Error("Cautela não encontrada na coleção ativa.");
-                    }
+                    if (!cautelaDoc.exists) throw new Error("Cautela não encontrada na coleção ativa.");
                     
                     const dadosOriginaisCautela = cautelaDoc.data();
                     const listaMestraId = dadosOriginaisCautela.local_origem_id;
                     const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaMestraId); 
                     const listaMestraDoc = await transaction.get(listaMestraRef);
                     
-                    if (!listaMestraDoc.exists) {
-                        throw new Error("Lista Mestra de origem não encontrada.");
-                    }
-                    
+                    if (!listaMestraDoc.exists) throw new Error("Lista Mestra de origem não encontrada.");
                     let listaMestraData = listaMestraDoc.data().list;
                     
-                    // --- B. LÓGICA DA TRANSAÇÃO (ATUALIZAÇÃO DE CARIMBO) ---
-                    
-                    // Lógica para marcar o item como 'ATIVA' na Lista Mestra
+                    // --- B. LÓGICA DA TRANSAÇÃO (ATUALIZAÇÃO DE CARIMBO NA LISTA MESTRA) ---
                     listaMestraData = listaMestraData.map(setor => ({
                         ...setor,
                         itens: setor.itens.map(mItem => {
                              relatorioRecebimento.forEach(relItem => {
-                                 if (relItem.id_completo.includes(mItem.id)) {
+                                 if (relItem.id_completo.includes(mItem.id_base || mItem.id)) {
                                     
                                      if (mItem.tipo === 'multi' && mItem.tombamentos) {
                                          mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                             if (`${mItem.id}-${tomb.tomb}` === relItem.id_completo) {
+                                             if (tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
                                                 tomb.cautela.status_conf = relItem.status_conferencia;
                                                 tomb.cautela.data_ativacao = firebase.firestore.FieldValue.serverTimestamp();
                                              }
@@ -805,35 +877,29 @@
                     // 3. Atualizar a Lista Mestra (aplicar a marcação de ATIVAÇÃO)
                     transaction.update(listaMestraRef, { list: listaMestraData });
                     
-                    // Prepara os dados para o PDF após a transação
                     cautelaDataSnapshot = { ...dadosOriginaisCautela, ...updateData };
 
                 });
                 
                 // --- PÓS-TRANSAÇÃO (UI) ---
-                limparRascunho(); // Limpa o rascunho
+                limparRascunho(); 
                 
-                // 🚨 CHAMADA AO PDF (Após o sucesso da transação)
-                if (cautelaDataSnapshot) {
-                    imprimirPDF_Cautela(cautelaDataSnapshot);
-                }
+                if (cautelaDataSnapshot) { imprimirPDF_Cautela(cautelaDataSnapshot); }
 
                 alert(`✅ Recebimento da Cautela ${CAUTELA_ID} finalizado e ATIVADO com sucesso!`);
-                
-                // Comunica ao Dashboard que o fluxo terminou (para fechar o iframe)
                 window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
 
             } catch (error) {
                 console.error("Erro na Transação de Recebimento:", error);
-                alert(`Erro ao finalizar recebimento. Nenhuma alteração foi salva. Erro: ${error.message}`);
+                alert(`Erro ao finalizar recebimento. Erro: ${error.message}`);
                 btn.disabled = false;
                 btn.textContent = 'FINALIZAR RECEBIMENTO (Tente Novamente)';
             }
         }
-        
+
         /**
          * Função que inicia o fluxo de Devolução/Transferência.
-         * (PASSO 6)
+         * (PASSO 6 - LÓGICA DE TRANSAÇÃO)
          */
         async function finalizarDevolucaoTransferencia() {
             const btn = document.getElementById('btn-finalizar');
@@ -841,7 +907,7 @@
             btn.textContent = 'Processando Devolução...';
             
             const recebedorDevolucao = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-            const tipo = DEVOLUCAO_TYPE;
+            const tipo = DEVOLUCAO_TYPE; // FINALIZADA ou TRANSFERENCIA
             const novoDestinatario = NOVO_DESTINATARIO;
             
             if (tipo === 'TRANSFERENCIA' && !novoDestinatario) {
@@ -850,9 +916,19 @@
                 btn.textContent = 'FINALIZAR DEVOLUÇÃO (Erro)';
                 return;
             }
-
+            
             try {
-                let novaCautelaDoc = null; // Para o caso de transferência
+                // A conferência de devolução/transferência é tratada como S/A para devolver o item
+                const relatorioDevolucao = dadosConferencia[0].itens.map(item => ({
+                     id_completo: item.id,
+                     nomeCompleto: item.nome,
+                     quantidade: item.quantidadeEsperada || 1,
+                     status_conferencia: window.itemStatus[item.id]?.status === 'C/A' ? 'C/A' : 'S/A',
+                     obs_conferencia: window.itemStatus[item.id]?.obs || null,
+                     tipo: item.tipo,
+                }));
+                
+                let cautelaDataSnapshot = null; 
                 
                 await db.runTransaction(async (transaction) => {
                     const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
@@ -866,25 +942,23 @@
                     const listaMestraDoc = await transaction.get(listaMestraRef);
                     let listaMestraData = listaMestraDoc.data().list;
                     
-                    // --- 1. LÓGICA DE ATUALIZAÇÃO DA LISTA MESTRA ---
+                    // --- 1. AJUSTE NA LISTA MESTRA ---
                     
                     listaMestraData = listaMestraData.map(setor => ({
                         ...setor,
                         itens: setor.itens.map(mItem => {
-                            dadosOriginaisCautela.itens.forEach(cItem => { // Itera sobre os itens da cautela
-                                if (cItem.id_completo.includes(mItem.id)) {
+                            dadosOriginaisCautela.itens.forEach(cItem => {
+                                if (cItem.id_completo.includes(mItem.id_base || mItem.id)) {
                                     
                                     if (mItem.tipo === 'multi' && mItem.tombamentos) {
                                         // ITEM MULTI
                                         mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                            if (`${mItem.id}-${tomb.tomb}` === cItem.id_completo) {
+                                            if (tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
                                                 if (tipo === 'FINALIZADA') {
-                                                    // Remove o carimbo da cautela (Devolução Finalizada)
                                                     delete tomb.cautela;
                                                 } else if (tipo === 'TRANSFERENCIA') {
-                                                    // Atualiza o destinatário (Transferência)
                                                     tomb.cautela.destinatario = novoDestinatario;
-                                                    tomb.cautela.id_transferencia = CAUTELA_ID; // Opcional: Carimba a transferência
+                                                    tomb.cautela.id_transferencia = CAUTELA_ID;
                                                 }
                                             }
                                             return tomb;
@@ -895,16 +969,14 @@
                                         mItem.cautelas = mItem.cautelas.filter(c => {
                                             if (c.id === CAUTELA_ID) {
                                                 if (tipo === 'FINALIZADA') {
-                                                    // Aumenta o estoque (Devolução Finalizada)
                                                     mItem.quantidadeEsperada += cItem.quantidade;
-                                                    return false; // Remove esta cautela do array 'cautelas'
+                                                    return false; 
                                                 } else if (tipo === 'TRANSFERENCIA') {
-                                                    // Atualiza o destinatário (Transferência)
                                                     c.destinatario = novoDestinatario;
                                                     c.id_transferencia = CAUTELA_ID;
                                                 }
                                             }
-                                            return true; // Mantém a cautela no array (Transferência)
+                                            return true; 
                                         });
                                     }
                                 }
@@ -914,32 +986,34 @@
                         })
                     }));
                     
-                    // --- 2. ATUALIZAÇÃO DOS DOCUMENTOS DA CAUTELA ---
+                    // 2. ATUALIZAÇÃO DO DOCUMENTO CAUTELA
                     if (tipo === 'FINALIZADA') {
-                        // Move para o Histórico (Devolução Finalizada)
+                        // Devolução Finalizada: Mover para o Histórico e deletar o ativo
                         const historicoData = { 
                             ...dadosOriginaisCautela, 
-                            status: 'FINALIZADA',
+                            status: 'DEVOLVIDA',
                             data_devolucao: firebase.firestore.FieldValue.serverTimestamp(),
-                            conferente_devolucao: recebedor 
+                            conferente_devolucao: recebedorDevolucao,
+                            relatorio_devolucao: relatorioDevolucao
                         };
                         transaction.set(db.collection(COLECAO_CAUTELAS_HIST).doc(CAUTELA_ID), historicoData);
-                        transaction.delete(cautelaRef); // Remove da lista ativa
+                        transaction.delete(cautelaRef); 
+                        cautelaDataSnapshot = historicoData;
+
                     } else if (tipo === 'TRANSFERENCIA') {
-                        // Cria um novo documento de cautela para o novo destinatário (Passo simplificado)
-                        novaCautelaDoc = {
-                            ...dadosOriginaisCautela,
+                        // Transferência: Apenas atualiza o destinatário e adiciona o log de transferência
+                        const updateTransfer = {
                             destinatario: novoDestinatario,
-                            emitente_transferencia: recebedor,
                             data_transferencia: firebase.firestore.FieldValue.serverTimestamp(),
-                            status: 'ATIVA', // Mantém ATIVA, mas com novo destinatário
-                            cautela_id_original: CAUTELA_ID // Referência
+                            conferente_transferencia: recebedorDevolucao,
+                            log_transferencia: firebase.firestore.FieldValue.arrayUnion({
+                                de: dadosOriginaisCautela.destinatario,
+                                para: novoDestinatario,
+                                data: firebase.firestore.FieldValue.serverTimestamp()
+                            })
                         };
-                        transaction.update(cautelaRef, {
-                            destinatario: novoDestinatario,
-                            emitente_transferencia: recebedor,
-                            data_transferencia: firebase.firestore.FieldValue.serverTimestamp(),
-                        });
+                        transaction.update(cautelaRef, updateTransfer);
+                        cautelaDataSnapshot = { ...dadosOriginaisCautela, ...updateTransfer };
                     }
                     
                     // 3. Atualizar a Lista Mestra
@@ -947,14 +1021,15 @@
                 });
                 
                 // --- PÓS-TRANSAÇÃO (UI) ---
-                if (tipo === 'FINALIZADA') {
-                    alert(`✅ Cautela ${CAUTELA_ID} encerrada e materiais devolvidos ao estoque.`);
-                } else {
-                    alert(`✅ Cautela ${CAUTELA_ID} transferida para ${NOVO_DESTINATARIO} com sucesso!`);
+                limparRascunho(); 
+                
+                if (cautelaDataSnapshot) {
+                     imprimirPDF_Cautela(cautelaDataSnapshot); 
                 }
-                
+
+                alert(`✅ Fluxo ${tipo} concluído!`);
                 window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-                
+
             } catch (error) {
                 console.error("Erro na Transação de Devolução:", error);
                 alert(`Erro ao finalizar a Devolução/Transferência. Erro: ${error.message}`);
@@ -962,7 +1037,8 @@
                 btn.textContent = 'FINALIZAR DEVOLUÇÃO (Tente Novamente)';
             }
         }
-        
+
+
         // --- LÓGICA DE VISUALIZAÇÃO DO PDF VIA URL ---
         async function checkUrlForPdfView() {
             const loading = document.getElementById('loading-message');
@@ -970,15 +1046,20 @@
             if (VIEW_TYPE === 'pdf' && CAUTELA_ID) {
                 loading.textContent = `Carregando dados para impressão da Cautela ${CAUTELA_ID}...`;
                 try {
-                    const doc = await db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID).get();
+                    // Tenta buscar na coleção Ativa e depois na Histórico
+                    let doc = await db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID).get();
+                    if (!doc.exists) {
+                         doc = await db.collection(COLECAO_CAUTELAS_HIST).doc(CAUTELA_ID).get();
+                    }
+
                     if (!doc.exists) throw new Error("Cautela não encontrada.");
                     
                     imprimirPDF_Cautela(doc.data());
-                    loading.textContent = "PDF gerado. Feche esta janela.";
+                    document.getElementById('loading-message').textContent = "PDF gerado. Feche esta janela.";
                     setTimeout(() => window.close(), 3000); 
 
                 } catch (e) {
-                    loading.innerHTML = `Erro ao gerar PDF: ${e.message}`;
+                    document.getElementById('loading-message').innerHTML = `Erro ao gerar PDF: ${e.message}`;
                 }
             
             } else if (VIEW_TYPE === 'devolucao' && CAUTELA_ID) {
@@ -987,7 +1068,6 @@
                  document.getElementById('titulo-conferencia').textContent = "CONFERÊNCIA DE DEVOLUÇÃO";
                  document.getElementById('btn-finalizar').onclick = finalizarDevolucaoTransferencia;
                  
-                 // Carrega a cautela (status ATIVA é o esperado)
                  carregarDadosCautela(); 
             }
             else {
