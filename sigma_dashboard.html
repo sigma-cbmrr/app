@@ -2081,15 +2081,16 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
     <script>
+        <script>
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", 
-         authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
+ authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
-            const auth = firebase.auth();
+ const auth = firebase.auth();
         
         function openNewConferenceModal() {
-            document.getElementById('modal-nova-conferencia').style.display = 'flex';
-         }
+        document.getElementById('modal-nova-conferencia').style.display = 'flex';
+ }
         // Constantes Globais
         const COLECAO_RESULTADOS = 'resultados_conferencias';
  const COLECAO_LISTAS = 'listas_conferencia';
@@ -2424,7 +2425,7 @@ function descartarConferenciaAtiva() {
         container.appendChild(unitHeader); 
         
         // --- Container dos Cards da Unidade ---
-        // Aqui não precisamos criar um novo grid, apenas adicionamos os cards ao container principal (container).
+        // Aqui não precisamos criar um um novo grid, apenas adicionamos os cards ao container principal (container).
  cardsList.forEach(d => {
             const items = d.items || [];
             const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
@@ -4247,6 +4248,376 @@ function reimprimirPDF(data) {
                 }); 
             });
  }
+        async function carregarDadosCautela() {
+            if (!CAUTELA_ID) { 
+                document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID da Cautela não encontrado.</span>";
+                return;
+            }
+                
+            document.getElementById('loading-message').textContent = `Conectando à Cautela ${CAUTELA_ID}...`;
+            try {
+                // Tenta buscar na coleção Ativa e depois na Histórico (para PDF/Histórico)
+                const COLECAO_ALVO = (VIEW_TYPE === 'pdf' || VIEW_TYPE === 'devolucao') ? COLECAO_CAUTELAS : COLECAO_CAUTELAS;
+                let doc = await db.collection(COLECAO_ALVO).doc(CAUTELA_ID).get();
+                
+                if (!doc.exists) {
+                    doc = await db.collection(COLECAO_CAUTELAS_HIST).doc(CAUTELA_ID).get();
+                }
+                
+                if (!doc.exists) throw new Error("Cautela Ativa não encontrada.");
+                
+                cautelaDadosCompletos = doc.data(); // Salva os dados completos
+                const data = cautelaDadosCompletos;
+
+                // 1. Adapta os dados para a estrutura de conferência
+                dadosConferencia = adaptarCautelaParaRender(data);
+                
+                // 2. Atualiza Info do Título
+                let nomeLocal, postoLocal, tipoInfo;
+
+                if (VIEW_TYPE === 'devolucao') {
+                    nomeLocal = `DEVOLUÇÃO: CAUTELA ${CAUTELA_ID}`;
+                    postoLocal = `Emitente: ${data.destinatario} | Destino: ${data.local_origem}`;
+                    tipoInfo = 'Você está conferindo os itens para DEVOLUÇÃO/ENCERRAMENTO ou TRANSFERÊNCIA da cautela.';
+                    document.getElementById('btn-finalizar').onclick = finalizarDevolucaoTransferencia;
+                } else {
+                    nomeLocal = `RECEBIMENTO: CAUTELA ${CAUTELA_ID}`;
+                    postoLocal = `Emitente: ${data.emitente} | Destinatário: ${data.destinatario}`;
+                    tipoInfo = 'A conferência atual registra o recebimento dos materiais da CAUTELA.';
+                    document.getElementById('btn-finalizar').onclick = finalizarRecebimentoCautela;
+                }
+                
+                document.getElementById('local-posto-info').innerHTML = `<span style="color:#2c7399;font-weight:bold">${postoLocal}</span>`;
+                document.getElementById('titulo-conferencia').textContent = nomeLocal;
+                document.getElementById('tipo-fluxo-info').textContent = tipoInfo;
+                document.title = nomeLocal;
+
+
+                // 3. Renderiza e inicializa
+                document.getElementById('loading-message').textContent = "Renderizando materiais...";
+                renderizarConferencia(); 
+                restaurarRascunho(); 
+                updateHeaderInfo(); 
+                updateOverallStatus();
+                
+                document.getElementById('loading-message').style.display='none'; 
+                document.getElementById('main-content').style.display='block';
+            } catch (e) { 
+                document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
+            }
+        }
+
+        /**
+         * Função principal que executa a transação de Recebimento (Ativação da Cautela).
+         */
+        async function finalizarRecebimentoCautela() {
+            const btn = document.getElementById('btn-finalizar');
+            btn.disabled = true;
+            btn.textContent = 'Executando Transação...';
+            
+            const relatorioRecebimento = [];
+            const recebedor = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+            
+            // Lógica de coleta de relatorioRecebimento
+            for (const setor of dadosConferencia) {
+                for (const itemOriginal of setor.itens) {
+                    
+                    const processItem = (itemData) => {
+                        const uid = itemData.id;
+                        const statusFinal = window.itemStatus[uid] ? window.itemStatus[uid].status : 'pending';
+                        
+                        if (statusFinal === 'pending') return;
+
+                        const finalObs = window.itemStatus[uid].obs || null;
+                        const finalStatus = (statusFinal === 'KEEP' ? 'C/A' : statusFinal);
+                        
+                        relatorioRecebimento.push({
+                            id_completo: uid,
+                            nomeCompleto: itemData.nome,
+                            quantidade: itemData.quantidadeEsperada || 1,
+                            status_conferencia: finalStatus,
+                            obs_conferencia: finalObs,
+                            tipo: itemData.tipo,
+                        });
+                    };
+                    processItem(itemOriginal);
+                }
+            }
+
+
+            // 2. Execução da Transação no Firestore
+            try {
+                let cautelaDataSnapshot = null;
+                
+                await db.runTransaction(async (transaction) => {
+                    
+                    // --- A. REFERÊNCIAS E LEITURAS ---
+                    const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
+                    
+                    const cautelaDoc = await transaction.get(cautelaRef);
+                    if (!cautelaDoc.exists) throw new Error("Cautela não encontrada na coleção ativa.");
+                    
+                    const dadosOriginaisCautela = cautelaDoc.data();
+                    const listaMestraId = dadosOriginaisCautela.local_origem_id;
+                    const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaMestraId); 
+                    const listaMestraDoc = await transaction.get(listaMestraRef);
+                    
+                    if (!listaMestraDoc.exists) throw new Error("Lista Mestra de origem não encontrada.");
+                    let listaMestraData = listaMestraDoc.data().list;
+                    
+                    // --- B. LÓGICA DA TRANSAÇÃO (ATUALIZAÇÃO DE CARIMBO NA LISTA MESTRA) ---
+                    listaMestraData = listaMestraData.map(setor => ({
+                        ...setor,
+                        itens: setor.itens.map(mItem => {
+                             relatorioRecebimento.forEach(relItem => {
+                                 if (relItem.id_completo.includes(mItem.id_base || mItem.id)) {
+                                    
+                                     if (mItem.tipo === 'multi' && mItem.tombamentos) {
+                                         mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                             if (tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
+                                                tomb.cautela.status_conf = relItem.status_conferencia;
+                                                tomb.cautela.data_ativacao = firebase.firestore.FieldValue.serverTimestamp();
+                                             }
+                                             return tomb;
+                                         });
+
+                                     } else if (mItem.tipo === 'single') {
+                                         mItem.cautelas = mItem.cautelas.map(c => {
+                                             if (c.id === CAUTELA_ID) {
+                                                c.status_conf = relItem.status_conferencia;
+                                                c.data_ativacao = firebase.firestore.FieldValue.serverTimestamp();
+                                             }
+                                             return c;
+                                         });
+                                     }
+                                 }
+                                 return mItem;
+                             })
+                            return mItem;
+                        })
+                    }));
+                    
+
+                    // 2. Marcar a cautela como ATIVA e registrar o relatório
+                    const updateData = { 
+                        status: 'ATIVA', 
+                        data_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
+                        recebedor_conf: recebedor,
+                        relatorio_recebimento: relatorioRecebimento, 
+                        total_itens_conf: relatorioRecebimento.length,
+                        total_ca_conf: relatorioRecebimento.filter(i => i.status_conferencia === 'C/A').length
+                    };
+                    
+                    transaction.update(cautelaRef, updateData);
+                    
+                    // 3. Atualizar a Lista Mestra (aplicar a marcação de ATIVAÇÃO)
+                    transaction.update(listaMestraRef, { list: listaMestraData });
+                    
+                    cautelaDataSnapshot = { ...dadosOriginaisCautela, ...updateData };
+
+                });
+                
+                // --- PÓS-TRANSAÇÃO (UI) ---
+                limparRascunho(); 
+                
+                if (cautelaDataSnapshot) { imprimirPDF_Cautela(cautelaDataSnapshot); }
+
+                alert(`✅ Recebimento da Cautela ${CAUTELA_ID} finalizado e ATIVADO com sucesso!`);
+                window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+
+            } catch (error) {
+                console.error("Erro na Transação de Recebimento:", error);
+                alert(`Erro ao finalizar recebimento. Erro: ${error.message}`);
+                btn.disabled = false;
+                btn.textContent = 'FINALIZAR RECEBIMENTO (Tente Novamente)';
+            }
+        }
+
+        /**
+         * Função que inicia o fluxo de Devolução/Transferência.
+         * (PASSO 6 - LÓGICA DE TRANSAÇÃO)
+         */
+        async function finalizarDevolucaoTransferencia() {
+            const btn = document.getElementById('btn-finalizar');
+            btn.disabled = true;
+            btn.textContent = 'Processando Devolução...';
+            
+            const recebedorDevolucao = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+            const tipo = DEVOLUCAO_TYPE; // FINALIZADA ou TRANSFERENCIA
+            const novoDestinatario = NOVO_DESTINATARIO;
+            
+            if (tipo === 'TRANSFERENCIA' && !novoDestinatario) {
+                alert("Militar de destino não especificado para transferência.");
+                btn.disabled = false;
+                btn.textContent = 'FINALIZAR DEVOLUÇÃO (Erro)';
+                return;
+            }
+            
+            try {
+                // A conferência de devolução/transferência é tratada como S/A para devolver o item
+                const relatorioDevolucao = dadosConferencia[0].itens.map(item => ({
+                     id_completo: item.id,
+                     nomeCompleto: item.nome,
+                     quantidade: item.quantidadeEsperada || 1,
+                     status_conferencia: window.itemStatus[item.id]?.status === 'C/A' ? 'C/A' : 'S/A',
+                     obs_conferencia: window.itemStatus[item.id]?.obs || null,
+                     tipo: item.tipo,
+                }));
+                
+                let cautelaDataSnapshot = null; 
+                
+                await db.runTransaction(async (transaction) => {
+                    const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
+                    const cautelaDoc = await transaction.get(cautelaRef);
+
+                    if (!cautelaDoc.exists) throw new Error("Cautela não encontrada na coleção ativa.");
+                    const dadosOriginaisCautela = cautelaDoc.data();
+                    
+                    const listaMestraId = dadosOriginaisCautela.local_origem_id;
+                    const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaMestraId);
+                    const listaMestraDoc = await transaction.get(listaMestraRef);
+                    let listaMestraData = listaMestraDoc.data().list;
+                    
+                    // --- 1. AJUSTE NA LISTA MESTRA ---
+                    
+                    listaMestraData = listaMestraData.map(setor => ({
+                        ...setor,
+                        itens: setor.itens.map(mItem => {
+                            dadosOriginaisCautela.itens.forEach(cItem => {
+                                if (cItem.id_completo.includes(mItem.id_base || mItem.id)) {
+                                    
+                                    if (mItem.tipo === 'multi' && mItem.tombamentos) {
+                                        // ITEM MULTI
+                                        mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                            if (tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
+                                                if (tipo === 'FINALIZADA') {
+                                                    delete tomb.cautela;
+                                                } else if (tipo === 'TRANSFERENCIA') {
+                                                    tomb.cautela.destinatario = novoDestinatario;
+                                                    tomb.cautela.id_transferencia = CAUTELA_ID;
+                                                }
+                                            }
+                                            return tomb;
+                                        });
+
+                                    } else if (mItem.tipo === 'single') {
+                                        // ITEM SINGLE
+                                        mItem.cautelas = mItem.cautelas.filter(c => {
+                                            if (c.id === CAUTELA_ID) {
+                                                if (tipo === 'FINALIZADA') {
+                                                    mItem.quantidadeEsperada += cItem.quantidade;
+                                                    return false; 
+                                                } else if (tipo === 'TRANSFERENCIA') {
+                                                    c.destinatario = novoDestinatario;
+                                                    c.id_transferencia = CAUTELA_ID;
+                                                }
+                                            }
+                                            return true; 
+                                        });
+                                    }
+                                }
+                                return mItem;
+                            })
+                            return mItem;
+                        })
+                    }));
+                    
+                    // 2. ATUALIZAÇÃO DO DOCUMENTO CAUTELA
+                    if (tipo === 'FINALIZADA') {
+                        // Devolução Finalizada: Mover para o Histórico e deletar o ativo
+                        const historicoData = { 
+                            ...dadosOriginaisCautela, 
+                            status: 'DEVOLVIDA',
+                            data_devolucao: firebase.firestore.FieldValue.serverTimestamp(),
+                            conferente_devolucao: recebedorDevolucao,
+                            relatorio_devolucao: relatorioDevolucao
+                        };
+                        transaction.set(db.collection(COLECAO_CAUTELAS_HIST).doc(CAUTELA_ID), historicoData);
+                        transaction.delete(cautelaRef); 
+                        cautelaDataSnapshot = historicoData;
+
+                    } else if (tipo === 'TRANSFERENCIA') {
+                        // Transferência: Apenas atualiza o destinatário e adiciona o log de transferência
+                        const updateTransfer = {
+                            destinatario: novoDestinatario,
+                            data_transferencia: firebase.firestore.FieldValue.serverTimestamp(),
+                            conferente_transferencia: recebedorDevolucao,
+                            log_transferencia: firebase.firestore.FieldValue.arrayUnion({
+                                de: dadosOriginaisCautela.destinatario,
+                                para: novoDestinatario,
+                                data: firebase.firestore.FieldValue.serverTimestamp()
+                            })
+                        };
+                        transaction.update(cautelaRef, updateTransfer);
+                        cautelaDataSnapshot = { ...dadosOriginaisCautela, ...updateTransfer };
+                    }
+                    
+                    // 3. Atualizar a Lista Mestra
+                    transaction.update(listaMestraRef, { list: listaMestraData });
+                });
+                
+                // --- PÓS-TRANSAÇÃO (UI) ---
+                limparRascunho(); 
+                
+                if (cautelaDataSnapshot) {
+                     imprimirPDF_Cautela(cautelaDataSnapshot); 
+                }
+
+                alert(`✅ Fluxo ${tipo} concluído!`);
+                window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+
+            } catch (error) {
+                console.error("Erro na Transação de Devolução:", error);
+                alert(`Erro ao finalizar a Devolução/Transferência. Erro: ${error.message}`);
+                btn.disabled = false;
+                btn.textContent = 'FINALIZAR DEVOLUÇÃO (Tente Novamente)';
+            }
+        }
+
+
+        // --- LÓGICA DE VISUALIZAÇÃO DO PDF VIA URL ---
+        async function checkUrlForPdfView() {
+            const loading = document.getElementById('loading-message');
+            
+            if (VIEW_TYPE === 'pdf' && CAUTELA_ID) {
+                loading.textContent = `Carregando dados para impressão da Cautela ${CAUTELA_ID}...`;
+                try {
+                    // Tenta buscar na coleção Ativa e depois na Histórico
+                    let doc = await db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID).get();
+                    if (!doc.exists) {
+                         doc = await db.collection(COLECAO_CAUTELAS_HIST).doc(CAUTELA_ID).get();
+                    }
+
+                    if (!doc.exists) throw new Error("Cautela não encontrada.");
+                    
+                    imprimirPDF_Cautela(doc.data());
+                    document.getElementById('loading-message').textContent = "PDF gerado. Feche esta janela.";
+                    setTimeout(() => window.close(), 3000); 
+
+                } catch (e) {
+                    document.getElementById('loading-message').innerHTML = `Erro ao gerar PDF: ${e.message}`;
+                }
+            
+            } else if (VIEW_TYPE === 'devolucao' && CAUTELA_ID) {
+                 // --- MODO DEVOLUÇÃO/TRANSFERÊNCIA ---
+                 document.getElementById('tipo-fluxo-info').textContent = `Conferência de Devolução/Transferência da Cautela ${CAUTELA_ID}.`;
+                 document.getElementById('titulo-conferencia').textContent = "CONFERÊNCIA DE DEVOLUÇÃO";
+                 document.getElementById('btn-finalizar').onclick = finalizarDevolucaoTransferencia;
+                 
+                 carregarDadosCautela(); 
+            }
+            else {
+                // --- MODO RECEBIMENTO (Padrão) ---
+                document.getElementById('btn-finalizar').onclick = finalizarRecebimentoCautela;
+                carregarDadosCautela();
+            }
+        }
+
+
+        // ==========================================
+        // INICIALIZAÇÃO
+        // ==========================================
+        window.onload = checkUrlForPdfView;
     </script>
 </body>
 </html>
