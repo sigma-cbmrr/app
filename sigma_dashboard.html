@@ -1926,6 +1926,36 @@
     </div>
         
 </div>
+    <div id="cautelaDetailsModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 700px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 20px;">
+            <h3 style="margin: 0; color: #800020;"><i class="fas fa-clipboard-list"></i> Detalhes da Cautela <span id="modal-cautela-id"></span></h3>
+            <span style="font-size: 1.2em; font-weight: bold; color: #d90f23;" id="modal-status"></span>
+        </div>
+        
+        <div class="form-area" style="padding: 15px; border: none; box-shadow: none; background-color: #f9f9f9; margin-bottom: 15px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                <div><label>Destinatário:</label><span id="modal-destinatario" class="info-value"></span></div>
+                <div><label>Emitente:</label><span id="modal-emitente" class="info-value"></span></div>
+                <div><label>Local de Origem:</label><span id="modal-local-origem" class="info-value"></span></div>
+                <div><label>Data de Emissão:</label><span id="modal-data-emissao" class="info-value"></span></div>
+            </div>
+            <label>Observações da Emissão:</label>
+            <div id="modal-obs-emissao" style="background-color: #fff; padding: 10px; border-radius: 5px; border: 1px solid #eee; min-height: 50px;"></div>
+        </div>
+        
+        <h4 style="color: #800020; border-bottom: 1px solid #eee; padding-bottom: 5px; margin-top: 20px;">Itens Cautelados:</h4>
+        <ul id="modal-itens-cautela" class="cautela-item-list" style="max-height: 250px; overflow-y: auto; margin-top: 10px;">
+            </ul>
+        
+        <div class="modal-actions">
+            <button class="btn-modern-action" id="btn-receber-cautela" style="display: none;">
+                <i class="fas fa-check-circle"></i> Iniciar Recebimento
+            </button>
+            <button class="modal-btn-cancel" onclick="document.getElementById('cautelaDetailsModal').style.display='none'">Fechar</button>
+        </div>
+    </div>
+</div>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
@@ -4940,7 +4970,7 @@ async function loadActiveCautelas() {
         // --- RENDERIZAÇÃO DA TABELA ---
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
-            tr.onclick = () => alert(`Detalhes da Cautela ${cautela.cautela_id}`); // Implementação futura para modal de detalhes
+            tr.onclick = () => showCautelaDetails(cautela.cautela_id); // Implementação futura para modal de detalhes
             
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
@@ -4964,6 +4994,106 @@ async function loadActiveCautelas() {
         loading.style.display = 'none';
         table.style.display = 'table';
     }
+}
+        async function showCautelaDetails(cautelaId) {
+    const modal = document.getElementById('cautelaDetailsModal');
+    const btnReceber = document.getElementById('btn-receber-cautela');
+    
+    // 1. Resetar modal e exibir
+    document.getElementById('modal-cautela-id').textContent = cautelaId;
+    document.getElementById('modal-status').textContent = 'Carregando...';
+    modal.style.display = 'flex';
+    btnReceber.style.display = 'none'; // Esconde o botão até o carregamento
+    
+    // Limpar conteúdos anteriores
+    document.getElementById('modal-destinatario').textContent = '';
+    document.getElementById('modal-emitente').textContent = '';
+    document.getElementById('modal-local-origem').textContent = '';
+    document.getElementById('modal-data-emissao').textContent = '';
+    document.getElementById('modal-obs-emissao').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    document.getElementById('modal-itens-cautela').innerHTML = '<li style="text-align:center;">Carregando itens...</li>';
+
+    try {
+        // 2. Buscar dados da cautela no Firestore
+        const docRef = db.collection('cautelas_abertas').doc(cautelaId);
+        const doc = await docRef.get();
+        
+        if (!doc.exists) {
+            alert(`Erro: Cautela ID ${cautelaId} não encontrada.`);
+            modal.style.display = 'none';
+            return;
+        }
+
+        const cautela = doc.data();
+
+        // 3. Preencher Detalhes Principais
+        document.getElementById('modal-destinatario').textContent = cautela.destinatario || 'N/D';
+        document.getElementById('modal-emitente').textContent = cautela.emitente || 'N/D';
+        document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
+        document.getElementById('modal-data-emissao').textContent = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+        document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
+        document.getElementById('modal-status').textContent = `Status: ${cautela.status}`;
+        
+        // 4. Preencher a Lista de Itens
+        const itensList = document.getElementById('modal-itens-cautela');
+        itensList.innerHTML = '';
+        
+        if (cautela.itens && cautela.itens.length > 0) {
+            cautela.itens.forEach(item => {
+                const li = document.createElement('li');
+                
+                const nomeItem = item.nome || 'Item sem nome';
+                // Define se mostra Tombamento ou Quantidade
+                const quantidadeOuTombamento = item.tombamento 
+                    ? `(Tombamento: <strong>${item.tombamento}</strong>)` 
+                    : `(Quantidade: <strong>${item.quantidade}</strong>)`;
+                
+                li.innerHTML = `
+                    <span style="font-weight: 500;">${nomeItem}</span>
+                    <span style="font-size: 0.9em; color: #555;">${quantidadeOuTombamento}</span>
+                `;
+                li.style.display = 'flex';
+                li.style.justifyContent = 'space-between';
+                li.style.alignItems = 'center';
+
+                itensList.appendChild(li);
+            });
+        } else {
+            itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
+        }
+
+        // 5. Lógica do Botão "Receber Cautela" (Visível apenas para o Destinatário)
+        const militarCompleto = currentUserData.nome_militar_completo;
+        
+        if (currentUserData.role === 'operacional' && cautela.destinatario === militarCompleto && cautela.status === 'ABERTA') {
+            btnReceber.style.display = 'block';
+            // Configura o onclick para iniciar o processo de recebimento (próximo passo)
+            btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
+        } else {
+            btnReceber.style.display = 'none';
+        }
+
+        document.getElementById('modal-status').textContent = `Status: ${cautela.status}`;
+
+    } catch (e) {
+        console.error("Erro ao carregar detalhes da cautela:", e);
+        document.getElementById('modal-itens-cautela').innerHTML = `<li style="text-align:center; color:red;">Erro ao buscar dados: ${e.message}</li>`;
+        document.getElementById('modal-status').textContent = `Status: ERRO`;
+    }
+}
+        function iniciarRecebimentoCautela(cautelaId) {
+    // FECHA O MODAL ANTES DE REDIRECIONAR
+    document.getElementById('cautelaDetailsModal').style.display = 'none'; 
+    
+    // Alerta temporário antes do redirecionamento
+    alert(`Redirecionando para a Conferência de Cautela ID: ${cautelaId}.`);
+
+    // LOGICA REAL:
+    // Redireciona para o aplicativo de conferência, passando o ID da cautela
+    // window.location.href = `conferencia_app.html?cautela=${cautelaId}`; 
+    
+    // Nota: Como estamos testando no Dashboard, você pode simular a abertura da tela:
+    showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
 }
     </script>
 </body>
