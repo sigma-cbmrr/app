@@ -4343,23 +4343,64 @@ function showMainMenu() {
 function showCautelasDashboard(type) {
     const menuContainer = document.getElementById('cautelas-options-container');
     const contentArea = document.getElementById('cautelas-content');
-
-    // Oculta o menu
     if (menuContainer) menuContainer.style.display = 'none';
 
-    // Carrega o conteúdo temporário com o botão de voltar
     if (contentArea) {
-        contentArea.innerHTML = `
-            <div class="op-card">
-                <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                    <h3><i class="fas fa-list-alt"></i> ${type || 'Conteúdo em Desenvolvimento'}</h3>
-                    <button class="btn-modern-action" onclick="showMainMenu()">
-                        <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                    </button>
+        let htmlContent = '';
+
+        if (type === 'Cautelas Ativas') {
+            htmlContent = `
+                <div class="op-card">
+                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                        <h3><i class="fas fa-clipboard-check"></i> Cautelas Ativas (Sua Responsabilidade)</h3>
+                        <button class="btn-modern-action" onclick="showMainMenu()">
+                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
+                        </button>
+                    </div>
+                    
+                    <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
+                        Lista de materiais sob sua cautela. Clique em uma linha para ver os detalhes.
+                    </p>
+
+                    <div id="loading-cautelas" style="text-align: center; padding: 20px;">
+                        <i class="fas fa-spinner fa-spin"></i> Carregando cautelas...
+                    </div>
+
+                    <table class="ca-table" id="cautelas-ativas-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Destinatário</th>
+                                <th>Emissão</th>
+                                <th>Local Origem</th>
+                                <th>Itens</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cautelas-ativas-body">
+                            </tbody>
+                    </table>
                 </div>
-                <p>Conteúdo de **${type || 'Dashboard'}** será implementado aqui. Por favor, utilize o botão Voltar.</p>
-            </div>
-        `;
+            `;
+            // Chamar a função de carregamento logo após injetar o HTML
+            setTimeout(() => loadActiveCautelas(), 50);
+
+        } else {
+            // Placeholder para as outras telas (Receber, Histórico)
+            htmlContent = `
+                <div class="op-card">
+                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                        <h3><i class="fas fa-list-alt"></i> ${type || 'Conteúdo em Desenvolvimento'}</h3>
+                        <button class="btn-modern-action" onclick="showMainMenu()">
+                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
+                        </button>
+                    </div>
+                    <p>Conteúdo de **${type || 'Dashboard'}** será implementado aqui.</p>
+                </div>
+            `;
+        }
+        
+        contentArea.innerHTML = htmlContent;
         contentArea.style.display = 'block';
     }
 }
@@ -4819,6 +4860,109 @@ function getSelectedCautelaItemsData() {
         console.error("Erro CRÍTICO no processo de Cautela:", error);
         alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Erro: ${error.message}`);
         updateCautelaItemCount();
+    }
+}
+        /**
+ * Busca e exibe as cautelas ativas.
+ * Exibe todas as cautelas da unidade para Gestores/Admin,
+ * e apenas as emitidas para/pelo usuário logado para Operacionais.
+ */
+async function loadActiveCautelas() {
+    const tbody = document.getElementById('cautelas-ativas-body');
+    const loading = document.getElementById('loading-cautelas');
+    const table = document.getElementById('cautelas-ativas-table');
+    const role = currentUserData.role || 'operacional';
+    const militarCompleto = currentUserData.nome_militar_completo;
+    const unidade = currentUserData.unidade;
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+
+    try {
+        let queryRef = db.collection('cautelas_abertas')
+            .where('status', '==', 'ABERTA');
+        
+        // --- FILTRAGEM DE ACESSO ---
+        if (role === 'operacional') {
+            // Operacional só vê suas próprias cautelas (emitidas ou recebidas)
+            // Nota: Firebase não permite "OR" em queries simples, faremos duas consultas e combinaremos localmente.
+            
+            // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
+            const snapDestinatario = await db.collection('cautelas_abertas')
+                .where('status', '==', 'ABERTA')
+                .where('destinatario', '==', militarCompleto)
+                .get();
+
+            // 2. Cautelas ONDE EU SOU O EMITENTE (Se precisar de visão de emissor)
+            const snapEmitente = await db.collection('cautelas_abertas')
+                .where('status', '==', 'ABERTA')
+                .where('emitente', '==', militarCompleto)
+                .get();
+
+            let allDocs = {};
+            snapDestinatario.forEach(doc => allDocs[doc.id] = doc.data());
+            snapEmitente.forEach(doc => allDocs[doc.id] = doc.data());
+
+            queryRef = Object.values(allDocs); // Usa o array combinado
+            
+        } else if (role === 'gestor') {
+            // Gestor vê todas as cautelas ATIVAS da sua UNIDADE de origem.
+            // Isso requer a busca por 'local_origem_id', que é mapeado para a unidade.
+            // Como a unidade está salva no documento de cautela (se você a adicionou no iniciarCautelaProcesso), podemos filtrar.
+            // Se 'unidade' não foi salva no documento de cautela: será necessário iterar todas as rotas ativas daquela unidade.
+            // ASSUMINDO que 'local_origem' já inclui o nome da Unidade.
+            
+            // Vamos filtrar no lado do cliente por simplicidade de Query, pois cautelas ativas não devem ser muitas.
+            const snapAll = await queryRef.get();
+            queryRef = snapAll.docs.map(doc => doc.data()).filter(d => {
+                // A lógica mais segura seria garantir que a Unidade fosse salva na Cautela no momento da emissão.
+                // Como não temos essa informação explícita na estrutura da cautela aqui, vamos usar uma suposição:
+                // Se o documento tiver um campo 'unidade' que você adicionou na emissão, use-o.
+                return d.unidade === unidade; // Filtra as cautelas que pertencem à unidade do gestor
+            });
+            
+        } else { // Admin
+            const snapAll = await queryRef.get();
+            queryRef = snapAll.docs.map(doc => doc.data());
+        }
+
+        // Se for um array (Operacional ou Gestor/Admin filtrado):
+        const cautelas = Array.isArray(queryRef) ? queryRef : queryRef.docs.map(doc => doc.data());
+
+        if (cautelas.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela ativa encontrada sob sua responsabilidade.</td></tr>`;
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            return;
+        }
+
+        // --- RENDERIZAÇÃO DA TABELA ---
+        cautelas.forEach(cautela => {
+            const tr = tbody.insertRow();
+            tr.onclick = () => alert(`Detalhes da Cautela ${cautela.cautela_id}`); // Implementação futura para modal de detalhes
+            
+            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
+            
+            tr.innerHTML = `
+                <td><strong>${cautela.cautela_id}</strong></td>
+                <td>${cautela.destinatario}</td>
+                <td>${dataEmissao}</td>
+                <td>${cautela.local_origem}</td>
+                <td>${itensCount} itens</td>
+                <td><span class="status-badge badge-aberta">ATIVA</span></td>
+            `;
+        });
+
+        loading.style.display = 'none';
+        table.style.display = 'table';
+        
+    } catch (e) {
+        console.error("Erro ao carregar cautelas ativas:", e);
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        loading.style.display = 'none';
+        table.style.display = 'table';
     }
 }
     </script>
