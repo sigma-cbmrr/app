@@ -4477,9 +4477,37 @@ function showCautelasDashboard(type) {
                 </table>
             </div>
         `;
+            } else if (type === 'Histórico de Cautelas') {
+    htmlContent = `
+        <div class="op-card">
+            <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                <h3><i class="fas fa-history"></i> Histórico de Cautelas (Finalizadas)</h3>
+                <button class="btn-modern-action" onclick="showMainMenu()">
+                    <i class="fas fa-arrow-left"></i> Voltar ao Menu
+                </button>
+            </div>
+
+            <div id="loading-historico" style="text-align: center; padding: 20px;">
+                <i class="fas fa-spinner fa-spin"></i> Buscando histórico de cautelas...
+            </div>
+
+            <table class="ca-table" id="historico-list-table" style="display: none;">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Emissão</th>
+                        <th>Recebimento</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="historico-list-body">
+                    </tbody>
+            </table>
+        </div>
+    `;
             // Chamar a função de carregamento logo após injetar o HTML
             setTimeout(() => loadActiveCautelas(), 50);
-
+        
         } else {
             // Placeholder para as outras telas (Receber, Histórico)
             htmlContent = `
@@ -4967,9 +4995,17 @@ async function loadActiveCautelas() {
     const loading = document.getElementById('loading-cautelas');
     const table = document.getElementById('cautelas-ativas-table');
     
-    // 🛑 VERIFICAÇÃO DE SEGURANÇA: Sai se os elementos desta tela não existirem (evita o crash)
-    if (!tbody || !loading) return; 
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (1): Sai se os elementos desta tela não existirem
+    if (!tbody || !loading || !table) return; 
     
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (2): Checa se os dados do usuário estão carregados
+    if (!window.currentUserData || !window.currentUserData.nome_militar_completo) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados. Recarregue a página.</td></tr>`;
+        loading.style.display = 'none'; 
+        table.style.display = 'table';
+        return;
+    }
+
     const role = currentUserData.role || 'operacional';
     const militarCompleto = currentUserData.nome_militar_completo;
     const unidade = currentUserData.unidade;
@@ -5004,7 +5040,7 @@ async function loadActiveCautelas() {
 
             cautelas = Object.values(allDocs);
             
-        } else { // Gestor ou Admin 
+        } else { // Gestor ou Admin (Busca todas e filtra pela unidade se for Gestor)
             
             const snapAll = await db.collection('cautelas_abertas')
                 .where('status', '==', statusAtivo) 
@@ -5032,9 +5068,8 @@ async function loadActiveCautelas() {
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
             
-            let statusBadgeClass = 'badge-ok'; 
+            let statusBadgeClass = 'badge-ok'; // Usamos 'badge-ok' para RECEBIDA
             
-            // Ação: Se eu for o destinatário, posso devolver.
             let actionHtml = `<button class="btn-modern-action" onclick="showCautelaDetails('${cautela.cautela_id}')"><i class="fas fa-eye"></i> Detalhes</button>`;
 
             if (cautela.status === 'RECEBIDA' && cautela.destinatario === militarCompleto) {
@@ -5057,12 +5092,12 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar cautelas ativas:", e);
+        // Garantimos que o loader suma em caso de erro
         tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
-}
-        async function showCautelaDetails(cautelaId) {
+}        async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
     
@@ -5174,6 +5209,18 @@ async function loadActiveCautelas() {
     const tbody = document.getElementById('receber-list-body');
     const loading = document.getElementById('loading-receber');
     const table = document.getElementById('receber-list-table');
+    
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (1): Sai se os elementos desta tela não existirem
+    if (!tbody || !loading || !table) return; 
+
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (2): Checa se os dados do usuário estão carregados
+    if (!window.currentUserData || !window.currentUserData.nome_militar_completo) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados. Recarregue a página.</td></tr>`;
+        loading.style.display = 'none'; 
+        table.style.display = 'table';
+        return;
+    }
+    
     const militarCompleto = currentUserData.nome_militar_completo; 
 
     tbody.innerHTML = '';
@@ -5181,7 +5228,7 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        // Usa as duas consultas para simular o OR, mas foca no destinatário (o emitente não precisa ver essa tela)
+        // Busca cautelas onde EU SOU O DESTINATÁRIO e o STATUS é ABERTA (aguardando)
         const snap = await db.collection('cautelas_abertas')
             .where('status', '==', 'ABERTA')
             .where('destinatario', '==', militarCompleto)
@@ -5222,7 +5269,70 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar lista a receber:", e);
+        // Garantimos que o loader suma em caso de erro
         tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        loading.style.display = 'none';
+        table.style.display = 'table';
+    }
+}
+        /**
+ * Carrega a lista de cautelas que foram FECHADAS (Histórico).
+ */
+async function loadHistoricoCautelas() {
+    const tbody = document.getElementById('historico-list-body');
+    const loading = document.getElementById('loading-historico');
+    const table = document.getElementById('historico-list-table');
+    const militarCompleto = currentUserData.nome_militar_completo; 
+    const role = currentUserData.role || 'operacional';
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+
+    try {
+        // Buscamos apenas o status FECHADA
+        let query = db.collection('cautelas_abertas')
+            .where('status', '==', 'FECHADA')
+            .orderBy('timestamp_devolucao', 'desc');
+
+        // Filtragem de acesso (Operacional só vê seu histórico)
+        if (role === 'operacional') {
+            // Buscamos onde ele era o destinatário OU o emitente.
+            // Como não podemos usar OR, vamos filtrar pelo destinatário/receptor.
+            query = query.where('destinatario', '==', militarCompleto);
+            // NOTA: Para incluir o histórico onde ele era o EMITENTE, seria necessário uma segunda query ou a busca de tudo no cliente.
+        }
+
+        const snap = await query.get();
+        const cautelas = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        if (cautelas.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela finalizada encontrada.</td></tr>`;
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            return;
+        }
+
+        // RENDERIZAÇÃO
+        cautelas.forEach(cautela => {
+            const tr = tbody.insertRow();
+            const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+            const dataRecebimento = cautela.timestamp_devolucao ? cautela.timestamp_devolucao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+
+            tr.innerHTML = `
+                <td data-label="ID"><strong>${cautela.id}</strong></td>
+                <td data-label="Emissão">${dataEmissao}</td>
+                <td data-label="Recebimento">${dataRecebimento}</td>
+                <td data-label="Status"><span class="status-badge badge-fechada">${cautela.status}</span></td>
+            `;
+        });
+
+        loading.style.display = 'none';
+        table.style.display = 'table';
+
+    } catch (e) {
+        console.error("Erro ao carregar histórico:", e);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
