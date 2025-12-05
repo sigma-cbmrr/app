@@ -5098,6 +5098,8 @@ function getSelectedCautelaItemsData() {
  * Consulta simplificada: busca apenas por 'destinatario' ou 'emitente' e filtra o status 'RECEBIDA' localmente.
  */
 async function loadActiveCautelas() {
+    console.log("DEBUG: Militar Completo usado na Query:", militarCompleto); 
+    console.log("DEBUG: Unidade usada na Query (Gestor):", unidade);
     const tbody = document.getElementById('cautelas-ativas-body');
     const loading = document.getElementById('loading-cautelas');
     const table = document.getElementById('cautelas-ativas-table');
@@ -5144,18 +5146,25 @@ async function loadActiveCautelas() {
             // FILTRAGEM LOCAL: Apenas status RECEBIDA
             cautelas = Object.values(allDocs).filter(c => c.status === statusAtivo);
             
-        } else { // Gestor ou Admin (Mantemos a busca por status que é mais eficiente aqui)
-            
-            let query = db.collection('cautelas_abertas').where('status', '==', statusAtivo);
+        } else if (role === 'gestor') { 
+            // 🛑 CONSULTA MAIS SEGURA PARA GESTOR: Filtra apenas por UNIDADE
+            // Evita a combinação de filtros (status + unidade) que pode travar.
+            const snap = await db.collection('cautelas_abertas')
+                .where('unidade', '==', unidade) // Requer apenas índice simples em 'unidade'
+                .get();
 
-            if (role === 'gestor') {
-                // Se for gestor, adiciona o filtro de unidade (Gestor/Unidade e Status RECEBIDA)
-                // Esta combinação PODE exigir um índice composto (status, unidade)
-                query = query.where('unidade', '==', unidade); 
-            }
+            let tempCautelas = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // FILTRAGEM LOCAL: Apenas status RECEBIDA
+            cautelas = tempCautelas.filter(c => c.status === statusAtivo);
             
-            const snapAll = await query.get();
-            cautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        } else { // Admin (Vê todas as ativas filtrando apenas pelo status)
+             // 🛑 CONSULTA PARA ADMIN: Filtra apenas por STATUS
+             // É o filtro mais eficiente para o Administrador.
+            const snap = await db.collection('cautelas_abertas')
+                .where('status', '==', statusAtivo) // Requer apenas índice simples em 'status'
+                .get();
+            cautelas = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
 
         if (cautelas.length === 0) {
