@@ -5219,17 +5219,42 @@ async function loadActiveCautelas() {
     }
 }
         function iniciarRecebimentoCautela(cautelaId) {
-    // FECHA O MODAL ANTES DE REDIRECIONAR
+    // 1. FECHA O MODAL DE DETALHES
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     
-    // Alerta temporário antes do redirecionamento
-    alert(`Redirecionando para a Conferência de Cautela ID: ${cautelaId}.`);
-
-
-    window.location.href = `conferencia_app.html?cautela=${cautelaId}`; 
+    // Opcional: Oculta a sidebar para dar foco total ao app de conferência
+    document.getElementById('sidebar').style.display = 'none'; 
     
-    // Nota: Como estamos testando no Dashboard, você pode simular a abertura da tela:
-    showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
+    const contentArea = document.getElementById('content-area');
+
+    // 2. INJETA UM IFRAME na content-area
+    contentArea.innerHTML = `
+        <div class="op-card" id="conferencia-area" style="min-height: 90vh; padding: 0;">
+            <iframe id="conferencia-iframe" 
+                    src="conferencia_app.html?cautelaId=${cautelaId}" 
+                    style="width: 100%; height: 100%; border: none; min-height: 90vh;"
+                    allowfullscreen>
+            </iframe>
+        </div>
+    `;
+    
+    // 3. CONFIGURA O LISTENER PARA SABER QUANDO O APP TERMINOU
+    // A função no conferencia_app.txt envia uma mensagem quando termina a conferência (SIGMA_FINISHED)
+    window.removeEventListener('message', handleIframeMessage); // Evita múltiplos listeners
+    window.addEventListener('message', handleIframeMessage); 
+}
+
+// Crie uma nova função para lidar com as mensagens do Iframe
+function handleIframeMessage(event) {
+    // Garante que a mensagem veio do seu domínio
+    if (event.origin !== window.location.origin) return; 
+
+    if (event.data && event.data.type === 'SIGMA_FINISHED') {
+        alert('✅ Recebimento finalizado com sucesso. Voltando ao Dashboard.');
+        document.getElementById('sidebar').style.display = 'block'; // Mostra a sidebar
+        showCautelasDashboard('Cautelas a Receber'); // Recarrega a lista para remover a cautela finalizada
+        window.removeEventListener('message', handleIframeMessage); // Remove o listener após o uso
+    }
 }
     </script>
 </body>
