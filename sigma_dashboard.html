@@ -4448,40 +4448,6 @@ function showCautelasDashboard(type) {
                     </table>
                 </div>
             `;
-            } else if (type === 'Devolução de Materiais') {
-        // NOVO CÓDIGO PARA DEVOLUÇÃO
-        htmlContent = `
-            <div class="op-card">
-                <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                    <h3><i class="fas fa-undo-alt"></i> Devolução de Materiais</h3>
-                    <button class="btn-modern-action" onclick="showMainMenu()">
-                        <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                    </button>
-                </div>
-                
-                <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
-                    Selecione a cautela que deseja devolver.
-                </p>
-
-                <div id="loading-devolucao" style="text-align: center; padding: 20px;">
-                    <i class="fas fa-spinner fa-spin"></i> Carregando cautelas sob sua responsabilidade...
-                </div>
-
-                <table class="ca-table" id="devolucao-list-table" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Emissão</th>
-                            <th>Local Origem</th>
-                            <th>Itens</th>
-                            <th>Ação</th>
-                        </tr>
-                    </thead>
-                    <tbody id="devolucao-list-body">
-                        </tbody>
-                </table>
-            </div>
-        `;
             // Chamar a função de carregamento logo após injetar o HTML
             setTimeout(() => loadActiveCautelas(), 50);
 
@@ -4980,37 +4946,56 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        // 1. CONSULTA: Busca TODAS as cautelas ativas, inativas, etc.
-        // Esta query não usa 'WHERE' e, portanto, não deve falhar por falta de índice.
-        const snapAll = await db.collection('cautelas_abertas').get();
-        let allCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        const statusAtivos = ['ABERTA', 'RECEBIDA'];
-        let cautelas = [];
+        let queryRef = db.collection('cautelas_abertas')
+            .where('status', '==', 'ABERTA');
         
-        // --- FILTRAGEM TOTALMENTE CLIENT-SIDE ---
+        // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
-            cautelas = allCautelas.filter(c => 
-                // 1. Status deve ser Ativo
-                statusAtivos.includes(c.status) &&
-                // 2. O usuário deve ser o destinatário OU o emitente (Simulando o OR)
-                (c.destinatario === militarCompleto || c.emitente === militarCompleto)
-            );
+            // Operacional só vê suas próprias cautelas (emitidas ou recebidas)
+            // Nota: Firebase não permite "OR" em queries simples, faremos duas consultas e combinaremos localmente.
             
-        } else if (role === 'gestor') { 
-            cautelas = allCautelas.filter(c => 
-                // 1. Status deve ser Ativo
-                statusAtivos.includes(c.status) &&
-                // 2. A cautela pertence à Unidade do Gestor
-                (c.unidade === unidade) // Requere que o campo 'unidade' tenha sido salvo na emissão
-            );
+            // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
+            const snapDestinatario = await db.collection('cautelas_abertas')
+                .where('status', '==', 'ABERTA')
+                .where('destinatario', '==', militarCompleto)
+                .get();
+
+            // 2. Cautelas ONDE EU SOU O EMITENTE (Se precisar de visão de emissor)
+            const snapEmitente = await db.collection('cautelas_abertas')
+                .where('status', '==', 'ABERTA')
+                .where('emitente', '==', militarCompleto)
+                .get();
+
+            let allDocs = {};
+            snapDestinatario.forEach(doc => allDocs[doc.id] = doc.data());
+            snapEmitente.forEach(doc => allDocs[doc.id] = doc.data());
+
+            queryRef = Object.values(allDocs); // Usa o array combinado
             
-        } else { // Admin (Vê todas as ativas)
-            cautelas = allCautelas.filter(c => statusAtivos.includes(c.status));
+        } else if (role === 'gestor') {
+            // Gestor vê todas as cautelas ATIVAS da sua UNIDADE de origem.
+            // Isso requer a busca por 'local_origem_id', que é mapeado para a unidade.
+            // Como a unidade está salva no documento de cautela (se você a adicionou no iniciarCautelaProcesso), podemos filtrar.
+            // Se 'unidade' não foi salva no documento de cautela: será necessário iterar todas as rotas ativas daquela unidade.
+            // ASSUMINDO que 'local_origem' já inclui o nome da Unidade.
+            
+            // Vamos filtrar no lado do cliente por simplicidade de Query, pois cautelas ativas não devem ser muitas.
+            const snapAll = await queryRef.get();
+            queryRef = snapAll.docs.map(doc => doc.data()).filter(d => {
+                // A lógica mais segura seria garantir que a Unidade fosse salva na Cautela no momento da emissão.
+                // Como não temos essa informação explícita na estrutura da cautela aqui, vamos usar uma suposição:
+                // Se o documento tiver um campo 'unidade' que você adicionou na emissão, use-o.
+                return d.unidade === unidade; // Filtra as cautelas que pertencem à unidade do gestor
+            });
+            
+        } else { // Admin
+            const snapAll = await queryRef.get();
+            queryRef = snapAll.docs.map(doc => doc.data());
         }
 
-        // ----------------------------------------
-        
+        // Se for um array (Operacional ou Gestor/Admin filtrado):
+        const cautelas = Array.isArray(queryRef) ? queryRef : queryRef.docs.map(doc => doc.data());
+
         if (cautelas.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela ativa encontrada sob sua responsabilidade.</td></tr>`;
             loading.style.display = 'none';
@@ -5021,16 +5006,10 @@ async function loadActiveCautelas() {
         // --- RENDERIZAÇÃO DA TABELA ---
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
+            tr.onclick = () => showCautelaDetails(cautela.cautela_id); // Implementação futura para modal de detalhes
             
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
-            
-            let statusBadgeClass = 'badge-aberta';
-            if (cautela.status === 'RECEBIDA') {
-                statusBadgeClass = 'badge-ok'; 
-            }
-            
-            tr.onclick = () => showCautelaDetails(cautela.cautela_id);
             
             tr.innerHTML = `
                 <td><strong>${cautela.cautela_id}</strong></td>
@@ -5038,7 +5017,7 @@ async function loadActiveCautelas() {
                 <td>${dataEmissao}</td>
                 <td>${cautela.local_origem}</td>
                 <td>${itensCount} itens</td>
-                <td><span class="status-badge ${statusBadgeClass}">${cautela.status}</span></td>
+                <td><span class="status-badge badge-aberta">ATIVA</span></td>
             `;
         });
 
@@ -5047,8 +5026,7 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar cautelas ativas:", e);
-        // Garante que o loader suma mesmo em caso de erro
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO CRÍTICO NA BUSCA. Verifique o console: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
@@ -5148,195 +5126,18 @@ async function loadActiveCautelas() {
     }
 }
         function iniciarRecebimentoCautela(cautelaId) {
-    // 1. Fecha o modal de detalhes
+    // FECHA O MODAL ANTES DE REDIRECIONAR
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     
-    // 2. Monta a URL de destino (conferencia_app.html)
-    // O nome de guerra é vital para a chave do rascunho.
-    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
+    // Alerta temporário antes do redirecionamento
+    alert(`Redirecionando para a Conferência de Cautela ID: ${cautelaId}.`);
+
+    // LOGICA REAL:
+    // Redireciona para o aplicativo de conferência, passando o ID da cautela
+    // window.location.href = `conferencia_app.html?cautela=${cautelaId}`; 
     
-    // CRÍTICO: Passamos o CAUTELA_ID em vez do LISTA_ID
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}`;
-
-    // 3. Salva um RESUME local para permitir que o usuário retome em caso de interrupção
-    localStorage.setItem('sigma_active_conf', JSON.stringify({
-        id: cautelaId, 
-        nomeLista: `CAUTELA: ${cautelaId}`, 
-        user: userForDraft, 
-        url: url
-    }));
-    
-    // 4. Inicia o App de Conferência no IFRAME
-    const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
-    iframe.src = url; 
-    container.style.display = 'block';
-
-    // O Dashboard agora aguarda a mensagem 'SIGMA_FINISHED' do iframe.
-}
-        async function findDonoProvisorio(listaId) {
-    if (!listaId) return 'N/D';
-    
-    try {
-        // 1. Busca o resultado mais recente para aquela lista_id
-        const snap = await db.collection('resultados_conferencias')
-            .where('lista_id', '==', listaId)
-            .orderBy('timestamp', 'desc') // Ordena pelo mais recente
-            .limit(1) // Pega apenas o último
-            .get();
-
-        if (snap.empty) {
-            return 'N/D (Nenhuma conferência anterior)';
-        }
-
-        // 2. Extrai o nome do conferente
-        const ultimoResultado = snap.docs[0].data();
-        return ultimoResultado.conferente || 'N/D';
-
-    } catch (e) {
-        console.error("Erro ao buscar Dono Provisório:", e);
-        return 'Erro de Conexão';
-    }
-}
-        async function loadDevolucaoList() {
-    const tbody = document.getElementById('devolucao-list-body');
-    const loading = document.getElementById('loading-devolucao');
-    const table = document.getElementById('devolucao-list-table');
-    // Assume que currentUserData.nome_militar_completo está disponível
-    const militarCompleto = currentUserData.nome_militar_completo; 
-
-    tbody.innerHTML = '';
-    loading.style.display = 'block';
-    table.style.display = 'none';
-
-    try {
-        // Busca apenas as cautelas ATIVAS onde EU SOU O DESTINATÁRIO
-        const snapDestinatario = await db.collection('cautelas_abertas')
-            .where('status', '==', 'ABERTA')
-            .where('destinatario', '==', militarCompleto)
-            .get();
-
-        // Mapeia os documentos para incluir o ID
-        const cautelas = snapDestinatario.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        if (cautelas.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela em aberto sob sua responsabilidade para devolução.</td></tr>`;
-            loading.style.display = 'none';
-            table.style.display = 'table';
-            return;
-        }
-
-        // --- RENDERIZAÇÃO DA TABELA ---
-        cautelas.forEach(cautela => {
-            const tr = tbody.insertRow();
-            
-            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
-            
-            tr.innerHTML = `
-                <td><strong>${cautela.id}</strong></td>
-                <td>${dataEmissao}</td>
-                <td>${cautela.local_origem}</td>
-                <td>${itensCount} itens</td>
-                <td>
-                    <button class="btn-modern-action" onclick="showDevolucaoModal('${cautela.id}', '${cautela.local_origem_id}')">
-                        <i class="fas fa-sign-out-alt"></i> Devolver
-                    </button>
-                </td>
-            `;
-        });
-
-        loading.style.display = 'none';
-        table.style.display = 'table';
-        
-    } catch (e) {
-        console.error("Erro ao carregar lista de devolução:", e);
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
-        loading.style.display = 'none';
-        table.style.display = 'table';
-    }
-}
-        async function showDevolucaoModal(cautelaId, listaId) {
-    const modalHtml = `
-        <div id="devolucaoModal" class="modal-overlay">
-            <div class="modal-content" style="max-width: 500px;">
-                <h3 style="color: #800020;"><i class="fas fa-box-open"></i> Devolver Cautela ${cautelaId}</h3>
-                <p>Você está prestes a iniciar o processo de devolução dos itens da cautela.</p>
-                
-                <div class="form-area" style="padding: 15px; background-color: #f0f0f0; border-radius: 5px;">
-                    <h4>Destino da Devolução:</h4>
-                    <p style="font-size: 0.9em; color: #666; margin-bottom: 10px;">
-                        A devolução deve ser entregue e conferida pela autoridade atual responsável pela Lista Mestra de Origem.
-                    </p>
-
-                    <div style="padding: 10px; border: 1px solid #ccc; background-color: #fff; border-radius: 5px;">
-                        <label style="font-weight: bold; color: #800020;">Lista Mestra de Origem:</label>
-                        <span class="info-value" id="devolucao-local-origem-id">${listaId}</span>
-                        <hr style="border: 0; border-top: 1px dashed #eee; margin: 8px 0;">
-                        <label style="font-weight: bold; color: #800020;">Responsável Atual (Dono Provisório):</label>
-                        <span class="info-value" id="dono-provisorio-nome"><i class="fas fa-spinner fa-spin"></i> Buscando...</span>
-                    </div>
-                </div>
-
-                <div class="modal-actions" style="margin-top: 20px;">
-                    <button class="btn-modern-action" id="btn-iniciar-devolucao" disabled onclick="iniciarConferenciaDevolucao('${cautelaId}', '${listaId}')">
-                        <i class="fas fa-check-circle"></i> Iniciar Conferência de Devolução
-                    </button>
-                    <button class="modal-btn-cancel" onclick="document.getElementById('devolucaoModal').remove()">Fechar</button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    // 1. Injeta o modal no body (e remove qualquer anterior para evitar duplicação)
-    const existingModal = document.getElementById('devolucaoModal');
-    if (existingModal) existingModal.remove();
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // 2. Busca o Dono Provisório
-    const donoProvisorioSpan = document.getElementById('dono-provisorio-nome');
-    const btnIniciar = document.getElementById('btn-iniciar-devolucao');
-
-    try {
-        const donoNome = await findDonoProvisorio(listaId); // Função criada anteriormente
-        donoProvisorioSpan.textContent = donoNome;
-        
-        // Habilita o botão se um responsável válido for encontrado
-        if (donoNome.includes('N/D') || donoNome.includes('Erro')) {
-            btnIniciar.textContent = 'Não é possível iniciar (Sem Dono Provisório)';
-        } else {
-            btnIniciar.disabled = false;
-        }
-
-    } catch (e) {
-        donoProvisorioSpan.textContent = 'Erro ao carregar responsável.';
-        console.error("Erro na exibição do modal de devolução:", e);
-    }
-}
-        function iniciarConferenciaDevolucao(cautelaId, listaId) {
-    // FECHA O MODAL
-    const existingModal = document.getElementById('devolucaoModal');
-    if (existingModal) existingModal.remove();
-    
-    // 1. Monta a URL de destino com a flag 'devolucao=true'
-    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
-    
-    // CRÍTICO: Passamos o CAUTELA_ID E A FLAG DEVOLUCAO=TRUE
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&devolucao=true&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}`;
-
-    // 2. Salva um RESUME local
-    localStorage.setItem('sigma_active_conf', JSON.stringify({
-        id: cautelaId, 
-        nomeLista: `DEVOLUÇÃO: ${cautelaId}`, 
-        user: userForDraft, 
-        url: url
-    }));
-    
-    // 3. Inicia o App de Conferência no IFRAME
-    const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
-    iframe.src = url; 
-    container.style.display = 'block';
+    // Nota: Como estamos testando no Dashboard, você pode simular a abertura da tela:
+    showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
 }
     </script>
 </body>
