@@ -4989,35 +4989,40 @@ async function loadActiveCautelas() {
         // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
             
-            // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
-            const snapDestinatario = await db.collection('cautelas_abertas')
-                .where('status', 'in', statusAtivos) // <-- BUSCA STATUS ATIVOS
-                .where('destinatario', '==', militarCompleto)
-                .get();
-
-            // 2. Cautelas ONDE EU SOU O EMITENTE (Visão de quem emitiu)
-            const snapEmitente = await db.collection('cautelas_abertas')
-                .where('status', 'in', statusAtivos) // <-- BUSCA STATUS ATIVOS
-                .where('emitente', '==', militarCompleto)
-                .get();
-
+            // Definição dos status ATIVOS
+            const statusAtivos = ['ABERTA', 'RECEBIDA'];
             let allDocs = {};
-            // Combina os dois resultados, usando o ID do documento como chave para evitar duplicatas
-            snapDestinatario.forEach(doc => allDocs[doc.id] = doc.data());
-            snapEmitente.forEach(doc => allDocs[doc.id] = doc.data());
 
+            // CONSULTA 1: Cautelas onde EU SOU O DESTINATÁRIO
+            for (const status of statusAtivos) {
+                const snap = await db.collection('cautelas_abertas')
+                    .where('status', '==', status)
+                    .where('destinatario', '==', militarCompleto)
+                    .get();
+                snap.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+            }
+
+            // CONSULTA 2: Cautelas onde EU SOU O EMITENTE (e o status é ativo)
+            for (const status of statusAtivos) {
+                const snap = await db.collection('cautelas_abertas')
+                    .where('status', '==', status)
+                    .where('emitente', '==', militarCompleto)
+                    .get();
+                snap.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+            }
+
+            // Transforma o objeto de documentos únicos em um array final
             cautelas = Object.values(allDocs);
             
         } else { // Gestor ou Admin (Busca todas e filtra pela unidade se for Gestor)
             
             const snapAll = await db.collection('cautelas_abertas')
-                .where('status', 'in', statusAtivos) // <-- BUSCA STATUS ATIVOS
+                .where('status', 'in', ['ABERTA', 'RECEBIDA']) // Aqui o 'in' funciona melhor por ser a única query WHERE
                 .get();
                 
-            let tempCautelas = snapAll.docs.map(doc => doc.data());
+            let tempCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
             if (role === 'gestor') {
-                // Filtra pelo campo 'unidade' da cautela (se você o salvou na emissão)
                 cautelas = tempCautelas.filter(d => d.unidade === unidade); 
             } else { // Admin vê tudo
                 cautelas = tempCautelas;
