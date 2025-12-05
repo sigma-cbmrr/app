@@ -4407,62 +4407,35 @@ function showMainMenu() {
  * Exibe as telas de Cautelas Ativas, Receber, ou Histórico (Temporário).
  * Chamado pelos outros 3 botões do menu.
  */
-function showCautelasDashboard(type) {
-    const menuContainer = document.getElementById('cautelas-options-container');
-    const contentArea = document.getElementById('cautelas-content');
-    if (menuContainer) menuContainer.style.display = 'none';
+function showCautelasDashboard(listType) {
+    // 1. Definição da Estrutura HTML a ser injetada (dependendo do listType)
+    let htmlContent = '';
+    const contentArea = document.getElementById('cautelas-dashboard-content');
+    
+    // Esconde o menu principal e mostra a área de conteúdo
+    document.getElementById('main-menu-content').style.display = 'none'; 
+    contentArea.style.display = 'block';
 
-    if (contentArea) {
-        let htmlContent = '';
-
-        if (type === 'Cautelas Ativas') {
-            htmlContent = `
-                <div class="op-card">
-                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                        <h3><i class="fas fa-clipboard-check"></i> Cautelas Ativas (Sua Responsabilidade)</h3>
-                        <button class="btn-modern-action" onclick="showMainMenu()">
-                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                        </button>
-                    </div>
-                    
-                    <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
-                        Lista de materiais sob sua cautela. Clique em uma linha para ver os detalhes.
-                    </p>
-
-                    <div id="loading-cautelas" style="text-align: center; padding: 20px;">
-                        <i class="fas fa-spinner fa-spin"></i> Carregando cautelas...
-                    </div>
-
-                    <table class="ca-table" id="cautelas-ativas-table" style="display: none;">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Destinatário</th>
-                                <th>Emissão</th>
-                                <th>Local Origem</th>
-                                <th>Itens</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cautelas-ativas-body">
-                            </tbody>
-                    </table>
-                </div>
-            `;
-            } else if (type === 'Cautelas a Receber') {
+    if (listType === 'Nova Cautela') {
         htmlContent = `
             <div class="op-card">
-                <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                <h3><i class="fas fa-plus-circle"></i> Emissão de Nova Cautela</h3>
+                <button class="btn-modern-action" onclick="showMainMenu()"><i class="fas fa-arrow-left"></i> Voltar ao Menu</button>
+            </div>
+        `;
+        // Nenhuma função de carregamento é chamada aqui, pois a emissão é interativa.
+        
+    } else if (listType === 'Cautelas a Receber') {
+        // Novo fluxo: Cautelas aguardando confirmação (Status: ABERTA)
+        htmlContent = `
+            <div class="op-card">
+                <div class="header-container">
                     <h3><i class="fas fa-inbox"></i> Cautelas a Receber (Aguardando Confirmação)</h3>
-                    <button class="btn-modern-action" onclick="showMainMenu()">
-                        <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                    </button>
+                    <button class="btn-modern-action" onclick="showMainMenu()"><i class="fas fa-arrow-left"></i> Voltar ao Menu</button>
                 </div>
-
                 <div id="loading-receber" style="text-align: center; padding: 20px;">
                     <i class="fas fa-spinner fa-spin"></i> Buscando documentos para recebimento...
                 </div>
-
                 <table class="ca-table" id="receber-list-table" style="display: none;">
                     <thead>
                         <tr>
@@ -4473,74 +4446,106 @@ function showCautelasDashboard(type) {
                             <th data-label="Ação">Ação</th>
                         </tr>
                     </thead>
-                    <tbody id="receber-list-body">
-                        </tbody>
+                    <tbody id="receber-list-body"></tbody>
                 </table>
             </div>
         `;
-            } else if (type === 'Histórico de Cautelas') {
-    htmlContent = `
-        <div class="op-card">
-            <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                <h3><i class="fas fa-history"></i> Histórico de Cautelas (Finalizadas)</h3>
-                <button class="btn-modern-action" onclick="showMainMenu()">
-                    <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                </button>
-            </div>
+        // 🛑 CHAMADA CRÍTICA: loadReceberList()
+        setTimeout(() => loadReceberList(), 50); 
 
-            <div id="loading-historico" style="text-align: center; padding: 20px;">
-                <i class="fas fa-spinner fa-spin"></i> Buscando histórico de cautelas...
-            </div>
-
-            <table class="ca-table" id="historico-list-table" style="display: none;">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Emissão</th>
-                        <th>Recebimento</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody id="historico-list-body">
-                    </tbody>
-            </table>
-        </div>
-    `;
-            // Chamar a função de carregamento logo após injetar o HTML
-            setTimeout(() => loadActiveCautelas(), 50);
-        
-        } else {
-            // Placeholder para as outras telas (Receber, Histórico)
-            htmlContent = `
-                <div class="op-card">
-                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                        <h3><i class="fas fa-list-alt"></i> ${type || 'Conteúdo em Desenvolvimento'}</h3>
-                        <button class="btn-modern-action" onclick="showMainMenu()">
-                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                        </button>
-                    </div>
-                    <p>Conteúdo de **${type || 'Dashboard'}** será implementado aqui.</p>
+    } else if (listType === 'Cautelas Ativas') {
+        // Novo fluxo: Cautelas em posse confirmada (Status: RECEBIDA)
+        htmlContent = `
+            <div class="op-card">
+                <div class="header-container">
+                    <h3><i class="fas fa-clipboard-check"></i> Cautelas Ativas (Sua Posse Confirmada)</h3>
+                    <button class="btn-modern-action" onclick="showMainMenu()"><i class="fas fa-arrow-left"></i> Voltar ao Menu</button>
                 </div>
-            `;
-        }
-        
-        contentArea.innerHTML = htmlContent;
-        contentArea.style.display = 'block';
-    }
-}
-        window.addEventListener('popstate', function (event) {
-            // 1. Reinsere o estado no histórico para neutralizar a navegação de "Voltar"
-            history.pushState(null, null, location.href);
+                <div id="loading-cautelas" style="text-align: center; padding: 20px;">
+                    <i class="fas fa-spinner fa-spin"></i> Carregando cautelas...
+                </div>
+                <table class="ca-table" id="cautelas-ativas-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th data-label="ID">ID</th>
+                            <th data-label="Destinatário">Destinatário</th>
+                            <th data-label="Emissão">Emissão</th>
+                            <th data-label="Origem">Local Origem</th>
+                            <th data-label="Itens">Itens</th>
+                            <th data-label="Status">Status</th>
+                            <th data-label="Ação">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cautelas-ativas-body"></tbody>
+                </table>
+            </div>
+        `;
+        // 🛑 CHAMADA CRÍTICA: loadActiveCautelas()
+        setTimeout(() => loadActiveCautelas(), 50);
 
-            // 2. Verifica se o usuário realmente quer sair
-            if (confirm('Atenção! Você está prestes a sair do sistema. Deseja realmente sair?')) {
-                // Limpa o listener popstate para que a saída seja limpa
-                window.removeEventListener('popstate', arguments.callee);
-                
-                // Redireciona para o logout
-                logout(); 
-            }
-        });
+    } else if (listType === 'Devolução de Materiais') {
+         // Menu de Devolução (para itens RECEBIDA)
+        htmlContent = `
+            <div class="op-card">
+                <div class="header-container">
+                    <h3><i class="fas fa-undo-alt"></i> Iniciar Devolução de Materiais</h3>
+                    <button class="btn-modern-action" onclick="showMainMenu()"><i class="fas fa-arrow-left"></i> Voltar ao Menu</button>
+                </div>
+                <p>Selecione a cautela que deseja devolver.</p>
+                <div id="loading-devolucao" style="text-align: center; padding: 20px;">
+                    <i class="fas fa-spinner fa-spin"></i> Carregando cautelas para devolução...
+                </div>
+                <table class="ca-table" id="devolucao-list-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Emissão</th>
+                            <th>Local Origem</th>
+                            <th>Itens</th>
+                            <th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devolucao-list-body"></tbody>
+                </table>
+            </div>
+        `;
+        // 🛑 CHAMADA CRÍTICA: loadDevolucaoList() (Ainda não implementada)
+        setTimeout(() => loadDevolucaoList(), 50);
+
+    } else if (listType === 'Historico Cautelas') {
+        // Histórico de Cautelas (Status: FECHADA)
+        htmlContent = `
+            <div class="op-card">
+                <div class="header-container">
+                    <h3><i class="fas fa-history"></i> Histórico de Cautelas (Finalizadas)</h3>
+                    <button class="btn-modern-action" onclick="showMainMenu()"><i class="fas fa-arrow-left"></i> Voltar ao Menu</button>
+                </div>
+                <div id="loading-historico" style="text-align: center; padding: 20px;">
+                    <i class="fas fa-spinner fa-spin"></i> Buscando histórico de cautelas...
+                </div>
+                <table class="ca-table" id="historico-list-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Emissão</th>
+                            <th>Recebimento</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historico-list-body"></tbody>
+                </table>
+            </div>
+        `;
+        // 🛑 CHAMADA CRÍTICA: loadHistoricoCautelas()
+        setTimeout(() => loadHistoricoCautelas(), 50);
+
+    } else {
+        htmlContent = `<p style="padding: 20px;">Menu **${listType}** em desenvolvimento.</p>`;
+    }
+
+    // 2. Injeta o conteúdo no DOM
+    contentArea.innerHTML = htmlContent;
+}
         async function loadUsersForSearch() {
     const datalist = document.getElementById('lista-usuarios');
     if (!datalist) return;
