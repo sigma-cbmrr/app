@@ -4985,119 +4985,7 @@ function getSelectedCautelaItemsData() {
         updateCautelaItemCount();
     }
 }
-        /**
- * Busca e exibe as cautelas ativas.
- * Exibe todas as cautelas da unidade para Gestores/Admin,
- * e apenas as emitidas para/pelo usuário logado para Operacionais.
- */
-async function loadActiveCautelas() {
-    const tbody = document.getElementById('cautelas-ativas-body');
-    const loading = document.getElementById('loading-cautelas');
-    const table = document.getElementById('cautelas-ativas-table');
-    
-    // 🛑 VERIFICAÇÃO DE SEGURANÇA (1): Sai se os elementos desta tela não existirem
-    if (!tbody || !loading || !table) return; 
-    
-    // 🛑 VERIFICAÇÃO DE SEGURANÇA (2): Checa se os dados do usuário estão carregados
-    if (!window.currentUserData || !window.currentUserData.nome_militar_completo) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados. Recarregue a página.</td></tr>`;
-        loading.style.display = 'none'; 
-        table.style.display = 'table';
-        return;
-    }
-
-    const role = currentUserData.role || 'operacional';
-    const militarCompleto = currentUserData.nome_militar_completo;
-    const unidade = currentUserData.unidade;
-
-    tbody.innerHTML = '';
-    loading.style.display = 'block';
-    table.style.display = 'none';
-
-    try {
-        const statusAtivo = 'RECEBIDA'; // Status de posse confirmada
-        let cautelas = [];
-        let allDocs = {};
-        
-        // --- FILTRAGEM DE ACESSO ---
-        if (role === 'operacional') {
-            
-            // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
-            const snapDestinatario = await db.collection('cautelas_abertas')
-                .where('status', '==', statusAtivo) 
-                .where('destinatario', '==', militarCompleto)
-                .get();
-
-            // 2. Cautelas ONDE EU SOU O EMITENTE (Visão de quem emitiu)
-            const snapEmitente = await db.collection('cautelas_abertas')
-                .where('status', '==', statusAtivo) 
-                .where('emitente', '==', militarCompleto)
-                .get();
-
-            // Combina os dois resultados, usando o ID do documento como chave para evitar duplicatas
-            snapDestinatario.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
-            snapEmitente.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
-
-            cautelas = Object.values(allDocs);
-            
-        } else { // Gestor ou Admin (Busca todas e filtra pela unidade se for Gestor)
-            
-            const snapAll = await db.collection('cautelas_abertas')
-                .where('status', '==', statusAtivo) 
-                .get();
-                
-            let tempCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            if (role === 'gestor') {
-                cautelas = tempCautelas.filter(d => d.unidade === unidade); 
-            } else { // Admin vê tudo
-                cautelas = tempCautelas;
-            }
-        }
-
-        if (cautelas.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela em posse ativa para iniciar devolução.</td></tr>`;
-            loading.style.display = 'none';
-            table.style.display = 'table';
-            return;
-        }
-
-        // --- RENDERIZAÇÃO DA TABELA ---
-        cautelas.forEach(cautela => {
-            const tr = tbody.insertRow();
-            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
-            
-            let statusBadgeClass = 'badge-ok'; // Usamos 'badge-ok' para RECEBIDA
-            
-            let actionHtml = `<button class="btn-modern-action" onclick="showCautelaDetails('${cautela.cautela_id}')"><i class="fas fa-eye"></i> Detalhes</button>`;
-
-            if (cautela.status === 'RECEBIDA' && cautela.destinatario === militarCompleto) {
-                 actionHtml = `<button class="btn-modern-action btn-delete" onclick="showDevolucaoModal('${cautela.cautela_id}', '${cautela.local_origem_id}')"><i class="fas fa-sign-out-alt"></i> Devolver</button>`;
-            }
-
-            tr.innerHTML = `
-                <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
-                <td data-label="Destinatário">${cautela.destinatario}</td>
-                <td data-label="Emissão">${dataEmissao}</td>
-                <td data-label="Origem">${cautela.local_origem}</td>
-                <td data-label="Itens">${itensCount} itens</td>
-                <td data-label="Status"><span class="status-badge ${statusBadgeClass}">${cautela.status}</span></td>
-                <td data-label="Ação" class="actions">${actionHtml}</td>
-            `;
-        });
-
-        loading.style.display = 'none';
-        table.style.display = 'table';
-        
-    } catch (e) {
-        console.error("Erro ao carregar cautelas ativas:", e);
-        // Garantimos que o loader suma em caso de erro
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
-        loading.style.display = 'none';
-        table.style.display = 'table';
-    }
-}        async function showCautelaDetails(cautelaId) {
+        async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
     
@@ -5206,19 +5094,22 @@ async function loadActiveCautelas() {
     showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
 }
         /**
- * Busca e exibe as cautelas ATIVAS (RECEBIDA).
- * FILTRAGEM 100% LOCAL para evitar problemas de índice.
+ * Busca e exibe as cautelas ATIVAS, que agora são aquelas em posse confirmada (RECEBIDA).
+ * Consulta simplificada: busca apenas por 'destinatario' ou 'emitente' e filtra o status 'RECEBIDA' localmente.
  */
 async function loadActiveCautelas() {
     const tbody = document.getElementById('cautelas-ativas-body');
     const loading = document.getElementById('loading-cautelas');
     const table = document.getElementById('cautelas-ativas-table');
     
-    // Verificações de segurança
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (1)
     if (!tbody || !loading || !table) return; 
+    
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (2)
     if (!window.currentUserData || !window.currentUserData.nome_militar_completo) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados.</td></tr>`;
-        loading.style.display = 'none'; table.style.display = 'table';
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados. Recarregue a página.</td></tr>`;
+        loading.style.display = 'none'; 
+        table.style.display = 'table';
         return;
     }
 
@@ -5231,27 +5122,40 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        const allCautelas = await loadCautelasBase();
-        if (!allCautelas) throw new Error("Falha na comunicação com o Firestore.");
-
-        const statusAtivo = 'RECEBIDA'; 
+        const statusAtivo = 'RECEBIDA'; // Status de posse confirmada
         let cautelas = [];
         
-        // --- FILTRAGEM 100% LOCAL ---
+        // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
-            cautelas = allCautelas.filter(c =>
-                c.status === statusAtivo && 
-                (c.destinatario === militarCompleto || c.emitente === militarCompleto)
-            );
+            let allDocs = {};
+
+            // 🛑 CONSULTA 1: Apenas um filtro where('destinatario', '==', militarCompleto)
+            const snapDestinatario = await db.collection('cautelas_abertas')
+                .where('destinatario', '==', militarCompleto) 
+                .get();
+            snapDestinatario.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+
+            // 🛑 CONSULTA 2: Apenas um filtro where('emitente', '==', militarCompleto)
+            const snapEmitente = await db.collection('cautelas_abertas')
+                .where('emitente', '==', militarCompleto)
+                .get();
+            snapEmitente.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+
+            // FILTRAGEM LOCAL: Apenas status RECEBIDA
+            cautelas = Object.values(allDocs).filter(c => c.status === statusAtivo);
             
-        } else if (role === 'gestor') { 
-            cautelas = allCautelas.filter(c => 
-                c.status === statusAtivo &&
-                (c.unidade === unidade)
-            );
+        } else { // Gestor ou Admin (Mantemos a busca por status que é mais eficiente aqui)
             
-        } else { // Admin (Vê todas as ativas)
-            cautelas = allCautelas.filter(c => c.status === statusAtivo);
+            let query = db.collection('cautelas_abertas').where('status', '==', statusAtivo);
+
+            if (role === 'gestor') {
+                // Se for gestor, adiciona o filtro de unidade (Gestor/Unidade e Status RECEBIDA)
+                // Esta combinação PODE exigir um índice composto (status, unidade)
+                query = query.where('unidade', '==', unidade); 
+            }
+            
+            const snapAll = await query.get();
+            cautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
 
         if (cautelas.length === 0) {
@@ -5267,6 +5171,7 @@ async function loadActiveCautelas() {
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
             
             let statusBadgeClass = 'badge-ok'; 
+            
             let actionHtml = `<button class="btn-modern-action" onclick="showCautelaDetails('${cautela.cautela_id}')"><i class="fas fa-eye"></i> Detalhes</button>`;
 
             if (cautela.status === 'RECEBIDA' && cautela.destinatario === militarCompleto) {
@@ -5366,6 +5271,81 @@ async function loadCautelasBase() {
     } catch (e) {
         console.error("Erro CRÍTICO na busca base do Firestore:", e);
         return null; // Sinaliza falha total de comunicação
+    }
+}
+        /**
+ * Carrega a lista de cautelas que foram emitidas (ABERTA) e aguardam confirmação do destinatário.
+ * Consulta simplificada: busca apenas por 'destinatario' e filtra o status 'ABERTA' localmente.
+ */
+async function loadReceberList() {
+    const tbody = document.getElementById('receber-list-body');
+    const loading = document.getElementById('loading-receber');
+    const table = document.getElementById('receber-list-table');
+    
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (1)
+    if (!tbody || !loading || !table) return; 
+
+    // 🛑 VERIFICAÇÃO DE SEGURANÇA (2)
+    if (!window.currentUserData || !window.currentUserData.nome_militar_completo) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados. Recarregue a página.</td></tr>`;
+        loading.style.display = 'none'; 
+        table.style.display = 'table';
+        return;
+    }
+    
+    const militarCompleto = currentUserData.nome_militar_completo; 
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+
+    try {
+        // 🛑 CONSULTA MAIS SIMPLES: Apenas um filtro where('destinatario', '==', militarCompleto)
+        const snap = await db.collection('cautelas_abertas')
+            .where('destinatario', '==', militarCompleto)
+            .get();
+
+        const allDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // 🛑 FILTRAGEM LOCAL: Apenas status ABERTA
+        const cautelas = allDocs.filter(c => c.status === 'ABERTA');
+
+        if (cautelas.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">Nenhuma nova cautela aguardando recebimento.</td></tr>`;
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            return;
+        }
+
+        // RENDERIZAÇÃO
+        cautelas.forEach(cautela => {
+            const tr = tbody.insertRow();
+            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
+            
+            tr.innerHTML = `
+                <td data-label="ID"><strong>${cautela.id}</strong></td>
+                <td data-label="Emissão">${dataEmissao}</td>
+                <td data-label="Origem">${cautela.local_origem}</td>
+                <td data-label="Itens">${itensCount} itens</td>
+                <td data-label="Ação" class="actions">
+                    <button class="btn-modern-action btn-create" 
+                            style="background-color: #1b8a3e;"
+                            onclick="iniciarRecebimentoCautela('${cautela.id}')">
+                        <i class="fas fa-check"></i> Receber
+                    </button>
+                </td>
+            `;
+        });
+
+        loading.style.display = 'none';
+        table.style.display = 'table';
+        
+    } catch (e) {
+        console.error("Erro ao carregar lista a receber:", e);
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        loading.style.display = 'none';
+        table.style.display = 'table';
     }
 }
     </script>
