@@ -5094,18 +5094,16 @@ function getSelectedCautelaItemsData() {
     // Nota: Como estamos testando no Dashboard, você pode simular a abertura da tela:
     showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
 }
-        /**
+       /**
  * Busca e exibe as cautelas ATIVAS, que agora são aquelas em posse confirmada (RECEBIDA).
- * Consulta simplificada: busca apenas por 'destinatario' ou 'emitente' e filtra o status 'RECEBIDA' localmente.
+ * Lógica de consulta simplificada para Gestor/Operacional.
  */
 async function loadActiveCautelas() {
-    console.log("DEBUG: Valor de militarCompleto usado na Query:", militarCompleto);
-    console.log("DEBUG: Valor de unidade usado na Query (Gestor):", unidade);
     const tbody = document.getElementById('cautelas-ativas-body');
     const loading = document.getElementById('loading-cautelas');
     const table = document.getElementById('cautelas-ativas-table');
     
-    // DECLARAÇÃO NO ESCOPO SUPERIOR
+    // 🛑 CORREÇÃO DE ESCOPO: DECLARAÇÃO NO ESCOPO SUPERIOR
     let role = 'operacional';
     let militarCompleto = '';
     let unidade = '';
@@ -5125,6 +5123,10 @@ async function loadActiveCautelas() {
     role = currentUserData.role || 'operacional';
     militarCompleto = currentUserData.nome_militar_completo;
     unidade = currentUserData.unidade;
+    
+    // 🛑 LOG DE DEBUG
+    console.log("DEBUG loadActiveCautelas: Militar Completo usado:", militarCompleto, " | Role:", role, " | Unidade:", unidade);
+
 
     tbody.innerHTML = '';
     loading.style.display = 'block';
@@ -5154,6 +5156,7 @@ async function loadActiveCautelas() {
             
         } else if (role === 'gestor') { 
             // 🛑 CONSULTA SIMPLIFICADA PARA GESTOR: Filtra apenas por UNIDADE
+            // Evita a combinação de filtros (status + unidade) que exige índice composto
             const snap = await db.collection('cautelas_abertas')
                 .where('unidade', '==', unidade) 
                 .get();
@@ -5185,14 +5188,15 @@ async function loadActiveCautelas() {
             
             let statusBadgeClass = 'badge-ok'; 
             
-            let actionHtml = `<button class="btn-modern-action" onclick="showCautelaDetails('${cautela.cautela_id}')"><i class="fas fa-eye"></i> Detalhes</button>`;
+            let actionHtml = `<button class="btn-modern-action" onclick="showCautelaDetails('${cautela.id}')"><i class="fas fa-eye"></i> Detalhes</button>`;
 
+            // Se for o destinatário, permite devolver
             if (cautela.status === 'RECEBIDA' && cautela.destinatario === militarCompleto) {
-                 actionHtml = `<button class="btn-modern-action btn-delete" onclick="showDevolucaoModal('${cautela.cautela_id}', '${cautela.local_origem_id}')"><i class="fas fa-sign-out-alt"></i> Devolver</button>`;
+                 actionHtml = `<button class="btn-modern-action btn-delete" onclick="showDevolucaoModal('${cautela.id}', '${cautela.local_origem_id}')"><i class="fas fa-sign-out-alt"></i> Devolver</button>`;
             }
 
             tr.innerHTML = `
-                <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
+                <td data-label="ID"><strong>${cautela.id}</strong></td>
                 <td data-label="Destinatário">${cautela.destinatario}</td>
                 <td data-label="Emissão">${dataEmissao}</td>
                 <td data-label="Origem">${cautela.local_origem}</td>
@@ -5206,21 +5210,21 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar cautelas ativas:", e);
-        // O console.log com o erro deve aparecer se a consulta falhar!
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO DE BUSCA: ${e.message}</td></tr>`;
+        // Exibe o erro de comunicação na tela
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO DE BUSCA (Firestore): ${e.message}</td></tr>`;
         loading.style.display = 'none'; table.style.display = 'table';
     }
 }
        /**
- * Carrega o histórico de cautelas (DEVOLVIDA/FECHADA).
- * Implementado: Filtragem 100% LOCAL para evitar problemas de Índice Composto.
+ * Carrega o histórico de cautelas (FECHADA).
+ * Consulta única por status, com filtragem local para evitar problemas de índice.
  */
 async function loadHistoricoCautelas() {
     const tbody = document.getElementById('historico-list-body');
     const loading = document.getElementById('loading-historico');
     const table = document.getElementById('historico-list-table');
 
-    // DECLARAÇÃO NO ESCOPO SUPERIOR
+    // 🛑 CORREÇÃO DE ESCOPO: DECLARAÇÃO NO ESCOPO SUPERIOR
     let militarCompleto = ''; 
     let role = 'operacional';
     let unidade = '';
@@ -5240,19 +5244,20 @@ async function loadHistoricoCautelas() {
     role = currentUserData.role || 'operacional';
     unidade = currentUserData.unidade;
 
+    // 🛑 LOG DE DEBUG
+    console.log("DEBUG loadHistoricoCautelas: Militar Completo usado:", militarCompleto, " | Role:", role, " | Unidade:", unidade);
+
+
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
     try {
-        // 🛑 CONSULTA ÚNICA: Filtra apenas por STATUS FECHADA
-        let query = db.collection('cautelas_abertas')
-            .where('status', '==', 'FECHADA');
+        // 🛑 CONSULTA ÚNICA: Filtra apenas por STATUS FECHADA (NÃO PODE HAVER ORDER BY AQUI)
+        const snap = await db.collection('cautelas_abertas')
+            .where('status', '==', 'FECHADA')
+            .get(); // Sem ordenação para evitar falhas de índice
 
-        // Adiciona a ordenação para o histórico (funciona pois o filtro de status é único)
-        
-
-        const snap = await query.get();
         let allHistorico = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         let cautelas = [];
@@ -5282,6 +5287,7 @@ async function loadHistoricoCautelas() {
         // RENDERIZAÇÃO
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
+            // Tratamento de datas (pode ser necessário verificar se o campo existe)
             const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
             const dataRecebimento = cautela.timestamp_recebimento ? cautela.timestamp_recebimento.toDate().toLocaleDateString('pt-BR') : 'N/D';
             const dataDevolucao = cautela.timestamp_devolucao ? cautela.timestamp_devolucao.toDate().toLocaleDateString('pt-BR') : 'N/D';
@@ -5289,7 +5295,7 @@ async function loadHistoricoCautelas() {
             tr.innerHTML = `
                 <td data-label="ID"><strong>${cautela.id}</strong></td>
                 <td data-label="Emissão">${dataEmissao}</td>
-                <td data-label="Recebimento">${dataRecebimento}</td>
+                <td data-label="Devolução">${dataDevolucao}</td>
                 <td data-label="Status"><span class="status-badge badge-fechada">${cautela.status}</span></td>
             `;
         });
@@ -5299,7 +5305,8 @@ async function loadHistoricoCautelas() {
 
     } catch (e) {
         console.error("Erro ao carregar histórico:", e);
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        // Exibe o erro de comunicação na tela
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:red; padding:20px;">ERRO DE BUSCA (Firestore): ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
@@ -5323,13 +5330,11 @@ async function loadCautelasBase() {
  * Consulta simplificada: busca apenas por 'destinatario' e filtra o status 'ABERTA' localmente.
  */
 async function loadReceberList() {
-    console.log("DEBUG: Valor de militarCompleto usado na Query:", militarCompleto);
-    console.log("DEBUG: Valor de unidade usado na Query (Gestor):", unidade);
     const tbody = document.getElementById('receber-list-body');
     const loading = document.getElementById('loading-receber');
     const table = document.getElementById('receber-list-table');
     
-    // DECLARAÇÃO NO ESCOPO SUPERIOR
+    // 🛑 CORREÇÃO DE ESCOPO: DECLARAÇÃO NO ESCOPO SUPERIOR
     let militarCompleto = ''; 
 
     // 🛑 VERIFICAÇÃO DE SEGURANÇA (1)
@@ -5343,43 +5348,52 @@ async function loadReceberList() {
         return;
     }
     
+    // ATRIBUIÇÃO DE VALORES
     militarCompleto = currentUserData.nome_militar_completo; 
+    
+    // 🛑 LOG DE DEBUG: VERIFIQUE ESSA STRING NO CONSOLE (F12)
+    console.log("DEBUG loadReceberList: Militar Completo usado na Query:", militarCompleto);
 
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
     try {
-        // 🛑 CONSULTA DE DIAGNÓSTICO: IGNORA TODOS OS FILTROS DE USUÁRIO/STATUS.
-        // Se isso falhar, o problema é na conexão ou nas Regras de Segurança do Firestore.
+        // 🛑 CONSULTA MAIS SIMPLES: Apenas um filtro where('destinatario', '==', militarCompleto)
         const snap = await db.collection('cautelas_abertas')
-            .limit(100) // Limita para ser rápido
+            .where('destinatario', '==', militarCompleto)
             .get();
 
         const allDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // REMOVEMOS O FILTRO LOCAL, vamos mostrar TUDO que for carregado
-        const cautelas = allDocs; 
+        // 🛑 FILTRAGEM LOCAL: Apenas status ABERTA
+        const cautelas = allDocs.filter(c => c.status === 'ABERTA');
 
         if (cautelas.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">DIAGNÓSTICO: Banco de Dados Acessível, mas Nenhuma Cautela Encontrada.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">Nenhuma nova cautela aguardando recebimento.</td></tr>`;
             loading.style.display = 'none';
             table.style.display = 'table';
             return;
         }
 
-        // RENDERIZAÇÃO DE DIAGNÓSTICO: Mostra os 100 documentos encontrados
+        // RENDERIZAÇÃO
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
-            // Mostramos o status e o destinatário para verificar a integridade da string
+            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
             
             tr.innerHTML = `
                 <td data-label="ID"><strong>${cautela.id}</strong></td>
                 <td data-label="Emissão">${dataEmissao}</td>
-                <td data-label="Status">${cautela.status}</td>
-                <td data-label="Destinatário">${cautela.destinatario}</td>
-                <td data-label="DEBUG">OK</td>
+                <td data-label="Origem">${cautela.local_origem}</td>
+                <td data-label="Itens">${itensCount} itens</td>
+                <td data-label="Ação" class="actions">
+                    <button class="btn-modern-action btn-create" 
+                            style="background-color: #1b8a3e;"
+                            onclick="iniciarRecebimentoCautela('${cautela.id}')">
+                        <i class="fas fa-check"></i> Receber
+                    </button>
+                </td>
             `;
         });
 
@@ -5387,9 +5401,9 @@ async function loadReceberList() {
         table.style.display = 'table';
         
     } catch (e) {
-        // Se chegar aqui, o erro é no AWAIT snap.get()
-        console.error("ERRO CRÍTICO DE CONEXÃO AO FIRESTORE:", e);
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">ERRO DE CONEXÃO: ${e.message}</td></tr>`;
+        console.error("Erro ao carregar lista a receber:", e);
+        // Exibe o erro de comunicação na tela
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">ERRO DE BUSCA (Firestore): ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
