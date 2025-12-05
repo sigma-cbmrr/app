@@ -4980,52 +4980,37 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        // Define os status considerados como "ativos" no Dashboard
+        // 1. CONSULTA: Busca TODAS as cautelas ativas, inativas, etc.
+        // Esta query não usa 'WHERE' e, portanto, não deve falhar por falta de índice.
+        const snapAll = await db.collection('cautelas_abertas').get();
+        let allCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
         const statusAtivos = ['ABERTA', 'RECEBIDA'];
-
-        let querySnapshot;
-        let cautelas;
+        let cautelas = [];
         
-        // --- FILTRAGEM DE ACESSO ---
+        // --- FILTRAGEM TOTALMENTE CLIENT-SIDE ---
         if (role === 'operacional') {
+            cautelas = allCautelas.filter(c => 
+                // 1. Status deve ser Ativo
+                statusAtivos.includes(c.status) &&
+                // 2. O usuário deve ser o destinatário OU o emitente (Simulando o OR)
+                (c.destinatario === militarCompleto || c.emitente === militarCompleto)
+            );
             
-            const statusAtivos = ['ABERTA', 'RECEBIDA']; // Status que queremos exibir
-            let allDocs = {};
+        } else if (role === 'gestor') { 
+            cautelas = allCautelas.filter(c => 
+                // 1. Status deve ser Ativo
+                statusAtivos.includes(c.status) &&
+                // 2. A cautela pertence à Unidade do Gestor
+                (c.unidade === unidade) // Requere que o campo 'unidade' tenha sido salvo na emissão
+            );
             
-            // 1. CONSULTA: Cautelas onde EU SOU O DESTINATÁRIO (Removemos o filtro de status)
-            const snapDestinatario = await db.collection('cautelas_abertas')
-                .where('destinatario', '==', militarCompleto)
-                .get();
-
-            // 2. CONSULTA: Cautelas onde EU SOU O EMITENTE (Removemos o filtro de status)
-            const snapEmitente = await db.collection('cautelas_abertas')
-                .where('emitente', '==', militarCompleto)
-                .get();
-
-            // Combina os dois resultados e aplica o filtro de status LOCALMENTE
-            snapDestinatario.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
-            snapEmitente.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
-
-            // Filtra os resultados combinados em JavaScript, garantindo que o status seja ATIVO
-            cautelas = Object.values(allDocs).filter(c => statusAtivos.includes(c.status));
-            
-        } else { // Gestor ou Admin (Mantemos a busca por status com 'in' que é menos problemática aqui)
-            
-            const statusAtivos = ['ABERTA', 'RECEBIDA'];
-            const snapAll = await db.collection('cautelas_abertas')
-                .where('status', 'in', statusAtivos) 
-                .get();
-                
-            let tempCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            if (role === 'gestor') {
-                cautelas = tempCautelas.filter(d => d.unidade === unidade); 
-            } else { // Admin vê tudo
-                cautelas = tempCautelas;
-            }
+        } else { // Admin (Vê todas as ativas)
+            cautelas = allCautelas.filter(c => statusAtivos.includes(c.status));
         }
-        // ... (O restante da lógica de renderização é mantida) ...
 
+        // ----------------------------------------
+        
         if (cautelas.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela ativa encontrada sob sua responsabilidade.</td></tr>`;
             loading.style.display = 'none';
@@ -5040,12 +5025,9 @@ async function loadActiveCautelas() {
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
             
-            // Define o status visual (badge)
             let statusBadgeClass = 'badge-aberta';
             if (cautela.status === 'RECEBIDA') {
-                statusBadgeClass = 'badge-ok'; // Usando badge-ok para indicar posse confirmada
-            } else if (cautela.status === 'FECHADA') {
-                statusBadgeClass = 'badge-fechada';
+                statusBadgeClass = 'badge-ok'; 
             }
             
             tr.onclick = () => showCautelaDetails(cautela.cautela_id);
@@ -5065,11 +5047,11 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar cautelas ativas:", e);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        // Garante que o loader suma mesmo em caso de erro
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO CRÍTICO NA BUSCA. Verifique o console: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
-}
         async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
