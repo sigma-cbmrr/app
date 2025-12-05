@@ -4448,6 +4448,35 @@ function showCautelasDashboard(type) {
                     </table>
                 </div>
             `;
+            } else if (type === 'Cautelas a Receber') {
+        htmlContent = `
+            <div class="op-card">
+                <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                    <h3><i class="fas fa-inbox"></i> Cautelas a Receber (Aguardando Confirmação)</h3>
+                    <button class="btn-modern-action" onclick="showMainMenu()">
+                        <i class="fas fa-arrow-left"></i> Voltar ao Menu
+                    </button>
+                </div>
+
+                <div id="loading-receber" style="text-align: center; padding: 20px;">
+                    <i class="fas fa-spinner fa-spin"></i> Buscando documentos para recebimento...
+                </div>
+
+                <table class="ca-table" id="receber-list-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th data-label="ID">ID</th>
+                            <th data-label="Emissão">Emissão</th>
+                            <th data-label="Origem">Local Origem</th>
+                            <th data-label="Itens">Itens</th>
+                            <th data-label="Ação">Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="receber-list-body">
+                        </tbody>
+                </table>
+            </div>
+        `;
             // Chamar a função de carregamento logo após injetar o HTML
             setTimeout(() => loadActiveCautelas(), 50);
 
@@ -4946,58 +4975,48 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        let queryRef = db.collection('cautelas_abertas')
-            .where('status', '==', 'ABERTA');
+        const statusAtivo = 'RECEBIDA'; // Apenas cautelas com posse confirmada
+        let cautelas = [];
+        let allDocs = {};
         
         // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
-            // Operacional só vê suas próprias cautelas (emitidas ou recebidas)
-            // Nota: Firebase não permite "OR" em queries simples, faremos duas consultas e combinaremos localmente.
             
             // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
             const snapDestinatario = await db.collection('cautelas_abertas')
-                .where('status', '==', 'ABERTA')
+                .where('status', '==', statusAtivo) 
                 .where('destinatario', '==', militarCompleto)
                 .get();
 
-            // 2. Cautelas ONDE EU SOU O EMITENTE (Se precisar de visão de emissor)
+            // 2. Cautelas ONDE EU SOU O EMITENTE (Visão de quem emitiu)
             const snapEmitente = await db.collection('cautelas_abertas')
-                .where('status', '==', 'ABERTA')
+                .where('status', '==', statusAtivo) 
                 .where('emitente', '==', militarCompleto)
                 .get();
 
-            let allDocs = {};
-            snapDestinatario.forEach(doc => allDocs[doc.id] = doc.data());
-            snapEmitente.forEach(doc => allDocs[doc.id] = doc.data());
+            // Combina os dois resultados, usando o ID do documento como chave para evitar duplicatas
+            snapDestinatario.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+            snapEmitente.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
 
-            queryRef = Object.values(allDocs); // Usa o array combinado
+            cautelas = Object.values(allDocs);
             
-        } else if (role === 'gestor') {
-            // Gestor vê todas as cautelas ATIVAS da sua UNIDADE de origem.
-            // Isso requer a busca por 'local_origem_id', que é mapeado para a unidade.
-            // Como a unidade está salva no documento de cautela (se você a adicionou no iniciarCautelaProcesso), podemos filtrar.
-            // Se 'unidade' não foi salva no documento de cautela: será necessário iterar todas as rotas ativas daquela unidade.
-            // ASSUMINDO que 'local_origem' já inclui o nome da Unidade.
+        } else { // Gestor ou Admin (Busca todas e filtra pela unidade se for Gestor)
             
-            // Vamos filtrar no lado do cliente por simplicidade de Query, pois cautelas ativas não devem ser muitas.
-            const snapAll = await queryRef.get();
-            queryRef = snapAll.docs.map(doc => doc.data()).filter(d => {
-                // A lógica mais segura seria garantir que a Unidade fosse salva na Cautela no momento da emissão.
-                // Como não temos essa informação explícita na estrutura da cautela aqui, vamos usar uma suposição:
-                // Se o documento tiver um campo 'unidade' que você adicionou na emissão, use-o.
-                return d.unidade === unidade; // Filtra as cautelas que pertencem à unidade do gestor
-            });
+            const snapAll = await db.collection('cautelas_abertas')
+                .where('status', '==', statusAtivo) 
+                .get();
+                
+            let tempCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             
-        } else { // Admin
-            const snapAll = await queryRef.get();
-            queryRef = snapAll.docs.map(doc => doc.data());
+            if (role === 'gestor') {
+                cautelas = tempCautelas.filter(d => d.unidade === unidade); 
+            } else { // Admin vê tudo
+                cautelas = tempCautelas;
+            }
         }
 
-        // Se for um array (Operacional ou Gestor/Admin filtrado):
-        const cautelas = Array.isArray(queryRef) ? queryRef : queryRef.docs.map(doc => doc.data());
-
         if (cautelas.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela ativa encontrada sob sua responsabilidade.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela em posse ativa para iniciar devolução.</td></tr>`;
             loading.style.display = 'none';
             table.style.display = 'table';
             return;
@@ -5006,18 +5025,26 @@ async function loadActiveCautelas() {
         // --- RENDERIZAÇÃO DA TABELA ---
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
-            tr.onclick = () => showCautelaDetails(cautela.cautela_id); // Implementação futura para modal de detalhes
-            
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
             
+            let statusBadgeClass = 'badge-ok'; // Usamos 'badge-ok' para RECEBIDA
+            
+            // Ação: Se eu for o destinatário, posso devolver.
+            let actionHtml = `<button class="btn-modern-action" onclick="showCautelaDetails('${cautela.cautela_id}')"><i class="fas fa-eye"></i> Detalhes</button>`;
+
+            if (cautela.status === 'RECEBIDA' && cautela.destinatario === militarCompleto) {
+                 actionHtml = `<button class="btn-modern-action btn-delete" onclick="showDevolucaoModal('${cautela.cautela_id}', '${cautela.local_origem_id}')"><i class="fas fa-sign-out-alt"></i> Devolver</button>`;
+            }
+
             tr.innerHTML = `
-                <td><strong>${cautela.cautela_id}</strong></td>
-                <td>${cautela.destinatario}</td>
-                <td>${dataEmissao}</td>
-                <td>${cautela.local_origem}</td>
-                <td>${itensCount} itens</td>
-                <td><span class="status-badge badge-aberta">ATIVA</span></td>
+                <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
+                <td data-label="Destinatário">${cautela.destinatario}</td>
+                <td data-label="Emissão">${dataEmissao}</td>
+                <td data-label="Origem">${cautela.local_origem}</td>
+                <td data-label="Itens">${itensCount} itens</td>
+                <td data-label="Status"><span class="status-badge ${statusBadgeClass}">${cautela.status}</span></td>
+                <td data-label="Ação" class="actions">${actionHtml}</td>
             `;
         });
 
@@ -5138,6 +5165,63 @@ async function loadActiveCautelas() {
     
     // Nota: Como estamos testando no Dashboard, você pode simular a abertura da tela:
     showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
+}
+        async function loadReceberList() {
+    const tbody = document.getElementById('receber-list-body');
+    const loading = document.getElementById('loading-receber');
+    const table = document.getElementById('receber-list-table');
+    const militarCompleto = currentUserData.nome_militar_completo; 
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+
+    try {
+        // Usa as duas consultas para simular o OR, mas foca no destinatário (o emitente não precisa ver essa tela)
+        const snap = await db.collection('cautelas_abertas')
+            .where('status', '==', 'ABERTA')
+            .where('destinatario', '==', militarCompleto)
+            .get();
+
+        const cautelas = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        if (cautelas.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">Nenhuma nova cautela aguardando recebimento.</td></tr>`;
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            return;
+        }
+
+        // RENDERIZAÇÃO
+        cautelas.forEach(cautela => {
+            const tr = tbody.insertRow();
+            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
+            
+            tr.innerHTML = `
+                <td data-label="ID"><strong>${cautela.id}</strong></td>
+                <td data-label="Emissão">${dataEmissao}</td>
+                <td data-label="Origem">${cautela.local_origem}</td>
+                <td data-label="Itens">${itensCount} itens</td>
+                <td data-label="Ação" class="actions">
+                    <button class="btn-modern-action btn-create" 
+                            style="background-color: #1b8a3e;"
+                            onclick="iniciarRecebimentoCautela('${cautela.id}')">
+                        <i class="fas fa-check"></i> Receber
+                    </button>
+                </td>
+            `;
+        });
+
+        loading.style.display = 'none';
+        table.style.display = 'table';
+        
+    } catch (e) {
+        console.error("Erro ao carregar lista a receber:", e);
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        loading.style.display = 'none';
+        table.style.display = 'table';
+    }
 }
     </script>
 </body>
