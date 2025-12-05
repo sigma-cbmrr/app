@@ -5094,8 +5094,9 @@ function getSelectedCautelaItemsData() {
     showCautelasDashboard('Cautelas a Receber'); // Chamaremos a tela de recebimento no Dashboard por enquanto.
 }
         /**
- * Busca e exibe as cautelas ATIVAS, que agora são aquelas em posse confirmada (RECEBIDA).
- * Consulta simplificada: busca apenas por 'destinatario' ou 'emitente' e filtra o status 'RECEBIDA' localmente.
+ * Busca e exibe as cautelas ATIVAS (RECEBIDA).
+ * Implementado: Consulta simplificada para TODOS os perfis (apenas um filtro no Firestore)
+ * para evitar problemas de Índice Composto.
  */
 async function loadActiveCautelas() {
     const tbody = document.getElementById('cautelas-ativas-body');
@@ -5107,7 +5108,7 @@ async function loadActiveCautelas() {
     
     // 🛑 VERIFICAÇÃO DE SEGURANÇA (2)
     if (!window.currentUserData || !window.currentUserData.nome_militar_completo) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados. Recarregue a página.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">ERRO: Dados de usuário não carregados.</td></tr>`;
         loading.style.display = 'none'; 
         table.style.display = 'table';
         return;
@@ -5115,27 +5116,27 @@ async function loadActiveCautelas() {
 
     const role = currentUserData.role || 'operacional';
     const militarCompleto = currentUserData.nome_militar_completo;
-    const unidade = currentUserData.unidade;
+    const unidade = currentUserData.unidade; // Usado para Gestor
 
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
     try {
-        const statusAtivo = 'RECEBIDA'; // Status de posse confirmada
+        const statusAtivo = 'RECEBIDA'; 
         let cautelas = [];
-        
-        // --- FILTRAGEM DE ACESSO ---
-        if (role === 'operacional') {
-            let allDocs = {};
+        let allDocs = {}; // Usado para Operacional
 
-            // 🛑 CONSULTA 1: Apenas um filtro where('destinatario', '==', militarCompleto)
+        // --- FILTRAGEM DE ACESSO (1 FILTRO MAX NO FIRESTORE) ---
+        if (role === 'operacional') {
+            
+            // 🛑 1. CONSULTA: Filtra apenas por DESTINATÁRIO
             const snapDestinatario = await db.collection('cautelas_abertas')
                 .where('destinatario', '==', militarCompleto) 
                 .get();
             snapDestinatario.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
 
-            // 🛑 CONSULTA 2: Apenas um filtro where('emitente', '==', militarCompleto)
+            // 🛑 2. CONSULTA: Filtra apenas por EMITENTE
             const snapEmitente = await db.collection('cautelas_abertas')
                 .where('emitente', '==', militarCompleto)
                 .get();
@@ -5144,18 +5145,23 @@ async function loadActiveCautelas() {
             // FILTRAGEM LOCAL: Apenas status RECEBIDA
             cautelas = Object.values(allDocs).filter(c => c.status === statusAtivo);
             
-        } else { // Gestor ou Admin (Mantemos a busca por status que é mais eficiente aqui)
-            
-            let query = db.collection('cautelas_abertas').where('status', '==', statusAtivo);
+        } else if (role === 'gestor') { 
+            // 🛑 CONSULTA SIMPLIFICADA PARA GESTOR: Filtra apenas por UNIDADE
+            const snap = await db.collection('cautelas_abertas')
+                .where('unidade', '==', unidade) // Requer apenas índice simples em 'unidade'
+                .get();
 
-            if (role === 'gestor') {
-                // Se for gestor, adiciona o filtro de unidade (Gestor/Unidade e Status RECEBIDA)
-                // Esta combinação PODE exigir um índice composto (status, unidade)
-                query = query.where('unidade', '==', unidade); 
-            }
+            let tempCautelas = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // FILTRAGEM LOCAL: Apenas status RECEBIDA
+            cautelas = tempCautelas.filter(c => c.status === statusAtivo);
             
-            const snapAll = await query.get();
-            cautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        } else { // Admin (Vê todas as ativas)
+             // 🛑 CONSULTA PARA ADMIN: Filtra apenas por STATUS
+            const snap = await db.collection('cautelas_abertas')
+                .where('status', '==', statusAtivo) // Requer apenas índice simples em 'status'
+                .get();
+            cautelas = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
 
         if (cautelas.length === 0) {
@@ -5193,6 +5199,7 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar cautelas ativas:", e);
+        // Garantimos que o loader suma em caso de erro
         tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none'; table.style.display = 'table';
     }
