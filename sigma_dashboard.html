@@ -4980,55 +4980,51 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        let queryRef = db.collection('cautelas_abertas')
-            .where('status', '==', 'ABERTA');
+        // Define os status considerados como "ativos" no Dashboard
+        const statusAtivos = ['ABERTA', 'RECEBIDA'];
+
+        let querySnapshot;
+        let cautelas;
         
         // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
-            // Operacional só vê suas próprias cautelas (emitidas ou recebidas)
-            // Nota: Firebase não permite "OR" em queries simples, faremos duas consultas e combinaremos localmente.
             
             // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
             const snapDestinatario = await db.collection('cautelas_abertas')
-                .where('status', '==', 'ABERTA')
+                .where('status', 'in', statusAtivos) // <-- BUSCA STATUS ATIVOS
                 .where('destinatario', '==', militarCompleto)
                 .get();
 
-            // 2. Cautelas ONDE EU SOU O EMITENTE (Se precisar de visão de emissor)
+            // 2. Cautelas ONDE EU SOU O EMITENTE (Visão de quem emitiu)
             const snapEmitente = await db.collection('cautelas_abertas')
-                .where('status', '==', 'ABERTA')
+                .where('status', 'in', statusAtivos) // <-- BUSCA STATUS ATIVOS
                 .where('emitente', '==', militarCompleto)
                 .get();
 
             let allDocs = {};
+            // Combina os dois resultados, usando o ID do documento como chave para evitar duplicatas
             snapDestinatario.forEach(doc => allDocs[doc.id] = doc.data());
             snapEmitente.forEach(doc => allDocs[doc.id] = doc.data());
 
-            queryRef = Object.values(allDocs); // Usa o array combinado
+            cautelas = Object.values(allDocs);
             
-        } else if (role === 'gestor') {
-            // Gestor vê todas as cautelas ATIVAS da sua UNIDADE de origem.
-            // Isso requer a busca por 'local_origem_id', que é mapeado para a unidade.
-            // Como a unidade está salva no documento de cautela (se você a adicionou no iniciarCautelaProcesso), podemos filtrar.
-            // Se 'unidade' não foi salva no documento de cautela: será necessário iterar todas as rotas ativas daquela unidade.
-            // ASSUMINDO que 'local_origem' já inclui o nome da Unidade.
+        } else { // Gestor ou Admin (Busca todas e filtra pela unidade se for Gestor)
             
-            // Vamos filtrar no lado do cliente por simplicidade de Query, pois cautelas ativas não devem ser muitas.
-            const snapAll = await queryRef.get();
-            queryRef = snapAll.docs.map(doc => doc.data()).filter(d => {
-                // A lógica mais segura seria garantir que a Unidade fosse salva na Cautela no momento da emissão.
-                // Como não temos essa informação explícita na estrutura da cautela aqui, vamos usar uma suposição:
-                // Se o documento tiver um campo 'unidade' que você adicionou na emissão, use-o.
-                return d.unidade === unidade; // Filtra as cautelas que pertencem à unidade do gestor
-            });
+            const snapAll = await db.collection('cautelas_abertas')
+                .where('status', 'in', statusAtivos) // <-- BUSCA STATUS ATIVOS
+                .get();
+                
+            let tempCautelas = snapAll.docs.map(doc => doc.data());
             
-        } else { // Admin
-            const snapAll = await queryRef.get();
-            queryRef = snapAll.docs.map(doc => doc.data());
+            if (role === 'gestor') {
+                // Filtra pelo campo 'unidade' da cautela (se você o salvou na emissão)
+                cautelas = tempCautelas.filter(d => d.unidade === unidade); 
+            } else { // Admin vê tudo
+                cautelas = tempCautelas;
+            }
         }
 
-        // Se for um array (Operacional ou Gestor/Admin filtrado):
-        const cautelas = Array.isArray(queryRef) ? queryRef : queryRef.docs.map(doc => doc.data());
+        // ... (O restante da lógica de renderização é mantida) ...
 
         if (cautelas.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela ativa encontrada sob sua responsabilidade.</td></tr>`;
@@ -5040,10 +5036,19 @@ async function loadActiveCautelas() {
         // --- RENDERIZAÇÃO DA TABELA ---
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
-            tr.onclick = () => showCautelaDetails(cautela.cautela_id); // Implementação futura para modal de detalhes
             
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
+            
+            // Define o status visual (badge)
+            let statusBadgeClass = 'badge-aberta';
+            if (cautela.status === 'RECEBIDA') {
+                statusBadgeClass = 'badge-ok'; // Usando badge-ok para indicar posse confirmada
+            } else if (cautela.status === 'FECHADA') {
+                statusBadgeClass = 'badge-fechada';
+            }
+            
+            tr.onclick = () => showCautelaDetails(cautela.cautela_id);
             
             tr.innerHTML = `
                 <td><strong>${cautela.cautela_id}</strong></td>
@@ -5051,7 +5056,7 @@ async function loadActiveCautelas() {
                 <td>${dataEmissao}</td>
                 <td>${cautela.local_origem}</td>
                 <td>${itensCount} itens</td>
-                <td><span class="status-badge badge-aberta">ATIVA</span></td>
+                <td><span class="status-badge ${statusBadgeClass}">${cautela.status}</span></td>
             `;
         });
 
