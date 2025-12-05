@@ -4989,35 +4989,31 @@ async function loadActiveCautelas() {
         // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
             
-            // Definição dos status ATIVOS
-            const statusAtivos = ['ABERTA', 'RECEBIDA'];
+            const statusAtivos = ['ABERTA', 'RECEBIDA']; // Status que queremos exibir
             let allDocs = {};
-
-            // CONSULTA 1: Cautelas onde EU SOU O DESTINATÁRIO
-            for (const status of statusAtivos) {
-                const snap = await db.collection('cautelas_abertas')
-                    .where('status', '==', status)
-                    .where('destinatario', '==', militarCompleto)
-                    .get();
-                snap.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
-            }
-
-            // CONSULTA 2: Cautelas onde EU SOU O EMITENTE (e o status é ativo)
-            for (const status of statusAtivos) {
-                const snap = await db.collection('cautelas_abertas')
-                    .where('status', '==', status)
-                    .where('emitente', '==', militarCompleto)
-                    .get();
-                snap.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
-            }
-
-            // Transforma o objeto de documentos únicos em um array final
-            cautelas = Object.values(allDocs);
             
-        } else { // Gestor ou Admin (Busca todas e filtra pela unidade se for Gestor)
+            // 1. CONSULTA: Cautelas onde EU SOU O DESTINATÁRIO (Removemos o filtro de status)
+            const snapDestinatario = await db.collection('cautelas_abertas')
+                .where('destinatario', '==', militarCompleto)
+                .get();
+
+            // 2. CONSULTA: Cautelas onde EU SOU O EMITENTE (Removemos o filtro de status)
+            const snapEmitente = await db.collection('cautelas_abertas')
+                .where('emitente', '==', militarCompleto)
+                .get();
+
+            // Combina os dois resultados e aplica o filtro de status LOCALMENTE
+            snapDestinatario.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+            snapEmitente.forEach(doc => allDocs[doc.id] = { id: doc.id, ...doc.data() });
+
+            // Filtra os resultados combinados em JavaScript, garantindo que o status seja ATIVO
+            cautelas = Object.values(allDocs).filter(c => statusAtivos.includes(c.status));
             
+        } else { // Gestor ou Admin (Mantemos a busca por status com 'in' que é menos problemática aqui)
+            
+            const statusAtivos = ['ABERTA', 'RECEBIDA'];
             const snapAll = await db.collection('cautelas_abertas')
-                .where('status', 'in', ['ABERTA', 'RECEBIDA']) // Aqui o 'in' funciona melhor por ser a única query WHERE
+                .where('status', 'in', statusAtivos) 
                 .get();
                 
             let tempCautelas = snapAll.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -5028,7 +5024,6 @@ async function loadActiveCautelas() {
                 cautelas = tempCautelas;
             }
         }
-
         // ... (O restante da lógica de renderização é mantida) ...
 
         if (cautelas.length === 0) {
