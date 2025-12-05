@@ -5345,41 +5345,36 @@ async function loadReceberList() {
     table.style.display = 'none';
 
     try {
-        // 🛑 CONSULTA MAIS SIMPLES: Apenas um filtro where('destinatario', '==', militarCompleto)
+        // 🛑 CONSULTA DE DIAGNÓSTICO: IGNORA TODOS OS FILTROS DE USUÁRIO/STATUS.
+        // Se isso falhar, o problema é na conexão ou nas Regras de Segurança do Firestore.
         const snap = await db.collection('cautelas_abertas')
-            .where('destinatario', '==', militarCompleto)
+            .limit(100) // Limita para ser rápido
             .get();
 
         const allDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        // 🛑 FILTRAGEM LOCAL: Apenas status ABERTA
-        const cautelas = allDocs.filter(c => c.status === 'ABERTA');
+        // REMOVEMOS O FILTRO LOCAL, vamos mostrar TUDO que for carregado
+        const cautelas = allDocs; 
 
         if (cautelas.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">Nenhuma nova cautela aguardando recebimento.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#999; padding:20px;">DIAGNÓSTICO: Banco de Dados Acessível, mas Nenhuma Cautela Encontrada.</td></tr>`;
             loading.style.display = 'none';
             table.style.display = 'table';
             return;
         }
 
-        // RENDERIZAÇÃO
+        // RENDERIZAÇÃO DE DIAGNÓSTICO: Mostra os 100 documentos encontrados
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
-            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+            // Mostramos o status e o destinatário para verificar a integridade da string
             const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
             
             tr.innerHTML = `
                 <td data-label="ID"><strong>${cautela.id}</strong></td>
                 <td data-label="Emissão">${dataEmissao}</td>
-                <td data-label="Origem">${cautela.local_origem}</td>
-                <td data-label="Itens">${itensCount} itens</td>
-                <td data-label="Ação" class="actions">
-                    <button class="btn-modern-action btn-create" 
-                            style="background-color: #1b8a3e;"
-                            onclick="iniciarRecebimentoCautela('${cautela.id}')">
-                        <i class="fas fa-check"></i> Receber
-                    </button>
-                </td>
+                <td data-label="Status">${cautela.status}</td>
+                <td data-label="Destinatário">${cautela.destinatario}</td>
+                <td data-label="DEBUG">OK</td>
             `;
         });
 
@@ -5387,8 +5382,9 @@ async function loadReceberList() {
         table.style.display = 'table';
         
     } catch (e) {
-        console.error("Erro ao carregar lista a receber:", e);
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        // Se chegar aqui, o erro é no AWAIT snap.get()
+        console.error("ERRO CRÍTICO DE CONEXÃO AO FIRESTORE:", e);
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">ERRO DE CONEXÃO: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
