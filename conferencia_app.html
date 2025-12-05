@@ -659,41 +659,42 @@
             const itensCaa = []; // Se houver pendências na conferência
             
             // 1. Processar a reintegração dos itens
-            itensConferidos.forEach(cItem => {
-                const isItemOk = (cItem.status === 'S/A' || cItem.status === 'KEEP'); // Item retornado/ok
-                
-                listaMestra = listaMestra.map(setor => ({
-                    ...setor,
-                    itens: setor.itens.map(mItem => {
-                        if (mItem.tipo === 'single' && mItem.id === cItem.id) {
-                            // Item Único: Reintegra a quantidade e remove a referência da cautela
-                            const cautelaItem = cautelaDoc.data().itens.find(i => i.id_base === cItem.id);
-                            if (isItemOk && cautelaItem) {
-                                mItem.quantidadeEsperada += cautelaItem.quantidade;
-                                // Remove a referência à cautela do array (se for um array)
-                                mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
-                            }
-                            // Se C/A, o item volta para o estoque, mas o conferente gera uma C/A no relatório (Passo 2).
+            listaMestra = listaMestra.map(setor => ({
+        ...setor,
+        itens: setor.itens.map(mItem => {
+            if (mItem.tipo === 'single' && mItem.id === cItem.id) {
+                // Item Único: Reintegra a quantidade e remove a referência da cautela
+                const cautelaItem = cautelaDoc.data().itens.find(i => i.id_base === cItem.id);
+                if (isItemOk && cautelaItem) {
+                    
+                    // 🛑 MUDANÇA CRÍTICA: NEUTRALIZAÇÃO DA SOMA DE INVENTÁRIO
+                    // mItem.quantidadeEsperada += cautelaItem.quantidade; // LINHA REMOVIDA
+                    
+                    // Apenas remove a referência para sinalizar que o item foi recebido pelo destinatário
+                    mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
+                }
+                // Se C/A, o item volta para o estoque, mas o conferente gera uma C/A no relatório (Passo 2).
 
-                        } else if (mItem.tipo === 'multi' && mItem.tombamentos) {
-                            // Item Tombado: Remove a marcação de cautela do tombamento específico
-                            const [itemIdBase, tombamentoId] = cItem.id.split('-');
-                            if (mItem.id === itemIdBase) {
-                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                    if (tomb.tomb === tombamentoId) {
-                                        if (isItemOk) {
-                                            delete tomb.cautela; // Item OK: remove a marcação
-                                        }
-                                        // Se C/A, o item volta para o estoque, mas o conferente gera uma C/A no relatório.
-                                    }
-                                    return tomb;
-                                });
+            } else if (mItem.tipo === 'multi' && mItem.tombamentos) {
+                // Item Tombado: Remove a marcação de cautela do tombamento específico
+                const [itemIdBase, tombamentoId] = cItem.id.split('-');
+                if (mItem.id === itemIdBase) {
+                    mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                        if (tomb.tomb === tombamentoId) {
+                            if (isItemOk) {
+                                // 🛑 MUDANÇA CRÍTICA: NEUTRALIZAÇÃO DA REINTEGRAÇÃO DA MARCAÇÃO
+                                // delete tomb.cautela; // LINHA REMOVIDA
                             }
+                            // Se C/A, o item volta para o estoque, mas o conferente gera uma C/A no relatório.
                         }
-                        return mItem;
-                    })
-                }));
-            });
+                        return tomb;
+                    });
+                }
+            }
+            return mItem;
+        })
+    }));
+});
             
             // 2. Criar o Relatório Final (como o App normal) para registrar C/A no relatório de conferência
             // Este passo garante que qualquer C/A seja registrado, mesmo na baixa.
