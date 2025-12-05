@@ -624,9 +624,9 @@
 }
         async function finalizarRecebimentoCautela() {
     const btn = document.getElementById('btn-finalizar');
-    btn.textContent = "Processando baixa...";
+    btn.textContent = "Confirmando posse...";
     
-    // Coleta o status final de cada item conferido
+    // Coleta o status final de cada item conferido (ainda necessário para o futuro relatório C/A)
     const itensConferidos = Object.entries(window.itemStatus)
         .filter(([id, status]) => status.status !== 'pending')
         .map(([id, status]) => ({ id: id, status: status.status }));
@@ -644,82 +644,31 @@
             const cautelaDoc = await transaction.get(cautelaRef);
             
             if (!cautelaDoc.exists || cautelaDoc.data().status !== 'ABERTA') {
-                throw new Error("Cautela não encontrada ou já finalizada.");
+                throw new Error("Cautela não encontrada ou já processada.");
             }
             
-            const localOrigemId = cautelaDoc.data().local_origem_id;
-            const listaMestraRef = db.collection(COLECAO_LISTAS).doc(localOrigemId);
-            const listaMestraDoc = await transaction.get(listaMestraRef);
+            // 🛑 CRÍTICO: Não precisamos da Lista Mestra aqui, pois não há alteração de inventário.
+            // Apenas atualizamos o status e o documento da cautela.
 
-            if (!listaMestraDoc.exists) {
-                throw new Error("Lista Mestra de origem não encontrada.");
-            }
-            
-            let listaMestra = listaMestraDoc.data().list;
-            const itensCaa = []; // Se houver pendências na conferência
-            
-            // 1. Processar a reintegração dos itens
-            listaMestra = listaMestra.map(setor => ({
-        ...setor,
-        itens: setor.itens.map(mItem => {
-            if (mItem.tipo === 'single' && mItem.id === cItem.id) {
-                // Item Único: Reintegra a quantidade e remove a referência da cautela
-                const cautelaItem = cautelaDoc.data().itens.find(i => i.id_base === cItem.id);
-                if (isItemOk && cautelaItem) {
-                    
-                    // 🛑 MUDANÇA CRÍTICA: NEUTRALIZAÇÃO DA SOMA DE INVENTÁRIO
-                    // mItem.quantidadeEsperada += cautelaItem.quantidade; // LINHA REMOVIDA
-                    
-                    // Apenas remove a referência para sinalizar que o item foi recebido pelo destinatário
-                    mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
-                }
-                // Se C/A, o item volta para o estoque, mas o conferente gera uma C/A no relatório (Passo 2).
-
-            } else if (mItem.tipo === 'multi' && mItem.tombamentos) {
-                // Item Tombado: Remove a marcação de cautela do tombamento específico
-                const [itemIdBase, tombamentoId] = cItem.id.split('-');
-                if (mItem.id === itemIdBase) {
-                    mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                        if (tomb.tomb === tombamentoId) {
-                            if (isItemOk) {
-                                // 🛑 MUDANÇA CRÍTICA: NEUTRALIZAÇÃO DA REINTEGRAÇÃO DA MARCAÇÃO
-                                // delete tomb.cautela; // LINHA REMOVIDA
-                            }
-                            // Se C/A, o item volta para o estoque, mas o conferente gera uma C/A no relatório.
-                        }
-                        return tomb;
-                    });
-                }
-            }
-            return mItem;
-        })
-    }));
-});
-            
-            // 2. Criar o Relatório Final (como o App normal) para registrar C/A no relatório de conferência
-            // Este passo garante que qualquer C/A seja registrado, mesmo na baixa.
-            
-            // Aqui, você precisaria criar o relatório (itensRelatorio e itensCaa) a partir de window.itemStatus
-            // *Para simplificar, apenas atualizaremos a lista mestra e fecharemos a cautela por enquanto.*
-            // Caso deseje o relatório, a lógica de coleta de dados do finalizarConferencia() deve ser adaptada.
-
-            // 3. Executar Transação: Fechar Cautela e Atualizar Inventário
-            transaction.update(listaMestraRef, { list: listaMestra });
+            // 1. Ação: Mudar o status da cautela para indicar que foi RECEBIDA.
             transaction.update(cautelaRef, { 
-                status: 'FECHADA',
+                status: 'RECEBIDA', // Status intermediário
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
-                receptor: userInfo.nomeGuerra // Registra quem recebeu
+                receptor: userInfo.nomeGuerra, // Nome de guerra do militar que recebeu
+                militar_completo_receptor: `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`, // Nome completo para futuras buscas
             });
+            
+            // Nota: Se houver itens C/A, eles DEVEM ser registrados em um relatório à parte (melhoria futura).
 
         }); // Fim da Transação
 
-        alert(`✅ Recebimento da Cautela ${CAUTELA_ID} finalizado com sucesso! Inventário atualizado.`);
+        alert(`✅ Cautela ${CAUTELA_ID} confirmada e status atualizado para "RECEBIDA".`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        console.error("Erro CRÍTICO ao finalizar recebimento:", error);
-        alert(`Erro ao finalizar recebimento. Nenhum dado foi alterado. Erro: ${error.message}`);
+        console.error("Erro CRÍTICO ao confirmar recebimento:", error);
+        alert(`Erro ao confirmar recebimento. Nenhum dado foi alterado. Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
