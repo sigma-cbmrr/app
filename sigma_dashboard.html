@@ -4448,8 +4448,46 @@ function showCautelasDashboard(type) {
                     </table>
                 </div>
             `;
+            
             // Chamar a função de carregamento logo após injetar o HTML
             setTimeout(() => loadActiveCautelas(), 50);
+            } else if (type === 'Cautelas a Receber') {
+            // NOVO BLOCO: Cautelas a Receber
+            htmlContent = `
+                <div class="op-card">
+                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                        <h3><i class="fas fa-inbox"></i> Cautelas a Receber (Destinatário)</h3>
+                        <button class="btn-modern-action" onclick="showMainMenu()">
+                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
+                        </button>
+                    </div>
+                    
+                    <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
+                        Cautelas emitidas por terceiros que precisam ser confirmadas por você.
+                    </p>
+
+                    <div id="loading-receive" style="text-align: center; padding: 20px;">
+                        <i class="fas fa-spinner fa-spin"></i> Carregando cautelas...
+                    </div>
+
+                    <table class="ca-table" id="cautelas-receive-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Emitente</th>
+                                <th>Emissão</th>
+                                <th>Local Origem</th>
+                                <th>Itens</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cautelas-receive-body">
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            // Chamar a nova função de carregamento logo após injetar o HTML
+            setTimeout(() => loadCautionsToReceive(), 50); // CHAMA A NOVA FUNÇÃO
 
         } else {
             // Placeholder para as outras telas (Receber, Histórico)
@@ -5026,6 +5064,61 @@ async function loadActiveCautelas() {
         
     } catch (e) {
         console.error("Erro ao carregar cautelas ativas:", e);
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        loading.style.display = 'none';
+        table.style.display = 'table';
+    }
+}
+        async function loadCautionsToReceive() {
+    const tbody = document.getElementById('cautelas-receive-body');
+    const loading = document.getElementById('loading-receive');
+    const table = document.getElementById('cautelas-receive-table');
+    const militarCompleto = currentUserData.nome_militar_completo;
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+
+    try {
+        // 🛑 FILTRAGEM CRÍTICA: Apenas status ABERTA ONDE EU SOU O DESTINATÁRIO
+        const queryRef = db.collection('cautelas_abertas')
+            .where('status', '==', 'ABERTA')
+            .where('destinatario', '==', militarCompleto)
+            .orderBy('timestamp_emissao', 'desc'); // Ordena para pegar as mais recentes
+
+        const snap = await queryRef.get();
+        const cautelas = snap.docs.map(doc => doc.data());
+
+        if (cautelas.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#1b8a3e; padding:20px;">✅ Nenhuma cautela pendente de recebimento.</td></tr>`;
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            return;
+        }
+
+        // --- RENDERIZAÇÃO DA TABELA ---
+        cautelas.forEach(cautela => {
+            const tr = tbody.insertRow();
+            // Ao clicar, chama o modal de detalhes (showCautelaDetails)
+            tr.onclick = () => showCautelaDetails(cautela.cautela_id);
+            
+            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
+            
+            tr.innerHTML = `
+                <td><strong>${cautela.cautela_id}</strong></td>
+                <td>${cautela.emitente}</td>
+                <td>${dataEmissao}</td>
+                <td>${cautela.local_origem}</td>
+                <td>${itensCount} itens</td>
+                <td><span class="status-badge badge-cautela">ABERTA</span></td>
+            `;
+        });
+        loading.style.display = 'none';
+        table.style.display = 'table';
+        
+    } catch (e) {
+        console.error("Erro ao carregar cautelas a receber:", e);
         tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
