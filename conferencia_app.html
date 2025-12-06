@@ -830,18 +830,22 @@ async function finalizarRecebimentoDevolucao(cautela) {
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
             
-            // 🛑 CORREÇÃO CRÍTICA: VERIFICAÇÃO DE STATUS ROBUSTA 🛑
-            const currentStatus = cautelaDoc.exists && cautelaDoc.data().status 
-                                ? cautelaDoc.data().status 
-                                : null;
+            // 🛑 CORREÇÃO FINAL: VERIFICAÇÃO DE STATUS NULL-SAFE 🛑
             
-            // Usa trim() e toUpperCase() para comparação à prova de espaços ou case
-            if (!cautelaDoc.exists || currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
-                // Loga o status real lido para o console, ajudando na depuração
+            if (!cautelaDoc.exists) {
+                throw new Error("Cautela não encontrada.");
+            }
+
+            // Lê o status de forma segura, usando string vazia como default se for null/undefined
+            const currentStatus = cautelaDoc.data().status || ""; 
+            
+            // Compara o status lido de forma robusta
+            if (currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
+                // Se o status for diferente, lança o erro com o status atual lido
                 console.warn(`Transação abortada. Status lido: ${currentStatus}`); 
                 throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
             }
-            // Fim da Correção
+            // Fim da Correção Null-Safe
 
             if (!listaMestraDoc.exists) {
                 throw new Error("Lista Mestra de Conferência (Origem) não encontrada!");
@@ -898,6 +902,7 @@ async function finalizarRecebimentoDevolucao(cautela) {
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
+        // O erro agora deve vir da linha 'Cautela não está no status...' se for falha de string
         console.error("Erro CRÍTICO ao finalizar devolução e restaurar estoque:", error);
         alert(`Erro ao finalizar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
