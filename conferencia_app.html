@@ -830,9 +830,19 @@ async function finalizarRecebimentoDevolucao(cautela) {
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
             
-            if (!cautelaDoc.exists || cautelaDoc.data().status !== 'DEVOLUÇÃO') {
-                throw new Error("Cautela não encontrada ou não está no status 'DEVOLUÇÃO'.");
+            // 🛑 CORREÇÃO CRÍTICA: VERIFICAÇÃO DE STATUS ROBUSTA 🛑
+            const currentStatus = cautelaDoc.exists && cautelaDoc.data().status 
+                                ? cautelaDoc.data().status 
+                                : null;
+            
+            // Usa trim() e toUpperCase() para comparação à prova de espaços ou case
+            if (!cautelaDoc.exists || currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
+                // Loga o status real lido para o console, ajudando na depuração
+                console.warn(`Transação abortada. Status lido: ${currentStatus}`); 
+                throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
             }
+            // Fim da Correção
+
             if (!listaMestraDoc.exists) {
                 throw new Error("Lista Mestra de Conferência (Origem) não encontrada!");
             }
