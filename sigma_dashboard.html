@@ -5025,6 +5025,8 @@ function getSelectedCautelaItemsData() {
  * Exibe todas as cautelas da unidade para Gestores/Admin,
  * e apenas as emitidas para/pelo usuário logado para Operacionais.
  */
+// Localização: Função loadActiveCautelas (aprox. linha 1132)
+
 async function loadActiveCautelas() {
     const tbody = document.getElementById('cautelas-ativas-body');
     const loading = document.getElementById('loading-cautelas');
@@ -5038,30 +5040,27 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        let queryRef;
-        let cautelas = [];
+        let cautelas = []; // Declarada UMA ÚNICA VEZ
 
-        // --- FILTRAGEM DE ACESSO ---
+        // --- FILTRAGEM DE ACESSO BASEADA NO PERFIL (ROLE) ---
         if (role === 'operacional') {
-            // 🛑 MUDANÇA CRÍTICA: Operacional só vê cautelas RECEBIDAS (sob sua posse)
-            // Se o usuário é o destinatário E o status é 'RECEBIDA'.
+            // OPERACIONAL: Vê APENAS cautelas RECEBIDAS (sob sua posse)
             const snap = await db.collection('cautelas_abertas')
-                .where('destinatario', '==', militarCompleto) // Index: destinatario
-                .where('status', '==', 'RECEBIDA')         // Index: status
+                .where('destinatario', '==', militarCompleto)
+                .where('status', '==', 'RECEBIDA')
                 .orderBy('timestamp_emissao', 'desc')
                 .get();
             cautelas = snap.docs.map(doc => doc.data());
             
         } else if (role === 'gestor') {
-            // ... (A ser implementado no próximo passo)
-            cautelas = []; // Temporário
-        } else { // Admin
-            // ... (A ser implementado no próximo passo)
-            cautelas = []; // Temporário
+            // GESTOR: Vê ABERTAS e RECEBIDAS de sua UNIDADE
+            // 🛑 NOTA: Se você não salvou 'unidade_destino' na emissão da cautela, esta query pode falhar.
+            // O getCautelasForGestor usará o filtro de Unidade para garantir o escopo.
+            cautelas = await getCautelasForGestor(unidade);
+            
+        } else { // ADMIN: Vê todas ABERTAS e RECEBIDAS
+            cautelas = await getCautelasForAdmin();
         }
-
-        // Se for um array (Operacional ou Gestor/Admin filtrado):
-       // const cautelas = Array.isArray(queryRef) ? queryRef : queryRef.docs.map(doc => doc.data());
 
         if (cautelas.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela ativa encontrada sob sua responsabilidade.</td></tr>`;
@@ -5073,10 +5072,26 @@ async function loadActiveCautelas() {
         // --- RENDERIZAÇÃO DA TABELA ---
         cautelas.forEach(cautela => {
             const tr = tbody.insertRow();
-            tr.onclick = () => showCautelaDetails(cautela.cautela_id); // Implementação futura para modal de detalhes
+            tr.onclick = () => showCautelaDetails(cautela.cautela_id);
             
             const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-            const dataEmissao = cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR');
+            
+            const dataEmissao = cautela.timestamp_emissao && typeof cautela.timestamp_emissao.toDate === 'function' 
+                                ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') 
+                                : 'N/A';
+            
+            // Status e Badge dinâmicos
+            const status = cautela.status || 'N/A';
+            let badgeClass = 'badge-cautela'; // Padrão
+            let badgeText = 'N/D';
+
+            if (status === 'RECEBIDA') {
+                 badgeClass = 'badge-solucao'; // Usando classe de sucesso/solução
+                 badgeText = 'RECEBIDA';
+            } else if (status === 'ABERTA') {
+                 badgeClass = 'badge-cautela';
+                 badgeText = 'ABERTA';
+            }
             
             tr.innerHTML = `
                 <td><strong>${cautela.cautela_id}</strong></td>
@@ -5084,7 +5099,7 @@ async function loadActiveCautelas() {
                 <td>${dataEmissao}</td>
                 <td>${cautela.local_origem}</td>
                 <td>${itensCount} itens</td>
-                <td><span class="status-badge badge-aberta">ATIVA</span></td>
+                <td><span class="status-badge ${badgeClass}">${badgeText}</span></td>
             `;
         });
 
@@ -5306,6 +5321,60 @@ function handleIframeMessage(event) {
         
         window.removeEventListener('message', handleIframeMessage); // Remove o listener
     }
+}
+        /**
+ * Busca cautelas com status ABERTA e RECEBIDA para Gestores (filtradas por Unidade).
+ * @param {string} unidade - A unidade do Gestor.
+ * @returns {Array} Lista combinada de cautelas.
+ */
+async function getCautelasForGestor(unidade) {
+    // Consulta 1: ABERTAS na Unidade
+    const queryAberta = db.collection('cautelas_abertas')
+        .where('unidade_destino', '==', unidade)
+        .where('status', '==', 'ABERTA');
+
+    // Consulta 2: RECEBIDAS na Unidade
+    const queryRecebida = db.collection('cautelas_abertas')
+        .where('unidade_destino', '==', unidade)
+        .where('status', '==', 'RECEBIDA');
+        
+    const [snapAberta, snapRecebida] = await Promise.all([
+        queryAberta.get(),
+        queryRecebida.get()
+    ]);
+
+    let cautelas = [...snapAberta.docs.map(doc => doc.data()), ...snapRecebida.docs.map(doc => doc.data())];
+    
+    // Ordena a lista combinada por timestamp_emissao (mais recente primeiro)
+    cautelas.sort((a, b) => (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0));
+
+    return cautelas;
+}
+
+/**
+ * Busca todas as cautelas com status ABERTA e RECEBIDA para Admin.
+ * @returns {Array} Lista combinada de cautelas.
+ */
+async function getCautelasForAdmin() {
+    // Consulta 1: Todas ABERTAS
+    const queryAberta = db.collection('cautelas_abertas')
+        .where('status', '==', 'ABERTA');
+
+    // Consulta 2: Todas RECEBIDAS
+    const queryRecebida = db.collection('cautelas_abertas')
+        .where('status', '==', 'RECEBIDA');
+        
+    const [snapAberta, snapRecebida] = await Promise.all([
+        queryAberta.get(),
+        queryRecebida.get()
+    ]);
+
+    let cautelas = [...snapAberta.docs.map(doc => doc.data()), ...snapRecebida.docs.map(doc => doc.data())];
+    
+    // Ordena a lista combinada por timestamp_emissao (mais recente primeiro)
+    cautelas.sort((a, b) => (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0));
+
+    return cautelas;
 }
     </script>
 </body>
