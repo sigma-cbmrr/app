@@ -806,47 +806,48 @@ async function finalizarRecebimentoDevolucao(cautela) {
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
 
-    if (!isCautela || !CAUTELA_ID) {
-        alert("Erro: ID da cautela não encontrado.");
+    // 🛑 VERIFICAÇÃO SINCRONA DE DADOS CRÍTICOS (CRASH PREVENTION) 🛑
+    // Usa optional chaining (?) para evitar crash se cautela for null/undefined
+    const listaId = cautela?.local_origem_id; 
+
+    if (!cautela || !CAUTELA_ID || !listaId) {
+        console.error("ERRO FATAL: Dados críticos ausentes. ", 
+                      { cautelaValid: !!cautela, CAUTELA_ID: CAUTELA_ID, LISTA_ID: listaId });
+        alert("Erro: Dados iniciais incompletos ou inválidos. Tente novamente.");
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
         return;
     }
-    
+    // FIM VERIFICAÇÃO CRÍTICA
+
     // Objeto do militar logado, que é o Dono Provisório (Receptor Final)
+    // Usar optional chaining aqui também é uma boa prática
     const militarReceptor = {
-        postoGraduacao: userInfo.postoGraduacao,
-        quadro: userInfo.quadro,
-        nomeGuerra: userInfo.nomeGuerra,
+        postoGraduacao: userInfo?.postoGraduacao,
+        quadro: userInfo?.quadro,
+        nomeGuerra: userInfo?.nomeGuerra,
     };
     
     // O ID da Lista Mestra está salvo na própria cautela
-    const listaId = cautela.local_origem_id; 
-    
-    // 🛑 NOVO LOG CRÍTICO (FORA DA TRANSAÇÃO) 🛑
-    console.log("DEBUG IDs: CAUTELA_ID:", CAUTELA_ID, "LISTA_ID:", listaId);
-    // ------------------------------------------
+    // Aqui usamos listaId que já foi verificado
+    // const listaId = cautela.local_origem_id; // Já definido acima
 
     try {
-        // Se um dos IDs for null/undefined, o erro deve ocorrer aqui:
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
         const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
-        
+
         await db.runTransaction(async (transaction) => {
-            
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
             
-            // ... (restante da lógica de status e estoque) ...
+            // 🛑 VERIFICAÇÃO DE STATUS ROBUSTA 🛑
             const currentStatus = cautelaDoc.exists && cautelaDoc.data().status
                                 ? cautelaDoc.data().status
                                 : "";
             
-            if (!cautelaDoc.exists) {
-                throw new Error("Cautela não encontrada.");
-            }
-
-            if (currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
+            // A verificação robusta contra espaços e case deve funcionar
+            if (!cautelaDoc.exists || currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
+                console.warn(`Transação abortada. Status lido (limpo): ${currentStatus.trim().toUpperCase()}`); 
                 throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
             }
 
@@ -868,6 +869,7 @@ async function finalizarRecebimentoDevolucao(cautela) {
                             if (cItem.tipo === 'single') {
                                 mItem.quantidadeEsperada += itemQtd;
                                 mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
+
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
                                 mItem.tombamentos = mItem.tombamentos.map(tomb => {
                                     if (tomb.tomb === cItem.tombamento && tomb.cautela) {
