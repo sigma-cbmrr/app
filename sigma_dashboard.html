@@ -2234,8 +2234,9 @@ async function getCautelasAReceberCount() {
         return 0;
     }
 }
-        /**
- * Busca e retorna a contagem de cautelas ativas/recebidas do militar logado.
+       /**
+ * Busca e retorna a contagem de cautelas ativas/recebidas do militar logado,
+ * incluindo as que estão EM DEVOLUÇÃO (enviadas por ele).
  */
 async function getMyActiveCautelasCount() {
     if (!currentUserData || !currentUserData.nome_militar_completo) return 0;
@@ -2243,13 +2244,21 @@ async function getMyActiveCautelasCount() {
     const militarCompleto = currentUserData.nome_militar_completo;
 
     try {
-        // Filtro: Destinatário == Militar Logado E Status == RECEBIDA
-        const snap = await db.collection('cautelas_abertas')
+        // 1. Query RECEBIDAS (CUSTÓDIA ATUAL - Filtra por DESTINATARIO)
+        const snapRecebida = await db.collection('cautelas_abertas')
             .where('destinatario', '==', militarCompleto)
             .where('status', '==', 'RECEBIDA')
             .get();
             
-        return snap.size;
+        // 2. Query EM DEVOLUÇÃO (ITENS EM TRÂNSITO - Filtra por REVERSOR)
+        const snapDevolucao = await db.collection('cautelas_abertas')
+            .where('militar_completo_reversor', '==', militarCompleto)
+            .where('status', '==', 'DEVOLUÇÃO')
+            .get();
+            
+        // Soma os resultados das duas consultas
+        return snapRecebida.size + snapDevolucao.size;
+        
     } catch (e) {
         console.error("Erro ao contar cautelas ativas do militar:", e);
         return 0;
