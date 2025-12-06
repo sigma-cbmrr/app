@@ -5016,51 +5016,26 @@ async function loadActiveCautelas() {
     table.style.display = 'none';
 
     try {
-        let queryRef = db.collection('cautelas_abertas')
-            .where('status', '==', 'ABERTA');
-        
+        let queryRef;
+        let cautelas = [];
+
         // --- FILTRAGEM DE ACESSO ---
         if (role === 'operacional') {
-            // Operacional só vê suas próprias cautelas (emitidas ou recebidas)
-            // Nota: Firebase não permite "OR" em queries simples, faremos duas consultas e combinaremos localmente.
-            
-            // 1. Cautelas ONDE EU SOU O DESTINATÁRIO
-            const snapDestinatario = await db.collection('cautelas_abertas')
-                .where('status', '==', 'ABERTA')
-                .where('destinatario', '==', militarCompleto)
+            // 🛑 MUDANÇA CRÍTICA: Operacional só vê cautelas RECEBIDAS (sob sua posse)
+            // Se o usuário é o destinatário E o status é 'RECEBIDA'.
+            const snap = await db.collection('cautelas_abertas')
+                .where('destinatario', '==', militarCompleto) // Index: destinatario
+                .where('status', '==', 'RECEBIDA')         // Index: status
+                .orderBy('timestamp_emissao', 'desc')
                 .get();
-
-            // 2. Cautelas ONDE EU SOU O EMITENTE (Se precisar de visão de emissor)
-            const snapEmitente = await db.collection('cautelas_abertas')
-                .where('status', '==', 'ABERTA')
-                .where('emitente', '==', militarCompleto)
-                .get();
-
-            let allDocs = {};
-            snapDestinatario.forEach(doc => allDocs[doc.id] = doc.data());
-            snapEmitente.forEach(doc => allDocs[doc.id] = doc.data());
-
-            queryRef = Object.values(allDocs); // Usa o array combinado
+            cautelas = snap.docs.map(doc => doc.data());
             
         } else if (role === 'gestor') {
-            // Gestor vê todas as cautelas ATIVAS da sua UNIDADE de origem.
-            // Isso requer a busca por 'local_origem_id', que é mapeado para a unidade.
-            // Como a unidade está salva no documento de cautela (se você a adicionou no iniciarCautelaProcesso), podemos filtrar.
-            // Se 'unidade' não foi salva no documento de cautela: será necessário iterar todas as rotas ativas daquela unidade.
-            // ASSUMINDO que 'local_origem' já inclui o nome da Unidade.
-            
-            // Vamos filtrar no lado do cliente por simplicidade de Query, pois cautelas ativas não devem ser muitas.
-            const snapAll = await queryRef.get();
-            queryRef = snapAll.docs.map(doc => doc.data()).filter(d => {
-                // A lógica mais segura seria garantir que a Unidade fosse salva na Cautela no momento da emissão.
-                // Como não temos essa informação explícita na estrutura da cautela aqui, vamos usar uma suposição:
-                // Se o documento tiver um campo 'unidade' que você adicionou na emissão, use-o.
-                return d.unidade === unidade; // Filtra as cautelas que pertencem à unidade do gestor
-            });
-            
+            // ... (A ser implementado no próximo passo)
+            cautelas = []; // Temporário
         } else { // Admin
-            const snapAll = await queryRef.get();
-            queryRef = snapAll.docs.map(doc => doc.data());
+            // ... (A ser implementado no próximo passo)
+            cautelas = []; // Temporário
         }
 
         // Se for um array (Operacional ou Gestor/Admin filtrado):
