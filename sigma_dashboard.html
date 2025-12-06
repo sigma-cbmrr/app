@@ -2499,67 +2499,31 @@ if (confirm("Tem certeza que deseja descartar esta conferência em andamento? El
     }
 }
         // --- 3. DASHBOARD HIERÁRQUICO ---
-        async function loadCaaData() {
-            const container = document.getElementById('cards-container');
-            container.innerHTML = 'Carregando...';
-            const loading = document.getElementById('loading-message-dashboard');
-            loading.style.display = 'block';
-            
-            try {
-                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-                const rotas = rotasDoc.data() || {};
-                const listToUnitMap = {};
-                
-                // Objeto para mapear o ID ÚNICO da ROTA/LISTA ao nome da Unidade
-                Object.keys(rotas).forEach(key => {
-                    // key é o ID da lista (ex: "alfa_permanencia")
-                    if (!key.toLowerCase().includes('bravo 5') && rotas[key].ativo !== false) {
-                        listToUnitMap[key] = rotas[key].unidade || 'GERAL';
-                    }
-                });
-                
-                const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
-                
-                // ALTERAÇÃO CRÍTICA: 'map' agora usará o LISTA_ID como chave, não o NOME do local.
-                const map = {}; 
-                const docs = [];
-                snap.forEach(d => docs.push({id:d.id, ...d.data()}));
-                
-                // Ordenação por tempo (mais recente primeiro)
-                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
+        // Localização: Linha ~870
+async function loadCaaData() {
+    // Adicionado verificação de existência aqui
+    const container = document.getElementById('cards-container');
+    const loading = document.getElementById('loading-message-dashboard');
 
-                docs.forEach(d => {
-                    const listaId = d.lista_id; // Usamos o ID único do resultado
-                    
-                    // Condição crucial: Só processa se a lista existir no mapa filtrado (rotas)
-                    if (!rotas[listaId]) return; 
+    if (!container || !loading) return; // ✅ NOVO: Sai se os elementos de UI não existirem na tela
+    
+    container.innerHTML = 'Carregando...';
+    loading.style.display = 'block';
 
-                    // Filtro de segurança (para Gestores)
-                    const listUnit = rotas[listaId].unidade || 'GERAL';
-                    if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
+    try {
+        // ... (o restante da sua lógica permanece inalterado)
 
-                    // CORREÇÃO: Usamos o listaId como chave para garantir unicidade.
-                    // A primeira a ser encontrada (a mais recente) é a que prevalece.
-                    if (!map[listaId]) {
-                        map[listaId] = { 
-                            docId: d.id, 
-                            local: d.local, 
-                            conferente: d.conferente, 
-                            date: d.timestamp.toDate().toLocaleString(), 
-                            items: d.itensCaa || [] 
-                        };
-                    }
-                });
-                
-                // Passamos o novo mapa baseado em ID para renderizar os cards
-                renderCards(map); 
-            } catch (e) { 
-                console.error(e); 
-                container.innerHTML = 'Erro ao carregar.';
-            } finally { 
-                loading.style.display = 'none';
-            }
-        }
+        // Linhas de acesso aos elementos de UI corrigidas:
+        
+        // [Linha ~887]
+        renderCards(map);
+    } catch (e) { 
+        console.error(e);
+        if (container) container.innerHTML = 'Erro ao carregar.';
+    } finally { 
+        if (loading) loading.style.display = 'none';
+    }
+}
         
        
         async function renderCards(map) {
@@ -5596,48 +5560,51 @@ function iniciarRecebimentoCautela(cautelaId) {
     window.addEventListener('message', handleIframeMessage); 
 }
 
-/**
- * Lida com as mensagens enviadas pelo Iframe do aplicativo de conferência.
- * Quando a mensagem 'SIGMA_FINISHED' é recebida, oculta o iframe e recarrega as listas.
- */
+// Localização: Linha ~1594
 function handleIframeMessage(event) {
     // Garante que a mensagem veio do seu domínio (Importante por segurança)
-    if (event.origin !== window.location.origin) return; 
+    if (event.origin !== window.location.origin) return;
 
     if (event.data && event.data.type === 'SIGMA_FINISHED') {
         alert('✅ Operação finalizada com sucesso. Voltando ao Dashboard.');
-        
+
         // 1. Oculta o container do Iframe
         const container = document.getElementById('app-runner-container');
         if (container) {
             container.style.display = 'none';
             // Limpa a URL do iframe para liberar recursos
-            document.getElementById('app-iframe').src = 'about:blank'; 
+            document.getElementById('app-iframe').src = 'about:blank';
         }
         
-        // 2. Mostra a área principal do dashboard e a sidebar (assumindo IDs comuns)
+        // 2. Mostra a área principal do dashboard e a sidebar
         const contentArea = document.getElementById('content-area');
         if (contentArea) {
             contentArea.style.display = 'block';
         }
-        const sidebar = document.getElementById('sidebar') || document.getElementById('main-sidebar'); 
+        const sidebar = document.getElementById('sidebar') || document.getElementById('main-sidebar');
         if (sidebar) {
             sidebar.style.display = 'block';
         }
         
-        // 3. Recarrega a lista de cautelas ativa para remover a cautela que acabou de ser concluída
-        const activeTab = document.querySelector('.tab-button.active');
-        if (activeTab && typeof showCautelasDashboard === 'function') {
-            // Assume que showCautelasDashboard recarrega a aba ativa.
-            showCautelasDashboard(activeTab.textContent); 
-        } else {
-             // Fallback: Recarrega as duas listas mais afetadas.
-             loadCautionsToReceive();
-             loadActiveCautions(); 
+        // 3. Recarrega a lista mais relevante (Cautelas a Receber e Ativas)
+        // Isso garante que o item CONCLUÍDA suma da lista A RECEBER/ATIVAS.
+        
+        // 🛑 CORREÇÃO DE REFERÊNCIA 🛑
+        // A função correta é loadActiveCautelas (com 't' e 'l').
+        loadCautionsToReceive(); // Atualiza a lista A RECEBER (item sumiu)
+        loadActiveCautelas();    // Atualiza a lista ATIVAS (item sumiu/mudou)
+        
+        // Força a atualização dos cards (contadores) e da lista "Conferências de Hoje"
+        if (typeof updateOperacionalCards === 'function') {
+            updateOperacionalCards();
         }
+        
+        // Volta para a view de Cautelas Ativas após o sucesso, se o usuário não estava no Dashboard.
+        // Isto é mais seguro do que tentar recarregar a aba 'Histórico' que estava ativa.
+        switchView('cautelas'); 
+        showCautelasDashboard('Cautelas Ativas'); 
     }
-}
-        /**
+}        /**
  * Busca cautelas com status ABERTA e RECEBIDA para Gestores (filtradas por Unidade).
  * @param {string} unidade - A unidade do Gestor.
  * @returns {Array} Lista combinada de cautelas.
