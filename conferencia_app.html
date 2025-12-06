@@ -822,27 +822,31 @@ async function finalizarRecebimentoDevolucao(cautela) {
     
     // O ID da Lista Mestra está salvo na própria cautela
     const listaId = cautela.local_origem_id; 
+    
+    // 🛑 NOVO LOG CRÍTICO (FORA DA TRANSAÇÃO) 🛑
+    console.log("DEBUG IDs: CAUTELA_ID:", CAUTELA_ID, "LISTA_ID:", listaId);
+    // ------------------------------------------
 
     try {
+        // Se um dos IDs for null/undefined, o erro deve ocorrer aqui:
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
         const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
-
+        
         await db.runTransaction(async (transaction) => {
+            
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
             
-            // 🛑 NOVO LOG DE DIAGNÓSTICO 🛑
+            // ... (restante da lógica de status e estoque) ...
             const currentStatus = cautelaDoc.exists && cautelaDoc.data().status
                                 ? cautelaDoc.data().status
                                 : "";
             
-            console.log("Status lido do Firebase dentro da transação:", `'${currentStatus}'`);
-            // FIM NOVO LOG
-            
-            // Compara o status lido de forma robusta
-            if (!cautelaDoc.exists || currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
-                // Se o status for diferente, lança o erro com o status atual lido
-                console.warn(`Transação abortada. Status lido (limpo): ${currentStatus.trim().toUpperCase()}`); 
+            if (!cautelaDoc.exists) {
+                throw new Error("Cautela não encontrada.");
+            }
+
+            if (currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
                 throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
             }
 
@@ -862,17 +866,12 @@ async function finalizarRecebimentoDevolucao(cautela) {
                         if (mItem.id === cItem.id_base) {
                             
                             if (cItem.tipo === 'single') {
-                                // 1. Item Único: SOMA A QUANTIDADE DE VOLTA
                                 mItem.quantidadeEsperada += itemQtd;
-                                
-                                // Opcional: Remover o carimbo da cautela do array (se for o caso)
                                 mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
-
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                // 2. Item Tombado: Remove o carimbo de cautela do tombamento específico
                                 mItem.tombamentos = mItem.tombamentos.map(tomb => {
                                     if (tomb.tomb === cItem.tombamento && tomb.cautela) {
-                                        delete tomb.cautela; // Remove o carimbo de cautela
+                                        delete tomb.cautela; 
                                     }
                                     return tomb;
                                 });
@@ -886,9 +885,9 @@ async function finalizarRecebimentoDevolucao(cautela) {
 
             // 3. Ação: Mudar o status da cautela para CONCLUIDA (Vai para o Histórico)
             transaction.update(cautelaRef, { 
-                status: 'CONCLUÍDA', // Status final
-                timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), // Novo campo para ordenação
-                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`, // Quem concluiu o recebimento
+                status: 'CONCLUÍDA', 
+                timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
+                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`,
             });
             
             // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
