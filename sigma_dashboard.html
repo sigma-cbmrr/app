@@ -2155,16 +2155,19 @@ function renderOperacionalCards() {
             </ul>
         </div>
 
+    
         <div class="op-card history" style="margin-top: 25px;">
             <h2 class="op-card-title" style="margin-bottom: 15px;"><i class="fas fa-chart-bar"></i> Dashboard Operacional</h2>
             <div class="cards-grid">
                 
                 <div class="sector-card status-ok" onclick="switchView('my-history')">
                     <h3>Minhas Conferências</h3>
+    
                     <div class="main-stat">
                         <span class="count-value" id="op-conf-count">0</span>
                         <i class="fas fa-history fa-2x" style="color:#1b8a3e;"></i>
                     </div>
+         
                     <div class="card-footer">
                         Clique para ver o histórico completo.
                     </div>
@@ -2173,21 +2176,25 @@ function renderOperacionalCards() {
                 <div class="sector-card status-unit" onclick="alert('Implementação futura: Minhas Cautelas Ativas')">
                     <h3>Minhas Cautelas Ativas</h3>
                     <div class="main-stat">
+                  
                         <span class="count-value">0</span>
                         <i class="fas fa-shield-alt fa-2x" style="color:#2c7399;"></i>
                     </div>
                     <div class="card-footer">
+                        
                         Itens que estão sob sua cautela.
                     </div>
                 </div>
 
-                <div class="sector-card status-posto" onclick="alert('Implementação futura: Cautelas a Receber')">
+                <div class="sector-card status-posto" onclick="switchView('cautelas'); showCautelasDashboard('Cautelas a Receber');">
                     <h3>Cautelas a Receber</h3>
                     <div class="main-stat">
-                        <span class="count-value">0</span>
+            
+                        <span class="count-value" id="op-cautela-receive-count">0</span>
                         <i class="fas fa-box-open fa-2x" style="color:#8e44ad;"></i>
                     </div>
                     <div class="card-footer">
+                  
                         Itens pendentes de recebimento/transferência.
                     </div>
                 </div>
@@ -2201,19 +2208,42 @@ function renderOperacionalCards() {
     container.style.display = 'block';
 }
 // [NOVO] Atualiza a contagem do Card "Minhas Conferências"
+async function getCautelasAReceberCount() {
+    if (!currentUserData || !currentUserData.nome_militar_completo) return 0;
+    
+    const militarCompleto = currentUserData.nome_militar_completo;
+
+    try {
+        // Consulta: status == 'ABERTA' E destinatario == militar logado
+        const snap = await db.collection('cautelas_abertas')
+            .where('status', '==', 'ABERTA')
+            .where('destinatario', '==', militarCompleto)
+            .get();
+            
+        return snap.size;
+    } catch (e) {
+        console.error("Erro ao contar cautelas a receber:", e);
+        return 0;
+    }
+}
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
+    // 🛑 NOVO: Elemento do contador de Cautelas a Receber
+    const cautelaReceiveCountEl = document.getElementById('op-cautela-receive-count');
     
     try {
-        // --- 1. CONTAGEM TOTAL (NOVO) ---
-        // Busca TODAS as conferências do usuário (sem filtro de data)
+        // --- 1. CONTAGEM TOTAL DE CONFERÊNCIAS (EXISTENTE) ---
         const snapTotal = await db.collection(COLECAO_RESULTADOS)
             .where('conferente', '==', currentUserData.nome_militar_completo)
             .get();
-            
-        const totalConferences = snapTotal.size; // ✅ Captura o tamanho total da coleção
-        if (countEl) countEl.textContent = totalConferences; // Atualiza o card com o total
+        const totalConferences = snapTotal.size; 
+        if (countEl) countEl.textContent = totalConferences;
+
+        // --- 2. CONTAGEM DE CAUTELAS A RECEBER (NOVO) ---
+        const totalCautelasAReceber = await getCautelasAReceberCount();
+        if (cautelaReceiveCountEl) cautelaReceiveCountEl.textContent = totalCautelasAReceber; 
+        // FIM NOVO
         
         // --- 2. CONTAGEM E LISTAGEM DO DIA (EXISTENTE) ---
         // Reutilizamos o snapTotal para filtrar APENAS os documentos de hoje, 
@@ -2242,6 +2272,7 @@ async function updateOperacionalCards() {
         ul.innerHTML = 'Erro.';
     }
 }
+        
             // --- NOVO: Cards Específicos para Admin/Gestor ---
 // --- NOVO: Cards Específicos para Admin/Gestor ---
 function renderAdminGestorCards(canViewDashboardCards) {
