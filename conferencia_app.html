@@ -534,68 +534,80 @@
             return [setorCautela]; // Retorna a lista encapsulada em um array de setores.
         }
         async function carregarDadosRemotos() {
-            // Se for uma cautela, o ID base é o CAUTELA_ID. Caso contrário, é o LISTA_ID.
-            const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
-            const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
-            
-            if (!ID_ALVO) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>";
-                return; }
-                
-            document.getElementById('loading-message').innerHTML = "Conectando...";
-            try {
-                const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
-                if (!doc.exists) throw new Error("Documento não encontrado.");
-                
-                const data = doc.data(); 
-                
-                // Estrutura de dados: 
-                // Se for Lista Mestra, usa data.list. 
-                // Se for Cautela, a estrutura é diferente e precisa ser adaptada para o renderizador.
-                dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
-                
-                // Informações do Local/Título:
-                const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "DESCONHECIDO");
-                const postoLocal = isCautela ? `Destinatário: ${data.destinatario}` : (data.posto || "Geral");
-                
-                infoLocal = { nome: nomeLocal, posto: postoLocal };
-                
-                document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
-                document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
+    // Se for uma cautela, o ID base é o CAUTELA_ID. Caso contrário, é o LISTA_ID.
+    const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
+    const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
+    
+    if (!ID_ALVO) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>";
+        return; }
+        
+    document.getElementById('loading-message').innerHTML = "Conectando...";
+    try {
+        const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
+        if (!doc.exists) throw new Error("Documento não encontrado.");
+        
+        const data = doc.data();
+        
+        // Estrutura de dados: 
+        dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
+        
+        // Informações do Local/Título:
+        const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "DESCONHECIDO");
+        const postoLocal = isCautela ? `Destinatário: ${data.destinatario}` : (data.posto || "Geral");
+        
+        infoLocal = { nome: nomeLocal, posto: postoLocal };
+        
+        document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
+        document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
 
-                if (isCautela) { // Apenas executa para cautelas
-                    const h1Element = document.querySelector('.container h1');
-                    const subtituloElement = document.querySelector('.container .subtitulo');
-                    const btnFinalizar = document.getElementById('btn-finalizar');
+        if (isCautela) { // Apenas executa para cautelas
+            const h1Element = document.querySelector('.container h1');
+            const subtituloElement = document.querySelector('.container .subtitulo');
+            const btnFinalizar = document.getElementById('btn-finalizar');
 
-                    // Lógica do modo DEVOLUÇÃO
-                    if (MODO_OPERACAO === 'devolucao') {
-                        h1Element.textContent = 'CONFERÊNCIA DE DEVOLUÇÃO';
-                        
-                        subtituloElement.innerHTML = `Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> para: <br> <strong>${DESTINATARIO_DEVOLUCAO}</strong>`;
-                        
-                        btnFinalizar.textContent = 'FINALIZAR DEVOLUÇÃO E CONCLUIR';
-                        btnFinalizar.onclick = () => finalizarDevolucaoCautela(data);
-                        btnFinalizar.classList.add('btn-delete');
-                        btnFinalizar.classList.remove('btn-action');
-                        
-                    } else {
-                        // Lógica de Recebimento (padrão)
-                        h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO';
-                        subtituloElement.textContent = `Recebimento da Cautela ${CAUTELA_ID}`;
-                        
-                        btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO';
-                        btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
-                        btnFinalizar.classList.add('btn-action');
-                        btnFinalizar.classList.remove('btn-delete');
-                    }
-                }
+            // 🛑 Lógica do NOVO modo: CONFERÊNCIA DE RECEBIMENTO DE DEVOLUÇÃO (Dono Provisório)
+            if (MODO_OPERACAO === 'devolucao_final') {
+                h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO DE DEVOLUÇÃO';
                 
-                document.getElementById('loading-message').innerHTML = "Renderizando...";
-                renderizarConferencia(); updateHeaderInfo(); updateOverallStatus(); restaurarRascunho();
-                document.getElementById('loading-message').style.display='none'; document.getElementById('main-content').style.display='block';
-            } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
+                // Exibe o militar que enviou (reversor), que está no campo 'reversor' da cautela (data)
+                const reversor = data.militar_completo_reversor || 'Militar Anterior';
+                subtituloElement.innerHTML = `Recebendo a Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> do Militar: <br> <strong>${reversor}</strong>`;
+                
+                btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO DA DEVOLUÇÃO';
+                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data); // Chamada à nova função
+                
+                btnFinalizar.classList.add('btn-sync'); 
+                btnFinalizar.classList.remove('btn-action', 'btn-delete');
+                
+            // Lógica do modo DEVOLUÇÃO (Antigo fluxo Usuário A, que agora não deveria ser conferido)
+            } else if (MODO_OPERACAO === 'devolucao') {
+                h1Element.textContent = 'CONFERÊNCIA DE DEVOLUÇÃO (TRANSIÇÃO)';
+                
+                subtituloElement.innerHTML = `Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> para: <br> <strong>${DESTINATARIO_DEVOLUCAO}</strong>`;
+                
+                btnFinalizar.textContent = 'FINALIZAR DEVOLUÇÃO E CONCLUIR';
+                btnFinalizar.onclick = () => finalizarDevolucaoCautela(data);
+                btnFinalizar.classList.add('btn-delete');
+                btnFinalizar.classList.remove('btn-action');
+                
+            } else {
+                // Lógica de Recebimento (padrão)
+                h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO';
+                subtituloElement.textContent = `Recebimento da Cautela ${CAUTELA_ID}`;
+                
+                btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO';
+                btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
+                btnFinalizar.classList.add('btn-action');
+                btnFinalizar.classList.remove('btn-delete', 'btn-sync');
             }
         }
+        
+        document.getElementById('loading-message').innerHTML = "Renderizando...";
+        renderizarConferencia(); updateHeaderInfo(); updateOverallStatus(); restaurarRascunho();
+        document.getElementById('loading-message').style.display='none'; document.getElementById('main-content').style.display='block';
+    } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
+    }
+}
 
         async function finalizarConferencia() {
     if (isCautela) {
@@ -782,7 +794,106 @@
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
-}  
+}
+        /**
+ * FINALIZA A DEVOLUÇÃO: Executa a transação final para somar os itens de volta à Lista Mestra 
+ * e mudar o status da cautela para CONCLUÍDA (Finalizada e enviada ao histórico).
+ * @param {object} cautela - O objeto de dados da cautela.
+ */
+async function finalizarRecebimentoDevolucao(cautela) {
+    const btn = document.getElementById('btn-finalizar');
+    btn.textContent = "PROCESSANDO...";
+    btn.disabled = true;
+
+    if (!isCautela || !CAUTELA_ID) {
+        alert("Erro: ID da cautela não encontrado.");
+        btn.textContent = "ERRO AO FINALIZAR";
+        btn.disabled = false;
+        return;
+    }
+    
+    // Objeto do militar logado, que é o Dono Provisório (Receptor Final)
+    const militarReceptor = {
+        postoGraduacao: userInfo.postoGraduacao,
+        quadro: userInfo.quadro,
+        nomeGuerra: userInfo.nomeGuerra,
+    };
+    
+    // O ID da Lista Mestra está salvo na própria cautela
+    const listaId = cautela.local_origem_id; 
+
+    try {
+        const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
+
+        await db.runTransaction(async (transaction) => {
+            const cautelaDoc = await transaction.get(cautelaRef);
+            const listaMestraDoc = await transaction.get(listaMestraRef);
+            
+            if (!cautelaDoc.exists || cautelaDoc.data().status !== 'DEVOLUÇÃO') {
+                throw new Error("Cautela não encontrada ou não está no status 'DEVOLUÇÃO'.");
+            }
+            if (!listaMestraDoc.exists) {
+                throw new Error("Lista Mestra de Conferência (Origem) não encontrada!");
+            }
+            
+            let listaMestra = listaMestraDoc.data().list;
+            
+            // 🛑 LÓGICA DE SOMA (REVERSÃO DE ESTOQUE) 🛑
+            cautela.itens.forEach(cItem => {
+                const itemQtd = cItem.quantidade || 0;
+                
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
+                        if (mItem.id === cItem.id_base) {
+                            
+                            if (cItem.tipo === 'single') {
+                                // 1. Item Único: SOMA A QUANTIDADE DE VOLTA
+                                mItem.quantidadeEsperada += itemQtd;
+                                
+                                // Opcional: Remover o carimbo da cautela do array (se for o caso)
+                                mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
+
+                            } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
+                                // 2. Item Tombado: Remove o carimbo de cautela do tombamento específico
+                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                    if (tomb.tomb === cItem.tombamento && tomb.cautela) {
+                                        delete tomb.cautela; // Remove o carimbo de cautela
+                                    }
+                                    return tomb;
+                                });
+                            }
+                        }
+                        return mItem;
+                    })
+                }));
+            });
+            // FIM DA LÓGICA DE SOMA
+
+            // 3. Ação: Mudar o status da cautela para CONCLUIDA (Vai para o Histórico)
+            transaction.update(cautelaRef, { 
+                status: 'CONCLUÍDA', // Status final
+                timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), // Novo campo para ordenação
+                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`, // Quem concluiu o recebimento
+            });
+            
+            // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
+            transaction.update(listaMestraRef, { list: listaMestra });
+
+        }); // Fim da Transação
+
+        alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada e estoque restaurado. Status: CONCLUÍDA.`);
+        limparRascunho();
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        
+    } catch (error) {
+        console.error("Erro CRÍTICO ao finalizar devolução e restaurar estoque:", error);
+        alert(`Erro ao finalizar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
+        btn.textContent = "ERRO AO FINALIZAR";
+        btn.disabled = false;
+    }
+}
         window.onload = carregarDadosRemotos;
     </script>
 </body>
