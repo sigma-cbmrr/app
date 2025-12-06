@@ -1972,15 +1972,19 @@
         </div>
     
         <div class="form-area" style="padding: 15px; border: none; box-shadow: none; background-color: #f9f9f9; margin-bottom: 15px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                <div><label>Destinatário:</label><span id="modal-destinatario" class="info-value"></span></div>
-                <div><label>Emitente:</label><span id="modal-emitente" class="info-value"></span></div>
-                <div><label>Local de Origem:</label><span id="modal-local-origem" class="info-value"></span></div>
-                <div><label>Data de Emissão:</label><span id="modal-data-emissao" class="info-value"></span></div>
-            </div>
-            <label>Observações da Emissão:</label>
-            <div id="modal-obs-emissao" style="background-color: #fff; padding: 10px; border-radius: 5px; border: 1px solid #eee; min-height: 50px;"></div>
-        </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+        <div><label>Emitente (Origem):</label><span id="modal-emitente" class="info-value"></span></div>
+        <div><label>Destinatário (Original):</label><span id="modal-destinatario-original" class="info-value"></span></div>
+        <div><label>Destinatário (Atual):</label><span id="modal-destinatario-atual" class="info-value"></span></div>
+        
+        <div><label>Local de Origem:</label><span id="modal-local-origem" class="info-value"></span></div>
+        <div><label>Data de Emissão:</label><span id="modal-data-emissao" class="info-value"></span></div>
+        <div><label>Status:</label><span id="modal-status-text" class="info-value"></span></div>
+    </div>
+    <label>Observações da Emissão:</label>
+    <div id="modal-obs-emissao" style="background-color: #fff; padding: 10px; border-radius: 5px; border: 1px solid #eee; min-height: 50px;"></div>
+    </div>
+<span style="font-size: 1.2em; font-weight: bold; color: #d90f23;" id="modal-status"></span>
         
         <h4 style="color: #800020; border-bottom: 1px solid #eee; padding-bottom: 5px; margin-top: 20px;">Itens Cautelados:</h4>
         <ul id="modal-itens-cautela" class="cautela-item-list" style="max-height: 250px; overflow-y: auto; margin-top: 10px;">
@@ -5274,8 +5278,12 @@ async function loadActiveCautelas() {
     if (btnDevolver) btnDevolver.style.display = 'none'; // Esconde o botão de devolução
     if (btnConfirmarDevolucao) btnConfirmarDevolucao.style.display = 'none'; // Esconde o novo botão
 
-    // Limpar conteúdos anteriores
-    document.getElementById('modal-destinatario').textContent = '';
+    // Limpar conteúdos anteriores (Adicionado limpeza para os novos campos de rastreabilidade)
+    if (document.getElementById('modal-destinatario-original')) document.getElementById('modal-destinatario-original').textContent = '';
+    if (document.getElementById('modal-destinatario-atual')) document.getElementById('modal-destinatario-atual').textContent = '';
+    if (document.getElementById('modal-ultimo-detentor')) document.getElementById('modal-ultimo-detentor').textContent = '';
+
+    // Campos existentes
     document.getElementById('modal-emitente').textContent = '';
     document.getElementById('modal-local-origem').textContent = '';
     document.getElementById('modal-data-emissao').textContent = '';
@@ -5294,13 +5302,47 @@ async function loadActiveCautelas() {
         }
 
         const cautela = doc.data();
+        const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
 
-        // 3. Preencher Detalhes Principais
-        document.getElementById('modal-destinatario').textContent = cautela.destinatario || 'N/D';
+        // 3. Preencher Detalhes Principais - COM RASTREABILIDADE
+        
+        // 🛑 LÓGICA DE RASTREABILIDADE (PONTO 2) 🛑
+        
+        // A. Emitente (Origem da cautela - USUARIO A)
         document.getElementById('modal-emitente').textContent = cautela.emitente || 'N/D';
+        
+        // B. Destinatário Original (Quem recebeu a cautela inicialmente - USUARIO B)
+        // Este campo DEVE ser criado na função de emissão e NUNCA mais alterado.
+        const destinatarioOriginal = cautela.destinatario_original || 'Necessita Campo "original"';
+        if (document.getElementById('modal-destinatario-original')) {
+             document.getElementById('modal-destinatario-original').textContent = destinatarioOriginal;
+        }
+        
+        // C. Destinatário Atual (Quem tem a posse/responsabilidade AGORA - USUARIO B ou Dono Provisório USUARIO C)
+        if (document.getElementById('modal-destinatario-atual')) {
+             document.getElementById('modal-destinatario-atual').textContent = cautela.destinatario || 'N/D';
+        }
+        
+        // D. Último Detentor (Quem enviou a devolução - USUARIO B, usando o campo militar_completo_reversor)
+        // Só faz sentido se o status for DEVOLUÇÃO.
+        let ultimoDetentor = 'N/A';
+        if (cautela.status === 'DEVOLUÇÃO') {
+             ultimoDetentor = cautela.militar_completo_reversor || 'Não registrado';
+        } else if (cautela.status === 'RECEBIDA' || cautela.status === 'ABERTA') {
+             // Se não está em devolução, o último detentor é o próprio destinatário.
+             ultimoDetentor = cautela.destinatario;
+        }
+        if (document.getElementById('modal-ultimo-detentor')) {
+             document.getElementById('modal-ultimo-detentor').textContent = ultimoDetentor;
+        }
+
+
+        // Informações de Borda (mantido)
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
-        document.getElementById('modal-data-emissao').textContent = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+        document.getElementById('modal-data-emissao').textContent = dataEmissao;
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
+        
+        // FIM DA LÓGICA DE RASTREABILIDADE
         
         // 4. Preencher a Lista de Itens (mantido o seu código)
         const itensList = document.getElementById('modal-itens-cautela');
@@ -5335,7 +5377,7 @@ async function loadActiveCautelas() {
             itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
         }
 
-        // 5. Lógica de Ação dos Botões (Receber, Devolver, Confirmar Devolução)
+        // 5. Lógica de Ação dos Botões (mantida)
         const militarCompleto = currentUserData.nome_militar_completo;
         const modalStatusElement = document.getElementById('modal-status');
         
@@ -5374,7 +5416,13 @@ async function loadActiveCautelas() {
                 btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente); 
             }
         
-        // D. LÓGICA PADRÃO (Outros Status / Não é o destinatário)
+        // D. Cautelas EM DEVOLUÇÃO (QUEM ENVIOU - Usuário A que ainda rastreia)
+        } else if (currentUserData.role === 'operacional' && cautela.militar_completo_reversor === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
+             // Este bloco é para o Usuário A ver a cautela que ele enviou, mas não pode clicar
+             // No modal, mostra para quem foi enviada.
+             modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${cautela.destinatario}</strong></span>`;
+
+        // E. LÓGICA PADRÃO (Outros Status / Não é o destinatário)
         } else {
             btnReceber.style.display = 'none';
             if (btnDevolver) btnDevolver.style.display = 'none';
@@ -5386,6 +5434,12 @@ async function loadActiveCautelas() {
     // 🛑 CHAVE DE FECHAMENTO DO TRY 🛑
     } catch (e) {
         console.error("Erro ao carregar detalhes da cautela:", e);
+        // Garante que os campos de rastreabilidade sejam limpos se houver erro
+        if (document.getElementById('modal-destinatario-original')) document.getElementById('modal-destinatario-original').textContent = 'ERRO';
+        if (document.getElementById('modal-destinatario-atual')) document.getElementById('modal-destinatario-atual').textContent = 'ERRO';
+        if (document.getElementById('modal-ultimo-detentor')) document.getElementById('modal-ultimo-detentor').textContent = 'ERRO';
+        
+        document.getElementById('modal-obs-emissao').textContent = 'Erro ao buscar observações.';
         document.getElementById('modal-itens-cautela').innerHTML = `<li style="text-align:center; color:red;">Erro ao buscar dados: ${e.message}</li>`;
         document.getElementById('modal-status').textContent = `Status: ERRO`;
     }
