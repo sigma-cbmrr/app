@@ -1782,7 +1782,7 @@
             <p>Pendências de materiais a serem devolvidos/repassados.</p>
         </div>
 
-        <div class="sector-card menu-card" onclick="showCautelasDashboard('Histórico de Cautelas')">
+        <div class="sector-card menu-card" onclick="showCautelasDashboard('Histórico')">
             <i class="fas fa-history card-icon"></i>
             <h3>Histórico de Cautelas</h3>
             <p>Consultar todas as cautelas emitidas e finalizadas.</p>
@@ -4542,21 +4542,16 @@ function showCautelasDashboard(type) {
             `;
             // Chamar a nova função de carregamento logo após injetar o HTML
             setTimeout(() => loadCautionsToReceive(), 50); // CHAMA A NOVA FUNÇÃO
+            else if (view === 'Histórico') {
+                // 🛑 NOVO: Mostra a view Histórico e carrega os dados
+                document.getElementById('cautelas-historico-view').style.display = 'block';
+                loadCautelasHistorico(); 
+            }
 
-        } else {
-            // Placeholder para as outras telas (Receber, Histórico)
-            htmlContent = `
-                <div class="op-card">
-                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                        <h3><i class="fas fa-list-alt"></i> ${type || 'Conteúdo em Desenvolvimento'}</h3>
-                        <button class="btn-modern-action" onclick="showMainMenu()">
-                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                        </button>
-                    </div>
-                    <p>Conteúdo de **${type || 'Dashboard'}** será implementado aqui.</p>
-                </div>
-            `;
-        }
+            } else {
+                // ⬅️ Adicione este bloco para erros/valores inesperados
+                console.warn("View de Cautelas desconhecida:", view);
+            }
         
         contentArea.innerHTML = htmlContent;
         contentArea.style.display = 'block';
@@ -5375,6 +5370,91 @@ async function getCautelasForAdmin() {
     cautelas.sort((a, b) => (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0));
 
     return cautelas;
+}
+        /**
+ * Carrega o histórico de cautelas (aquelas com status CONCLUÍDA)
+ * com filtro por perfil (Operacional/Gestor/Admin).
+ */
+async function loadCautelasHistorico() {
+    const tbody = document.getElementById('cautelas-historico-body');
+    const loading = document.getElementById('loading-historico');
+    const table = document.getElementById('cautelas-historico-table');
+    const role = currentUserData.role || 'operacional';
+    const militarCompleto = currentUserData.nome_militar_completo;
+    const unidade = currentUserData.unidade;
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
+
+    try {
+        let queryRef;
+        
+        // --- FILTRAGEM POR ACESSO (STATUS: CONCLUÍDA) ---
+        if (role === 'operacional') {
+            // Operacional: Apenas aquelas que ele foi o destinatário
+            queryRef = db.collection('cautelas_abertas')
+                .where('destinatario', '==', militarCompleto)
+                .where('status', '==', 'CONCLUÍDA')
+                .orderBy('timestamp_conclusao', 'desc'); 
+            
+        } else if (role === 'gestor') {
+            // Gestor: Apenas aquelas de sua Unidade
+            queryRef = db.collection('cautelas_abertas')
+                .where('unidade_destino', '==', unidade)
+                .where('status', '==', 'CONCLUÍDA')
+                .orderBy('timestamp_conclusao', 'desc');
+            
+        } else { // Admin: Vê todas
+            queryRef = db.collection('cautelas_abertas')
+                .where('status', '==', 'CONCLUÍDA')
+                .orderBy('timestamp_conclusao', 'desc');
+        }
+
+        const snap = await queryRef.get();
+        const cautelas = snap.docs.map(doc => doc.data());
+
+        if (cautelas.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada.</td></tr>`;
+            loading.style.display = 'none';
+            table.style.display = 'table';
+            return;
+        }
+
+        // --- RENDERIZAÇÃO DA TABELA ---
+        cautelas.forEach(cautela => {
+            const tr = tbody.insertRow();
+            // Implementação futura: tr.onclick = () => showCautelaDetails(cautela.cautela_id);
+            
+            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+            
+            const dataEmissao = cautela.timestamp_emissao && typeof cautela.timestamp_emissao.toDate === 'function' 
+                                ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') 
+                                : 'N/A';
+            
+            const dataConclusao = cautela.timestamp_conclusao && typeof cautela.timestamp_conclusao.toDate === 'function' 
+                                ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') 
+                                : 'N/A';
+
+            tr.innerHTML = `
+                <td><strong>${cautela.cautela_id}</strong></td>
+                <td>${cautela.destinatario}</td>
+                <td>${dataEmissao}</td>
+                <td>${dataConclusao}</td>
+                <td>${itensCount} itens</td>
+                <td><span class="status-badge badge-sucesso">CONCLUÍDA</span></td>
+            `;
+        });
+
+        loading.style.display = 'none';
+        table.style.display = 'table';
+        
+    } catch (e) {
+        console.error("Erro ao carregar histórico de cautelas:", e);
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        loading.style.display = 'none';
+        table.style.display = 'table';
+    }
 }
     </script>
 </body>
