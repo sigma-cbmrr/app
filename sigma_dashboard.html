@@ -5223,45 +5223,41 @@ async function loadActiveCautelas() {
         // Localização: Função iniciarRecebimentoCautela (aproximadamente linha 1172)
 
 function iniciarRecebimentoCautela(cautelaId) {
-    // 1. FECHA O MODAL DE DETALHES
+    // 1. Fecha o modal de detalhes
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     
-    // Opcional: Oculta a sidebar para dar foco total ao app de conferência
+    // 2. Coleta e codifica os dados do militar
+    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
+    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
+    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
+
+    // 3. Constrói a URL para a cautela. (Usa 'cautelaId')
+    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}`;
+
+    // 4. 🛑 LÓGICA DE ABERTURA DO IFRAME (REPLICADA DA CONFERÊNCIA NORMAL) 🛑
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+    
+    if (!container || !iframe) {
+        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
+        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
+        return;
+    }
+    
+    iframe.src = url;  
+    container.style.display = 'block';
+    
+    // 5. Oculta a área principal do dashboard (content-area) e a sidebar para dar foco total ao app
+    const contentArea = document.getElementById('content-area');
+    if (contentArea) {
+        contentArea.style.display = 'none'; 
+    }
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
         sidebar.style.display = 'none'; 
     }
 
-    // 🛑 CRÍTICO: Definindo variáveis com ENCODEURIComponent
-    // Isso resolve o ReferenceError e prepara os dados para a URL.
-    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
-    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
-    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
-    
-    // 🛑 CRÍTICO: Constrói a URL completa.
-    // Usamos 'cautelaId' como ID principal e as variáveis codificadas.
-    const iframeSrc = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}`;
-
-    const contentArea = document.getElementById('content-area');
-
-    if (!contentArea) {
-        console.error("Área de conteúdo (content-area) não encontrada.");
-        alert("Erro: Não foi possível iniciar o recebimento. Componente principal faltando.");
-        return;
-    }
-
-    // 2. INJETA UM IFRAME na content-area
-    contentArea.innerHTML = `
-        <div id="conferencia-area" style="width: 100%; min-height: 90vh; padding: 0;">
-            <iframe id="conferencia-iframe" 
-                    src="${iframeSrc}" 
-                    style="width: 100%; height: 100%; border: none; min-height: 90vh;"
-                    allowfullscreen>
-            </iframe>
-        </div>
-    `;
-
-    // 3. CONFIGURA O LISTENER PARA SABER QUANDO O APP TERMINOU
+    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
     window.removeEventListener('message', handleIframeMessage); 
     window.addEventListener('message', handleIframeMessage); 
 }
