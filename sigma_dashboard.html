@@ -4574,41 +4574,44 @@ function showCautelasDashboard(type) {
             setTimeout(() => loadCautionsToReceive(), 50); // CHAMA A NOVA FUNÇÃO
             } else if (type === 'Histórico') {
                 // 🛑 NOVO: Mostra a view Histórico e carrega os dados
-                htmlContent = `
+               htmlContent = `
                 <div class="op-card">
                     <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                        <h3><i class="fas fa-archive"></i> Histórico de Cautelas (Concluídas)</h3>
+                        <h3><i class="fas fa-archive"></i> Histórico de Cautelas</h3>
                         <button class="btn-modern-action" onclick="showMainMenu()">
                             <i class="fas fa-arrow-left"></i> Voltar ao Menu
                         </button>
                     </div>
                     
                     <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
-                        Lista completa de todas as cautelas que finalizaram o ciclo (status CONCLUÍDA).
+                        Visualize as cautelas finalizadas de acordo com o seu papel na transação.
                     </p>
 
-                    <div id="loading-historico" style="text-align: center; padding: 20px;">
-                        <i class="fas fa-spinner fa-spin"></i> Carregando histórico...
+                    <div class="tab-navigation" style="display: flex; gap: 5px; margin-bottom: 15px;">
+                        <button class="btn-modern-action tab-button active" data-tab="minhas" onclick="loadHistorico('minhas')">
+                            Minhas (Dest. Original)
+                        </button>
+                        <button class="btn-modern-action tab-button" data-tab="devolucao" onclick="loadHistorico('devolucao')">
+                            Devolução (Recebidas)
+                        </button>
+                        <button class="btn-modern-action tab-button" data-tab="emitidas" onclick="loadHistorico('emitidas')">
+                            Emitidas por Mim
+                        </button>
                     </div>
-
-                    <table class="ca-table" id="cautelas-historico-table" style="display: none;">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Destinatário</th>
-                                <th>Emissão</th>
-                                <th>Conclusão</th>
-                                <th>Itens</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="cautelas-historico-body">
-                        </tbody>
-                    </table>
+                    <div id="historico-content-container">
+                        <div id="loading-historico" style="text-align: center; padding: 20px;">
+                            <i class="fas fa-spinner fa-spin"></i> Carregando histórico...
+                        </div>
+                        
+                        <div id="content-minhas" class="historico-tab-content active-tab"></div>
+                        <div id="content-devolucao" class="historico-tab-content"></div>
+                        <div id="content-emitidas" class="historico-tab-content"></div>
+                    </div>
+                    
                 </div>
             `;
-            setTimeout(() => loadCautelasHistorico(), 50);
-
+            // Chamar a função de carregamento principal (que dispara a aba 'minhas' por padrão)
+            setTimeout(() => loadHistorico('minhas'), 50);
             } else {
                 // ⬅️ Adicione este bloco para erros/valores inesperados
                 console.warn("View de Cautelas desconhecida:", view);
@@ -5743,6 +5746,157 @@ async function loadCautelasHistorico() {
         console.error("Erro CRÍTICO ao iniciar devolução:", error);
         alert(`Erro ao iniciar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
         if (btnDevolver) btnDevolver.disabled = false;
+    }
+}
+        /**
+ * Alterna a aba do Histórico e dispara o carregamento da função correspondente.
+ */
+function loadHistorico(tabName) {
+    // 1. Atualiza a UI das abas
+    document.querySelectorAll('.tab-navigation .tab-button').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-tab') === tabName) {
+            btn.classList.add('active');
+        }
+    });
+
+    // 2. Oculta e mostra o conteúdo
+    document.querySelectorAll('.historico-tab-content').forEach(content => {
+        content.classList.remove('active-tab');
+        content.style.display = 'none';
+    });
+    const targetContent = document.getElementById(`content-${tabName}`);
+    if (targetContent) {
+        targetContent.style.display = 'block';
+        targetContent.classList.add('active-tab');
+    }
+    
+    // 3. Dispara a função de carregamento de dados
+    if (tabName === 'minhas') {
+        loadHistoricoMinhas();
+    } else if (tabName === 'devolucao') {
+        loadHistoricoDevolucao();
+    } else if (tabName === 'emitidas') {
+        loadHistoricoEmitidas();
+    }
+}
+        // Função auxiliar para renderizar a tabela, minimizando a repetição
+function renderHistoricoTable(containerId, cautelas) {
+    const container = document.getElementById(containerId);
+    const loading = document.getElementById('loading-historico');
+
+    if (!container) return; 
+
+    // Oculta loading e garante que o container esteja visível
+    if (loading) loading.style.display = 'none';
+
+    if (cautelas.length === 0) {
+        container.innerHTML = '<p style="text-align:center; padding:20px;">Nenhuma cautela encontrada neste histórico.</p>';
+        return;
+    }
+
+    // Cria a estrutura da tabela
+    let html = `
+        <table class="ca-table" style="width: 100%;">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Dest. Original</th>
+                    <th>Emitente</th>
+                    <th>Data Final</th>
+                    <th>Itens</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    cautelas.forEach(cautela => {
+        const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+        const dataFinal = cautela.timestamp_conclusao ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+        
+        // Define o destinatário original de forma segura (para esta aba)
+        const destOriginal = cautela.destinatario_original || 'N/A';
+        const badgeText = 'CONCLUÍDA';
+        const badgeClass = 'badge-solucao';
+
+        html += `
+            <tr onclick="showCautelaDetails('${cautela.cautela_id}')" style="cursor:pointer;">
+                <td><strong>${cautela.cautela_id}</strong></td>
+                <td>${destOriginal}</td>
+                <td>${cautela.emitente}</td>
+                <td>${dataFinal}</td>
+                <td>${itensCount} itens</td>
+                <td><span class="status-badge ${badgeClass}">${badgeText}</span></td>
+            </tr>
+        `;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+// -------------------------------------------------------------
+// FUNÇÕES ESPECÍFICAS DE CARREGAMENTO POR ABA
+// -------------------------------------------------------------
+
+/**
+ * Aba 1: MINHAS (Destinatário Original)
+ * Filtro: destinatario_original == militarCompleto E status == CONCLUÍDA
+ */
+async function loadHistoricoMinhas() {
+    const militarCompleto = currentUserData.nome_militar_completo;
+    
+    try {
+        const snap = await db.collection('cautelas_abertas')
+            .where('destinatario_original', '==', militarCompleto)
+            .where('status', '==', 'CONCLUÍDA')
+            .orderBy('timestamp_conclusao', 'desc')
+            .get();
+        
+        renderHistoricoTable('content-minhas', snap.docs.map(doc => doc.data()));
+    } catch (e) {
+        document.getElementById('content-minhas').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
+    }
+}
+
+/**
+ * Aba 2: DEVOLUÇÃO (Recebidas de volta, como Dono Provisório)
+ * Filtro: receptor_final_completo == militarCompleto E status == CONCLUÍDA
+ */
+async function loadHistoricoDevolucao() {
+    const militarCompleto = currentUserData.nome_militar_completo;
+    
+    try {
+        const snap = await db.collection('cautelas_abertas')
+            .where('receptor_final_completo', '==', militarCompleto) // Campo que registra o Dono Provisório
+            .where('status', '==', 'CONCLUÍDA')
+            .orderBy('timestamp_conclusao', 'desc')
+            .get();
+        
+        renderHistoricoTable('content-devolucao', snap.docs.map(doc => doc.data()));
+    } catch (e) {
+        document.getElementById('content-devolucao').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
+    }
+}
+
+/**
+ * Aba 3: EMITIDAS POR MIM
+ * Filtro: emitente == militarCompleto E status == CONCLUÍDA
+ */
+async function loadHistoricoEmitidas() {
+    const militarCompleto = currentUserData.nome_militar_completo;
+    
+    try {
+        const snap = await db.collection('cautelas_abertas')
+            .where('emitente', '==', militarCompleto)
+            .where('status', '==', 'CONCLUÍDA')
+            .orderBy('timestamp_conclusao', 'desc')
+            .get();
+        
+        renderHistoricoTable('content-emitidas', snap.docs.map(doc => doc.data()));
+    } catch (e) {
+        document.getElementById('content-emitidas').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
     }
 }
     </script>
