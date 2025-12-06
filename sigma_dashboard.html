@@ -2122,7 +2122,6 @@
     // --- 3. Chamadas de Dados Comuns (Manter) ---
     carregarListasParaNovaConferencia(); // Preenche o modal "Iniciar Conferência"
     verificarConferenciaAtiva(); // Renderiza o card de "Continuar Conferência"
-    verificarCautelaAtiva();
     
     // ===================================
     // SOLUÇÃO PARA INICIAR O MENU FECHADO
@@ -2361,116 +2360,6 @@ if (confirm("Tem certeza que deseja descartar esta conferência em andamento? El
         verificarConferenciaAtiva();
     }
 }
-        /**
- * Verifica se existe um rascunho de Cautela (Recebimento) para o usuário.
- * Usa a chave de rascunho do localStorage.
- */
-function verificarCautelaAtiva() {
-    // 🛑 ATENÇÃO: Se você usa o container 'resume-container' para conferência E cautela,
-    // você precisa garantir que eles sejam exibidos na mesma função.
-    
-    // Para simplificar, vamos usar a lógica anterior para a cautela.
-    const activeCautelaId = getActiveCautelaDraftId(); // Usa a função que criamos antes
-    const container = document.getElementById('resume-container'); // O container onde o alerta aparece
-    
-    // Limpa o container para evitar duplicidade com a conferência normal (se a função for chamada separadamente)
-    // Se a conferência normal usa este container, você deve garantir que a lógica da conferência normal
-    // não sobrescreva esta (ou chame as duas verificações em sequência).
-    // Por enquanto, vamos limpar e carregar SÓ A CAUTELA (se encontrada).
-    // SE O SEU CÓDIGO CHAMA 'verificarConferenciaAtiva' e 'verificarCautelaAtiva' em sequência no mesmo container,
-    // você precisará fundir a lógica das duas funções.
-    if (!container) return;
-    container.innerHTML = ''; 
-
-    if (activeCautelaId) {
-        // Assume que a cautela tem nome/título 'Recebimento de Cautela' para o card.
-        const nomeLista = `Recebimento de Cautela ID: ${activeCautelaId}`; 
-        
-        container.innerHTML = `
-            <div class="op-card resume">
-                <button class="btn-resume-close" onclick="event.stopPropagation(); descartarCautelaAtiva('${activeCautelaId}')">
-                    <i class="fas fa-times"></i>
-                </button>
-                <div onclick="retomarCautela('${activeCautelaId}')" style="cursor: pointer;">
-                    <h2 class="op-card-title" style="border:none; margin:0; color:#e65100;">
-                        <i class="fas fa-handshake"></i> Continuar: ${nomeLista}
-                    </h2>
-                    <p style="margin:5px 0 0 30px; color:#666; font-size:0.9em;">
-                        Clique para retomar o recebimento de onde parou...
-                    </p>
-                </div>
-            </div>`;
-    }
-}
-        /**
- * Retoma uma cautela em rascunho, carregando o aplicativo de conferência no iframe.
- * @param {string} cautelaId - O ID da cautela a ser retomada.
- */
-function retomarCautela(cautelaId) {
-    // 1. Coleta e codifica os dados do militar
-    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
-    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
-    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
-
-    // 2. Constrói a URL para a cautela (ID e dados do militar)
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}`;
-
-    // 3. Carrega no iframe (lógica da conferência normal)
-    const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
-    const contentArea = document.getElementById('content-area');
-    const sidebar = document.getElementById('sidebar');
-    
-    // Verifica se os componentes existem antes de prosseguir
-    if (!container || !iframe) {
-        alert("Erro ao retomar. Componentes de UI faltando.");
-        return;
-    }
-
-    iframe.src = url;  
-    container.style.display = 'block';
-    
-    // Oculta a área principal do dashboard (content-area) e a sidebar para dar foco ao app
-    if (contentArea) contentArea.style.display = 'none'; 
-    if (sidebar) sidebar.style.display = 'none'; 
-
-    // 4. Configura o listener para lidar com o retorno do app (ao finalizar)
-    window.removeEventListener('message', handleIframeMessage); 
-    window.addEventListener('message', handleIframeMessage); 
-}
-        /**
- * Descarta o rascunho de uma cautela em andamento (recebimento).
- * @param {string} cautelaId - O ID da cautela cujo rascunho será descartado.
- */
-function descartarCautelaAtiva(cautelaId) {
-    // 🛑 ATENÇÃO: A lógica da cautela não usa 'sigma_active_conf',
-    // pois a conferência normal já usa essa chave.
-    // Usaremos apenas a chave de rascunho de progresso.
-    
-    if (!currentUserData || !currentUserData.nome_guerra) {
-        alert("Erro: Dados do usuário não disponíveis para descartar rascunho.");
-        return;
-    }
-
-    const userForDraft = currentUserData.nome_guerra.toUpperCase();
-    
-    if (confirm(`Tem certeza que deseja descartar o rascunho da Cautela ID: ${cautelaId}? Ela não poderá ser retomada!`)) {
-        // 1. Constrói a chave do rascunho para limpeza (usando o padrão correto)
-        const draftKey = `sigma_draft_${userForDraft}_${cautelaId}`; 
-        
-        // 2. Limpa o rascunho de progresso
-        localStorage.removeItem(draftKey);
-
-        // 3. Atualiza UI: remove o cartão de resumo da cautela
-        verificarCautelaAtiva(); 
-        
-        // 🛑 CRÍTICO: Se a conferência normal usa 'sigma_active_conf',
-        // este descarte não deve afetar a conferência normal.
-        
-        alert("Rascunho de Cautela descartado com sucesso.");
-    }
-}
-
         // --- 3. DASHBOARD HIERÁRQUICO ---
         async function loadCaaData() {
             const container = document.getElementById('cards-container');
