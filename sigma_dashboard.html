@@ -2172,6 +2172,18 @@ function renderOperacionalCards() {
                         Clique para ver o histórico completo.
                     </div>
                 </div>
+                <div class="sector-card status-unit" onclick="switchView('cautelas'); showCautelasDashboard('Cautelas Ativas');">
+                    <h3>Minhas Cautelas Ativas</h3>
+                    <div class="main-stat">
+              
+                    <span class="count-value" id="op-my-active-cautela-count">0</span>
+                        <i class="fas fa-shield-alt fa-2x" style="color:#2c7399;"></i>
+                </div>
+                <div class="card-footer">
+                    
+                    Itens que estão sob sua cautela.
+                </div>
+            </div>
 
                 <div class="sector-card status-unit" onclick="alert('Implementação futura: Minhas Cautelas Ativas')">
                     <h3>Minhas Cautelas Ativas</h3>
@@ -2226,11 +2238,33 @@ async function getCautelasAReceberCount() {
         return 0;
     }
 }
+        /**
+ * Busca e retorna a contagem de cautelas ativas/recebidas do militar logado.
+ */
+async function getMyActiveCautelasCount() {
+    if (!currentUserData || !currentUserData.nome_militar_completo) return 0;
+    
+    const militarCompleto = currentUserData.nome_militar_completo;
+
+    try {
+        // Filtro: Destinatário == Militar Logado E Status == RECEBIDA
+        const snap = await db.collection('cautelas_abertas')
+            .where('destinatario', '==', militarCompleto)
+            .where('status', '==', 'RECEBIDA')
+            .get();
+            
+        return snap.size;
+    } catch (e) {
+        console.error("Erro ao contar cautelas ativas do militar:", e);
+        return 0;
+    }
+}
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
     // 🛑 NOVO: Elemento do contador de Cautelas a Receber
     const cautelaReceiveCountEl = document.getElementById('op-cautela-receive-count');
+    const myActiveCautelaCountEl = document.getElementById('op-my-active-cautela-count');
     
     try {
         // --- 1. CONTAGEM TOTAL DE CONFERÊNCIAS (EXISTENTE) ---
@@ -2245,9 +2279,10 @@ async function updateOperacionalCards() {
         if (cautelaReceiveCountEl) cautelaReceiveCountEl.textContent = totalCautelasAReceber; 
         // FIM NOVO
         
-        // --- 2. CONTAGEM E LISTAGEM DO DIA (EXISTENTE) ---
-        // Reutilizamos o snapTotal para filtrar APENAS os documentos de hoje, 
-        // evitando uma segunda requisição grande ao Firestore.
+        // --- 3. CONTAR MINHAS CAUTELAS ATIVAS (NOVO) ---
+        const totalMyActiveCautelas = await getMyActiveCautelasCount();
+        if (myActiveCautelaCountEl) myActiveCautelaCountEl.textContent = totalMyActiveCautelas; 
+        // FIM NOVO
         
         const hojeStr = new Date().toLocaleDateString('pt-BR');
         let countToday = 0; // Contagem das conferências de hoje
