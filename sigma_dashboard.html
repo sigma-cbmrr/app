@@ -5078,22 +5078,23 @@ async function loadActiveCautelas() {
         let cautelas = []; // Declarada UMA ÚNICA VEZ
 
         // --- FILTRAGEM DE ACESSO BASEADA NO PERFIL (ROLE) ---
-        if (role === 'operacional') {
-            // OPERACIONAL: Vê APENAS cautelas RECEBIDAS e em DEVOLUÇÃO.
-            
-            // Query 1: RECEBIDAS
-            const snapRecebida = await db.collection('cautelas_abertas')
-                .where('destinatario', '==', militarCompleto)
-                .where('status', '==', 'RECEBIDA')
-                .orderBy('timestamp_emissao', 'desc')
-                .get();
-                
-            // Query 2: DEVOLUÇÃO
-            const snapDevolucao = await db.collection('cautelas_abertas')
-                .where('destinatario', '==', militarCompleto)
-                .where('status', '==', 'DEVOLUÇÃO')
-                .orderBy('timestamp_emissao', 'desc')
-                .get();
+       if (role === 'operacional') {
+    // OPERACIONAL: Vê RECEBIDAS (sob sua posse) E em DEVOLUÇÃO (enviadas por ele e em trânsito)
+    
+    // Query 1: RECEBIDAS (Filtra pelo destinatario)
+    const snapRecebida = await db.collection('cautelas_abertas')
+        .where('destinatario', '==', militarCompleto)
+        .where('status', '==', 'RECEBIDA')
+        .orderBy('timestamp_emissao', 'desc')
+        .get();
+        
+    // Query 2: DEVOLUÇÃO (Filtra pelo reversor, que é o usuário logado agora)
+    // 🛑 CORREÇÃO CRÍTICA: O filtro muda de 'destinatario' para 'militar_completo_reversor' 🛑
+    const snapDevolucao = await db.collection('cautelas_abertas')
+        .where('militar_completo_reversor', '==', militarCompleto)
+        .where('status', '==', 'DEVOLUÇÃO')
+        .orderBy('timestamp_emissao', 'desc')
+        .get();
                 
             // Combina e popula o array, ordenando localmente
             cautelas = [...snapRecebida.docs.map(doc => doc.data()), ...snapDevolucao.docs.map(doc => doc.data())];
