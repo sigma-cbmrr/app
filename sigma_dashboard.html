@@ -5079,18 +5079,29 @@ async function loadActiveCautelas() {
 
         // --- FILTRAGEM DE ACESSO BASEADA NO PERFIL (ROLE) ---
         if (role === 'operacional') {
-            // OPERACIONAL: Vê APENAS cautelas RECEBIDAS (sob sua posse)
-            const snap = await db.collection('cautelas_abertas')
+            // OPERACIONAL: Vê APENAS cautelas RECEBIDAS e em DEVOLUÇÃO.
+            
+            // Query 1: RECEBIDAS
+            const snapRecebida = await db.collection('cautelas_abertas')
                 .where('destinatario', '==', militarCompleto)
-                .where('status', 'in', ['RECEBIDA', 'DEVOLUÇÃO'])
+                .where('status', '==', 'RECEBIDA')
                 .orderBy('timestamp_emissao', 'desc')
                 .get();
-            cautelas = snap.docs.map(doc => doc.data());
+                
+            // Query 2: DEVOLUÇÃO
+            const snapDevolucao = await db.collection('cautelas_abertas')
+                .where('destinatario', '==', militarCompleto)
+                .where('status', '==', 'DEVOLUÇÃO')
+                .orderBy('timestamp_emissao', 'desc')
+                .get();
+                
+            // Combina e popula o array, ordenando localmente
+            cautelas = [...snapRecebida.docs.map(doc => doc.data()), ...snapDevolucao.docs.map(doc => doc.data())];
             
+            cautelas.sort((a, b) => (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0));
+
         } else if (role === 'gestor') {
-            // GESTOR: Vê ABERTAS e RECEBIDAS de sua UNIDADE
-            // 🛑 NOTA: Se você não salvou 'unidade_destino' na emissão da cautela, esta query pode falhar.
-            // O getCautelasForGestor usará o filtro de Unidade para garantir o escopo.
+            // GESTOR: Vê ABERTAS e RECEBIDAS de sua Unidade (usa função auxiliar)
             cautelas = await getCautelasForGestor(unidade);
             
         } else { // ADMIN: Vê todas ABERTAS e RECEBIDAS
@@ -5115,17 +5126,21 @@ async function loadActiveCautelas() {
                                 ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') 
                                 : 'N/A';
             
-            // Status e Badge dinâmicos
+            // 🛑 CORREÇÃO DO N/D 🛑
             const status = cautela.status || 'N/A';
-            let badgeClass = 'badge-cautela'; // Padrão
-            let badgeText = 'N/D';
+            let badgeClass = 'badge-cautela';
+            let badgeText = 'N/D'; 
 
             if (status === 'RECEBIDA') {
-                 badgeClass = 'badge-solucao'; // Usando classe de sucesso/solução
+                 badgeClass = 'badge-solucao'; 
                  badgeText = 'RECEBIDA';
             } else if (status === 'ABERTA') {
                  badgeClass = 'badge-cautela';
                  badgeText = 'ABERTA';
+            } else if (status === 'DEVOLUÇÃO') {
+                 // Adiciona a lógica para o novo status
+                 badgeClass = 'badge-pendente'; 
+                 badgeText = 'EM DEVOLUÇÃO';
             }
             
             tr.innerHTML = `
