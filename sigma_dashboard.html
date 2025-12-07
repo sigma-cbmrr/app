@@ -2578,57 +2578,66 @@ if (confirm("Tem certeza que deseja descartar esta conferência em andamento? El
         // --- 3. DASHBOARD HIERÁRQUICO ---
         // Localização: Linha ~870
 async function loadCaaData() {
-    // Adicionado verificação de existência aqui
-    const container = document.getElementById('cards-container');
-    const loading = document.getElementById('loading-message-dashboard');
+            const container = document.getElementById('cards-container');
+            container.innerHTML = 'Carregando...';
+            const loading = document.getElementById('loading-message-dashboard');
+            loading.style.display = 'block';
+            
+            try {
+                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+                const rotas = rotasDoc.data() || {};
+                const listToUnitMap = {};
+                
+                // Objeto para mapear o ID ÚNICO da ROTA/LISTA ao nome da Unidade
+                Object.keys(rotas).forEach(key => {
+                    // key é o ID da lista (ex: "alfa_permanencia")
+                    if (!key.toLowerCase().includes('bravo 5') && rotas[key].ativo !== false) {
+                        listToUnitMap[key] = rotas[key].unidade || 'GERAL';
+                    }
+                });
+                
+                const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
+                
+                // ALTERAÇÃO CRÍTICA: 'map' agora usará o LISTA_ID como chave, não o NOME do local.
+                const map = {}; 
+                const docs = [];
+                snap.forEach(d => docs.push({id:d.id, ...d.data()}));
+                
+                // Ordenação por tempo (mais recente primeiro)
+                docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
 
-    if (!container || !loading) return; // Sai se os elementos de UI não existirem na tela
-    
-    container.innerHTML = 'Carregando...';
-    loading.style.display = 'block';
+                docs.forEach(d => {
+                    const listaId = d.lista_id; // Usamos o ID único do resultado
+                    
+                    // Condição crucial: Só processa se a lista existir no mapa filtrado (rotas)
+                    if (!rotas[listaId]) return; 
 
-    try {
-        let map = {};
-        
-        // 1. Inicia a QUERY base: Busca todos os documentos que não foram Solucionados
-        let queryRef = db.collection(COLECAO_RESULTADOS)
-            .where('statusAdmin', '!=', 'Solucionado')
-            // >> [CORREÇÃO AQUI] << O PRIMEIRO orderBy DEVE SER O CAMPO COM DESIGUALDADE
-            .orderBy('statusAdmin') 
-            .orderBy('timestamp', 'desc'); 
-        
-        // 2. APLICA FILTRO DE UNIDADE SOMENTE PARA O GESTOR
-        if (currentUserData.role === 'gestor') {
-            const unidadeGestor = currentUserData.unidade;
-            queryRef = queryRef.where('unidade', '==', unidadeGestor);
+                    // Filtro de segurança (para Gestores)
+                    const listUnit = rotas[listaId].unidade || 'GERAL';
+                    if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
+
+                    // CORREÇÃO: Usamos o listaId como chave para garantir unicidade.
+                    // A primeira a ser encontrada (a mais recente) é a que prevalece.
+                    if (!map[listaId]) {
+                        map[listaId] = { 
+                            docId: d.id, 
+                            local: d.local, 
+                            conferente: d.conferente, 
+                            date: d.timestamp.toDate().toLocaleString(), 
+                            items: d.itensCaa || [] 
+                        };
+                    }
+                });
+                
+                // Passamos o novo mapa baseado em ID para renderizar os cards
+                renderCards(map); 
+            } catch (e) { 
+                console.error(e); 
+                container.innerHTML = 'Erro ao carregar.';
+            } finally { 
+                loading.style.display = 'none';
+            }
         }
-
-        // 3. Executa a consulta
-        const snap = await queryRef.limit(200).get();
-        // 4. Processa e armazena no 'map'
-        snap.forEach(doc => {
-            const data = doc.data();
-
-            // Armazena no objeto 'map'
-            map[doc.id] = { 
-                local: data.local, 
-                conferente: data.conferente, 
-                date: new Date(data.timestamp.seconds * 1000).toLocaleDateString('pt-BR'), 
-                items: data.itensCaa || [],
-                docId: doc.id
-            };
-        });
-        
-        // 5. Renderiza os Cards com os dados carregados
-        renderCards(map);
-        
-    } catch (e) { 
-        console.error(e);
-        if (container) container.innerHTML = 'Erro ao carregar.';
-    } finally { 
-        if (loading) loading.style.display = 'none';
-    }
-}
         
        
         async function renderCards(map) {
