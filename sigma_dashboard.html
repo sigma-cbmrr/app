@@ -2160,6 +2160,23 @@
             <button class="modal-btn-cancel" onclick="document.getElementById('cautelaDetailsModal').style.display='none'">Fechar</button>
         </div>
     </div>
+        <div id="modal-user-search" class="modal-overlay">
+        <div class="modal-content" style="max-width: 450px;">
+            <button class="close-btn" onclick="document.getElementById('modal-user-search').style.display='none'"><i class="fas fa-times"></i></button>
+            <h2>Buscar Destinatário</h2>
+            
+            <label>Nome de Guerra ou Completo:</label>
+            <input type="text" id="search-input-cautela" placeholder="Digite para filtrar..." oninput="filterCautelaUsers()">
+            
+            <div id="user-results-list" class="checklist-container" style="max-height: 300px; margin-top: 15px;">
+                <p style="text-align: center; color: #999;">Digite para encontrar militares...</p>
+            </div>
+
+            <div class="modal-buttons" style="justify-content: flex-end;">
+                <button class="modal-btn-cancel" onclick="document.getElementById('modal-user-search').style.display='none'">Cancelar</button>
+            </div>
+        </div>
+    </div>
 </div>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
@@ -2180,6 +2197,7 @@
         // Variáveis Globais
         let currentUserData = null;
         let allLists = [];
+        let allUsersList = []
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
         let conferente = '';
@@ -4520,9 +4538,24 @@ function getNovaCautelaFormHTML() {
         
             <div class="form-grid-2-columns">
                 <div class="form-group">
-                    <label for="cautela-destinatario">Destinatário da Cautela (Quem irá receber):</label>
-                    <input type="text" id="cautela-destinatario" list="lista-usuarios" placeholder="Digite o nome ou matrícula do usuário" required onblur="corrigirDatalistMobile(event)">
-                    <datalist id="lista-usuarios"></datalist>
+                    <label>Destinatário da Cautela (Quem irá receber):</label>
+                    
+                    <input type="hidden" id="cautela-destinatario-value" required>
+
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <input type="text" 
+                               id="cautela-destinatario-display" 
+                               placeholder="Clique em 'Buscar Militar'..." 
+                               readonly
+                               style="background-color: #eee; cursor: pointer;">
+                        
+                        <button class="btn-modern-action" 
+                                type="button" 
+                                onclick="openUserSearchModal()" 
+                                style="flex-shrink: 0; padding: 10px 15px;">
+                            <i class="fas fa-search"></i> Buscar Militar
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="form-group">
@@ -6074,166 +6107,82 @@ async function loadHistoricoEmitidas() {
         document.getElementById('content-emitidas').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
     }
 }
-       function corrigirDatalistMobile(event) {
-    const input = event.target;
-    const datalist = document.getElementById(input.getAttribute('list'));
-    
-    // Usa um pequeno timeout (10ms-50ms) para dar tempo ao navegador de
-    // completar o preenchimento após o toque na opção do datalist.
-    setTimeout(() => {
-        const valorDigitado = input.value.trim();
+       
+    function openUserSearchModal() {
+        document.getElementById('modal-user-search').style.display = 'flex';
+        // Garante que a lista de usuários esteja carregada antes de abrir o modal
+        if (allUsersList.length === 0) {
+            loadAllUsersForSearchModal(); 
+        } else {
+        // Renderiza a lista se já estiver carregada (mostra todos inicialmente)
+        renderCautelaUserList(allUsersList);
+    }
+}
+        async function loadAllUsersForSearchModal() {
+    const listContainer = document.getElementById('user-results-list');
+    listContainer.innerHTML = '<p style="text-align: center; color: #800020;"><i class="fas fa-spinner fa-spin"></i> Carregando militares...</p>';
 
-        if (!valorDigitado) return;
-        
-        let valorCorreto = null;
-        
-        // Verifica se o valor digitado corresponde a uma opção existente
-        datalist.querySelectorAll('option').forEach(option => {
-            if (option.value === valorDigitado) {
-                valorCorreto = option.value;
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeGestor = currentUserData.unidade; 
+    let userQuery = db.collection('usuarios'); 
+    if (isGestor) {
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
+    }
+    
+    try {
+        const usersSnapshot = await userQuery.get();
+        allUsersList = [];
+        usersSnapshot.forEach(doc => {
+            const user = doc.data();
+            if (user.nome_militar_completo) {
+                allUsersList.push(user);
             }
         });
+        renderCautelaUserList(allUsersList); // Renderiza a lista completa
+    } catch (error) {
+        console.error("Erro ao carregar usuários para o modal:", error);
+        listContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar lista de militares.</p>';
+    }
+}
+        function filterCautelaUsers() {
+    const searchTerm = document.getElementById('search-input-cautela').value.toLowerCase();
+    const filtered = allUsersList.filter(user => 
+        user.nome_militar_completo.toLowerCase().includes(searchTerm) ||
+        user.nome_guerra.toLowerCase().includes(searchTerm)
+    );
+    renderCautelaUserList(filtered);
+}
 
-        // Se encontrou uma opção válida, forçamos o valor (embora já devesse estar lá,
-        // é a forma de garantir a consistência).
-        if (valorCorreto) {
-            input.value = valorCorreto;
-        } 
-        
-        // Se após o timeout o campo continuar vazio ou com um valor incorreto,
-        // mas o usuário tentou interagir, podemos forçar o foco de volta ou ignorar
-        // (no mobile, forçar o foco de volta pode ser irritante).
-        // A chave aqui é o tempo que damos ao navegador.
-        
-    }, 50); // 50 milissegundos de atraso.
-}function corrigirDatalistMobile(event) {
-    const input = event.target;
-    const datalist = document.getElementById(input.getAttribute('list'));
+function renderCautelaUserList(users) {
+    const listContainer = document.getElementById('user-results-list');
+    if (users.length === 0) {
+        listContainer.innerHTML = '<p style="text-align: center; color: #999;">Nenhum militar encontrado.</p>';
+        return;
+    }
+
+    let html = '';
+    users.forEach(user => {
+        // Usamos a função selectUserFromModal para forçar a seleção (garantindo o preenchimento)
+        const fullName = user.nome_militar_completo.replace(/'/g, "\\'");
+        html += `
+            <div class="checklist-item" style="cursor: pointer;" onclick="selectUserFromModal('${fullName}')">
+                <span>${user.posto} ${user.nome_guerra} - ${user.unidade}</span>
+            </div>
+        `;
+    });
+    listContainer.innerHTML = html;
+}
+
+function selectUserFromModal(fullName) {
+    // 1. Preenche os campos do formulário principal
+    document.getElementById('cautela-destinatario-value').value = fullName;
+    document.getElementById('cautela-destinatario-display').value = fullName;
     
-    // Usa um pequeno timeout (10ms-50ms) para dar tempo ao navegador de
-    // completar o preenchimento após o toque na opção do datalist.
-    setTimeout(() => {
-        const valorDigitado = input.value.trim();
-
-        if (!valorDigitado) return;
-        
-        let valorCorreto = null;
-        
-        // Verifica se o valor digitado corresponde a uma opção existente
-        datalist.querySelectorAll('option').forEach(option => {
-            if (option.value === valorDigitado) {
-                valorCorreto = option.value;
-            }
-        });
-
-        // Se encontrou uma opção válida, forçamos o valor (embora já devesse estar lá,
-        // é a forma de garantir a consistência).
-        if (valorCorreto) {
-            input.value = valorCorreto;
-        } 
-        
-        // Se após o timeout o campo continuar vazio ou com um valor incorreto,
-        // mas o usuário tentou interagir, podemos forçar o foco de volta ou ignorar
-        // (no mobile, forçar o foco de volta pode ser irritante).
-        // A chave aqui é o tempo que damos ao navegador.
-        
-    }, 50); // 50 milissegundos de atraso.
-}function corrigirDatalistMobile(event) {
-    const input = event.target;
-    const datalist = document.getElementById(input.getAttribute('list'));
+    // 2. Fecha o modal
+    document.getElementById('modal-user-search').style.display = 'none';
     
-    // Usa um pequeno timeout (10ms-50ms) para dar tempo ao navegador de
-    // completar o preenchimento após o toque na opção do datalist.
-    setTimeout(() => {
-        const valorDigitado = input.value.trim();
-
-        if (!valorDigitado) return;
-        
-        let valorCorreto = null;
-        
-        // Verifica se o valor digitado corresponde a uma opção existente
-        datalist.querySelectorAll('option').forEach(option => {
-            if (option.value === valorDigitado) {
-                valorCorreto = option.value;
-            }
-        });
-
-        // Se encontrou uma opção válida, forçamos o valor (embora já devesse estar lá,
-        // é a forma de garantir a consistência).
-        if (valorCorreto) {
-            input.value = valorCorreto;
-        } 
-        
-        // Se após o timeout o campo continuar vazio ou com um valor incorreto,
-        // mas o usuário tentou interagir, podemos forçar o foco de volta ou ignorar
-        // (no mobile, forçar o foco de volta pode ser irritante).
-        // A chave aqui é o tempo que damos ao navegador.
-        
-    }, 50); // 50 milissegundos de atraso.
-}function corrigirDatalistMobile(event) {
-    const input = event.target;
-    const datalist = document.getElementById(input.getAttribute('list'));
-    
-    // Usa um pequeno timeout (10ms-50ms) para dar tempo ao navegador de
-    // completar o preenchimento após o toque na opção do datalist.
-    setTimeout(() => {
-        const valorDigitado = input.value.trim();
-
-        if (!valorDigitado) return;
-        
-        let valorCorreto = null;
-        
-        // Verifica se o valor digitado corresponde a uma opção existente
-        datalist.querySelectorAll('option').forEach(option => {
-            if (option.value === valorDigitado) {
-                valorCorreto = option.value;
-            }
-        });
-
-        // Se encontrou uma opção válida, forçamos o valor (embora já devesse estar lá,
-        // é a forma de garantir a consistência).
-        if (valorCorreto) {
-            input.value = valorCorreto;
-        } 
-        
-        // Se após o timeout o campo continuar vazio ou com um valor incorreto,
-        // mas o usuário tentou interagir, podemos forçar o foco de volta ou ignorar
-        // (no mobile, forçar o foco de volta pode ser irritante).
-        // A chave aqui é o tempo que damos ao navegador.
-        
-    }, 50); // 50 milissegundos de atraso.
-}function corrigirDatalistMobile(event) {
-    const input = event.target;
-    const datalist = document.getElementById(input.getAttribute('list'));
-    
-    // Usa um pequeno timeout (10ms-50ms) para dar tempo ao navegador de
-    // completar o preenchimento após o toque na opção do datalist.
-    setTimeout(() => {
-        const valorDigitado = input.value.trim();
-
-        if (!valorDigitado) return;
-        
-        let valorCorreto = null;
-        
-        // Verifica se o valor digitado corresponde a uma opção existente
-        datalist.querySelectorAll('option').forEach(option => {
-            if (option.value === valorDigitado) {
-                valorCorreto = option.value;
-            }
-        });
-
-        // Se encontrou uma opção válida, forçamos o valor (embora já devesse estar lá,
-        // é a forma de garantir a consistência).
-        if (valorCorreto) {
-            input.value = valorCorreto;
-        } 
-        
-        // Se após o timeout o campo continuar vazio ou com um valor incorreto,
-        // mas o usuário tentou interagir, podemos forçar o foco de volta ou ignorar
-        // (no mobile, forçar o foco de volta pode ser irritante).
-        // A chave aqui é o tempo que damos ao navegador.
-        
-    }, 50); // 50 milissegundos de atraso.
+    // 3. (Opcional) Foca no próximo campo importante (Local de Origem)
+    document.getElementById('cautela-local-origem').focus();
 }
     </script>
 </body>
