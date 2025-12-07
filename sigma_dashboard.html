@@ -2588,13 +2588,34 @@ async function loadCaaData() {
     loading.style.display = 'block';
 
     try {
-        // ... (o restante da sua lógica permanece inalterado)
+        // [AQUI] Código para buscar e processar os dados de CAA
 
-        // Linhas de acesso aos elementos de UI corrigidas:
+        // 1. Defina e Inicialize a variável 'map'
+        let map = {}; 
         
-        // [Linha ~887]
+        // 2. Busque os dados dos resultados
+        const snap = await db.collection(COLECAO_RESULTADOS)
+            .where('statusAdmin', '!=', 'Solucionado')
+            .limit(50) // Limite de 50 para teste rápido
+            .get(); 
+        
+        // 3. Processa e armazena no 'map'
+        snap.forEach(doc => {
+            const data = doc.data();
+            // Filtro de segurança para gestores (se aplicável ao seu cenário)
+            if (currentUserData.role === 'gestor' && data.unidade !== currentUserData.unidade) return;
+
+            // Armazena no objeto 'map'
+            map[doc.id] = { 
+                local: data.local, 
+                conferente: data.conferente, 
+                date: new Date(data.timestamp.seconds * 1000).toLocaleDateString('pt-BR'), 
+                items: data.itensCaa || [],
+                docId: doc.id
+            };
+        });
         renderCards(map);
-    } catch (e) { 
+        } catch (e) { 
         console.error(e);
         if (container) container.innerHTML = 'Erro ao carregar.';
     } finally { 
