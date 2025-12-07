@@ -2582,28 +2582,33 @@ async function loadCaaData() {
     const container = document.getElementById('cards-container');
     const loading = document.getElementById('loading-message-dashboard');
 
-    if (!container || !loading) return; // ✅ NOVO: Sai se os elementos de UI não existirem na tela
+    if (!container || !loading) return; // Sai se os elementos de UI não existirem na tela
     
     container.innerHTML = 'Carregando...';
     loading.style.display = 'block';
 
     try {
-        // [AQUI] Código para buscar e processar os dados de CAA
-
-        // 1. Defina e Inicialize a variável 'map'
-        let map = {}; 
+        let map = {};
         
-        // 2. Busque os dados dos resultados
-        const snap = await db.collection(COLECAO_RESULTADOS)
+        // 1. Inicia a QUERY base: Busca todos os documentos que não foram Solucionados
+        let queryRef = db.collection(COLECAO_RESULTADOS)
             .where('statusAdmin', '!=', 'Solucionado')
-            .limit(50) // Limite de 50 para teste rápido
-            .get(); 
+            .orderBy('timestamp', 'desc'); 
         
-        // 3. Processa e armazena no 'map'
+        // 2. APLICA FILTRO DE UNIDADE SOMENTE PARA O GESTOR
+        // O Admin (role !== 'gestor' e não entra aqui) visualiza todos os documentos da query base.
+        if (currentUserData.role === 'gestor') {
+            const unidadeGestor = currentUserData.unidade;
+            // Adiciona a restrição da unidade à query
+            queryRef = queryRef.where('unidade', '==', unidadeGestor);
+        }
+
+        // 3. Executa a consulta (Limite de 200 resultados para evitar sobrecarga, mas aumentando o limite de 50)
+        const snap = await queryRef.limit(200).get(); 
+
+        // 4. Processa e armazena no 'map'
         snap.forEach(doc => {
             const data = doc.data();
-            // Filtro de segurança para gestores (se aplicável ao seu cenário)
-            if (currentUserData.role === 'gestor' && data.unidade !== currentUserData.unidade) return;
 
             // Armazena no objeto 'map'
             map[doc.id] = { 
@@ -2614,8 +2619,11 @@ async function loadCaaData() {
                 docId: doc.id
             };
         });
+        
+        // 5. Renderiza os Cards com os dados carregados
         renderCards(map);
-        } catch (e) { 
+        
+    } catch (e) { 
         console.error(e);
         if (container) container.innerHTML = 'Erro ao carregar.';
     } finally { 
