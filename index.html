@@ -258,6 +258,23 @@
             <h2>Primeiro Acesso</h2>
             <p class="card-subtitle">Complete seus dados para continuar.</p>
 
+            <div id="register-card" class="card-box">
+                <div class="input-group">
+                    <label>CPF</label>
+                    <input type="text" id="reg-cpf" placeholder="000.000.000-00" maxlength="14">
+                </div>
+
+                <div class="input-group">
+                    <label>Matrícula</label>
+                    <input type="text" id="reg-matricula" placeholder="0000000-000" maxlength="11">
+                </div>
+
+                <div class="input-group">
+                    <label>Nome Completo</label>
+                    <input type="text" id="reg-nome-completo" placeholder="NOME COMPLETO" oninput="this.value = this.value.toUpperCase()">
+                    <small>Apenas letras maiúsculas.</small>
+                </div>
+
             <div class="input-group">
                 <label>Posto / Graduação</label>
                 <select id="reg-posto" onchange="atualizarQuadro()">
@@ -390,46 +407,67 @@
         }
         
         function salvarNovoUsuario() {
+            // --- NOVOS CAMPOS E VALIDAÇÃO ---
+            const cpfRaw = document.getElementById('reg-cpf').value.replace(/\D/g, '');
+            const matriculaRaw = document.getElementById('reg-matricula').value.replace(/\D/g, '');
+            const nomeCompleto = document.getElementById('reg-nome-completo').value.trim().toUpperCase();
+
+            // Campos existentes
             const posto = document.getElementById('reg-posto').value;
-            let quadro = document.getElementById('reg-quadro').value; // Pega valor mesmo disabled
+            let quadro = document.getElementById('reg-quadro').value;
             const nomeGuerra = document.getElementById('reg-nome-guerra').value.trim().toUpperCase();
-            if (!posto || !quadro || !nomeGuerra) return alert("Preencha todos os campos.");
+
+            // VALIDAÇÃO CRÍTICA
+            if (!cpfRaw || cpfRaw.length !== 11) {
+                return alert("O CPF é obrigatório e deve ter 11 dígitos.");
+            }
+            if (!nomeCompleto) {
+                return alert("O Nome Completo é obrigatório.");
+            }
+            if (!posto || !quadro || !nomeGuerra) {
+                return alert("Preencha todos os campos restantes (Posto/Graduação, Quadro e Nome de Guerra).");
+            }
+            // ---------------------------------
 
             const btn = document.getElementById('btn-register');
             btn.textContent = "Salvando...";
             btn.disabled = true;
 
-            const nomeCompleto = `${posto} ${quadro} ${nomeGuerra}`;
+            // Use o nome completo do militar para o campo de exibição no dashboard
+            const nomeMilitarCompleto = `${posto} ${quadro} ${nomeGuerra}`;
 
             db.collection('usuarios').doc(tempUid).set({
                 uid: tempUid,
                 email: tempEmail,
                 foto_url: tempPhoto,
+        
+                // --- NOVOS DADOS SALVOS NO FIRESTORE ---
+                cpf: cpfRaw,
+                matricula: matriculaRaw,
+                nome_completo: nomeCompleto, 
+                // ----------------------------------------
+        
                 nome_guerra: nomeGuerra,
                 posto: posto,
-      
                 quadro: quadro,
-                nome_militar_completo: nomeCompleto,
-                role: 'operacional',   // Padrão inicial
-                unidade: 'Sem Unidade', // Para ser definido pelo Gestor depois
+                nome_militar_completo: nomeMilitarCompleto, // Mantém o formato padrão
+                role: 'operacional', 
+                unidade: 'Sem Unidade', 
                 criadoEm: firebase.firestore.FieldValue.serverTimestamp()
-        
             })
+            // ... (o restante da lógica de sucesso e catch) ...
             .then(() => {
                 alert("Cadastro realizado com sucesso!");
-            // Redirecionamento CORRETO
-            window.location.href = "/app/sigma_dashboard.html"; 
+                // Redirecionamento CORRETO
+                window.location.href = "/app/sigma_dashboard.html"; 
             })
             .catch((error) => {
-        
                 console.error("Erro ao salvar:", error);
                 alert("Erro ao salvar cadastro: " + error.message);
                 btn.textContent = "CONCLUIR CADASTRO";
                 btn.disabled = false;
             });
         }
-
-
         // --- 3. HANDLERS DE BOTÕES ---
 
         function resetBotoes() {
@@ -472,24 +510,64 @@
         }
 
         function loginGoogle() {
-    const provider = new firebase.auth.GoogleAuthProvider();
-    const btnG = document.getElementById('btn-google');
+            const provider = new firebase.auth.GoogleAuthProvider();
+            const btnG = document.getElementById('btn-google');
     
-    btnG.style.opacity = "0.7";
-    document.getElementById('btn-login').disabled = true;
+            btnG.style.opacity = "0.7";
+            document.getElementById('btn-login').disabled = true;
     
-    // 1. Executar o login DIRETAMENTE
-    auth.signInWithPopup(provider) // REMOVEMOS auth.setPersistence e o .then()
-        .then((result) => {
-            // O processo de login foi bem-sucedido
-            verificarRedirecionamento(result.user);
-        })
-        .catch((error) => {
-            console.error(error);
-            alert("Erro ao entrar com Google: " + error.message);
-            resetBotoes();
+            // 1. Executar o login DIRETAMENTE
+            auth.signInWithPopup(provider) // REMOVEMOS auth.setPersistence e o .then()
+                .then((result) => {
+                    // O processo de login foi bem-sucedido
+                    verificarRedirecionamento(result.user);
+                })
+                .catch((error) => {
+                    console.error(error);
+                    alert("Erro ao entrar com Google: " + error.message);
+                    resetBotoes();
+                });
+        }
+        function formatarCPF(input) {
+            let value = input.value.replace(/\D/g, ''); // Remove tudo que não for dígito
+            value = value.substring(0, 11); // Limita a 11 dígitos
+
+            if (value.length > 9) {
+                value = value.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+            } else if (value.length > 6) {
+                value = value.replace(/^(\d{3})(\d{3})(\d{3})$/, '$1.$2.$3');
+            } else if (value.length > 3) {
+                value = value.replace(/^(\d{3})(\d{3})$/, '$1.$2');
+            } else if (value.length > 0) {
+                value = value.replace(/^(\d{3})$/, '$1');
+            }
+            input.value = value;
+        }
+
+        function formatarMatricula(input) {
+            let value = input.value.replace(/\D/g, ''); // Remove tudo que não for dígito
+            value = value.substring(0, 10); // Limita a 10 dígitos
+
+            if (value.length > 7) {
+                value = value.replace(/^(\d{7})(\d{3})$/, '$1-$2');
+            }
+            input.value = value;
+        }
+
+        // --- ADICIONA LISTENERS APÓS O CARREGAMENTO DO DOM ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Adiciona o listener para o CPF
+            const cpfInput = document.getElementById('reg-cpf');
+            if (cpfInput) {
+                cpfInput.addEventListener('input', () => formatarCPF(cpfInput));
+            }
+    
+            // Adiciona o listener para a Matrícula
+            const matriculaInput = document.getElementById('reg-matricula');
+            if (matriculaInput) {
+                matriculaInput.addEventListener('input', () => formatarMatricula(matriculaInput));
+            }
         });
-}
     </script>
 </body>
 </html>
