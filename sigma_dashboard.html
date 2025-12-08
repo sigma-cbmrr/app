@@ -2073,7 +2073,15 @@
             <label>Nome do Posto</label>
             <input type="text" id="edit-posto-name-input">
             <input type="hidden" id="edit-posto-original-name">
-            
+            <div id="posto-preview-container" style="
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: #f9f9f9;
+                margin-bottom: 20px;
+            ">
+                <p style="margin: 0;">Listas Atualmente Vinculadas: **Carregando...**</p>
+            </div>
             <label style="margin-top:20px;">Vincular Viaturas/Listas a este Posto:</label>
             <div id="posto-lists-checklist" class="checklist-container">
             </div>
@@ -3264,6 +3272,9 @@ sortedUnits.forEach(unit => {
             const checklist = document.getElementById('posto-lists-checklist');
             checklist.innerHTML = '';
     
+            const previewContainer = document.getElementById('posto-preview-container'); // NOVO
+            let listasAtualmenteVinculadas = []; // NOVO
+    
             // --- LÓGICA DE PERMISSÃO ---
             const isGestor = currentUserData && currentUserData.role === 'gestor';
             const gestorUnidade = currentUserData ? currentUserData.unidade : null;
@@ -3271,33 +3282,48 @@ sortedUnits.forEach(unit => {
             Object.entries(allRotas).forEach(([id, r]) => {
                 if(r.ativo === false) return;
         
+                // 1. LÓGICA DO PREVIEW: Coleta as listas já vinculadas
+                const isChecked = (r.posto === postoName) ? 'checked' : '';
+                if (isChecked) {
+                    listasAtualmenteVinculadas.push(`
+                        <span style="display: block; font-size: 0.9em;">
+                            ${r.nome} (${r.unidade || 'GERAL'})
+                        </span>
+                    `);
+                }
+        
+                // 2. LÓGICA DO CHECKLIST (EXISTENTE):
                 const div = document.createElement('div');
                 div.className = 'checklist-item';
         
-                const isChecked = (r.posto === postoName) ? 'checked' : '';
-        
-                // 1. Verifica se a lista pertence à unidade do gestor
                 const isMinhaUnidade = r.unidade === gestorUnidade;
-        
-                // 2. Determina se o checkbox deve ser desabilitado
                 let isDisabled = '';
                 if (isGestor && !isMinhaUnidade) {
-                    // Se for Gestor E a lista NÃO for da sua unidade, desabilita.
                     isDisabled = 'disabled';
                 }
         
-                // Aplica o ID, o status checkado E o status disabled
                 div.innerHTML = `
                     <input type="checkbox" id="chk-p-${id}" ${isChecked} value="${id}" ${isDisabled}> 
                     <label for="chk-p-${id}" style="margin:0;font-weight:normal;">
-                        ${r.nome} <span style="font-weight: bold; color: #555;">(${r.unidade})</span>
+                        ${r.nome} <span style="font-weight: bold; color: #555;">(${r.unidade || 'GERAL'})</span>
                     </label>`;
         
                 checklist.appendChild(div);
             });
     
+            // 3. INJEÇÃO DO PREVIEW NO HTML
+            if (listasAtualmenteVinculadas.length > 0) {
+                previewContainer.innerHTML = `
+                    <p style="margin: 0 0 5px 0; font-weight: bold; color: #800020;">Listas Atualmente Vinculadas (${listasAtualmenteVinculadas.length}):</p>
+                    ${listasAtualmenteVinculadas.join('')}
+                `;
+            } else {
+                previewContainer.innerHTML = '<p style="margin: 0; color: #d39e00;">Nenhuma lista vinculada a este posto no momento.</p>';
+            }
+    
             document.getElementById('modal-posto-manager').style.display = 'flex';
         }
+        
         async function salvarAlteracoesPosto() {
             const oldName = document.getElementById('edit-posto-original-name').value;
             const newName = document.getElementById('edit-posto-name-input').value.trim().toUpperCase();
