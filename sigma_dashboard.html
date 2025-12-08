@@ -1731,6 +1731,7 @@
             </div>
 
             <div id="resume-container"></div>
+            <div id="dashboard-mode-toggle-container" style="display: none;"></div>
             <div id="dashboard-content-by-role">
                 <div id="admin-gestor-cards-container"></div>
                 <div id="operacional-cards-container"></div>
@@ -2303,6 +2304,8 @@
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
         let conferente = '';
+        const GESTOR_MODE_KEY = 'sigma_dashboard_mode';
+        let currentDashboardMode = ''; // 'operacional' (default) ou 'gerencial'
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -2330,41 +2333,49 @@
             const unit = currentUserData.unidade || 'N/D';
             // --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
             const roleDisplay = document.getElementById('user-role-display');
-// Verifica se o elemento existe antes de tentar definir o texto
-    if (roleDisplay) { 
-        roleDisplay.innerHTML = `<strong>${role.toUpperCase()}</strong><br>${unit}`;
-}
-    // ------------------------------------------
-
-    atualizarSaudacao(currentUserData);
-// --- 1. Definindo as Permissões Reais de Acesso ---
-    const p = currentUserData.permissoes || {};
-// Objeto de Permissões
-    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
-    const canViewAdminTools = role === 'admin';
-    const canViewDashboardCards = role === 'admin' ||
-    (isGestorOuAdmin && p.canViewDashboardCards);
-    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
-    const canManageUnits = role === 'admin';
-// Assume que Gerenciamento de Unidades é Admin-Only
-    const canManagePosts = role === 'admin' ||
-(isGestorOuAdmin && p.canManagePosts);
-    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
-    const canManageUnitLists = role === 'admin' ||
-(isGestorOuAdmin && p.canManageUnitLists);
-// --- 2. Aplicação das Restrições na UI (Corrigida e Segura) ---
+            // Verifica se o elemento existe antes de tentar definir o texto
+                if (roleDisplay) { 
+                    roleDisplay.innerHTML = `<strong>${role.toUpperCase()}</strong><br>${unit}`;
+                }
+                // ------------------------------------------
+            atualizarSaudacao(currentUserData);
+            // --- 1. Definindo as Permissões Reais de Acesso ---
+            const p = currentUserData.permissoes || {};
+            // Objeto de Permissões
+            const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
+            currentDashboardMode = localStorage.getItem(GESTOR_MODE_KEY) || 'operacional';
+            const canViewAdminTools = role === 'admin';
+            const canViewDashboardCards = role === 'admin' ||
+            (isGestorOuAdmin && p.canViewDashboardCards);
+            const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
+            const canManageUnits = role === 'admin';
+            // Assume que Gerenciamento de Unidades é Admin-Only
+            const canManagePosts = role === 'admin' ||
+            (isGestorOuAdmin && p.canManagePosts);
+            const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
+            const canManageUnitLists = role === 'admin' ||
+            (isGestorOuAdmin && p.canManageUnitLists);
+            // --- 2. Aplicação das Restrições na UI (Corrigida e Segura) ---
     
-    // Reseta visibilidade dos links de Admin.
-    document.querySelectorAll('.restricted-admin-only').forEach(el => {
-        if(el) el.style.display = 'block';
-    });
+            // Reseta visibilidade dos links de Admin.
+            document.querySelectorAll('.restricted-admin-only').forEach(el => {
+                if(el) el.style.display = 'block';
+            });
 // Oculta o Rótulo e Links de Admin se for Operacional
     if (role === 'operacional') {
         renderOperacionalCards();
- } else {
-        // Para Admin e Gestor
-        renderAdminGestorCards(canViewDashboardCards);
-        // ✅ CORREÇÃO: Removido carregarConferenciasHoje() para evitar TypeError: Cannot set properties of null
+    } else { // Gestor ou Admin
+        
+        // Renderiza o Toggle de Modo para Gestor/Admin
+        renderModeToggle(currentDashboardMode);
+
+        if (currentDashboardMode === 'operacional') {
+            // Se o modo preferido for Operacional (padrão)
+            renderOperacionalCards();
+        } else {
+            // Se o modo preferido for Gerencial
+            renderAdminGestorCards(canViewDashboardCards);
+        }
     }
 
     // --- 2.1 Ajuste Fino dos Links de Gestão (para Gestores e Admin) ---
@@ -2449,7 +2460,43 @@ function setupMasksForModal() {
     }
 }
             // --- NOVO: Cards Específicos para Operacional ---
-function renderOperacionalCards() {
+
+        function toggleDashboardMode() {
+    const newMode = (currentDashboardMode === 'operacional' || !currentDashboardMode) ? 'gerencial' : 'operacional';
+    
+    // Salva a nova preferência
+    localStorage.setItem(GESTOR_MODE_KEY, newMode);
+    currentDashboardMode = newMode;
+
+    // Força o recarregamento do dashboard para aplicar o novo modo
+    switchView('dashboard');
+}
+
+/**
+ * Renderiza o botão de alternância de modo (somente para Gestor/Admin).
+ * @param {string} currentMode - O modo atual ('operacional' ou 'gerencial').
+ */
+function renderModeToggle(currentMode) {
+    const container = document.getElementById('dashboard-mode-toggle-container');
+    if (!container) return;
+
+    const targetMode = (currentMode === 'operacional' || !currentMode) ? 'Gerencial' : 'Operacional';
+    
+    // Texto e ícone do botão: sempre mostra o MODO DE DESTINO
+    const buttonText = `Alternar para Modo ${targetMode}`;
+    const icon = (targetMode === 'Gerencial') ? 'fas fa-cogs' : 'fas fa-user-circle';
+
+    // Estilo Mobile-First: Botão full-width no topo
+    container.innerHTML = `
+        <button class="btn-modern-action btn-secondary btn-form-action" 
+                onclick="toggleDashboardMode()" 
+                style="margin-bottom: 25px; background-color: #f0f0f0; color: #555;">
+            <i class="${icon}"></i> ${buttonText}
+        </button>
+    `;
+    container.style.display = 'block';
+}
+        function renderOperacionalCards() {
     const container = document.getElementById('operacional-cards-container');
     if (!container) return;
     
