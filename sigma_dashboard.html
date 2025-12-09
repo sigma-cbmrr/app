@@ -1735,6 +1735,10 @@
         </div>
         
         <h3>Usuários Cadastrados</h3>
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label for="user-search-input"><i class="fas fa-search"></i> Filtrar por Nome de Exibição:</label>
+                <input type="text" id="user-search-input" placeholder="Digite o Nome de Exibição (Posto Quadro Nome Guerra)" class="filter-input" oninput="filtrarUsuarios()">
+            </div>
         <table class="admin-table">
             <thead>
                 <tr>
@@ -2126,6 +2130,7 @@
         // Variáveis Globais
         let currentUserData = null;
         let allLists = [];
+        let allUsersData = [];
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
         let conferente = '';
@@ -4099,65 +4104,39 @@ const activeLink = document.getElementById(`link-${v}`);
     const tbody = document.getElementById('users-table-body');
     tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
     
-    // --- NOVO: FILTRO DE UNIDADE PARA O GESTOR --- (Mantido)
+    // --- NOVO: FILTRO DE UNIDADE PARA O GESTOR ---
     const isGestor = currentUserData.role === 'gestor';
     const unidadeGestor = currentUserData.unidade;
     
-    let userQuery = db.collection('usuarios'); 
+    let userQuery = db.collection('usuarios'); // Coleção correta
     
     if (isGestor) {
+        // Se for Gestor, filtre a query para buscar usuários APENAS na sua unidade
         userQuery = userQuery.where('unidade', '==', unidadeGestor);
     }
+    // ---------------------------------------------
 
     try {
+        // Executa a query (filtrada ou total)
         const snap = await userQuery.get();
-        tbody.innerHTML = '';
         
-        if (snap.empty) {
+        // 1. POPULA A VARIÁVEL GLOBAL allUsersData
+        allUsersData = [];
+        snap.forEach(doc => {
+            // Salva o ID do documento junto com os dados para uso no modal e filtro
+            allUsersData.push({ id: doc.id, ...doc.data() }); 
+        });
+        
+        // 2. VERIFICA SE HÁ DADOS
+        if (allUsersData.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5">Nenhum militar encontrado nesta unidade.</td></tr>';
             return;
         }
 
-        snap.forEach(doc => {
-            const u = doc.data();
-            const docId = doc.id; 
-            const tr = document.createElement('tr');
-            
-            const isCurrentUser = firebase.auth().currentUser.uid === docId;
-            
-            // --- VARIÁVEIS PARA TELEFONE E WHATSAPP ---
-            const telefone = u.telefone_contato || 'N/D';
-            const whatsappUrl = u.whatsapp_url || '#';
-            const rawTelefone = telefone.replace(/\D/g, '');
-            
-            // LÓGICA DO PONTO 3: NÚMERO SEM DDD (Retira os 2 primeiros dígitos '95')
-            // Se o número tiver 11 dígitos (DDD + 9 dígitos), remove os 2 primeiros (o DDD).
-            const numeroSemDDD = (rawTelefone.length === 11) ? rawTelefone.substring(2) : rawTelefone; 
-
-            // --- CONSTRUÇÃO DO ÍCONE WHATSAPP (PONTO 2) ---
-            const whatsappLink = `<a href="${whatsappUrl}" target="_blank" style="margin-left: 5px; color: #25D366;"><i class="fab fa-whatsapp"></i></a>`;
-
-            // --- CONSTRUÇÃO DO ÍCONE DE DISCAGEM (PONTO 3) ---
-            // O ícone só é exibido se for mobile (max-width: 768px). Usamos uma classe CSS customizada.
-            const dialLink = (rawTelefone.length >= 8) ? 
-                `<a href="tel:${numeroSemDDD}" class="btn-dial-mobile" style="margin-left: 5px; color: #2c7399;"><i class="fas fa-phone"></i></a>` : 
-                '';
-            
-            // Renderização da linha
-            tr.innerHTML = `
-                <td>${u.nome_militar_completo}</td>
-                <td>
-                    <div style="display: flex; align-items: center; justify-content: flex-start;">
-                        <span>${telefone}</span>
-                        ${whatsappLink}
-                        ${dialLink} 
-                    </div>
-                </td>
-                <td><span class="role-badge role-${u.role}">${u.role}</span></td>
-                <td>${u.unidade}</td>
-                <td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')" ${isCurrentUser ? 'disabled' : ''}>Editar</button></td>`;
-            tbody.appendChild(tr);
-        });
+        // 3. INICIA A RENDERIZAÇÃO/FILTRAGEM
+        // Chama a função de filtragem (que faz a renderização real)
+        filtrarUsuarios();
+        
     } catch(e) {
         console.error("Erro ao listar usuários:", e);
         tbody.innerHTML = '<tr><td colspan="5">Erro ao carregar lista de usuários.</td></tr>';
@@ -6211,6 +6190,57 @@ function formatarTelefone(input) {
         value = value.replace(/^(\d{2})$/, '($1)');
     }
     input.value = value;
+}
+        function filtrarUsuarios() {
+    const searchInput = document.getElementById('user-search-input');
+    const searchTerm = searchInput.value.trim().toUpperCase();
+    const tbody = document.getElementById('users-table-body');
+    
+    tbody.innerHTML = '';
+    
+    const filteredUsers = allUsersData.filter(u => {
+        // Filtra pelo Nome de Exibição completo
+        const nomeExibicao = u.nome_militar_completo || '';
+        return nomeExibicao.includes(searchTerm);
+    });
+
+    if (filteredUsers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">Nenhum usuário encontrado com o nome digitado.</td></tr>';
+        return;
+    }
+
+    filteredUsers.forEach(u => {
+        const docId = u.id; 
+        const tr = document.createElement('tr');
+        
+        // Verifica se é o usuário logado (para desabilitar o botão de edição)
+        const isCurrentUser = firebase.auth().currentUser.uid === docId; 
+        
+        const telefone = u.telefone_contato || 'N/D';
+        const whatsappUrl = u.whatsapp_url || '#';
+        const rawTelefone = telefone.replace(/\D/g, '');
+        const numeroSemDDD = (rawTelefone.length === 11) ? rawTelefone.substring(2) : rawTelefone; 
+
+        // Constrói os links de ação (WhatsApp e Discagem)
+        const whatsappLink = `<a href="${whatsappUrl}" target="_blank" style="margin-left: 5px; color: #25D366;"><i class="fab fa-whatsapp"></i></a>`;
+        const dialLink = (rawTelefone.length >= 8) ? 
+            `<a href="tel:${numeroSemDDD}" class="btn-dial-mobile" style="margin-left: 5px; color: #2c7399;"><i class="fas fa-phone"></i></a>` : '';
+        
+        // Renderização da linha
+        tr.innerHTML = `
+            <td>${u.nome_militar_completo}</td>
+            <td>
+                <div style="display: flex; align-items: center; justify-content: flex-start;">
+                    <span>${telefone}</span>
+                    ${whatsappLink}
+                    ${dialLink} 
+                </div>
+            </td>
+            <td><span class="role-badge role-${u.role}">${u.role}</span></td>
+            <td>${u.unidade}</td>
+            <td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')" ${isCurrentUser ? 'disabled' : ''}>Editar</button></td>`;
+        tbody.appendChild(tr);
+    });
 }
     </script>
 </body>
