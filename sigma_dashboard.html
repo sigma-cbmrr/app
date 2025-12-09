@@ -2329,17 +2329,114 @@
         });
 
         function setupUIBasedOnRole() {
-    // 🚨 CORREÇÃO: Verifica se os dados do usuário estão carregados
+    // 🚨 CORREÇÃO CRÍTICA (Erro TypeError): Garante que os dados do usuário estão carregados
     if (!currentUserData) {
         console.warn("currentUserData não carregado. Abortando setupUIBasedOnRole.");
         return; 
     }
     
-    // Antiga Linha 2332
     const role = currentUserData.role || 'operacional';
     const unit = currentUserData.unidade || 'N/D';
     
-    // ... (restante da lógica de formatação e permissões, que agora está segura) ...
+    // --- 1. Exibir Perfil e Unidade (Quebra de Linha e Negrito) ---
+    const roleDisplay = document.getElementById('user-role-display'); 
+    if (roleDisplay) {
+        // Usa innerHTML para renderizar <br> e <strong>
+        roleDisplay.innerHTML = `<strong>${role.toUpperCase()}</strong><br>${unit}`;
+    }
+
+    atualizarSaudacao(currentUserData);
+    
+    // --- Lógica de Permissões (Manter) ---
+    const p = currentUserData.permissoes || {};
+    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
+    
+    // 2. Define o Modo de Visualização do Dashboard
+    currentDashboardMode = localStorage.getItem(GESTOR_MODE_KEY) || 'operacional';
+    
+    const canViewDashboardCards = role === 'admin' || (isGestorOuAdmin && p.canViewDashboardCards);
+    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
+    const canManageUnits = role === 'admin';
+    const canManagePosts = role === 'admin' || (isGestorOuAdmin && p.canManagePosts);
+    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
+    const canManageUnitLists = role === 'admin' || (isGestorOuAdmin && p.canManageUnitLists);
+    
+    // --- 3. Aplicação das Restrições na UI (Links Laterais) ---
+    // Reseta visibilidade dos links de Admin.
+    document.querySelectorAll('.restricted-admin-only').forEach(el => { 
+        if(el) el.style.display = 'block'; 
+    });
+
+    // --- 4. Renderização do Dashboard Baseada no Modo ---
+    
+    if (role === 'operacional') {
+        renderOperacionalCards();
+    } else { 
+        // Usuário Gestor/Admin: Renderiza o botão de alternância
+        renderModeToggle(currentDashboardMode);
+
+        if (currentDashboardMode === 'operacional') {
+            // Modo padrão (Operacional): Mostra cards de uso diário
+            renderOperacionalCards();
+        } else {
+            // Modo Gerencial: Mostra cards de gestão/pendências
+            renderAdminGestorCards(canViewDashboardCards);
+        }
+    }
+    
+    // --- 5. Ajuste Fino dos Links de Gestão (para Gestores e Admin) ---
+    // (Seu código original para links laterais)
+    if (!canManageUnits) { 
+        const linkUnidades = document.getElementById('link-unidades');
+        if(linkUnidades) linkUnidades.style.display = 'none';
+    }
+    
+    if (!canManagePosts) { 
+        const linkPostos = document.getElementById('link-postos');
+        if(linkPostos) linkPostos.style.display = 'none';
+    }
+    
+    if (!canManageUnitUsers) { 
+        const linkUsuarios = document.getElementById('link-usuarios');
+        if(linkUsuarios) linkUsuarios.style.display = 'none';
+    }
+    
+    if (!canManageUnitLists) { 
+        const linkListas = document.getElementById('link-listas');
+        if(linkListas) linkListas.style.display = 'none';
+    }
+    
+    // Oculta o Histórico Global se a permissão não estiver marcada
+    const globalHistoryLink = document.getElementById('link-global-history');
+    if (!canViewUnitHistory && globalHistoryLink) {
+        globalHistoryLink.style.display = 'none';
+    }
+    
+    // Ocultar Rótulo Admin se não sobrou nenhum link
+    const adminLinks = ['link-unidades', 'link-postos', 'link-usuarios', 'link-listas'];
+    const anyAdminLinkVisible = adminLinks.some(id => {
+        const el = document.getElementById(id);
+        return el && el.style.display !== 'none';
+    });
+    const rotuloAdmin = document.getElementById('sidebar-rotulo-admin');
+    if (!anyAdminLinkVisible && rotuloAdmin) {
+        rotuloAdmin.style.display = 'none';
+    }
+
+    // --- 6. Chamadas de Dados Comuns e UI ---
+    carregarListasParaNovaConferencia(); // Preenche o modal "Iniciar Conferência"
+    verificarConferenciaAtiva(); // Renderiza o card de "Continuar Conferência"
+    
+    // SOLUÇÃO PARA INICIAR O MENU FECHADO
+    closeMenuMobile();
+    // Trava do Botão Voltar (Mobile/Browser)
+    if (window.innerWidth <= 768) { 
+        history.pushState(null, null, location.href);
+    }
+    
+    // Garante que a visão seja o dashboard ao logar
+    switchView('dashboard');
+    setupMasksForModal();
 }
         /**
  * Adiciona listeners de formatação (máscara) aos inputs do modal Gerenciar Militar.
