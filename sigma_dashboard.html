@@ -103,6 +103,9 @@
             cursor: pointer; 
             padding: 0 5px; 
         }
+        .btn-dial-mobile {
+            display: none !important;
+        }
         .profile-badge { 
             background-color: #800020; /* Cor sólida SIGMA (vermelho escuro) */
             color: white; /* Mantém o texto branco no fundo vermelho escuro */
@@ -1277,6 +1280,9 @@
                 width: 100%;
                 order: 1; /* Garante que o botão venha depois do texto */
             }
+            .btn-dial-mobile {
+                display: inline-block !important; /* Torna o botão visível */
+            }
             greeting-avatar {
                 flex-basis: auto;
             }
@@ -1733,7 +1739,7 @@
             <thead>
                 <tr>
                     <th>Militar</th>
-                    <th>Login</th>
+                    <th>Telefone para Contato</th> 
                     <th>Perfil</th>
                     <th>Unidade</th>
                     <th>Ações</th>
@@ -4093,20 +4099,17 @@ const activeLink = document.getElementById(`link-${v}`);
     const tbody = document.getElementById('users-table-body');
     tbody.innerHTML = '<tr><td colspan="5">Carregando...</td></tr>';
     
-    // --- NOVO: FILTRO DE UNIDADE PARA O GESTOR ---
+    // --- NOVO: FILTRO DE UNIDADE PARA O GESTOR --- (Mantido)
     const isGestor = currentUserData.role === 'gestor';
     const unidadeGestor = currentUserData.unidade;
     
-    let userQuery = db.collection('usuarios'); // Coleção correta
+    let userQuery = db.collection('usuarios'); 
     
     if (isGestor) {
-        // Se for Gestor, filtre a query para buscar usuários APENAS na sua unidade
         userQuery = userQuery.where('unidade', '==', unidadeGestor);
     }
-    // ---------------------------------------------
 
     try {
-        // Executa a query (filtrada ou total)
         const snap = await userQuery.get();
         tbody.innerHTML = '';
         
@@ -4120,11 +4123,39 @@ const activeLink = document.getElementById(`link-${v}`);
             const docId = doc.id; 
             const tr = document.createElement('tr');
             
-            // O usuário Administrador não deve poder editar a si mesmo
             const isCurrentUser = firebase.auth().currentUser.uid === docId;
             
+            // --- VARIÁVEIS PARA TELEFONE E WHATSAPP ---
+            const telefone = u.telefone_contato || 'N/D';
+            const whatsappUrl = u.whatsapp_url || '#';
+            const rawTelefone = telefone.replace(/\D/g, '');
+            
+            // LÓGICA DO PONTO 3: NÚMERO SEM DDD (Retira os 2 primeiros dígitos '95')
+            // Se o número tiver 11 dígitos (DDD + 9 dígitos), remove os 2 primeiros (o DDD).
+            const numeroSemDDD = (rawTelefone.length === 11) ? rawTelefone.substring(2) : rawTelefone; 
+
+            // --- CONSTRUÇÃO DO ÍCONE WHATSAPP (PONTO 2) ---
+            const whatsappLink = `<a href="${whatsappUrl}" target="_blank" style="margin-left: 5px; color: #25D366;"><i class="fab fa-whatsapp"></i></a>`;
+
+            // --- CONSTRUÇÃO DO ÍCONE DE DISCAGEM (PONTO 3) ---
+            // O ícone só é exibido se for mobile (max-width: 768px). Usamos uma classe CSS customizada.
+            const dialLink = (rawTelefone.length >= 8) ? 
+                `<a href="tel:${numeroSemDDD}" class="btn-dial-mobile" style="margin-left: 5px; color: #2c7399;"><i class="fas fa-phone"></i></a>` : 
+                '';
+            
             // Renderização da linha
-            tr.innerHTML = `<td>${u.nome_militar_completo}</td><td>${u.email || 'N/D'}</td><td><span class="role-badge role-${u.role}">${u.role}</span></td><td>${u.unidade}</td><td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')" ${isCurrentUser ? 'disabled' : ''}>Editar</button></td>`;
+            tr.innerHTML = `
+                <td>${u.nome_militar_completo}</td>
+                <td>
+                    <div style="display: flex; align-items: center; justify-content: flex-start;">
+                        <span>${telefone}</span>
+                        ${whatsappLink}
+                        ${dialLink} 
+                    </div>
+                </td>
+                <td><span class="role-badge role-${u.role}">${u.role}</span></td>
+                <td>${u.unidade}</td>
+                <td><button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.8em;" onclick="abrirGestaoUsuario('${docId}')" ${isCurrentUser ? 'disabled' : ''}>Editar</button></td>`;
             tbody.appendChild(tr);
         });
     } catch(e) {
@@ -4239,7 +4270,7 @@ const activeLink = document.getElementById(`link-${v}`);
         cpf: cpf,
         matricula: matricula,
         telefone_contato: telefone,
-        whatsapp_url: `https://wa.me/55${telefone.replace(/\\D/g, '')}`, // Atualiza URL do WhatsApp
+        whatsapp_url: `https://web.whatsapp.com/send?phone=55${telefone.replace(/\D/g, '')}`,
         
         role: role,
         unidade: unit,
