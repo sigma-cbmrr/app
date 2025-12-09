@@ -3833,87 +3833,32 @@ function reimprimirPDF(data) {
         }
         
         function switchView(v) {
-    // Esconde todas as seções de visualização
-    document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');   
-    // Mostra a seção desejada
+    // 🛑 MODIFICAÇÃO CRÍTICA: Garante que as áreas principais do conteúdo estejam visíveis.
+    // Isto resolve a "tela em branco" quando o container pai é ocultado por outras lógicas.
+    const contentAreaWrapper = document.getElementById('content-area'); // O principal container do dashboard
+    const contentAreaInner = document.querySelector('.content');        // O container interno das views
+    
+    if (contentAreaWrapper) contentAreaWrapper.style.display = 'block';
+    if (contentAreaInner) contentAreaInner.style.display = 'block';
+    // --------------------------------------------------------------------------
+
+    // 1. Oculta todas as views (Original)
+    document.querySelectorAll('.view-section').forEach(view => {
+        view.style.display = 'none';
+        view.classList.remove('active-view');
+    });
+
+    // 2. Exibe a view solicitada (Original)
     const viewElement = document.getElementById(`view-${v}`);
     if (viewElement) {
         viewElement.style.display = 'block';
-    } else {
-        console.error(`View não encontrada: view-${v}`);
-        return;
-    }
-    
-    // Remove a classe 'active' de todos os links e adiciona ao link clicado
-    document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
-    const activeLink = document.getElementById(`link-${v}`);
-    if (activeLink) {
-        activeLink.classList.add('active');
+        viewElement.classList.add('active-view');
     }
 
-    // --- AÇÕES ESPECÍFICAS POR VIEW ---
-    
-    // NOVO BLOCO CRÍTICO PARA ATUALIZAR O DASHBOARD AO CLICAR NO BOTÃO
-    if (v === 'dashboard') {
-        // Força a re-execução da lógica que lê o localStorage e renderiza o modo (Operacional/Gerencial)
-        setupUIBasedOnRole(); 
-    }
-    
-    if (v === 'unidades') {
-        carregarUnidadesVisuais();
-        setupCadastroMilitarLogic();
-    }
-    
-    if (v === 'postos') {
-        carregarPostosVisuais();
-    }
-
-    if (v === 'usuarios') {
-        listarUsuarios();
-        carregarUnidadesSelect();
-    }
-    
+    // 3. Carregamento de dados específico (Original)
     if (v === 'listas') {
-        // 1. Carrega os Postos de Serviço (Dropdown 1)
-        carregarPostosServicoSelect('novo-local-posto'); 
-        
-        // 2. Carrega as unidades e aplica a lógica de Gestor (Dropdown 2)
-        carregarUnidadesSelect('novo-local-unidade'); 
-        
-        // 3. Carrega a lista de locais existente (se existir)
-        carregarListaLocaisAdmin(); 
+        carregarListaLocaisAdmin();
     }
-
-    if(v === 'global-history') {
-        // Inicializa o filtro de data (últimos 30 dias)
-        document.getElementById('glob-hist-start').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
-        document.getElementById('glob-hist-end').valueAsDate = new Date();
-        
-        
-        // Carrega as opções de Local (Viatura) e Filtra por Unidade do Gestor
-        carregarUnidadesVisuais();
-        // NOVO: Carrega as opções de Conferente (Usuário) e Filtra por Unidade do Gestor
-        carregarUsuariosFiltro();
-        // Carrega o histórico com os filtros iniciais
-        loadGlobalHistory();
-    }
-
-    if(v === 'my-history') {
-        // 1. Calcular a data de 30 dias atrás
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(endDate.getDate() - 30); // Subtrai 30 dias
-        document.getElementById('my-hist-start').valueAsDate = startDate;
-        document.getElementById('my-hist-end').valueAsDate = endDate;
-        loadMyHistory();
-    }
-
-    // === SOLUÇÃO: FECHA O MENU APÓS SELEÇÃO NO MOBILE ===
-    if (window.innerWidth <= 768) {
-        history.pushState(null, null, location.href);
-        closeMenuMobile();
-    }
-    // ===================================================
 }
         function toggleMenuMobile() { 
             const s = document.getElementById('main-sidebar');
@@ -4198,22 +4143,30 @@ function reimprimirPDF(data) {
             switchView('listas'); 
         }
         
-        async function carregarDadosGerenciador(){ 
+        // Local: Função carregarDadosGerenciador
+async function carregarDadosGerenciador(){ 
     if(!currentEditingId) return;
     
-    // Garante que o loading e o conteúdo estejam na ordem correta
+    // 1. Inicia o loading
     document.getElementById('loading-message-admin').style.display = 'block';
     document.getElementById('main-admin-content').style.display = 'none';
 
     try{ 
-        const d = await db.collection(COLECAO_LISTAS).doc(currentEditingId).get(); 
+        // 2. Busca e Carrega os Dados
+        const d = await db.collection(COLECAO_LISTAS).doc(currentEditingId).get();
         dadosConferencia = d.exists ? (d.data().list || []) : []; 
-        renderizarLista();
-        // 🛑 NOVO BLOCO DE TEMPO: Esperar um tick do ciclo de eventos
-        await new Promise(resolve => setTimeout(resolve, 50)); // Pequena pausa (50ms)
         
+        // 3. Renderiza o HTML (com Sortable.js)
+        renderizarLista(); 
+
+        // 🛑 CRÍTICO: Pausa para o navegador desenhar o DOM antes de exibi-lo 🛑
+        // Isto resolve conflitos com a inicialização do Sortable.js
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+        
+        // 4. Finaliza a exibição (Mostra o conteúdo renderizado)
         document.getElementById('loading-message-admin').style.display = 'none';
         document.getElementById('main-admin-content').style.display = 'block';
+
     }catch(e){
         console.error(e);
         alert("Erro ao carregar lista.");
