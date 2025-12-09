@@ -4090,128 +4090,110 @@ const activeLink = document.getElementById(`link-${v}`);
     }
 }
         
-        async function abrirGestaoUsuario(docId) {
-            try {
-                const doc = await db.collection('usuarios').doc(docId).get();
-                if (!doc.exists) return alert("Usuário não encontrado.");
-                
-                const u = doc.data();
-                const permissoes = u.permissoes || {}; // Inicializa o objeto de permissões
-                
-                // Preenche o campo de unidades
-                await carregarUnidadesSelect('edit-user-unit');
+        async async function abrirGestaoUsuario(docId) {
+    try {
+        const doc = await db.collection('usuarios').doc(docId).get();
+        if (!doc.exists) return alert("Usuário não encontrado.");
+        
+        const u = doc.data();
+        const permissoes = u.permissoes || {};
+        
+        // Preenche o campo de unidades
+        await carregarUnidadesSelect('edit-user-unit');
+        
+        document.getElementById('edit-user-doc-id').value = docId;
+        document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
+        document.getElementById('edit-user-posto').value = u.posto || '';
+        document.getElementById('edit-user-completo').value = u.nome_completo || ''; // NOVO: Nome Civil Completo
+        document.getElementById('edit-user-email').value = u.email || 'N/D';
+        document.getElementById('edit-user-role').value = u.role || 'operacional';
+        document.getElementById('edit-user-unit').value = u.unidade || '';
 
-                document.getElementById('edit-user-doc-id').value = docId;
-                document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
-                document.getElementById('edit-user-posto').value = u.posto || '';
-                document.getElementById('edit-user-completo').value = u.nome_militar_completo || '';
-                document.getElementById('edit-user-email').value = u.email || 'N/D';
-                document.getElementById('edit-user-role').value = u.role || 'operacional';
-                document.getElementById('edit-user-unit').value = u.unidade || '';
+        // --- NOVOS CAMPOS SOMENTE LEITURA (PREENCHIMENTO) ---
+        document.getElementById('edit-user-cpf').value = u.cpf || 'N/D';
+        document.getElementById('edit-user-matricula').value = u.matricula || 'N/D';
+        document.getElementById('edit-user-telefone').value = u.telefone_contato || 'N/D';
+        
+        // CAMPO NOME DE EXIBIÇÃO (SINTÉTICO - SOMENTE LEITURA)
+        document.getElementById('edit-user-display-name').value = u.nome_militar_completo || 'N/D';
 
-                // --- NOVA LÓGICA DE PERMISSÕES ---
-                const roleSelect = document.getElementById('edit-user-role');
-                const permFields = document.getElementById('user-permissions-fields');
-                
-                // Mostra o bloco de permissões apenas se a role for 'gestor' ou 'admin'
-                permFields.style.display = (u.role === 'gestor' || u.role === 'admin') ? 'block' : 'none';
+        // --- LÓGICA DE PERMISSÕES (Mantida) ---
+        const roleSelect = document.getElementById('edit-user-role');
+        const permFields = document.getElementById('user-permissions-fields');
+        
+        // Mostra o bloco de permissões apenas se a role for 'gestor' ou 'admin'
+        permFields.style.display = (u.role === 'gestor' || u.role === 'admin') ? 'block' : 'none';
 
-                // Preenche os checkboxes com base nos dados do Firestore (se existir)
-                document.getElementById('perm-view-cards').checked = permissoes.canViewDashboardCards || false;
-                document.getElementById('perm-view-history').checked = permissoes.canViewUnitHistory || false;
-                document.getElementById('perm-manage-posts').checked = permissoes.canManagePosts || false;
-                document.getElementById('perm-manage-users').checked = permissoes.canManageUnitUsers || false;
-                document.getElementById('perm-manage-lists').checked = permissoes.canManageUnitLists || false;
+        // Preenche os checkboxes com base nos dados do Firestore (se existir)
+        document.getElementById('perm-view-cards').checked = permissoes.canViewDashboardCards || false;
+        document.getElementById('perm-view-history').checked = permissoes.canViewUnitHistory || false;
+        document.getElementById('perm-manage-posts').checked = permissoes.canManagePosts || false;
+        document.getElementById('perm-manage-users').checked = permissoes.canManageUnitUsers || false;
+        document.getElementById('perm-manage-lists').checked = permissoes.canManageUnitLists || false;
 
-                // Listener para mostrar/ocultar as permissões ao mudar a Role
-                roleSelect.onchange = function() {
-                    permFields.style.display = (this.value === 'gestor' || this.value === 'admin') ? 'block' : 'none';
-                };
-                // ---------------------------------
+        // Listener para mostrar/ocultar as permissões ao mudar a Role
+        roleSelect.onchange = function() {
+            permFields.style.display = (this.value === 'gestor' || this.value === 'admin') ? 'block' : 'none';
+        };
+        // ---------------------------------
 
-                document.getElementById('modal-user-manager').style.display = 'flex';
-            } catch(e) {
-                console.error(e);
-                alert("Erro ao abrir edição: " + e.message);
-            }
-        }
+        document.getElementById('modal-user-manager').style.display = 'flex';
+    } catch(e) {
+        console.error(e);
+        alert("Erro ao abrir edição: " + e.message);
+    }
+}
         
         async function salvarAlteracoesUsuario() {
-            const docId = document.getElementById('edit-user-doc-id').value;
-            const guerra = document.getElementById('edit-user-guerra').value.trim();
-            const posto = document.getElementById('edit-user-posto').value.trim();
-            const completo = document.getElementById('edit-user-completo').value.trim();
-            const role = document.getElementById('edit-user-role').value;
-            const unit = document.getElementById('edit-user-unit').value;
-            
-            if (!guerra || !posto || !unit) return alert("Nome de Guerra, Posto e Unidade são obrigatórios.");
+    const docId = document.getElementById('edit-user-doc-id').value;
+    const guerra = document.getElementById('edit-user-guerra').value.trim();
+    const posto = document.getElementById('edit-user-posto').value.trim();
+    const completo = document.getElementById('edit-user-completo').value.trim(); // NOVO: Nome Civil Completo
+    const role = document.getElementById('edit-user-role').value;
+    const unit = document.getElementById('edit-user-unit').value;
 
-            // --- NOVA LÓGICA DE SALVAMENTO DE PERMISSÕES ---
-            const novasPermissoes = {
-                canViewDashboardCards: document.getElementById('perm-view-cards').checked,
-                canViewUnitHistory: document.getElementById('perm-view-history').checked,
-                canManagePosts: document.getElementById('perm-manage-posts').checked,
-                canManageUnitUsers: document.getElementById('perm-manage-users').checked,
-                canManageUnitLists: document.getElementById('perm-manage-lists').checked,
-            };
-            
-            // O objeto de atualização
-            const updateData = {
-                nome_guerra: guerra,
-                posto: posto,
-                nome_militar_completo: completo,
-                role: role,
-                unidade: unit,
-                permissoes: novasPermissoes // SALVA O NOVO OBJETO
-            };
-            // ---------------------------------------------
-            
-            try {
-                await db.collection('usuarios').doc(docId).update(updateData);
-                
-                alert("Dados do militar atualizados com sucesso!");
-                document.getElementById('modal-user-manager').style.display = 'none';
-                listarUsuarios();
-            } catch(e) {
-                alert("Erro ao salvar alterações: " + e.message);
-            }
-        }
-        async function carregarUsuariosFiltro() {
-    const select = document.getElementById('glob-hist-user');
-    if (!select) return;
+    if (!guerra || !posto || !unit || !completo) return alert("Nome de Guerra, Posto, Unidade e Nome Civil Completo são obrigatórios.");
 
-    select.innerHTML = '<option value="">Todos</option>';
+    // --- REQUISIÇÃO ADICIONAL PARA PEGAR O QUADRO ATUAL ---
+    // Precisamos buscar o documento original para manter o valor de 'quadro' e 'cpf' que não estão no modal.
+    const userDoc = await db.collection('usuarios').doc(docId).get();
+    if (!userDoc.exists) return alert("Erro ao carregar dados originais para salvar.");
+    const originalData = userDoc.data();
+    const quadro = originalData.quadro || 'N/D'; // Mantém o quadro original
+
+    // --- RECALCULAÇÃO DA VARIÁVEL SINTÉTICA (NOME DE EXIBIÇÃO) ---
+    const nomeMilitarCompleto = `${posto} ${quadro} ${guerra}`;
     
-    // Filtro de segurança: Gestor só vê usuários da própria unidade. Admin vê todos.
-    const isGestor = currentUserData.role === 'gestor';
-    const unidadeGestor = currentUserData.unidade;
-
-    let userQuery = db.collection('usuarios');
+    // --- LÓGICA DE SALVAMENTO DE PERMISSÕES (Mantida) ---
+    const novasPermissoes = {
+        canViewDashboardCards: document.getElementById('perm-view-cards').checked,
+        canViewUnitHistory: document.getElementById('perm-view-history').checked,
+        canManagePosts: document.getElementById('perm-manage-posts').checked,
+        canManageUnitUsers: document.getElementById('perm-manage-users').checked,
+        canManageUnitLists: document.getElementById('perm-manage-lists').checked,
+    };
     
-    if (isGestor) {
-        userQuery = userQuery.where('unidade', '==', unidadeGestor);
-    }
-
+    // O objeto de atualização
+    const updateData = {
+        nome_guerra: guerra,
+        posto: posto,
+        nome_completo: completo,             // NOVO: Nome Civil Completo
+        nome_militar_completo: nomeMilitarCompleto, // NOVO: Valor Recalculado
+        role: role,
+        unidade: unit,
+        permissoes: novasPermissoes,
+        // Mantemos 'quadro' inalterado, caso não haja edição.
+        // Se o Posto/Graduação mudar, a atualização de Quadro deve ser feita por outro modal mais complexo,
+        // ou assumimos que o quadro está correto para o Posto fornecido.
+    };
+    
     try {
-        const snap = await userQuery.get();
-        let users = [];
-        snap.forEach(doc => {
-            const u = doc.data();
-            // Usamos o nome completo, pois é o que está salvo nos resultados (linha 1082)
-            if (u.nome_militar_completo) {
-                users.push(u.nome_militar_completo);
-            }
-        });
-
-        users.sort().forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            select.appendChild(opt);
-        });
-
-    } catch (e) {
-        console.error("Erro ao carregar filtro de usuários:", e);
+        await db.collection('usuarios').doc(docId).update(updateData);
+        alert("Dados do militar atualizados com sucesso!");
+        document.getElementById('modal-user-manager').style.display = 'none';
+        listarUsuarios();
+    } catch(e) {
+        alert("Erro ao salvar alterações: " + e.message);
     }
 }
         async function excluirUsuario() {
