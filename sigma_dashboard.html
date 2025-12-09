@@ -1790,25 +1790,31 @@
     </div>
 
     <div id="view-editor" class="view-section">
-        <div class="admin-container">
-            <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
-                <button onclick="switchView('listas')" class="btn-modern-action btn-edit">Voltar</button>
-                <h1 class="page-title" id="editor-title" style="font-size:1.2em; margin:0;">Editando...</h1>
-            </div>
-            <div id="loading-message-admin">Carregando...</div>
-                <div id="main-admin-content" style="display:none;">
-                    <div class="global-actions">
+            <div class="admin-container">
+                <div style="display:flex;
+justify-content:space-between; margin-bottom:15px;">
+                    <button onclick="switchView('listas')" class="btn-modern-action btn-edit">Voltar</button>
+                    <h1 class="page-title" id="editor-title" style="font-size:1.2em;
+margin:0;">Editando...</h1>
+                </div>
+                <div id="loading-message-admin">Carregando...</div>
+                <div id="main-admin-content"> <div class="global-actions">
                         <button class="btn-modern-action btn-sync" onclick="salvarDados()">Salvar</button>
+         
                         <button class="btn-modern-action btn-backup" onclick="fazerBackupLocal()">Backup</button>
                         <input type="file" id="import-json" style="display: none;" onchange="importarBackupLocal(event)">
                         <button class="btn-modern-action btn-create" onclick="document.getElementById('import-json').click()">Importar</button>
               
-                        <div class="add-setor-form" style="margin-left:auto; display:flex; gap:5px;">
-                            <input type="text" id="input-setor-nome" placeholder="Nome Setor" style="padding:8px; border:1px solid #ccc; border-radius:4px;">
+            
+                        <div class="add-setor-form" style="margin-left:auto; display:flex;
+                        gap:5px;">
+                            <input type="text" id="input-setor-nome" placeholder="Nome Setor" style="padding:8px;
+                            border:1px solid #ccc; border-radius:4px;">
                             <button class="btn-add" onclick="adicionarSetor(document.getElementById('input-setor-nome').value)">+ Setor</button>
                         </div>
                     </div>
-                    <ul id="lista-setores-container" class="lista-setores"></ul>
+                    <ul id="lista-setores-container" 
+                    class="lista-setores"></ul>
                 </div>
             </div>
         </div>
@@ -3386,45 +3392,65 @@ function reimprimirPDF(data) {
         }
         
         function switchView(v) {
-        // Esconde todas as seções de visualização
-        document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
-// Mostra a seção desejada
+    // 🛑 MODIFICAÇÃO CRÍTICA: Garante que as áreas principais do conteúdo estejam visíveis.
+    // Isso resolve o problema da "tela em branco" quando um script anterior oculta a área principal.
+    const contentAreaWrapper = document.getElementById('content-area');
+    const contentAreaInner = document.querySelector('.content');
+    
+    if (contentAreaWrapper) contentAreaWrapper.style.display = 'block';
+    if (contentAreaInner) contentAreaInner.style.display = 'block';
+    // --------------------------------------------------------------------------
+
+    // Esconde todas as seções de visualização
+    document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
+    
+    // Mostra a seção desejada
     const viewElement = document.getElementById(`view-${v}`);
-if (viewElement) {
+    if (viewElement) {
         viewElement.style.display = 'block';
-} else {
+    } else {
         console.error(`View não encontrada: view-${v}`);
         return;
-}
+    }
     
     // Remove a classe 'active' de todos os links e adiciona ao link clicado
     document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
-const activeLink = document.getElementById(`link-${v}`);
+    const activeLink = document.getElementById(`link-${v}`);
     if (activeLink) {
         activeLink.classList.add('active');
-}
+    }
 
     // --- AÇÕES ESPECÍFICAS POR VIEW ---
+    
+    // NOVO BLOCO CRÍTICO PARA ATUALIZAR O DASHBOARD AO CLICAR NO BOTÃO
+    if (v === 'dashboard') {
+        // Força a re-execução da lógica que lê o localStorage e renderiza o modo (Operacional/Gerencial)
+        setupUIBasedOnRole();
+    }
+    
     if (v === 'unidades') {
         carregarUnidadesVisuais();
-// Carrega os cards de Unidades/Rotas (Visão Admin)
+        setupCadastroMilitarLogic();
     }
     
     if (v === 'postos') {
         carregarPostosVisuais();
-// Carrega os cards de Postos (Visão Admin)
     }
 
     if (v === 'usuarios') {
         listarUsuarios();
-// Carrega a tabela de usuários (Visão Admin/Gestor)
         carregarUnidadesSelect();
-// Carrega o select de Unidades para o modal de cadastro/edição
     }
     
     if (v === 'listas') {
+        // 1. Carrega os Postos de Serviço (Dropdown 1)
+        carregarPostosServicoSelect('novo-local-posto');
+        
+        // 2. Carrega as unidades e aplica a lógica de Gestor (Dropdown 2)
+        carregarUnidadesSelect('novo-local-unidade');
+        
+        // 3. Carrega a lista de locais existente (se existir)
         carregarListaLocaisAdmin();
-// Carrega a lista de Viaturas/Locais (Visão Admin/Gestor)
     }
 
     if(v === 'global-history') {
@@ -3708,24 +3734,43 @@ const activeLink = document.getElementById(`link-${v}`);
 }
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
         function abrirEditor(id, nome, unidadeLista) { 
+    console.log("DIAGNÓSTICO 1: Função abrirEditor iniciada.");
     
-    // --- NOVA VERIFICAÇÃO DE PERMISSÃO DE UNIDADE ---
-    // Verifica se o usuário é um Gestor E se a Unidade da Lista 
-    // é diferente da Unidade do usuário logado.
-    if (currentUserData.role === 'gestor' && unidadeLista !== currentUserData.unidade) {
-        alert("Acesso negado. Você só pode editar listas da sua unidade.");
-        return; // Impede que o editor seja aberto
+    // --- VERIFICAÇÃO E INJEÇÃO DE ESTRUTURA CRÍTICA ---
+    const contentContainer = document.querySelector('.content');
+    let viewEditor = document.getElementById('view-editor');
+    
+    // 🛑 Se a view não existe no DOM, injeta o HTML dinamicamente (Correção do seu DOM corrompido)
+    if (!viewEditor && contentContainer) {
+        console.warn("DIAGNÓSTICO X: View Editor não encontrada no DOM. Injentando HTML forçadamente.");
+        contentContainer.insertAdjacentHTML('beforeend', getEditorViewHTML());
+        viewEditor = document.getElementById('view-editor'); 
     }
-    // --------------------------------------------------
+    
+    if (!viewEditor) {
+        alert("Erro fatal: A estrutura do editor está ausente.");
+        return;
+    }
+    // --------------------------------------------------------------------------
+
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeLogada = currentUserData.unidade;
+    
+    if (isGestor && unidadeLista !== unidadeLogada) {
+        console.warn(`DIAGNÓSTICO 3: ACESSO NEGADO.`);
+        alert("Acesso negado. Você só pode editar listas da sua unidade.");
+        return;
+    }
 
     currentEditingId = id;
     const editorTitleEl = document.getElementById('editor-title');
     if(editorTitleEl) {
-        editorTitleEl.textContent = `Editando: ${nome}`; 
+        editorTitleEl.textContent = `Editando: ${nome}`;
     }
     
+    console.log("DIAGNÓSTICO 4: Permissão OK. Trocando de view.");
     switchView('editor'); 
-    carregarDadosGerenciador(); 
+    carregarDadosGerenciador();
 }
         function voltarParaLocais() { 
             currentEditingId = null;
@@ -3733,20 +3778,38 @@ const activeLink = document.getElementById(`link-${v}`);
         }
         
         async function carregarDadosGerenciador(){ 
-            if(!currentEditingId) return;
-            try{ 
-                document.getElementById('loading-message-admin').style.display = 'block';
-                document.getElementById('main-admin-content').style.display = 'none';
-                const d=await db.collection(COLECAO_LISTAS).doc(currentEditingId).get(); 
-                dadosConferencia=d.exists?(d.data().list||[]):[]; 
-                renderizarLista(); 
-                document.getElementById('loading-message-admin').style.display = 'none';
-                document.getElementById('main-admin-content').style.display = 'block';
-            }catch(e){
-                console.error(e);
-                alert("Erro ao carregar lista.");
-            } 
+    if(!currentEditingId) return;
+    
+    const loadingEl = document.getElementById('loading-message-admin');
+    const mainContentEl = document.getElementById('main-admin-content');
+    
+    // 1. Mostrar loading e ocultar o conteúdo (mesmo que removamos o display:none do HTML)
+    if(loadingEl) loadingEl.style.display = 'block';
+    if(mainContentEl) mainContentEl.style.display = 'none';
+
+    try{ 
+        const d = await db.collection(COLECAO_LISTAS).doc(currentEditingId).get(); 
+        dadosConferencia = d.exists ? (d.data().list || []) : []; 
+        
+        // 2. Renderiza o DOM (Injeta o HTML/Sortable.js)
+        renderizarLista(); 
+
+        // 3. Pausa CRÍTICA para o navegador desenhar o DOM antes de exibi-lo 
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+        
+        // 4. Exibir o Conteúdo Final
+        if(loadingEl) loadingEl.style.display = 'none';
+        if(mainContentEl) mainContentEl.style.display = 'block';
+
+    }catch(e){
+        console.error("Erro no carregamento do Gerenciador:", e);
+        if(loadingEl) loadingEl.style.display = 'none';
+        if(mainContentEl) {
+            mainContentEl.innerHTML = "ERRO: Falha ao carregar lista. Verifique o console.";
+            mainContentEl.style.display = 'block';
         }
+    } 
+}
         async function salvarDados(a=true){ 
             if(!currentEditingId) return;
             try{ 
@@ -4326,76 +4389,91 @@ const activeLink = document.getElementById(`link-${v}`);
     });
 }
         
-        function renderizarLista() { 
-            const container = document.getElementById('lista-setores-container');
-            container.innerHTML = '';
-            dadosConferencia.forEach(setor => {
-            const setorLi = document.createElement('li'); 
-            setorLi.className = 'setor-item'; 
-            setorLi.setAttribute('data-id', setor.id);
-            const addItemFormHtml = `<div class="add-item-form-setor">
-            <input type="text" id="input-item-nome-${setor.id}" placeholder="Item" class="filter-input" style="flex-grow:1;">
-            <input type="number" id="input-item-qtd-${setor.id}" value="1" class="filter-input" style="width:50px; flex-grow:0;">
-            <select id="select-item-tipo-${setor.id}" class="filter-input" style="flex-grow:1;">
-            <option value="single">Único</option>
-            <option value="multi">Tombamento</option>
-            </select>
-            <button class="btn-add" onclick="adicionarItemPorSetor('${setor.id}')">+</button>
-            </div>`;
-                let itensHtml = '';
-                setor.itens.forEach(item => {
-                    let tombamentosHtml = '';
-                    if (item.tipo === 'multi' && item.tombamentos) {
-                        const tombamentosList = item.tombamentos.map(tomb => `<li><div style="display:flex; align-items:center; width:100%;"><span style="margin-right:10px; font-size:0.85em; font-weight:bold; color:#555;">TB:</span><input type="text" value="${tomb.tomb}" onblur="editarTombamento('${item.id}', '${tomb.tomb}', this)" style="padding:4px; font-size:0.85em; border:1px solid #ddd; border-radius:4px;"></div><button class="btn-remover" onclick="removerTombamento('${item.id}', '${tomb.tomb}')" style="padding:2px 8px; margin-left:10px;"><i class="fas fa-trash" style="font-size:0.8em;"></i></button></li>`).join('');
-                        tombamentosHtml = `<div class="tombamento-container-wrapper"><div class="tombamento-section"><h4>Tombamentos (${item.tombamentos.length})</h4><ul class="tombamento-list">${tombamentosList}</ul><div class="add-tombamento-form"><input type="text" id="tomb-input-${item.id}" placeholder="Novo Tombamento"><button class="btn-add" onclick="adicionarTombamento('${item.id}', document.getElementById('tomb-input-${item.id}'))"><i class="fas fa-plus"></i></button></div></div></div>`;
-                    }
-                    itensHtml += `<li class="item-conferencia-admin"><div style="width:100%"><div style="display:flex;justify-content:space-between;"><div><strong>${item.nome}</strong><small> Qtd: ${item.quantidadeEsperada}</small></div><div class="item-actions-admin"><button class="btn-edit-alt" onclick="abrirModalEdicao('${setor.id}','${item.id}')"><i class="fas fa-edit"></i></button><button class="btn-remover" onclick="removerItem('${setor.id}','${item.id}')"><i class="fas fa-trash"></i></button></div></div>${item.tipo === 'multi' ? tombamentosHtml : ''}</div></li>`;
-                });
-                
-                // ... (código dentro do loop forEach) ...
-                setorLi.innerHTML = `
-    <div class="setor-content-header-sticky" onclick="this.nextElementSibling.classList.toggle('collapsed')">
-        <div class="setor-header-admin">
-            <span>${setor.nome}</span>
-            <button class="btn-remover" onclick="event.stopPropagation();removerSetor('${setor.id}')">X</button>
-        </div>
-        ${addItemFormHtml}
-    </div>
-    <div class="setor-content-admin">
-        <ul class="lista-setores item-list-admin" data-setor-id="${setor.id}">${itensHtml}</ul>
-    </div>
-`;
-                container.appendChild(setorLi);
+        // Local: Função renderizarLista
+function renderizarLista() { 
+    const container = document.getElementById('lista-setores-container');
+    if (!container) return; // Adicionado para garantir que o container exista
+    
+    container.innerHTML = '';
+    
+    // --- 1. RENDERIZAÇÃO DO HTML E CONTEÚDO DOS SETORES ---
+    dadosConferencia.forEach(setor => {
+        const setorLi = document.createElement('li'); 
+        setorLi.className = 'setor-item'; 
+        setorLi.setAttribute('data-id', setor.id);
+        const addItemFormHtml = `<div class="add-item-form-setor">
+        <input type="text" id="input-item-nome-${setor.id}" placeholder="Item" class="filter-input" style="flex-grow:1;">
+        <input type="number" id="input-item-qtd-${setor.id}" value="1" class="filter-input" style="width:50px;
+        flex-grow:0;">
+        <select id="select-item-tipo-${setor.id}" class="filter-input" style="flex-grow:1;">
+        <option value="single">Único</option>
+        <option value="multi">Tombamento</option>
+        </select>
+        <button class="btn-add" onclick="adicionarItemPorSetor('${setor.id}')">+</button>
+        </div>`;
+            let itensHtml = '';
+
+            setor.itens.forEach(item => {
+                let tombamentosHtml = '';
+                if (item.tipo === 'multi' && item.tombamentos) {
+                    const tombamentosList = item.tombamentos.map(tomb => `<li><div style="display:flex; align-items:center; width:100%;"><span style="margin-right:10px; font-size:0.85em; 
+                    font-weight:bold; color:#555;">TB:</span><input type="text" value="${tomb.tomb}" onblur="editarTombamento('${item.id}', '${tomb.tomb}', this)" style="padding:4px; font-size:0.85em; border:1px solid #ddd; border-radius:4px;"></div><button class="btn-remover" onclick="removerTombamento('${item.id}', '${tomb.tomb}')" style="padding:2px 8px;
+                    margin-left:10px;"><i class="fas fa-trash" style="font-size:0.8em;"></i></button></li>`).join('');
+                    tombamentosHtml = `<div class="tombamento-container-wrapper"><div class="tombamento-section"><h4>Tombamentos (${item.tombamentos.length})</h4><ul class="tombamento-list">${tombamentosList}</ul><div class="add-tombamento-form"><input type="text" id="tomb-input-${item.id}" placeholder="Novo Tombamento"><button class="btn-add" onclick="adicionarTombamento('${item.id}', document.getElementById('tomb-input-${item.id}'))"><i class="fas fa-plus"></i></button></div></div></div>`;
+                }
+                itensHtml += `<li class="item-conferencia-admin"><div style="width:100%"><div style="display:flex;justify-content:space-between;"><div><strong>${item.nome}</strong><small> Qtd: ${item.quantidadeEsperada}</small></div><div class="item-actions-admin"><button class="btn-edit-alt" onclick="abrirModalEdicao('${setor.id}','${item.id}')"><i class="fas fa-edit"></i></button><button class="btn-remover" onclick="removerItem('${setor.id}','${item.id}')"><i class="fas fa-trash"></i></button></div></div>${item.tipo 
+                === 'multi' ? tombamentosHtml : ''}</div></li>`;
             });
+            
+            setorLi.innerHTML = `
+                <div class="setor-content-header-sticky" onclick="this.nextElementSibling.classList.toggle('collapsed')">
+                    <div class="setor-header-admin">
+                        <span>${setor.nome}</span>
+                        <button class="btn-remover" onclick="event.stopPropagation();removerSetor('${setor.id}')">X</button>
+                    </div>
+                    ${addItemFormHtml}
+                </div>
+                <div class="setor-content-admin">
+                    <ul class="lista-setores item-list-admin" data-setor-id="${setor.id}">${itensHtml}</ul>
+                </div>
+            `;
+            container.appendChild(setorLi);
+    });
+    
+    // --- 2. INICIALIZAÇÃO DO SORTABLE.JS COM ATRASO ASYNC ---
+    // Movido para setTimeout para resolver conflitos de timing de renderização do DOM [cite: 2465-2472]
+    setTimeout(() => {
+        try {
             // Inicialização do Sortable para SETORES (na variável 'container')
             new Sortable(container, { 
                 animation: 150, 
                 handle: '.setor-header-admin', 
                 onEnd: () => { 
-                    updateOrdens(); // <-- NOVO: Atualiza a ordem dos setores e itens no array global
+                    updateOrdens(); 
                     salvarDados(false); 
                 } 
             });
+
+            // Inicialização do Sortable para ITENS
             document.querySelectorAll('.item-list-admin').forEach(el => { 
                 new Sortable(el, { 
                     group: 'items', 
                     animation: 150, 
-                    // === OPÇÕES DE AUTOSCROLL AQUI ===
-        
-                    scroll: true,             // 1. Ativa a rolagem automática
-                    scrollSensitivity: 80,    // 2. Distância (em pixels) da borda para acionar o scroll
-                    scrollSpeed: 20,          // 3. Velocidade da rolagem (quanto maior, mais rápido)
+                    scroll: true,             
+                    scrollSensitivity: 80,    
+                    scrollSpeed: 20,     
                     bubbleScroll: true,
-                    // Define o elemento que deve rolar. 
-                    // No seu caso, o elemento pai de `el` é o .setor-content-admin
-                
                     onEnd: () => { 
                         updateOrdens(); 
                         salvarDados(false); 
                     } 
                 }); 
             });
+        } catch(e) {
+            console.error("Erro na inicialização do Sortable.js:", e);
         }
+    }, 100); // Atraso de 100ms
+}
         /**
  * ====================================
  * FUNÇÕES DE GESTÃO DE CAUTELAS
@@ -5961,6 +6039,37 @@ async function loadHistoricoEmitidas() {
     } catch (e) {
         document.getElementById('content-emitidas').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
     }
+}
+        function getEditorViewHTML() {
+    return `
+        <div id="view-editor" class="view-section">
+            <div class="admin-container">
+                <div style="display:flex;
+                justify-content:space-between; margin-bottom:15px;">
+                    <button onclick="switchView('listas')" class="btn-modern-action btn-edit">Voltar</button>
+                    <h1 class="page-title" id="editor-title" style="font-size:1.2em;
+                    margin:0;">Editando...</h1>
+                </div>
+                <div id="loading-message-admin">Carregando...</div>
+                <div id="main-admin-content" style="display:none;">
+                    <div class="global-actions">
+                        <button class="btn-modern-action btn-sync" onclick="salvarDados()">Salvar</button>
+                        <button class="btn-modern-action btn-backup" onclick="fazerBackupLocal()">Backup</button>
+                        <input type="file" id="import-json" style="display: none;" onchange="importarBackupLocal(event)">
+                        <button class="btn-modern-action btn-create" onclick="document.getElementById('import-json').click()">Importar</button>
+                        <div class="add-setor-form" style="margin-left:auto; display:flex;
+                        gap:5px;">
+                            <input type="text" id="input-setor-nome" placeholder="Nome Setor" style="padding:8px;
+                            border:1px solid #ccc; border-radius:4px;">
+                            <button class="btn-add" onclick="adicionarSetor(document.getElementById('input-setor-nome').value)">+ Setor</button>
+                        </div>
+                    </div>
+                    <ul id="lista-setores-container" 
+                    class="lista-setores"></ul>
+                </div>
+            </div>
+        </div>
+    `;
 }
     </script>
 </body>
