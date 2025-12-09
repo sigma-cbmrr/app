@@ -1962,10 +1962,26 @@
         <input type="text" id="edit-user-guerra">
         
         <label>Posto/Graduação</label>
-        <input type="text" id="edit-user-posto">
+        <select id="edit-user-posto">
+            <option value="" disabled selected>Selecione o Posto</option>
+            <option value="CEL">CEL</option>
+            <option value="TEN CEL">TEN CEL</option>
+            <option value="MAJ">MAJ</option>
+            <option value="CAP">CAP</option>
+            <option value="1º TEN">1º TEN</option>
+            <option value="2º TEN">2º TEN</option>
+            <option value="ST">ST</option>
+            <option value="1º SGT">1º SGT</option>
+            <option value="2º SGT">2º SGT</option>
+            <option value="3º SGT">3º SGT</option>
+            <option value="CB">CB</option>
+            <option value="SD">SD</option>
+        </select>
         
         <label>Quadro</label>
-        <input type="text" id="edit-user-quadro">
+        <select id="edit-user-quadro" disabled>
+            <option value="" disabled selected>Selecione...</option>
+        </select>
 
         <label>Nome de Exibição (Posto/Quadro/Guerra)</label>
         <input type="text" id="edit-user-display-name" disabled style="background-color: #eee;">
@@ -4106,29 +4122,40 @@ const activeLink = document.getElementById(`link-${v}`);
         
         document.getElementById('edit-user-doc-id').value = docId;
         document.getElementById('edit-user-guerra').value = u.nome_guerra || '';
-        document.getElementById('edit-user-posto').value = u.posto || '';
-        document.getElementById('edit-user-completo').value = u.nome_completo || ''; // Nome Civil Completo
+        document.getElementById('edit-user-posto').value = u.posto || ''; // Preenche o Posto
+        document.getElementById('edit-user-completo').value = u.nome_completo || ''; 
         document.getElementById('edit-user-email').value = u.email || 'N/D';
         document.getElementById('edit-user-role').value = u.role || 'operacional';
         document.getElementById('edit-user-unit').value = u.unidade || '';
 
-        // --- CAMPOS AGORA EDITÁVEIS (PREENCHIMENTO) ---
-        // Se os valores não existirem, preenche com string vazia para edição fácil
+        // Campos de Identificação Pessoal
         document.getElementById('edit-user-cpf').value = u.cpf || '';
         document.getElementById('edit-user-matricula').value = u.matricula || '';
         document.getElementById('edit-user-telefone').value = u.telefone_contato || '';
-        document.getElementById('edit-user-quadro').value = u.quadro || ''; // NOVO: QUADRO
+        
+        // Campo Quadro é tratado abaixo, mas guarda o valor para pré-seleção
+        const quadroSalvo = u.quadro || ''; 
 
         // CAMPO NOME DE EXIBIÇÃO (SINTÉTICO - SOMENTE LEITURA)
         document.getElementById('edit-user-display-name').value = u.nome_militar_completo || 'N/D';
+
+        // --- INTEGRAÇÃO DA LÓGICA DE SELEÇÃO (NOVO BLOCO) ---
+        
+        // 1. Anexa o Listener de Mudança ao Posto/Graduação
+        const postoSelect = document.getElementById('edit-user-posto');
+        postoSelect.onchange = atualizarQuadroModal; // Chama a função de dependência
+
+        // 2. Dispara a lógica uma vez para carregar as opções de Quadro
+        // Isso preencherá o #edit-user-quadro com as opções corretas para o posto salvo.
+        atualizarQuadroModal();
+
+        // 3. Pré-seleciona o Quadro salvo (só funciona após a chamada acima)
+        document.getElementById('edit-user-quadro').value = quadroSalvo;
 
         // --- LÓGICA DE PERMISSÕES (Mantida) ---
         const roleSelect = document.getElementById('edit-user-role');
         const permFields = document.getElementById('user-permissions-fields');
         
-        // ... (o restante da função de permissões e exibição do modal deve ser mantido) ...
-        
-        // [Apenas um lembrete para manter o restante da função original aqui]
         permFields.style.display = (u.role === 'gestor' || u.role === 'admin') ? 'block' : 'none';
         
         document.getElementById('perm-view-cards').checked = permissoes.canViewDashboardCards || false;
@@ -4152,8 +4179,8 @@ const activeLink = document.getElementById(`link-${v}`);
     const docId = document.getElementById('edit-user-doc-id').value;
     const guerra = document.getElementById('edit-user-guerra').value.trim();
     const posto = document.getElementById('edit-user-posto').value.trim();
-    const quadro = document.getElementById('edit-user-quadro').value.trim(); // NOVO: QUADRO EDITÁVEL
-    const completo = document.getElementById('edit-user-completo').value.trim(); // Nome Civil Completo
+    const quadro = document.getElementById('edit-user-quadro').value.trim(); // Lendo do novo SELECT editável
+    const completo = document.getElementById('edit-user-completo').value.trim(); 
     const role = document.getElementById('edit-user-role').value;
     const unit = document.getElementById('edit-user-unit').value;
     
@@ -4163,6 +4190,7 @@ const activeLink = document.getElementById(`link-${v}`);
     const telefone = document.getElementById('edit-user-telefone').value.trim();
 
     if (!guerra || !posto || !quadro || !unit || !completo) return alert("Preencha Nome de Guerra, Posto, Quadro, Unidade e Nome Civil Completo.");
+    if (posto === "" || quadro === "") return alert("Selecione o Posto/Graduação e o Quadro.");
 
     // --- RECALCULAÇÃO DA VARIÁVEL SINTÉTICA (NOME DE EXIBIÇÃO) ---
     const nomeMilitarCompleto = `${posto} ${quadro} ${guerra}`;
@@ -4178,21 +4206,17 @@ const activeLink = document.getElementById(`link-${v}`);
     
     // O objeto de atualização
     const updateData = {
-        // Dados de Identificação Militar (Editáveis)
         nome_guerra: guerra,
         posto: posto,
         quadro: quadro,                         
-        nome_militar_completo: nomeMilitarCompleto, // Valor Recalculado
-        nome_completo: completo,             // Nome Civil Completo
+        nome_militar_completo: nomeMilitarCompleto, 
+        nome_completo: completo,             
         
-        // Dados Pessoais (Editáveis)
         cpf: cpf,
         matricula: matricula,
         telefone_contato: telefone,
-        // Recalcula a URL do WhatsApp a partir do telefone limpo (remove não-dígitos)
-        whatsapp_url: `https://wa.me/55${telefone.replace(/\\D/g, '')}`,
+        whatsapp_url: `https://wa.me/55${telefone.replace(/\\D/g, '')}`, // Atualiza URL do WhatsApp
         
-        // Dados de Acesso e Permissão
         role: role,
         unidade: unit,
         permissoes: novasPermissoes,
@@ -6009,6 +6033,50 @@ async function loadHistoricoEmitidas() {
         renderHistoricoTable('content-emitidas', snap.docs.map(doc => doc.data()));
     } catch (e) {
         document.getElementById('content-emitidas').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
+    }
+}
+        function atualizarQuadroModal() {
+    const postoSelect = document.getElementById('edit-user-posto');
+    const quadroSelect = document.getElementById('edit-user-quadro');
+    const posto = postoSelect.value;
+    
+    // Limpa o select do quadro e desabilita
+    quadroSelect.innerHTML = '<option value="" disabled selected>Selecione...</option>';
+    quadroSelect.disabled = true;
+
+    // Se o posto for vazio (ou a opção "Selecione"), sai
+    if (!posto) return;
+
+    // Mapeamento dos postos para a categoria (Oficiais, Praças, SD)
+    let quadros = [];
+    const oficiais = ['CEL', 'TEN CEL', 'MAJ', 'CAP', '1º TEN', '2º TEN'];
+    const pracas = ['ST', '1º SGT', '2º SGT', '3º SGT', 'CB'];
+
+    if (oficiais.includes(posto)) {
+        quadros = ['QOCBM', 'QCOBM', 'QOSBM', 'QEOBM'];
+    } else if (pracas.includes(posto)) {
+        quadros = ['QPCBM', 'QPSBM', 'QEPBM'];
+    } else if (posto === 'SD') {
+        // SD tem um quadro fixo e não permite alteração
+        quadros = ['QPCBM'];
+        quadroSelect.disabled = true;
+    }
+
+    if (quadros.length > 0) {
+        quadroSelect.disabled = (posto === 'SD'); // Desabilita apenas se for SD
+        
+        // Preenche as opções do quadro
+        quadros.forEach(quadro => {
+            const option = document.createElement('option');
+            option.value = quadro;
+            option.textContent = quadro;
+            quadroSelect.appendChild(option);
+        });
+        
+        // Tenta pré-selecionar a primeira opção se houver apenas uma (caso do SD)
+        if(quadros.length === 1) {
+            quadroSelect.value = quadros[0];
+        }
     }
 }
     </script>
