@@ -2329,7 +2329,7 @@
         });
 
         function setupUIBasedOnRole() {
-    // 🚨 CORREÇÃO CRÍTICA (Erro TypeError): Garante que os dados do usuário estão carregados
+    // 🚨 1. CORREÇÃO CRÍTICA DO ERRO DE CARREGAMENTO: Aborta se os dados do usuário não estiverem prontos
     if (!currentUserData) {
         console.warn("currentUserData não carregado. Abortando setupUIBasedOnRole.");
         return; 
@@ -2338,7 +2338,7 @@
     const role = currentUserData.role || 'operacional';
     const unit = currentUserData.unidade || 'N/D';
     
-    // --- 1. Exibir Perfil e Unidade (Quebra de Linha e Negrito) ---
+    // --- 2. Exibir Perfil e Unidade (Com Quebra de Linha e Negrito) ---
     const roleDisplay = document.getElementById('user-role-display'); 
     if (roleDisplay) {
         // Usa innerHTML para renderizar <br> e <strong>
@@ -2347,12 +2347,12 @@
 
     atualizarSaudacao(currentUserData);
     
-    // --- Lógica de Permissões (Manter) ---
+    // --- 3. Lógica de Permissões e Variáveis de Controle ---
     const p = currentUserData.permissoes || {};
     const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
     
-    // 2. Define o Modo de Visualização do Dashboard
-    currentDashboardMode = localStorage.getItem(GESTOR_MODE_KEY) || 'operacional';
+    // Leitura do Modo de Dashboard (Assume 'operacional' se não houver preferência)
+    const currentDashboardMode = localStorage.getItem(GESTOR_MODE_KEY) || 'operacional';
     
     const canViewDashboardCards = role === 'admin' || (isGestorOuAdmin && p.canViewDashboardCards);
     const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
@@ -2361,31 +2361,31 @@
     const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
     const canManageUnitLists = role === 'admin' || (isGestorOuAdmin && p.canManageUnitLists);
     
-    // --- 3. Aplicação das Restrições na UI (Links Laterais) ---
+    // --- 4. Renderização do Dashboard Baseada no Modo ---
+    
+    if (role === 'operacional') {
+        // Usuário Operacional: Apenas a visão operacional
+        renderOperacionalCards();
+    } else { 
+        // Usuário Gestor/Admin:
+        
+        // A. Renderiza o botão de alternância
+        renderModeToggle(currentDashboardMode);
+
+        // B. Renderiza o conteúdo baseado no MODO atual
+        if (currentDashboardMode === 'operacional') {
+            renderOperacionalCards();
+        } else {
+            renderAdminGestorCards(canViewDashboardCards);
+        }
+    }
+    
+    // --- 5. Ajuste Fino dos Links de Gestão (Links Laterais) ---
     // Reseta visibilidade dos links de Admin.
     document.querySelectorAll('.restricted-admin-only').forEach(el => { 
         if(el) el.style.display = 'block'; 
     });
 
-    // --- 4. Renderização do Dashboard Baseada no Modo ---
-    
-    if (role === 'operacional') {
-        renderOperacionalCards();
-    } else { 
-        // Usuário Gestor/Admin: Renderiza o botão de alternância
-        renderModeToggle(currentDashboardMode);
-
-        if (currentDashboardMode === 'operacional') {
-            // Modo padrão (Operacional): Mostra cards de uso diário
-            renderOperacionalCards();
-        } else {
-            // Modo Gerencial: Mostra cards de gestão/pendências
-            renderAdminGestorCards(canViewDashboardCards);
-        }
-    }
-    
-    // --- 5. Ajuste Fino dos Links de Gestão (para Gestores e Admin) ---
-    // (Seu código original para links laterais)
     if (!canManageUnits) { 
         const linkUnidades = document.getElementById('link-unidades');
         if(linkUnidades) linkUnidades.style.display = 'none';
@@ -2424,13 +2424,14 @@
     }
 
     // --- 6. Chamadas de Dados Comuns e UI ---
-    carregarListasParaNovaConferencia(); // Preenche o modal "Iniciar Conferência"
-    verificarConferenciaAtiva(); // Renderiza o card de "Continuar Conferência"
+    carregarListasParaNovaConferencia(); 
+    verificarConferenciaAtiva(); 
     
     // SOLUÇÃO PARA INICIAR O MENU FECHADO
     closeMenuMobile();
+    
     // Trava do Botão Voltar (Mobile/Browser)
-    if (window.innerWidth <= 768) { 
+    if (window.innerWidth <= 768) {
         history.pushState(null, null, location.href);
     }
     
