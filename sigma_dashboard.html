@@ -6487,20 +6487,19 @@ function formatarTelefone(input) {
     // 1. Regra dos 3 Caracteres
     if (searchTerm.length < 3) {
         resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #999;">Digite 3 ou mais caracteres...</p>';
-        resultsContainer.style.display = 'block'; // Mostra a instrução
+        resultsContainer.style.display = 'block';
         return;
     }
     
-    // 2. Otimização: Não refazer a pesquisa se o termo não mudou significativamente
+    // 2. Otimização
     if (searchTerm === lastSearchTerm) return;
     lastSearchTerm = searchTerm;
     
     resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #800020;"><i class="fas fa-spinner fa-spin"></i> Buscando...</p>';
     resultsContainer.style.display = 'block';
 
-    // 3. Consulta ao Firestore
-    const isGestor = currentUserData.role === 'gestor';
-    const unidadeGestor = currentUserData.unidade; 
+    // 3. Consulta ao Firestore (IRRESTRITA POR UNIDADE)
+    // As variáveis isGestor e unidadeGestor não são mais necessárias aqui.
     
     // Lógica para pesquisar no campo 'nome_militar_completo'
     const startString = searchTerm.toUpperCase();
@@ -6508,26 +6507,18 @@ function formatarTelefone(input) {
     
     let userQuery = db.collection('usuarios'); 
 
-    // 🛑 INÍCIO DA CORREÇÃO: Respeitar a regra de consulta do Firestore 🛑
-    if (isGestor) {
-        // Para Gestores, o filtro de unidade DEVE vir primeiro e depois o filtro de texto.
-        // Isso é suportado APENAS se o filtro de unidade for de igualdade ('==').
-        
-        userQuery = userQuery.where('unidade', '==', unidadeGestor);
-        
-        // Agora podemos aplicar o filtro de texto.
-        userQuery = userQuery
-            .where('nome_militar_completo', '>=', startString)
-            .where('nome_militar_completo', '<=', endString)
-            .limit(100);
+    // 🛑 CORREÇÃO: Consulta ÚNICA IRRESTRITA (Funciona para Gestor, Admin e Operacional) 🛑
+    userQuery = userQuery
+        .where('nome_militar_completo', '>=', startString)
+        .where('nome_militar_completo', '<=', endString)
+        .limit(100);
 
-    } else {
-        // Admin/Operacional: Apenas o filtro de texto (range) é suficiente.
-        userQuery = userQuery
-            .where('nome_militar_completo', '>=', startString)
-            .where('nome_militar_completo', '<=', endString)
-            .limit(100);
+    // O código abaixo foi removido:
+    /*
+    if (isGestor) {
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
     }
+    */
     // 🛑 FIM DA CORREÇÃO 🛑
 
     try {
