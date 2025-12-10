@@ -6501,23 +6501,35 @@ function formatarTelefone(input) {
     // 3. Consulta ao Firestore
     const isGestor = currentUserData.role === 'gestor';
     const unidadeGestor = currentUserData.unidade; 
-    let userQuery = db.collection('usuarios'); 
-
+    
     // Lógica para pesquisar no campo 'nome_militar_completo'
-    // O Firestore só suporta startsWith com o '>=', '==' e '<' no final.
-    // Usamos um limite seguro de 100 para a pesquisa parcial.
     const startString = searchTerm.toUpperCase();
     const endString = startString + '\uf8ff'; 
-
-    userQuery = userQuery
-        .where('nome_militar_completo', '>=', startString)
-        .where('nome_militar_completo', '<=', endString)
-        .limit(100);
-
-    if (isGestor) {
-        userQuery = userQuery.where('unidade', '==', unidadeGestor);
-    }
     
+    let userQuery = db.collection('usuarios'); 
+
+    // 🛑 INÍCIO DA CORREÇÃO: Respeitar a regra de consulta do Firestore 🛑
+    if (isGestor) {
+        // Para Gestores, o filtro de unidade DEVE vir primeiro e depois o filtro de texto.
+        // Isso é suportado APENAS se o filtro de unidade for de igualdade ('==').
+        
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
+        
+        // Agora podemos aplicar o filtro de texto.
+        userQuery = userQuery
+            .where('nome_militar_completo', '>=', startString)
+            .where('nome_militar_completo', '<=', endString)
+            .limit(100);
+
+    } else {
+        // Admin/Operacional: Apenas o filtro de texto (range) é suficiente.
+        userQuery = userQuery
+            .where('nome_militar_completo', '>=', startString)
+            .where('nome_militar_completo', '<=', endString)
+            .limit(100);
+    }
+    // 🛑 FIM DA CORREÇÃO 🛑
+
     try {
         const usersSnapshot = await userQuery.get();
         let optionsHtml = '';
