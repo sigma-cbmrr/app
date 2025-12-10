@@ -3598,7 +3598,7 @@ const activeLink = document.getElementById(`link-${v}`);
         carregarPostosServicoSelect('novo-local-posto'); 
         
         // 2. Carrega as unidades e aplica a lógica de Gestor (Dropdown 2)
-        carregarUnidadesSelect('novo-local-unidade'); 
+        carregarUnidadesSelect('novo-local-unidade');
         
         // 3. Carrega a lista de locais existente (se existir)
         carregarListaLocaisAdmin();
@@ -4132,20 +4132,12 @@ const activeLink = document.getElementById(`link-${v}`);
     select.innerHTML = '<option value="">Carregando...</option>';
 
     try {
-        // Busca o documento 'unidades' dentro de 'config_geral'
-        const docRef = db.collection('config_geral').doc('unidades');
-        const doc = await docRef.get();
-        
-        let unidades = [];
-
-        // Usa a extração segura de dados
-        if (doc.exists) {
-            unidades = doc.data().lista || []; // Pega o array 'lista'
-        }
+        const snap = await db.collection('unidades').get();
+        const unidades = snap.docs.map(doc => doc.data().nome);
 
         // Preenche o dropdown
         select.innerHTML = '<option value="" disabled selected>Selecione a Unidade</option>';
-        unidades.sort().forEach(unidade => {
+        unidades.forEach(unidade => {
             const option = document.createElement('option');
             option.value = unidade;
             option.textContent = unidade;
@@ -4157,8 +4149,10 @@ const activeLink = document.getElementById(`link-${v}`);
         const gestorUnidade = currentUserData ? currentUserData.unidade : null;
         
         if (isGestor && gestorUnidade) {
+            // Se for gestor, pré-seleciona e desabilita o campo
             select.value = gestorUnidade;
             select.disabled = true;
+            // Opcional: Adiciona um fundo para indicar que está desabilitado
             select.style.backgroundColor = '#f0f0f0';
         } else {
             select.disabled = false;
@@ -4166,9 +4160,29 @@ const activeLink = document.getElementById(`link-${v}`);
         }
 
     } catch(e) {
-        console.error("Erro CRÍTICO ao carregar unidades:", e);
+        console.error("Erro ao carregar unidades:", e);
         select.innerHTML = '<option value="">Erro ao carregar</option>';
     }
+}
+        function carregarCategoriasLista(elementId) {
+    const select = document.getElementById(elementId);
+    if (!select) return;
+
+    // Categorias que o administrador pode criar itens
+    const categorias = [
+        'POSTO DE SERVIÇO', // A categoria que você mencionou
+        'SETOR', 
+        'VIATURAS',
+        // Adicione outras categorias que você permite editar
+    ];
+
+    select.innerHTML = '<option value="" disabled selected>Selecione a Categoria</option>';
+    categorias.forEach(categoria => {
+        const option = document.createElement('option');
+        option.value = categoria;
+        option.textContent = categoria;
+        select.appendChild(option);
+    });
 }
 
         
@@ -6436,17 +6450,17 @@ function atualizarQuadroCad(postoSelect, quadroSelect) {
     select.innerHTML = '<option value="" disabled selected>Carregando Postos...</option>';
 
     try {
-        // Usa a busca comprovadamente funcional
-        db.collection('config_geral').doc('postos').set({ lista: firebase.firestore.FieldValue.arrayUnion(nome) }, { merge: true })
+        // Busca o documento no caminho específico (config_geral/posto)
+        const docRef = db.collection('config_geral').doc('posto');
         const doc = await docRef.get();
 
-        // Usa a extração segura de dados (Postos Visuais usa esta mesma lógica)
-        if (doc.exists) {
-            const postos = doc.data().lista || []; // Pega o array 'lista'
+        if (doc.exists && doc.data().lista) {
+            // Assume que 'lista' é um array que contém os nomes dos postos
+            const postos = doc.data().lista.filter(p => p && typeof p === 'string'); // Filtra valores nulos/vazios
             
             select.innerHTML = '<option value="" disabled selected>Selecione o Posto de Serviço</option>';
             
-            postos.sort().forEach(posto => {
+            postos.forEach(posto => {
                 const option = document.createElement('option');
                 option.value = posto;
                 option.textContent = posto;
@@ -6458,8 +6472,7 @@ function atualizarQuadroCad(postoSelect, quadroSelect) {
         }
 
     } catch(e) {
-        // Verifique o console (F12) se esta mensagem aparecer
-        console.error("Erro CRÍTICO ao carregar Postos de Serviço:", e); 
+        console.error("Erro ao carregar Postos de Serviço:", e);
         select.innerHTML = '<option value="" disabled selected>Erro ao carregar</option>';
     }
 }
