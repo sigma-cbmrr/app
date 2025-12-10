@@ -2204,6 +2204,8 @@
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
         let conferente = '';
+        let lastSearchTerm = '';
+        let searchTimeout;
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -4728,11 +4730,13 @@ function getNovaCautelaFormHTML() {
                     <datalist id="lista-usuarios"></datalist>
                 </div>
                 
-                <div class="form-group">
-                    <label for="cautela-local-origem">Local de Origem (Sua Custódia):</label>
-                    <select id="cautela-local-origem" required onchange="loadCustodiaItens()">
-                        <option value="" disabled selected>Selecione um local...</option>
-                    </select>
+                <div class="form-group" style="position: relative;">
+                    <label for="cautela-destinatario">Destinatário da Cautela (Quem irá receber):</label>
+                    <input type="text" id="cautela-destinatario" placeholder="Digite 3 ou mais letras para buscar..." required autocomplete="off">
+    
+                        <div id="cautela-destinatario-results" class="results-dropdown" style="position: absolute; z-index: 1000; width: 100%; max-height: 200px; overflow-y: auto; background: white; border: 1px solid #ccc; border-top: none; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: none;">
+                            <p style="padding: 10px; margin: 0; color: #999;">Digite 3 ou mais caracteres...</p>
+                        </div>
                 </div>
             </div>
         
@@ -4786,7 +4790,6 @@ function loadNewCautelaForm() {
         }, 50);
 
         loadCustodiaLocais(); 
-        loadUsersForSearch();
     }
 }
 
@@ -4958,40 +4961,6 @@ function showCautelasDashboard(type) {
                     logout(); 
                 }
             });
-    async function loadUsersForSearch() {
-    const datalist = document.getElementById('lista-usuarios');
-    if (!datalist) return;
-
-    // --- Lógica de Filtro de Unidade para o Gestor (mantida) ---
-    const isGestor = currentUserData.role === 'gestor'; 
-    const unidadeGestor = currentUserData.unidade; 
-
-    let userQuery = db.collection('usuarios'); 
-    if (isGestor) {
-        userQuery = userQuery.where('unidade', '==', unidadeGestor);
-    }
-    // ------------------------------------------------------------------
-    
-    try {
-        const usersSnapshot = await userQuery.get(); 
-        
-        let optionsHtml = '';
-        usersSnapshot.forEach(doc => {
-            const user = doc.data();
-            // O nome_militar_completo é o padrão que deve ser exibido.
-            const nomeCompleto = user.nome_militar_completo; 
-
-            if (nomeCompleto) {
-                // Apenas uma única opção é criada. O datalist só irá filtrar e exibir esta string.
-                // Ao digitar 'NORO' ou 'SD QPCBM NOR', o navegador filtrará e exibirá APENAS 'SD QPCBM NORONHA'.
-                optionsHtml += `<option data-uid="${doc.id}" value="${nomeCompleto}"></option>`;
-            }
-        });
-        datalist.innerHTML = optionsHtml;
-    } catch (error) {
-        console.error("Erro ao carregar usuários para a pesquisa:", error);
-    }
-}
 
 /**
  * Busca os locais onde o usuário logado foi o último conferente
@@ -6530,6 +6499,109 @@ function formatarTelefone(input) {
             select.innerHTML = '<option value="">Erro ao carregar</option>';
         }
     }
+        async function searchUsersForCautela() {
+    const searchInput = document.getElementById('cautela-destinatario');
+    const resultsContainer = document.getElementById('cautela-destinatario-results');
+    const searchTerm = searchInput.value.trim();
+
+    // 1. Regra dos 3 Caracteres
+    if (searchTerm.length < 3) {
+        resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #999;">Digite 3 ou mais caracteres...</p>';
+        resultsContainer.style.display = 'block'; // Mostra a instrução
+        return;
+    }
+    
+    // 2. Otimização: Não refazer a pesquisa se o termo não mudou significativamente
+    if (searchTerm === lastSearchTerm) return;
+    lastSearchTerm = searchTerm;
+    
+    resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #800020;"><i class="fas fa-spinner fa-spin"></i> Buscando...</p>';
+    resultsContainer.style.display = 'block';
+
+    // 3. Consulta ao Firestore
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeGestor = currentUserData.unidade; 
+    let userQuery = db.collection('usuarios'); 
+
+    // Lógica para pesquisar no campo 'nome_militar_completo'
+    // O Firestore só suporta startsWith com o '>=', '==' e '<' no final.
+    // Usamos um limite seguro de 100 para a pesquisa parcial.
+    const startString = searchTerm.toUpperCase();
+    const endString = startString + '\uf8ff'; 
+
+    userQuery = userQuery
+        .where('nome_militar_completo', '>=', startString)
+        .where('nome_militar_completo', '<=', endString)
+        .limit(100);
+
+    if (isGestor) {
+        userQuery = userQuery.where('unidade', '==', unidadeGestor);
+    }
+    
+    try {
+        const usersSnapshot = await userQuery.get();
+        let optionsHtml = '';
+        
+        if (usersSnapshot.empty) {
+            optionsHtml = '<p style="padding: 10px; margin: 0; color: #d90f23;">Nenhum usuário encontrado.</p>';
+        } else {
+            usersSnapshot.forEach(doc => {
+                const user = doc.data();
+                const nomeCompleto = user.nome_militar_completo;
+                
+                // Cria um item clicável que preenche o input e fecha o dropdown
+                optionsHtml += `
+                    <div class="result-item" 
+                         data-nome="${nomeCompleto}" 
+                         onclick="selectCautelaDestinatario('${nomeCompleto}')" 
+                         style="padding: 8px 10px; cursor: pointer; border-bottom: 1px dotted #eee;">
+                        ${nomeCompleto}
+                        <span style="font-size: 0.8em; color: #999;">(${user.unidade})</span>
+                    </div>
+                `;
+            });
+        }
+        
+        resultsContainer.innerHTML = optionsHtml;
+        resultsContainer.style.display = 'block';
+
+    } catch (error) {
+        console.error("Erro ao buscar usuários para cautela:", error);
+        resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: red;">Erro na busca.</p>';
+    }
+}
+
+/**
+ * Função chamada ao selecionar um item no dropdown de resultados.
+ */
+function selectCautelaDestinatario(nomeCompleto) {
+    document.getElementById('cautela-destinatario').value = nomeCompleto;
+    document.getElementById('cautela-destinatario-results').style.display = 'none';
+    lastSearchTerm = nomeCompleto; // Trava a pesquisa se for o nome exato
+}
+
+// --------------------------------------------------------------------------------
+// [NOVO] Adicionar o Event Listener para a pesquisa
+// --------------------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('cautela-destinatario');
+    const resultsContainer = document.getElementById('cautela-destinatario-results');
+    
+    if (searchInput) {
+        // Usa um timeout para atrasar a pesquisa e evitar spam no DB
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(searchUsersForCautela, 300); // Pesquisa após 300ms
+        });
+
+        // Oculta o dropdown se o usuário clicar fora
+        document.addEventListener('click', (e) => {
+            if (e.target !== searchInput && e.target.closest('#cautela-destinatario-results') === null) {
+                resultsContainer.style.display = 'none';
+            }
+        });
+    }
+});
     </script>
 </body>
 </html>
