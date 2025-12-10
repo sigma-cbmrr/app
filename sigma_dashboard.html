@@ -6480,68 +6480,29 @@ function formatarTelefone(input) {
         }
     }
         async function searchUsersForCautela() {
-    const searchInput = document.getElementById('cautela-destinatario');
     const resultsContainer = document.getElementById('cautela-destinatario-results');
-    const searchTerm = searchInput.value.trim();
-
-    // 1. Regra dos 3 Caracteres
-    if (searchTerm.length < 3) {
-        resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #999;">Digite 3 ou mais caracteres...</p>';
-        resultsContainer.style.display = 'block';
-        return;
-    }
     
-    if (searchTerm === lastSearchTerm) return;
-    lastSearchTerm = searchTerm;
-    
-    resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #800020;"><i class="fas fa-spinner fa-spin"></i> Buscando...</p>';
+    resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: blue;"><i class="fas fa-spinner fa-spin"></i> Testando Conexão...</p>';
     resultsContainer.style.display = 'block';
 
-    // 3. Consulta ao Firestore (DEBUG: Tenta trazer TUDO e filtra na memória)
-    // Se a busca é irrestrita, podemos simplesmente tentar buscar sem o filtro de texto.
-    
-    let userQuery = db.collection('usuarios').limit(100); 
-
     try {
-        const usersSnapshot = await userQuery.get();
-        let optionsHtml = '';
-        const startString = searchTerm.toUpperCase();
+        // Tenta buscar APENAS 100 documentos
+        const usersSnapshot = await db.collection('usuarios').limit(100).get();
         
-        // Novo: Filtrar na memória se a busca não for por startsWith
-        const filteredUsers = [];
-        usersSnapshot.forEach(doc => {
-            const user = doc.data();
-            const nomeCompleto = user.nome_militar_completo || "";
-            // Filtra se o nome completo contiver o termo de busca (parcial, case insensitive)
-            if (nomeCompleto.toUpperCase().includes(startString)) {
-                filteredUsers.push(user);
-            }
-        });
+        const count = usersSnapshot.size;
         
-        if (filteredUsers.length === 0) {
-            optionsHtml = '<p style="padding: 10px; margin: 0; color: #d90f23;">Nenhum usuário encontrado.</p>';
+        if (count > 0) {
+            // Se encontrar documentos, exibe a contagem
+            resultsContainer.innerHTML = `<p style="padding: 10px; margin: 0; color: green;">✅ Conexão OK. Total de ${count} usuários encontrados.</p>`;
         } else {
-            filteredUsers.forEach(user => {
-                const nomeCompleto = user.nome_militar_completo;
-                
-                // Cria um item clicável
-                optionsHtml += `
-                    <div class="result-item" 
-                         data-nome="${nomeCompleto}" 
-                         onclick="selectCautelaDestinatario('${nomeCompleto}')" 
-                         style="padding: 8px 10px; cursor: pointer; border-bottom: 1px dotted #eee;">
-                        ${nomeCompleto}
-                        <span style="font-size: 0.8em; color: #999;">(${user.unidade})</span>
-                    </div>
-                `;
-            });
+            // Se a busca retornar zero
+            resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: orange;">⚠️ Conexão OK, mas coleção "usuarios" VAZIA ou inacessível (contagem: 0).</p>';
         }
-        
-        resultsContainer.innerHTML = optionsHtml;
 
     } catch (error) {
-        console.error("Erro ao buscar usuários para cautela:", error);
-        resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: red;">Erro na busca.</p>';
+        // Se a conexão falhar ou houver erro de permissão (Regras do Firebase)
+        console.error("Erro CRÍTICO na conexão/permissão:", error);
+        resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: red;">❌ Erro de Conexão/Permissão. Verifique o console.</p>';
     }
 }
 
