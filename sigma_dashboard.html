@@ -1830,12 +1830,31 @@
         <h1>Editor de Listas</h1>
         <div class="new-local-section">
             <h3>Criar Lista</h3>
-            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <select id="novo-local-posto" class="filter-input" style="flex:1;"></select>
-                <input type="text" id="novo-local-nome" placeholder="Nome Lista" class="filter-input" style="flex:2;">
-                <select id="novo-local-unidade" class="filter-input" style="flex:1;"><option value="">Associar a Unidade...</option></select>
-                <button class="btn-modern-action btn-create" onclick="criarNovoLocal()">Criar</button>
-            </div>
+
+<div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+    
+    <div class="form-group" style="flex: 1 1 200px;"> 
+        <label>Posto de Serviço</label>
+        <select id="novo-local-posto" class="filter-input">
+            <option value="" disabled selected>Carregando Postos...</option>
+        </select>
+    </div>
+
+    <div class="form-group" style="flex: 1 1 250px;">
+        <label>Nome do Novo Item</label>
+        <input type="text" id="novo-local-nome" placeholder="EX: RESGATE 01" class="filter-input">
+    </div>
+
+    <div class="form-group" style="flex: 1 1 200px;">
+        <label>Unidade de Vínculo</label>
+        <select id="novo-local-unidade" class="filter-input">
+            <option value="" disabled selected>Carregando Unidades...</option>
+        </select>
+    </div>
+
+    <button class="btn-modern-action btn-create" onclick="criarNovoLocal()" style="height: 40px; margin-bottom: 5px;">CRIAR</button>
+
+</div>
         </div>
         <ul id="lista-locais-container" class="locais-list"></ul>
     </div>
@@ -3576,6 +3595,8 @@ const activeLink = document.getElementById(`link-${v}`);
     
     if (v === 'listas') {
         carregarListaLocaisAdmin();
+        carregarPostosServicoSelect('novo-local-posto');
+        carregarUnidadesSelect('novo-local-unidade');
 // Carrega a lista de Viaturas/Locais (Visão Admin/Gestor)
     }
 
@@ -6379,6 +6400,84 @@ function atualizarQuadroCad(postoSelect, quadroSelect) {
         if(quadros.length === 1) {
             quadroSelect.value = quadros[0];
         }
+    }
+    async function carregarPostosServicoSelect(elementId) {
+    const select = document.getElementById(elementId);
+    if (!select) return;
+
+    select.innerHTML = '<option value="" disabled selected>Carregando Postos...</option>';
+
+    try {
+        // Usa a busca comprovadamente funcional
+        const docRef = db.collection('config_geral').doc('postos');
+        const doc = await docRef.get();
+
+        // Usa a extração segura de dados (Postos Visuais usa esta mesma lógica)
+        if (doc.exists) {
+            const postos = doc.data().lista || []; // Pega o array 'lista'
+            
+            select.innerHTML = '<option value="" disabled selected>Selecione o Posto de Serviço</option>';
+            
+            postos.sort().forEach(posto => {
+                const option = document.createElement('option');
+                option.value = posto;
+                option.textContent = posto;
+                select.appendChild(option);
+            });
+            
+        } else {
+            select.innerHTML = '<option value="" disabled selected>Lista de Postos não encontrada.</option>';
+        }
+
+    } catch(e) {
+        // Verifique o console (F12) se esta mensagem aparecer
+        console.error("Erro CRÍTICO ao carregar Postos de Serviço:", e); 
+        select.innerHTML = '<option value="" disabled selected>Erro ao carregar</option>';
+    }
+}
+        async function carregarUnidadesSelect(elementId = 'new-user-unit') {
+    const select = document.getElementById(elementId);
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Carregando...</option>';
+
+    try {
+        // Busca o documento 'unidades' dentro de 'config_geral'
+        const docRef = db.collection('config_geral').doc('unidades');
+        const doc = await docRef.get();
+        
+        let unidades = [];
+
+        // Usa a extração segura de dados
+        if (doc.exists) {
+            unidades = doc.data().lista || []; // Pega o array 'lista'
+        }
+
+        // Preenche o dropdown
+        select.innerHTML = '<option value="" disabled selected>Selecione a Unidade</option>';
+        unidades.sort().forEach(unidade => {
+            const option = document.createElement('option');
+            option.value = unidade;
+            option.textContent = unidade;
+            select.appendChild(option);
+        });
+
+        // --- LÓGICA DE PERMISSÃO PARA GESTOR ---
+        const isGestor = currentUserData && currentUserData.role === 'gestor';
+        const gestorUnidade = currentUserData ? currentUserData.unidade : null;
+        
+        if (isGestor && gestorUnidade) {
+            select.value = gestorUnidade;
+            select.disabled = true;
+            select.style.backgroundColor = '#f0f0f0';
+        } else {
+            select.disabled = false;
+            select.style.backgroundColor = '';
+        }
+
+    } catch(e) {
+        console.error("Erro CRÍTICO ao carregar unidades:", e);
+        select.innerHTML = '<option value="">Erro ao carregar</option>';
     }
 }
     </script>
