@@ -800,6 +800,64 @@
             font-weight: bold; 
             text-transform: uppercase;
         }
+        .custom-select-container {
+            position: relative;
+        }
+        .custom-select-container input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+            font-size: 1em;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+         .custom-select-container input[type="text"]:focus {
+            border-color: #800020;
+            box-shadow: 0 0 0 2px rgba(128, 0, 32, 0.2);
+        }
+
+        .suggestions-box {
+            position: absolute;
+            top: 100%; /* Posiciona logo abaixo do input */
+            left: 0;
+            right: 0;
+            z-index: 10; /* Garante que fique acima de outros elementos */
+            background-color: #fff;
+            border: 1px solid #800020; /* Cor Institucional */
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            max-height: 200px; /* Limita a altura para rolagem */
+            overflow-y: auto;
+            display: none; /* Inicia oculto */
+        }
+
+        #cautela-suggestions-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        #cautela-suggestions-list li {
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 0.95em;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.2s;
+        }
+
+        #cautela-suggestions-list li:last-child {
+            border-bottom: none;
+        }
+
+        #cautela-suggestions-list li:hover {
+            background-color: #ffecec; /* Hover com cor institucional clara */
+            color: #800020;
+            font-weight: 500;
+        }
         .row-amarelo { 
             background-color: #fff9c4 !important; 
         } 
@@ -2201,6 +2259,7 @@
         let currentUserData = null;
         let allLists = [];
         let allUsersData = [];
+        let allTargetUsers = [];
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
         let conferente = '';
@@ -4724,8 +4783,15 @@ function getNovaCautelaFormHTML() {
             <div class="form-grid-2-columns">
                 <div class="form-group">
                     <label for="cautela-destinatario">Destinatário da Cautela (Quem irá receber):</label>
-                    <input type="text" id="cautela-destinatario" list="lista-usuarios" placeholder="Digite o nome ou matrícula do usuário" required>
-                    <datalist id="lista-usuarios"></datalist>
+                    
+                    <div class="custom-select-container">
+                        <input type="text" id="cautela-destinatario" placeholder="Digite o nome, posto ou matrícula do usuário" required autocomplete="off">
+                        <div id="cautela-suggestions-box" class="suggestions-box">
+                            <ul id="cautela-suggestions-list">
+                                </ul>
+                        </div>
+                    </div>
+       
                 </div>
                 
                 <div class="form-group">
@@ -4959,35 +5025,94 @@ function showCautelasDashboard(type) {
                 }
             });
     async function loadUsersForSearch() {
-    const datalist = document.getElementById('lista-usuarios');
-    if (!datalist) return;
-
-    // A consulta agora busca TODOS os usuários na coleção 'usuarios' (irrestrita)
+    // 1. BUSCA IRRESTRITA E EXCLUSÃO DO PRÓPRIO USUÁRIO
     let userQuery = db.collection('usuarios'); 
-    
-    // Obtém o nome completo do usuário logado (o qual deve ser excluído)
     const militarLogadoCompleto = currentUserData.nome_militar_completo;
 
     try {
         const usersSnapshot = await userQuery.get();
-        let optionsHtml = '';
+        // Zera o array global antes de popular
+        allTargetUsers = []; 
         
         usersSnapshot.forEach(doc => {
             const user = doc.data();
             const nomeCompleto = user.nome_militar_completo; 
 
-            // FILTRO CRÍTICO: Excluir o próprio usuário logado (não pode cautelar para si mesmo).
+            // Excluir o próprio usuário logado
             if (nomeCompleto && nomeCompleto !== militarLogadoCompleto) {
-                // Popula a datalist com o nome militar completo para o autocompletar
-                optionsHtml += `<option data-uid="${doc.id}" value="${nomeCompleto}"></option>`;
+                // Salva o objeto completo no array (com ID e nome)
+                allTargetUsers.push({
+                    id: doc.id,
+                    nome: nomeCompleto
+                });
             }
         });
-
-        datalist.innerHTML = optionsHtml;
+        
+        // 2. CONFIGURA LISTENERS APÓS CARREGAR DADOS
+        setupCautelaDestinatarioListener();
 
     } catch (error) {
-        console.error("Erro ao carregar usuários para a pesquisa:", error);
+        console.error("Erro ao carregar usuários para a busca:", error);
     }
+}
+        function setupCautelaDestinatarioListener() {
+    const input = document.getElementById('cautela-destinatario');
+    const suggestionsBox = document.getElementById('cautela-suggestions-box');
+    const suggestionsList = document.getElementById('cautela-suggestions-list');
+    
+    // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
+    input.addEventListener('input', () => {
+        const searchTerm = input.value.trim().toUpperCase();
+        suggestionsList.innerHTML = '';
+        
+        if (searchTerm.length < 3) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        const filteredUsers = allTargetUsers.filter(user => 
+            user.nome.toUpperCase().includes(searchTerm)
+        );
+
+        if (filteredUsers.length > 0) {
+            let html = '';
+            filteredUsers.forEach(user => {
+                // Adiciona o nome completo (value) e o ID (data-id) na lista
+                html += `<li data-user-name="${user.nome}">${user.nome}</li>`;
+            });
+            
+            suggestionsList.innerHTML = html;
+            suggestionsBox.style.display = 'block';
+        } else {
+            suggestionsBox.style.display = 'none';
+        }
+    });
+    
+    // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
+    suggestionsList.addEventListener('click', (event) => {
+        if (event.target.tagName === 'LI') {
+            const selectedName = event.target.getAttribute('data-user-name');
+            input.value = selectedName;
+            suggestionsBox.style.display = 'none';
+            // Garante que o input seja marcado como modificado
+            input.dispatchEvent(new Event('change')); 
+        }
+    });
+
+    // 3. Oculta a caixa quando o foco sai do input, mas com um pequeno atraso
+    // para permitir o clique no LI antes que a caixa suma.
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            suggestionsBox.style.display = 'none';
+        }, 150);
+    });
+    
+    // 4. Garante que a caixa reapareça ao focar
+    input.addEventListener('focus', () => {
+        if (input.value.length >= 3) {
+             suggestionsBox.style.display = 'block';
+        }
+    });
 }
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
