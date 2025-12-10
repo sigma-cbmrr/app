@@ -5014,20 +5014,23 @@ async function loadCustodiaLocais() {
 
 
     try {
-        // Busca no campo 'conferente' da coleção 'resultados_conferencias'
-        // Ordenamos pela data para garantir que a custódia seja a mais recente (mesmo que só precisemos do local)
-        const resultsSnapshot = await db.collection('resultados_conferencias')
-            .where('conferente', '==', currentUserId) 
-            .orderBy('timestamp', 'desc')
+        const currentUserId = conferente; // Nome completo do militar logado
+        
+        // 🛑 CORREÇÃO: Consulta a coleção de CONTROLE DE CUSTÓDIA ATUAL 🛑
+        const custodyRef = db.collection('custodia_atual');
+        const resultsSnapshot = await custodyRef
+            // Filtra EXCLUSIVAMENTE onde o conferente_completo é o militar logado
+            .where('conferente_completo', '==', currentUserId) 
             .get();
 
         const locaisDeCustodia = new Set();
         
-        // Coleta apenas os locais únicos onde o usuário conferiu por último.
+        // Coleta os nomes de local_nome para preencher o dropdown
         resultsSnapshot.forEach(doc => {
-            locaisDeCustodia.add(doc.data().local);
+            // O campo agora é 'local_nome' e deve ser usado para preencher o Set
+            locaisDeCustodia.add(doc.data().local_nome);
         });
-
+        
         // Monta as opções do SELECT.
         let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
         if (locaisDeCustodia.size === 0) {
@@ -5038,9 +5041,8 @@ async function loadCustodiaLocais() {
             });
         }
         
-
         selectLocal.innerHTML = optionsHtml;
-        selectLocal.disabled = false; 
+        selectLocal.disabled = false;
     } catch (error) {
         console.error("Erro ao carregar locais sob custódia:", error);
         selectLocal.disabled = false;
