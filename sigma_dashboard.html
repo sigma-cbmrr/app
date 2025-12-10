@@ -6491,48 +6491,40 @@ function formatarTelefone(input) {
         return;
     }
     
-    // 2. Otimização
     if (searchTerm === lastSearchTerm) return;
     lastSearchTerm = searchTerm;
     
     resultsContainer.innerHTML = '<p style="padding: 10px; margin: 0; color: #800020;"><i class="fas fa-spinner fa-spin"></i> Buscando...</p>';
     resultsContainer.style.display = 'block';
 
-    // 3. Consulta ao Firestore (IRRESTRITA POR UNIDADE)
-    // As variáveis isGestor e unidadeGestor não são mais necessárias aqui.
+    // 3. Consulta ao Firestore (DEBUG: Tenta trazer TUDO e filtra na memória)
+    // Se a busca é irrestrita, podemos simplesmente tentar buscar sem o filtro de texto.
     
-    // Lógica para pesquisar no campo 'nome_militar_completo'
-    const startString = searchTerm.toUpperCase();
-    const endString = startString + '\uf8ff'; 
-    
-    let userQuery = db.collection('usuarios'); 
-
-    // 🛑 CORREÇÃO: Consulta ÚNICA IRRESTRITA (Funciona para Gestor, Admin e Operacional) 🛑
-    userQuery = userQuery
-        .where('nome_militar_completo', '>=', startString)
-        .where('nome_militar_completo', '<=', endString)
-        .limit(100);
-
-    // O código abaixo foi removido:
-    /*
-    if (isGestor) {
-        userQuery = userQuery.where('unidade', '==', unidadeGestor);
-    }
-    */
-    // 🛑 FIM DA CORREÇÃO 🛑
+    let userQuery = db.collection('usuarios').limit(100); 
 
     try {
         const usersSnapshot = await userQuery.get();
         let optionsHtml = '';
+        const startString = searchTerm.toUpperCase();
         
-        if (usersSnapshot.empty) {
+        // Novo: Filtrar na memória se a busca não for por startsWith
+        const filteredUsers = [];
+        usersSnapshot.forEach(doc => {
+            const user = doc.data();
+            const nomeCompleto = user.nome_militar_completo || "";
+            // Filtra se o nome completo contiver o termo de busca (parcial, case insensitive)
+            if (nomeCompleto.toUpperCase().includes(startString)) {
+                filteredUsers.push(user);
+            }
+        });
+        
+        if (filteredUsers.length === 0) {
             optionsHtml = '<p style="padding: 10px; margin: 0; color: #d90f23;">Nenhum usuário encontrado.</p>';
         } else {
-            usersSnapshot.forEach(doc => {
-                const user = doc.data();
+            filteredUsers.forEach(user => {
                 const nomeCompleto = user.nome_militar_completo;
                 
-                // Cria um item clicável que preenche o input e fecha o dropdown
+                // Cria um item clicável
                 optionsHtml += `
                     <div class="result-item" 
                          data-nome="${nomeCompleto}" 
@@ -6546,7 +6538,6 @@ function formatarTelefone(input) {
         }
         
         resultsContainer.innerHTML = optionsHtml;
-        resultsContainer.style.display = 'block';
 
     } catch (error) {
         console.error("Erro ao buscar usuários para cautela:", error);
