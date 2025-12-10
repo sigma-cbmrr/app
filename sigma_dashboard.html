@@ -3594,10 +3594,14 @@ const activeLink = document.getElementById(`link-${v}`);
     }
     
     if (v === 'listas') {
+        // 1. Carrega os Postos de Serviço (Dropdown 1)
+        carregarPostosServicoSelect('novo-local-posto'); 
+        
+        // 2. Carrega as unidades e aplica a lógica de Gestor (Dropdown 2)
+        carregarUnidadesSelect('novo-local-unidade'); 
+        
+        // 3. Carrega a lista de locais existente (se existir)
         carregarListaLocaisAdmin();
-        carregarPostosServicoSelect('list-category-select');
-        carregarUnidadesSelect('list-unit-select');
-// Carrega a lista de Viaturas/Locais (Visão Admin/Gestor)
     }
 
     if(v === 'global-history') {
@@ -4121,28 +4125,52 @@ const activeLink = document.getElementById(`link-${v}`);
         }
         
         // Admin Helpers
-        async function carregarUnidadesSelect(selectId = 'new-user-unit') {
-            
-            // 1. Define todos os elementos SELECT conhecidos para Unidades
-            const selCadastro = document.getElementById('new-user-unit'); // Cadastro de novo usuário
-            const selEdicao = document.getElementById('edit-user-unit'); // Edição de usuário (novo modal)
-            const selLista = document.getElementById('novo-local-unidade'); // Criação de lista
+        async function carregarUnidadesSelect(elementId = 'new-user-unit') {
+    const select = document.getElementById(elementId);
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Carregando...</option>';
+
+    try {
+        // Busca o documento 'unidades' dentro de 'config_geral'
+        const docRef = db.collection('config_geral').doc('unidades');
+        const doc = await docRef.get();
         
-            try {
-                const doc = await db.collection('config_geral').doc('unidades').get();
-                const unidades = doc.exists ? doc.data().lista : [];
-                let html = '<option value="">Selecione...</option>';
-                unidades.forEach(u => html += `<option value="${u}">${u}</option>`);
-                
-                // 2. Preenche TODOS os selects de unidade existentes
-                if(selCadastro) selCadastro.innerHTML = html;
-                if(selEdicao) selEdicao.innerHTML = html;
-                if(selLista) selLista.innerHTML = html;
-            
-            } catch(e) {
-                console.error("Erro ao carregar unidades:", e);
-            }
+        let unidades = [];
+
+        // Usa a extração segura de dados
+        if (doc.exists) {
+            unidades = doc.data().lista || []; // Pega o array 'lista'
         }
+
+        // Preenche o dropdown
+        select.innerHTML = '<option value="" disabled selected>Selecione a Unidade</option>';
+        unidades.sort().forEach(unidade => {
+            const option = document.createElement('option');
+            option.value = unidade;
+            option.textContent = unidade;
+            select.appendChild(option);
+        });
+
+        // --- LÓGICA DE PERMISSÃO PARA GESTOR ---
+        const isGestor = currentUserData && currentUserData.role === 'gestor';
+        const gestorUnidade = currentUserData ? currentUserData.unidade : null;
+        
+        if (isGestor && gestorUnidade) {
+            select.value = gestorUnidade;
+            select.disabled = true;
+            select.style.backgroundColor = '#f0f0f0';
+        } else {
+            select.disabled = false;
+            select.style.backgroundColor = '';
+        }
+
+    } catch(e) {
+        console.error("Erro CRÍTICO ao carregar unidades:", e);
+        select.innerHTML = '<option value="">Erro ao carregar</option>';
+    }
+}
+
         
         async function criarUsuario() {
     const email = document.getElementById('new-user-email').value.trim();
