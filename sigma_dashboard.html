@@ -22,8 +22,14 @@
             min-height: 100vh; 
             padding-top: 50px; 
             padding-bottom: 60px; 
-   a         box-sizing: border-box; 
+            box-sizing: border-box; 
             overflow-x: hidden;
+        }
+        body.role-operacional, 
+        body.role-gestor, 
+        body.role-admin {
+            background-color: #f4f4f9 !important; /* Cor original do fundo  */
+            color: #333 !important;
         }
         
         /* Header */
@@ -6519,15 +6525,26 @@ async function loadHistoricalCautelas() {
             
         } else { // role === 'gestor' || role === 'admin'
             
-            // Lógica para GESTOR/ADMIN (Visão Geral Única)
+            // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
+            
             let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit'); 
+            let queryRef = db.collection('cautelas_abertas')
+                .where('status', '==', 'CONCLUÍDA')
+                .orderBy('timestamp_conclusao', 'desc');
+
+            if (role === 'gestor') {
+                // Filtra APENAS por cautelas que pertencem à unidade do Gestor (campo 'unidade' na cautela)
+                queryRef = queryRef.where('unidade', '==', user.unidade);
+            }
+            
+            const snapGeral = await queryRef.get();
+            const cautelas = snapGeral.docs.map(doc => doc.data());
             
             // GESTOR/ADMIN USA A TABELA PADRÃO
-            if (snapGeral.length > 0) {
+            if (cautelas.length > 0) {
                 let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
                 
-                snapGeral.forEach(cautela => {
+                cautelas.forEach(cautela => {
                     htmlContent += renderCautelaRow(cautela); 
                 });
                 tbody.innerHTML = htmlContent;
