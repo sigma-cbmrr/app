@@ -6516,7 +6516,7 @@ async function loadHistoricalCautelas() {
             
             // OPERACIONAL: Apenas aguarda o carregamento da aba padrão ('minhas') via loadHistorico()
             
-        } else { // role === 'gestor' || role === 'admin'
+       } else { // role === 'gestor' || role === 'admin'
             
             // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
             
@@ -6527,13 +6527,25 @@ async function loadHistoricalCautelas() {
                 .orderBy('timestamp_conclusao', 'desc');
 
             if (role === 'gestor') {
+                // CORREÇÃO FINAL: Consulta direta para Gestor, usando o campo correto e a variável 'unidade'
                 const unidadeDoGestor = user.unidade; 
-                queryRef = queryRef.where('unidade_destino', '==', unidadeDoGestor);
+                queryRef = queryRef
+                    .where('unidade_destino', '==', unidadeDoGestor)
+                    // Necessário adicionar o filtro 'status' na queryRef novamente antes do where de unidade
+                    // Vamos reconstruir a query de Gestor de forma explícita para evitar o problema de Índice/Combinação:
+                    queryRef = db.collection('cautelas_abertas')
+                        .where('unidade_destino', '==', unidadeDoGestor)
+                        .where('status', '==', 'CONCLUÍDA')
+                        .orderBy('timestamp_conclusao', 'desc');
             }
+            
+            // ADMIN: Se não é Gestor, a queryRef permanece como Global (apenas status e ordenação)
             
             // Execução da Query
             const snapGeral = await queryRef.get();
             const cautelas = snapGeral.docs.map(doc => doc.data());
+            
+            // ... (Restante do seu código de renderização TBODY) ...
             
             // GESTOR/ADMIN USA A TABELA PADRÃO
             if (cautelas.length > 0) {
