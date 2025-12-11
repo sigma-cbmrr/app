@@ -5935,82 +5935,49 @@ async function loadActiveCautelas() {
 }
        
         async function loadCautionsToReceive() {
-    const tbody = document.getElementById('cautelas-receive-body');
-    const loading = document.getElementById('loading-receive');
-    const table = document.getElementById('cautelas-receive-table');
-    const militarCompleto = currentUserData.nome_militar_completo;
-
+    // Mantendo a referência aos seus elementos de tabela
+    const tbody = document.getElementById('cautelas-receive-body'); 
+    const loading = document.getElementById('loading-receive');     
+    const table = document.getElementById('cautelas-receive-table'); 
+    
+    // Configurações de exibição inicial
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
     try {
-        // --- 1. Consulta ABERTA (Fluxo normal) ---
-        const queryAbertaRef = db.collection('cautelas_abertas')
-            .where('status', '==', 'ABERTA')
-            .where('destinatario', '==', militarCompleto)
-            .orderBy('timestamp_emissao', 'desc');
-
-        const snapAberta = await queryAbertaRef.get();
-        const cautelasAberta = snapAberta.docs.map(doc => doc.data());
+        const role = currentUserData.role || 'operacional';
+        const user = currentUserData;
+        let cautelas = [];
         
-        // --- 2. Consulta DEVOLUÇÃO (Novo fluxo) ---
-        const queryDevolucaoRef = db.collection('cautelas_abertas')
-            .where('status', '==', 'DEVOLUÇÃO')
-            .where('destinatario', '==', militarCompleto) // O destinatário agora é o Dono Provisório
-            .orderBy('timestamp_devolucao_iniciada', 'desc'); // Ordena pela data de início da devolução
+        // Status de Ação Imediata: ABERTA (fluxo normal) e DEVOLUÇÃO (fluxo de retorno)
+        const statusAcaoImediata = ['ABERTA', 'DEVOLUÇÃO'];
 
-        const snapDevolucao = await queryDevolucaoRef.get();
-        const cautelasDevolucao = snapDevolucao.docs.map(doc => doc.data());
-
-        // --- 3. Combina e Ordena as Cautelas ---
-        // Combina as listas
-        let cautelas = [...cautelasAberta, ...cautelasDevolucao];
-
-        // Ordena a lista combinada para ter as mais recentes no topo (preferindo a data de emissão/devolução)
-        cautelas.sort((a, b) => {
-            const timeA = (a.timestamp_emissao || a.timestamp_devolucao_iniciada)?.toMillis() || 0;
-            const timeB = (b.timestamp_emissao || b.timestamp_devolucao_iniciada)?.toMillis() || 0;
-            return timeB - timeA;
-        });
-
-
+        // --- EXECUÇÃO DAS BUSCAS BASEADAS NO PERFIL ---
+        if (role === 'operacional' || role === 'gestor') {
+            // OPERACIONAL/GESTOR (Visão Pessoal): Filtra por destinatário logado
+            cautelas = await queryCautelas(statusAcaoImediata, role, user, 'destinatario', 'personal');
+            
+        } else if (role === 'admin') {
+            // ADMIN (Visão Global): Vê todas as pendências (usa 'unit' para triggerar a visão admin na query)
+            cautelas = await queryCautelas(statusAcaoImediata, role, user, null, 'unit');
+        }
+        
+        // --- RENDERIZAÇÃO ---
+        
         if (cautelas.length === 0) {
             tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#1b8a3e; padding:20px;">✅ Nenhuma cautela pendente de recebimento.</td></tr>`;
-            loading.style.display = 'none';
-            table.style.display = 'table';
-            return;
+        } else {
+            // Renderiza cada linha usando a função auxiliar de linha
+            let htmlContent = '';
+            cautelas.forEach(cautela => {
+                // Requer a função renderCautelaRow (que criamos no passo anterior)
+                htmlContent += renderCautelaRow(cautela); 
+            });
+            tbody.innerHTML = htmlContent;
         }
 
-        // --- 4. RENDERIZAÇÃO DA TABELA ---
-        cautelas.forEach(cautela => {
-            const tr = tbody.insertRow();
-            tr.onclick = () => showCautelaDetails(cautela.cautela_id);
-            
-            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-            
-            // Define a data correta para exibição
-            let dataAcao = cautela.timestamp_emissao;
-            let statusBadge = 'ABERTA';
-            let badgeClass = 'badge-cautela';
-            
-            if (cautela.status === 'DEVOLUÇÃO') {
-                dataAcao = cautela.timestamp_devolucao_iniciada || cautela.timestamp_emissao;
-                statusBadge = 'DEVOLUÇÃO';
-                badgeClass = 'badge-pendente'; // Use uma classe diferente, por exemplo, cor laranja/amarela
-            }
-            
-            const dataExibicao = dataAcao.toDate().toLocaleDateString('pt-BR');
-
-            tr.innerHTML = `
-                <td><strong>${cautela.cautela_id}</strong></td>
-                <td>${cautela.emitente}</td>
-                <td>${dataExibicao}</td>
-                <td>${cautela.local_origem}</td>
-                <td>${itensCount} itens</td>
-                <td><span class="status-badge ${badgeClass}">${statusBadge}</span></td>
-            `;
-        });
+        // --- FINALIZAÇÃO DA EXIBIÇÃO ---
         loading.style.display = 'none';
         table.style.display = 'table';
         
