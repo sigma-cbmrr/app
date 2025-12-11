@@ -6476,12 +6476,11 @@ async function getCautelasForAdmin() {
  * Controla a visibilidade das abas operacionais.
  */
 async function loadHistoricalCautelas() {
-    // Preservando seus elementos de tabela para fins de carregamento/esconder
     const tbody = document.getElementById('cautelas-historico-body'); 
     const loading = document.getElementById('loading-historico');
     const table = document.getElementById('cautelas-historico-table');
     const container = document.getElementById('historico-cautelas-container'); 
-    const abasOperacional = document.getElementById('historico-abas-operacional'); // <-- NOVO SELETOR
+    const abasOperacional = document.getElementById('historico-abas-operacional'); 
     
     const role = currentUserData.role || 'operacional';
     const user = currentUserData;
@@ -6490,52 +6489,42 @@ async function loadHistoricalCautelas() {
     if (container) container.innerHTML = '';
     tbody.innerHTML = '';
     loading.style.display = 'block';
-    
-    // Controla se as 3 abas devem aparecer (apenas para Operacional)
-    if (abasOperacional) {
-        abasOperacional.style.display = (role === 'operacional') ? 'flex' : 'none';
-    }
-    
-    // Ocultamos a tabela padrão no início e exibimos condicionalmente depois
-    table.style.display = 'none'; 
+    table.style.display = 'none';
 
     let htmlContent = '';
+    
+    // --- 2. CONTROLE FORÇADO DE VISIBILIDADE DAS ABAS (CORREÇÃO) ---
+    if (abasOperacional) {
+        if (role === 'operacional') {
+            abasOperacional.style.display = 'flex'; 
+        } else {
+            // FORÇA DISPLAY NONE para GESTOR/ADMIN, anulando qualquer CSS/JS concorrente
+            abasOperacional.style.setProperty('display', 'none', 'important');
+        }
+    }
     
     try {
         if (role === 'operacional') {
             
-            // --- Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal) ---
-            
-            // 1. MINHAS (DESTINATÁRIO ORIGINAL)
+            // Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal)
             const snapDestinatario = await queryCautelas(['CONCLUÍDA'], role, user, 'destinatario_original', 'personal');
-            
-            // 2. RECEBIDAS (DEVOLUÇÃO)
             const snapRecebedor = await queryCautelas(['CONCLUÍDA'], role, user, 'receptor_final_completo', 'personal');
-            
-            // 3. EMITIDAS POR MIM
             const snapEmitidas = await queryCautelas(['CONCLUÍDA'], role, user, 'emitente', 'personal');
             
-            // Renderiza os três grupos separadamente em contêineres DIV (não no TBODY da tabela padrão)
             htmlContent += renderHistoricalGroup('MINHAS (DESTINATÁRIO ORIGINAL)', snapDestinatario, 'historico-destinatario');
             htmlContent += renderHistoricalGroup('RECEBIDAS (DEVOLUÇÃO)', snapRecebedor, 'historico-recebedor');
             htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
 
         } else { // role === 'gestor' || role === 'admin'
             
-            // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
-            
+            // Lógica para GESTOR/ADMIN (Visão Geral Única)
             let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-            
-            // Busca todas as CONCLUÍDAS sob o escopo
             const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit'); 
             
-            // GESTOR/ADMIN USA A TABELA PADRÃO, SEM AS DIVISÕES DE GRUPO
-            
+            // GESTOR/ADMIN USA A TABELA PADRÃO
             if (snapGeral.length > 0) {
-                // Adiciona um cabeçalho simples para a visão geral
                 let headerContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
                 
-                // Injeta o cabeçalho e as linhas no TBODY
                 htmlContent = headerContent;
                 snapGeral.forEach(cautela => {
                     htmlContent += renderCautelaRow(cautela); 
@@ -6551,14 +6540,14 @@ async function loadHistoricalCautelas() {
         loading.style.display = 'none';
         
         if (role === 'operacional') {
-            // O Operacional injeta o conteúdo de grupos no contêiner e esconde a tabela padrão.
+            // Operacional: Injeta grupos no container e esconde a tabela padrão.
             if (container) container.innerHTML = htmlContent;
             table.style.display = 'none'; 
             
         } else {
-            // Gestor/Admin usa a tabela padrão (mostra a tabela) e não injeta nada no contêiner de grupos.
+            // Gestor/Admin: Mostra a tabela padrão e garante que o container de grupos esteja limpo.
             table.style.display = 'table';
-            if (container) container.innerHTML = '';
+            if (container) container.innerHTML = ''; // Garante que nenhum grupo esteja visível
         }
         
     } catch (e) {
