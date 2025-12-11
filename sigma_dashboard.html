@@ -5686,7 +5686,7 @@ async function iniciarCautelaProcesso() {
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
-            // **IMPORTANTE:** Clone profundo para garantir mutabilidade segura
+            // **IMPORTANTE:** Clone profundo para mutabilidade
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
             
             // Cálculo do Total (para Notificação)
@@ -5696,48 +5696,46 @@ async function iniciarCautelaProcesso() {
             
             const dataEmissao = new Date().toISOString().split('T')[0];
             
-            // 🛑 LÓGICA DE BAIXA (MUTABILIDADE FORÇADA com forEach) 🛑
+            // 🛑 LÓGICA DE BAIXA (USANDO BUSCA DIRETA E MUTAÇÃO) 🛑
             itensParaCautela.forEach(cItem => {
                 
-                // Itera sobre setores
-                listaMestra.forEach(setor => {
-                    // Itera sobre itens
-                    setor.itens.forEach(mItem => {
-                        if (mItem.id === cItem.id_base) {
-                            
-                            // Lógica para SINGLE (Funcional)
-                            if (cItem.tipo === 'single') {
-                                mItem.quantidadeEsperada -= cItem.quantidade;
-                                mItem.cautelas = mItem.cautelas || [];
-                                mItem.cautelas.push({
+                // Encontra o item base (mItem) usando a função robusta
+                let mItem = findItemInList(listaMestra, cItem.id_base);
+                
+                if (mItem) {
+                    
+                    // Lógica para SINGLE (Funcional)
+                    if (cItem.tipo === 'single') {
+                        mItem.quantidadeEsperada -= cItem.quantidade;
+                        mItem.cautelas = mItem.cautelas || [];
+                        mItem.cautelas.push({
+                            id: cautelaIdSequencial,
+                            destinatario: destinatarioInput,
+                            quantidade: cItem.quantidade,
+                            data: dataEmissao
+                        });
+                    } 
+                    
+                    // Lógica para MULTI (TOMBAMENTO) - Mutação Direta no Objeto
+                    else if (cItem.tipo === 'multi' && mItem.tombamentos) {
+                        
+                        // Encontra o objeto de tombamento por referência no array mItem.tombamentos
+                        const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
+                        
+                        if (tombIndex > -1) {
+                            // Modifica o objeto no ARRAY por referência (mutação)
+                            // Isso deve ser detectado e salvo na transação
+                            mItem.tombamentos[tombIndex] = {
+                                ...mItem.tombamentos[tombIndex], 
+                                cautela: { 
                                     id: cautelaIdSequencial,
                                     destinatario: destinatarioInput,
-                                    quantidade: cItem.quantidade,
                                     data: dataEmissao
-                                });
-                            } 
-                            
-                            // Lógica para MULTI (TOMBAMENTO) - Mutação Direta no Objeto
-                            else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                
-                                // Encontra o objeto de tombamento por referência no array mItem.tombamentos
-                                const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
-                                
-                                if (tombIndex > -1) {
-                                    // 🛑 MUTAÇÃO DIRETA: Modifica o objeto no ARRAY por referência 🛑
-                                    mItem.tombamentos[tombIndex] = {
-                                        ...mItem.tombamentos[tombIndex], 
-                                        cautela: { 
-                                            id: cautelaIdSequencial,
-                                            destinatario: destinatarioInput,
-                                            data: dataEmissao
-                                        }
-                                    };
                                 }
-                            }
+                            };
                         }
-                    });
-                });
+                    }
+                } // Fim do if(mItem)
             });
             // ---------------------------------------------
             
@@ -5758,7 +5756,7 @@ async function iniciarCautelaProcesso() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada (que agora deve ter a mutação do tombamento)
+            // Salva a lista Mestra modificada
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
@@ -5882,6 +5880,23 @@ async function loadActiveCautelas() {
         loading.style.display = 'none';
         table.style.display = 'table';
     }
+}
+        /**
+ * Função robusta para encontrar o objeto item (mItem) na lista mestra
+ * dado seu ID base.
+ * @param {Array} lista - O array listaMestra.
+ * @param {string} itemIdBase - O ID base do item (Ex: 'setorID-64012364').
+ * @returns {object|null} O objeto mItem ou null.
+ */
+function findItemInList(lista, itemIdBase) {
+    for (const setor of lista) {
+        for (const item of setor.itens) {
+            if (item.id === itemIdBase) {
+                return item;
+            }
+        }
+    }
+    return null;
 }
         async function loadCautionsToReceive() {
     const tbody = document.getElementById('cautelas-receive-body');
