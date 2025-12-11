@@ -6491,9 +6491,11 @@ async function getCautelasForAdmin() {
 }
       /**
  * Carrega e renderiza o Histórico de Cautelas CONCLUÍDAS.
- * Controla a visibilidade das abas operacionais.
+ * Controla a visibilidade das abas operacionais e implementa a visão única 
+ * para Gestor/Admin com base na última correção.
  */
 async function loadHistoricalCautelas() {
+    // Preservando seus elementos de tabela para fins de carregamento/esconder
     const tbody = document.getElementById('cautelas-historico-body'); 
     const loading = document.getElementById('loading-historico');
     const table = document.getElementById('cautelas-historico-table');
@@ -6504,19 +6506,19 @@ async function loadHistoricalCautelas() {
     const user = currentUserData;
     
     // 1. LIMPEZA E CONTROLE INICIAL DE VISIBILIDADE
-    if (container) container.innerHTML = '';
+    if (container) container.innerHTML = ''; 
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
     let htmlContent = '';
     
-    // --- 2. CONTROLE FORÇADO DE VISIBILIDADE DAS ABAS (CORREÇÃO) ---
+    // --- 2. CONTROLE FORÇADO DE VISIBILIDADE DAS ABAS ---
     if (abasOperacional) {
         if (role === 'operacional') {
             abasOperacional.style.display = 'flex'; 
         } else {
-            // FORÇA DISPLAY NONE para GESTOR/ADMIN, anulando qualquer CSS/JS concorrente
+            // FORÇA DISPLAY NONE para GESTOR/ADMIN, resolvendo o problema de UI
             abasOperacional.style.setProperty('display', 'none', 'important');
         }
     }
@@ -6524,56 +6526,50 @@ async function loadHistoricalCautelas() {
     try {
         if (role === 'operacional') {
             
-            // Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal)
-            const snapDestinatario = await queryCautelas(['CONCLUÍDA'], role, user, 'destinatario_original', 'personal');
-            const snapRecebedor = await queryCautelas(['CONCLUÍDA'], role, user, 'receptor_final_completo', 'personal');
-            const snapEmitidas = await queryCautelas(['CONCLUÍDA'], role, user, 'emitente', 'personal');
+            // OPERACIONAL: Deixa o carregamento de dados para o loadHistorico('minhas') 
+            // que é chamado na inicialização do switchView.
+            // Apenas aguarda aqui.
             
-            htmlContent += renderHistoricalGroup('MINHAS (DESTINATÁRIO ORIGINAL)', snapDestinatario, 'historico-destinatario');
-            htmlContent += renderHistoricalGroup('RECEBIDAS (DEVOLUÇÃO)', snapRecebedor, 'historico-recebedor');
-            htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
-
         } else { // role === 'gestor' || role === 'admin'
-        
-        // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
-        
-        let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-        const statusHistory = ['CONCLUÍDA'];
-        
-        let cautelas = [];
-
-        if (role === 'admin') {
-            // ADMIN: Busca globalmente (type: 'unit' com role: 'admin' na queryCautelas faz isso)
-            cautelas = await queryCautelas(statusHistory, role, user, null, 'unit');
-
-        } else if (role === 'gestor') {
-            // GESTOR: Usa a lógica de filtro de listas (local_origem_id)
             
-            // 🛑 Lógica dentro da queryCautelas para Gestor:
-            // Ele buscará todos os IDs de lista da unidade do gestor e fará um WHERE 'local_origem_id' IN [ids]
-            cautelas = await queryCautelas(statusHistory, role, user, null, 'unit');
+            // --- Lógica para GESTOR/ADMIN (Visão Geral Única Consolidada) ---
+            
+            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+            const statusHistory = ['CONCLUÍDA'];
+            
+            let cautelas = [];
 
-            // Nota: Se houverem muitos itens, a consulta para o Gestor pode falhar se getUnitListIds() 
-            // retornar mais de 10 IDs (limitação do Firestore para o operador 'in').
+            if (role === 'admin') {
+                // ADMIN: Busca globalmente (type: 'unit' com role: 'admin' na queryCautelas faz isso)
+                cautelas = await queryCautelas(statusHistory, role, user, null, 'unit');
+
+            } else if (role === 'gestor') {
+                // GESTOR: Busca via lógica de filtro de listas (local_origem_id)
+                // A função queryCautelas cuidará de buscar os IDs da unidade do gestor
+                // e aplicar o filtro 'where local_origem_id IN [ids]' (depende de getUnitListIds)
+                cautelas = await queryCautelas(statusHistory, role, user, null, 'unit');
+
+                // NOTA CRÍTICA: Se os dados não aparecerem, é necessário verificar a função queryCautelas 
+                // e a criação do Índice Composto (local_origem_id, status, timestamp_conclusao).
+            }
+            
+            // GESTOR/ADMIN USA A TABELA PADRÃO
+            if (cautelas.length > 0) {
+                let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
+                
+                cautelas.forEach(cautela => {
+                    htmlContent += renderCautelaRow(cautela); 
+                });
+                tbody.innerHTML = htmlContent;
+                
+            } else {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada.</td></tr>`;
+            }
+
+            // Garante que o loading suma e a tabela apareça APENAS para Gestor/Admin
+            loading.style.display = 'none';
+            table.style.display = 'table';
         }
-        
-        // GESTOR/ADMIN USA A TABELA PADRÃO
-        if (cautelas.length > 0) {
-            let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
-            
-            cautelas.forEach(cautela => {
-                htmlContent += renderCautelaRow(cautela); 
-            });
-            tbody.innerHTML = htmlContent;
-            
-        } else {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada. VERIFIQUE SEUS VÍNCULOS DE UNIDADE/LISTA.</td></tr>`;
-        }
-
-        // Garante que o loading suma e a tabela apareça APENAS para Gestor/Admin
-        loading.style.display = 'none';
-        table.style.display = 'table';
-    }
 
         // --- FINALIZAÇÃO DA EXIBIÇÃO ---
         loading.style.display = 'none';
