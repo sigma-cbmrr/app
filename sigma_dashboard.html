@@ -5866,16 +5866,31 @@ async function loadActiveCautelas() {
 
         // A. Pessoal: Custódia Ativa (RECEBIDA como destinatário)
         if (role === 'operacional' || role === 'gestor') {
-            grupos.custodiaAtiva.data = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
-            grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.cautela_id));
-            
-            // B. Pessoal: Rastreio (ABERTA, RECEBIDA, DEVOLUÇÃO como emitente)
-            const rastreioRaw = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
-            
-            // Remove itens que já estão na custódia ativa (evita duplicatas se o militar emite para si mesmo)
-            grupos.rastreioPessoal.data = rastreioRaw.filter(c => !renderedIds.has(c.cautela_id));
-            grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.cautela_id));
-        }
+        
+        // 1. CUSTÓDIA ATIVA / RASTREIO DE RESPONSABILIDADE
+        // A. Custódia Ativa (RECEBIDA como destinatario)
+        const custodiaRecebida = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
+        
+        // B. Rastreio de Devolução (DEVOLUÇÃO como REVERSOR) - PERMANECE NA VISUALIZAÇÃO ATIVA PARA RASTREIO DE RESPONSABILIDADE.
+        const devolucaoRastreio = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal'); // <-- NOVO
+
+        // Combina e popula o grupo de Custódia Ativa/Rastreio
+        // Isso garante que o item RECEBIDA e o item DEVOLUÇÃO (enviado por ele) fiquem aqui.
+        grupos.custodiaAtiva.data = [...custodiaRecebida, ...devolucaoRastreio];
+        grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.cautela_id));
+        
+        // 2. RASTREIO PESSOAL - Itens que ele EMITIU, que não sejam os que ele acabou de devolver.
+        // Inclui ABERTA, RECEBIDA e DEVOLUÇÃO (se ele for o emitente original)
+        const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
+        
+        // Remove itens que já foram vistos no grupo de Custódia/Rastreio de Devolução
+        // Isto é crucial para não duplicar itens onde o Operacional é Emitente E Reversor (o que é raro, mas possível).
+        grupos.rastreioPessoal.data = rastreioEmitente.filter(c => !renderedIds.has(c.cautela_id));
+        grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.cautela_id));
+
+        // Agora, o item DEVOLUÇÃO (enviado pelo Destinatário logado) permanece na visualização [CAUTELAS ATIVAS],
+        // dentro do grupo "Custódia Ativa/Rastreio de Responsabilidade".
+    }
 
         // C. Gerencial/Admin: Monitoramento da Unidade/Global
         if (role === 'gestor' || role === 'admin') {
