@@ -5685,7 +5685,7 @@ function getSelectedCautelaItemsData() {
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
-            // **IMPORTANTE:** Cria um clone profundo para garantir mutabilidade segura em JS (CORREÇÃO DE MUTABILIDADE)
+            // **IMPORTANTE:** listaMestra deve ser um clone profundo para evitar mutação indesejada ANTES da transação
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
             
             // Cálculo do Total (para Notificação)
@@ -5695,13 +5695,15 @@ function getSelectedCautelaItemsData() {
             
             const dataEmissao = new Date().toISOString().split('T')[0];
             
-            // 🛑 LÓGICA DE BAIXA (MUTABILIDADE GARANTIDA) 🛑
+            // 🛑 LÓGICA DE BAIXA (USANDO MAP FUNCIONAL PARA GARANTIR RETORNO DE CÓPIA) 🛑
             itensParaCautela.forEach(cItem => {
                 
-                // Encontra o item base (mItem) na listaMestra
-                listaMestra.forEach(setor => {
-                    setor.itens.forEach(mItem => {
-                        if (mItem.id === cItem.id_base) {
+                // Itera sobre setores
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor,
+                    // Itera sobre itens
+                    itens: setor.itens.map(mItem => {
+                        if (mItem.id === cItem.id_base) { // Encontra o item base
                             
                             // Lógica para SINGLE (Funcional)
                             if (cItem.tipo === 'single') {
@@ -5715,26 +5717,28 @@ function getSelectedCautelaItemsData() {
                                 });
                             } 
                             
-                            // Lógica para MULTI (TOMBAMENTO) - Mutação Direta do Objeto
+                            // Lógica para MULTI (TOMBAMENTO) - Retorna NOVO OBJETO TOMBAMENTO
                             else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                // Encontra o objeto de tombamento por referência no array mItem.tombamentos
-                                const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
                                 
-                                if (tombIndex > -1) {
-                                    // Modifica o objeto do tombamento no array por referência (mutação)
-                                    mItem.tombamentos[tombIndex] = {
-                                        ...mItem.tombamentos[tombIndex], // Mantém status, obs, etc.
-                                        cautela: { 
-                                            id: cautelaIdSequencial,
-                                            destinatario: destinatarioInput,
-                                            data: dataEmissao
-                                        }
-                                    };
-                                }
+                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                    if (tomb.tomb === cItem.tombamento) {
+                                        // Retorna o objeto tomb com a propriedade 'cautela' adicionada.
+                                        return { 
+                                            ...tomb, 
+                                            cautela: { 
+                                                id: cautelaIdSequencial,
+                                                destinatario: destinatarioInput,
+                                                data: dataEmissao
+                                            }
+                                        };
+                                    }
+                                    return tomb; // Retorna o tombamento não modificado
+                                });
                             }
                         }
-                    });
-                });
+                        return mItem;
+                    })
+                }));
             });
             // ---------------------------------------------
             
@@ -5755,7 +5759,7 @@ function getSelectedCautelaItemsData() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada (que agora deve ter a mutação do tombamento)
+            // Salva a lista Mestra modificada (usando a cópia modificada)
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
