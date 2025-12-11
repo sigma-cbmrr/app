@@ -22,9 +22,27 @@
             min-height: 100vh; 
             padding-top: 50px; 
             padding-bottom: 60px; 
-   a         box-sizing: border-box; 
+            box-sizing: border-box; 
             overflow-x: hidden;
         }
+        body.role-operacional, 
+        body.role-gestor, 
+        body.role-admin {
+            background-color: #f4f4f9 !important; /* Cor original do fundo  */
+            color: #333 !important;
+        }
+        /* REGRA CSS PARA OCULTAÇÃO GLOBAL DE ABAS DO HISTÓRICO */
+
+/* Esconde as abas para Gestor e Admin */
+        .role-gestor #historico-abas-operacional,
+        .role-admin #historico-abas-operacional {
+            display: none !important;
+        }
+
+/* Garante que o operacional veja (fallback) */
+.role-operacional #historico-abas-operacional {
+    display: flex !important; /* Ou display: block, dependendo do seu layout */
+}
         
         /* Header */
         .main-header { 
@@ -6516,25 +6534,46 @@ async function loadHistoricalCautelas() {
             htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
 
         } else { // role === 'gestor' || role === 'admin'
+        
+        // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
+        
+        let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+        const statusHistory = ['CONCLUÍDA'];
+        
+        let cautelas = [];
+
+        if (role === 'admin') {
+            // ADMIN: Busca globalmente (type: 'unit' com role: 'admin' na queryCautelas faz isso)
+            cautelas = await queryCautelas(statusHistory, role, user, null, 'unit');
+
+        } else if (role === 'gestor') {
+            // GESTOR: Usa a lógica de filtro de listas (local_origem_id)
             
-            // Lógica para GESTOR/ADMIN (Visão Geral Única)
-            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit'); 
-            
-            // GESTOR/ADMIN USA A TABELA PADRÃO
-            if (snapGeral.length > 0) {
-                let headerContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
-                
-                htmlContent = headerContent;
-                snapGeral.forEach(cautela => {
-                    htmlContent += renderCautelaRow(cautela); 
-                });
-                tbody.innerHTML = htmlContent;
-                
-            } else {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada para ${role}.</td></tr>`;
-            }
+            // 🛑 Lógica dentro da queryCautelas para Gestor:
+            // Ele buscará todos os IDs de lista da unidade do gestor e fará um WHERE 'local_origem_id' IN [ids]
+            cautelas = await queryCautelas(statusHistory, role, user, null, 'unit');
+
+            // Nota: Se houverem muitos itens, a consulta para o Gestor pode falhar se getUnitListIds() 
+            // retornar mais de 10 IDs (limitação do Firestore para o operador 'in').
         }
+        
+        // GESTOR/ADMIN USA A TABELA PADRÃO
+        if (cautelas.length > 0) {
+            let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
+            
+            cautelas.forEach(cautela => {
+                htmlContent += renderCautelaRow(cautela); 
+            });
+            tbody.innerHTML = htmlContent;
+            
+        } else {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada. VERIFIQUE SEUS VÍNCULOS DE UNIDADE/LISTA.</td></tr>`;
+        }
+
+        // Garante que o loading suma e a tabela apareça APENAS para Gestor/Admin
+        loading.style.display = 'none';
+        table.style.display = 'table';
+    }
 
         // --- FINALIZAÇÃO DA EXIBIÇÃO ---
         loading.style.display = 'none';
