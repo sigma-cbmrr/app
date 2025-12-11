@@ -2725,31 +2725,50 @@ async function getCautelasAReceberCount() {
  * Busca e retorna a contagem de cautelas ativas/recebidas do militar logado,
  * incluindo as que estão EM DEVOLUÇÃO (enviadas por ele).
  */
-async function getMyActiveCautelasCount() {
+/**
+ * Calcula a contagem total e desduplicada de cautelas ativas para o dashboard,
+ * respeitando os filtros de perfil (Operacional, Gestor, Admin).
+ */
+async function countActiveCautelas() {
     if (!currentUserData || !currentUserData.nome_militar_completo) return 0;
     
-    const militarCompleto = currentUserData.nome_militar_completo;
-
-    try {
-        // 1. Query RECEBIDAS (CUSTÓDIA ATUAL - Filtra por DESTINATARIO)
-        const snapRecebida = await db.collection('cautelas_abertas')
-            .where('destinatario', '==', militarCompleto)
-            .where('status', '==', 'RECEBIDA')
-            .get();
-            
-        // 2. Query EM DEVOLUÇÃO (ITENS EM TRÂNSITO - Filtra por REVERSOR)
-        const snapDevolucao = await db.collection('cautelas_abertas')
-            .where('militar_completo_reversor', '==', militarCompleto)
-            .where('status', '==', 'DEVOLUÇÃO')
-            .get();
-            
-        // Soma os resultados das duas consultas
-        return snapRecebida.size + snapDevolucao.size;
+    const role = currentUserData.role;
+    const user = currentUserData;
+    
+    // Conjunto para garantir que cada Cautela ID seja contada apenas uma vez
+    const countedIds = new Set();
+    
+    // --- 1. BUSCAS PARA OPERACIONAL / GESTOR (Regras Pessoais) ---
+    if (role === 'operacional' || role === 'gestor') {
         
-    } catch (e) {
-        console.error("Erro ao contar cautelas ativas do militar:", e);
-        return 0;
+        // A. CUSTÓDIA ATIVA + RASTREIO DE DEVOLUÇÃO (RECEBIDA como destinatário OU DEVOLUÇÃO como reversor)
+        // Usaremos duas queries separadas e depois desduplicaremos para garantir a contagem.
+        
+        // CUSTÓDIA ATIVA (RECEBIDA)
+        const custodiaRecebida = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
+        custodiaRecebida.forEach(c => countedIds.add(c.cautela_id));
+        
+        // RASTREIO DE RESPONSABILIDADE (DEVOLUÇÃO como Reversor)
+        const devolucaoRastreio = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
+        devolucaoRastreio.forEach(c => countedIds.add(c.cautela_id));
+
+        // B. RASTREIO PESSOAL (ABERTA, RECEBIDA, DEVOLUÇÃO como Emitente)
+        const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
+        rastreioEmitente.forEach(c => countedIds.add(c.cautela_id));
     }
+    
+    // --- 2. BUSCAS PARA GESTOR / ADMIN (Regras Gerenciais de Monitoramento) ---
+    if (role === 'gestor' || role === 'admin') {
+        
+        // MONITORAMENTO: ABERTA, RECEBIDA, DEVOLUÇÃO (Filtro por Unidade ou Global)
+        const monitoramentoRaw = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, null, 'unit');
+
+        // Adiciona todos os IDs de monitoramento no Set (ele cuida da desduplicação)
+        monitoramentoRaw.forEach(c => countedIds.add(c.cautela_id));
+    }
+
+    // O tamanho do Set é a contagem total desduplicada de todas as cautelas ativas
+    return countedIds.size;
 }
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
