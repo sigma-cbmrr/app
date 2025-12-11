@@ -6474,86 +6474,132 @@ async function getCautelasForAdmin() {
  * Carrega o histórico de cautelas (aquelas com status CONCLUÍDA)
  * com filtro por perfil (Operacional/Gestor/Admin).
  */
-async function loadCautelasHistorico() {
-    const tbody = document.getElementById('cautelas-historico-body');
+/**
+ * Carrega e renderiza o Histórico de Cautelas CONCLUÍDAS,
+ * adaptado para a UI de Tabela/Contêiner do seu frontend.
+ */
+async function loadHistoricalCautelas() {
+    // Preservando seus elementos de tabela para fins de carregamento/esconder
+    const tbody = document.getElementById('cautelas-historico-body'); 
     const loading = document.getElementById('loading-historico');
     const table = document.getElementById('cautelas-historico-table');
+    const container = document.getElementById('historico-cautelas-container'); // O contêiner pai que abrigará os grupos
+    
     const role = currentUserData.role || 'operacional';
-    const militarCompleto = currentUserData.nome_militar_completo;
-    const unidade = currentUserData.unidade;
-
+    const user = currentUserData;
+    
+    // Limpar o contêiner e mostrar loading
+    if (container) container.innerHTML = '';
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
+    let htmlContent = '';
+    
     try {
-        let queryRef;
-        
-        // --- FILTRAGEM POR ACESSO (STATUS: CONCLUÍDA) ---
         if (role === 'operacional') {
-            // Operacional: Apenas aquelas que ele foi o destinatário
-            queryRef = db.collection('cautelas_abertas')
-                .where('destinatario', '==', militarCompleto)
-                .where('status', '==', 'CONCLUÍDA')
-                .orderBy('timestamp_conclusao', 'desc'); 
             
-        } else if (role === 'gestor') {
-            // Gestor: Apenas aquelas de sua Unidade
-            queryRef = db.collection('cautelas_abertas')
-                .where('unidade_destino', '==', unidade)
-                .where('status', '==', 'CONCLUÍDA')
-                .orderBy('timestamp_conclusao', 'desc');
+            // --- Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal) ---
             
-        } else { // Admin: Vê todas
-            queryRef = db.collection('cautelas_abertas')
-                .where('status', '==', 'CONCLUÍDA')
-                .orderBy('timestamp_conclusao', 'desc');
+            // 1. MINHAS (DESTINATÁRIO ORIGINAL)
+            const snapDestinatario = await queryCautelas(['CONCLUÍDA'], role, user, 'destinatario_original', 'personal');
+            
+            // 2. RECEBIDAS (DEVOLUÇÃO) - Onde ele aceitou o retorno/finalizou
+            const snapRecebedor = await queryCautelas(['CONCLUÍDA'], role, user, 'receptor_final_completo', 'personal');
+            
+            // 3. EMITIDAS POR MIM
+            const snapEmitidas = await queryCautelas(['CONCLUÍDA'], role, user, 'emitente', 'personal');
+            
+            // Renderiza os três grupos separadamente (Usando a nova renderização baseada em divs)
+            htmlContent += renderHistoricalGroup('MINHAS (DESTINATÁRIO ORIGINAL)', snapDestinatario, 'historico-destinatario');
+            htmlContent += renderHistoricalGroup('RECEBIDAS (DEVOLUÇÃO)', snapRecebedor, 'historico-recebedor');
+            htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
+
+        } else if (role === 'gestor' || role === 'admin') {
+            
+            // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
+            
+            let titulo = 'Histórico Global (ADMIN)';
+            if (role === 'gestor') {
+                titulo = 'Histórico da Unidade (GESTOR)';
+            }
+            
+            // Busca todas as CONCLUÍDAS sob o escopo (Unidade ou Global)
+            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit'); // 'unit' trata Gestor/Admin
+            
+            // RENDERIZAÇÃO: Usaremos a tabela única existente (tbody, table)
+            if (snapGeral.length > 0) {
+                // Se houver resultados, injetamos as linhas no TBODY
+                snapGeral.forEach(cautela => {
+                    htmlContent += renderCautelaRow(cautela); // Reutiliza renderCautelaRow
+                });
+                // Injetamos o conteúdo no TBODY, e a TABELA/LOADING é exibida/escondida abaixo
+                tbody.innerHTML = htmlContent;
+
+            } else {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada para ${role}.</td></tr>`;
+            }
         }
 
-        const snap = await queryRef.get();
-        const cautelas = snap.docs.map(doc => doc.data());
-
-        if (cautelas.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada.</td></tr>`;
-            loading.style.display = 'none';
-            table.style.display = 'table';
-            return;
-        }
-
-        // --- RENDERIZAÇÃO DA TABELA ---
-        cautelas.forEach(cautela => {
-            const tr = tbody.insertRow();
-            // Implementação futura: tr.onclick = () => showCautelaDetails(cautela.cautela_id);
-            
-            const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-            
-            const dataEmissao = cautela.timestamp_emissao && typeof cautela.timestamp_emissao.toDate === 'function' 
-                                ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') 
-                                : 'N/A';
-            
-            const dataConclusao = cautela.timestamp_conclusao && typeof cautela.timestamp_conclusao.toDate === 'function' 
-                                ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') 
-                                : 'N/A';
-
-            tr.innerHTML = `
-                <td><strong>${cautela.cautela_id}</strong></td>
-                <td>${cautela.destinatario}</td>
-                <td>${dataEmissao}</td>
-                <td>${dataConclusao}</td>
-                <td>${itensCount} itens</td>
-                <td><span class="status-badge badge-sucesso">CONCLUÍDA</span></td>
-            `;
-        });
-
+        // --- EXIBIÇÃO FINAL ---
         loading.style.display = 'none';
-        table.style.display = 'table';
+        
+        if (role === 'operacional') {
+            // O Operacional usa o contêiner DIV para os grupos e ESCONDE a tabela única
+            if (container) container.innerHTML = htmlContent;
+            table.style.display = 'none'; 
+            
+        } else {
+            // Gestor/Admin usa a tabela única (mostra a tabela)
+            table.style.display = 'table';
+        }
         
     } catch (e) {
         console.error("Erro ao carregar histórico de cautelas:", e);
+        if (container) container.innerHTML = '';
         tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
+}
+        function renderHistoricalGroup(title, cautelas, groupId) {
+    // Retorna string vazia se não houver dados
+    if (cautelas.length === 0) {
+        return ''; 
+    }
+    
+    // Constrói a estrutura do grupo (que pode ser uma aba ou uma seção)
+    let html = `
+        <div class="historical-group" id="${groupId}">
+            <h4 class="group-title-historical"><i class="fas fa-history"></i> ${title} (${cautelas.length})</h4>
+            <div class="table-responsive-container">
+            <table class="cautelas-table" id="${groupId}-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Emitente</th>
+                        <th>Dest. Atual</th>
+                        <th>Data Conclusão</th>
+                        <th>Itens</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    // Adiciona as linhas da tabela
+    cautelas.forEach(cautela => {
+        // Reutiliza a função de renderização de linha que já está ajustada
+        html += renderCautelaRow(cautela); 
+    });
+    
+    html += `
+                </tbody>
+            </table>
+            </div>
+        </div>
+    `;
+    return html;
 }
         async function getLastConferente(localOrigem) {
             if (!localOrigem) return "N/D";
