@@ -6517,38 +6517,46 @@ async function loadHistoricalCautelas() {
             // OPERACIONAL: Apenas aguarda o carregamento da aba padrão ('minhas') via loadHistorico()
             
        } else { // role === 'gestor' || role === 'admin'
+        
+        let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+        
+        // --- ADMIN / TESTE GLOBAL: A Consulta Mais Simples Que Deve Funcionar ---
+        let queryRef = db.collection('cautelas_abertas')
+            .where('status', '==', 'CONCLUÍDA')
+            .orderBy('timestamp_conclusao', 'desc');
+
+        // --- LÓGICA DO GESTOR (APLICA FILTRO SE NECESSÁRIO) ---
+        if (role === 'gestor') {
+            const unidadeDoGestor = user.unidade; 
             
-            // --- Lógica para GESTOR/ADMIN (VISÃO GLOBAL SIMPLIFICADA PARA TESTE) ---
-            
-            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico Global (TESTE GESTOR)';
-            
-            // ADMIN / GESTOR: Filtro mais simples que funciona, APENAS por status CONCLUÍDA e ordenação.
-            // (Removemos o filtro where('unidade_destino'...) para este teste)
-            let queryRef = db.collection('cautelas_abertas')
+            // Reconstrução da query de Gestor com o filtro de unidade
+            queryRef = db.collection('cautelas_abertas')
+                .where('unidade_destino', '==', unidadeDoGestor)
                 .where('status', '==', 'CONCLUÍDA')
                 .orderBy('timestamp_conclusao', 'desc');
-
-            // Execução da Query
-            const snapGeral = await queryRef.get();
-            const cautelas = snapGeral.docs.map(doc => doc.data());
-            
-            // GESTOR/ADMIN USA A TABELA PADRÃO
-            if (cautelas.length > 0) {
-                let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
-                
-                cautelas.forEach(cautela => {
-                    htmlContent += renderCautelaRow(cautela); 
-                });
-                tbody.innerHTML = htmlContent;
-                
-            } else {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada para ${role} (Falha no filtro).</td></tr>`;
-            }
-
-            // Garante que o loading suma e a tabela apareça APENAS para Gestor/Admin
-            loading.style.display = 'none';
-            table.style.display = 'table';
         }
+        
+        // Execução da Query
+        const snapGeral = await queryRef.get();
+        const cautelas = snapGeral.docs.map(doc => doc.data());
+        
+        // ... (Restante da renderização) ...
+        
+        if (cautelas.length > 0) {
+            let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
+            
+            cautelas.forEach(cautela => {
+                htmlContent += renderCautelaRow(cautela); 
+            });
+            tbody.innerHTML = htmlContent;
+            
+        } else {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada. VERIFIQUE ÍNDICES E DADOS.</td></tr>`;
+        }
+
+        loading.style.display = 'none';
+        table.style.display = 'table';
+    }
         
     } catch (e) {
         console.error("Erro ao carregar histórico de cautelas:", e);
