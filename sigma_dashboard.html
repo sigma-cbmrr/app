@@ -22,14 +22,8 @@
             min-height: 100vh; 
             padding-top: 50px; 
             padding-bottom: 60px; 
-            box-sizing: border-box; 
+   a         box-sizing: border-box; 
             overflow-x: hidden;
-        }
-        body.role-operacional, 
-        body.role-gestor, 
-        body.role-admin {
-            background-color: #f4f4f9 !important; /* Cor original do fundo  */
-            color: #333 !important;
         }
         
         /* Header */
@@ -565,15 +559,6 @@
             white-space: nowrap; 
             overflow: hidden;
             text-overflow: ellipsis; 
-        }
-        .role-gestor #historico-abas-operacional,
-        .role-admin #historico-abas-operacional {
-            display: none !important;
-        }
-
-        /* Garante que o operacional veja (fallback) */
-        .role-operacional #historico-abas-operacional {
-            display: flex !important; /* Ou display: block, dependendo do seu layout */
         }
 
         /* Greeting Card */
@@ -2518,19 +2503,14 @@
         });
 
         function setupUIBasedOnRole() {
-            const role = currentUserData.role || 'operacional';
-            const unit = currentUserData.unidade || 'N/D';
-            // --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
-            const roleDisplay = document.getElementById('user-role-display');
-            const body = document.body;
-            if (body) {
-                body.classList.remove('role-operacional', 'role-gestor', 'role-admin');
-                body.classList.add(`role-${role}`);
-            }
-            // Verifica se o elemento existe antes de tentar definir o texto
-            if (roleDisplay) { 
-                roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
-            }
+    const role = currentUserData.role || 'operacional';
+    const unit = currentUserData.unidade || 'N/D';
+// --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
+    const roleDisplay = document.getElementById('user-role-display');
+// Verifica se o elemento existe antes de tentar definir o texto
+    if (roleDisplay) { 
+        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
+}
     // ------------------------------------------
 
     atualizarSaudacao(currentUserData);
@@ -6497,76 +6477,85 @@ async function getCautelasForAdmin() {
  */
 async function loadHistoricalCautelas() {
     const tbody = document.getElementById('cautelas-historico-body'); 
-    const loading = document.getElementById('loading-historico'); // Está dentro do content-container
+    const loading = document.getElementById('loading-historico');
     const table = document.getElementById('cautelas-historico-table');
-    const container = document.getElementById('historico-content-container'); // Onde vai o conteúdo da aba
+    const container = document.getElementById('historico-cautelas-container'); 
+    const abasOperacional = document.getElementById('historico-abas-operacional'); 
     
     const role = currentUserData.role || 'operacional';
     const user = currentUserData;
     
     // 1. LIMPEZA E CONTROLE INICIAL DE VISIBILIDADE
-    // O contêiner de abas (container) só precisa ser limpo no início.
-    if (container) container.innerHTML = ''; 
+    if (container) container.innerHTML = '';
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
+    let htmlContent = '';
+    
+    // --- 2. CONTROLE FORÇADO DE VISIBILIDADE DAS ABAS (CORREÇÃO) ---
+    if (abasOperacional) {
+        if (role === 'operacional') {
+            abasOperacional.style.display = 'flex'; 
+        } else {
+            // FORÇA DISPLAY NONE para GESTOR/ADMIN, anulando qualquer CSS/JS concorrente
+            abasOperacional.style.setProperty('display', 'none', 'important');
+        }
+    }
+    
     try {
         if (role === 'operacional') {
             
-            // OPERACIONAL: Apenas aguarda o carregamento da aba padrão ('minhas') via loadHistorico()
+            // Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal)
+            const snapDestinatario = await queryCautelas(['CONCLUÍDA'], role, user, 'destinatario_original', 'personal');
+            const snapRecebedor = await queryCautelas(['CONCLUÍDA'], role, user, 'receptor_final_completo', 'personal');
+            const snapEmitidas = await queryCautelas(['CONCLUÍDA'], role, user, 'emitente', 'personal');
             
-       } else { // role === 'gestor' || role === 'admin'
-        
-        let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-        
-        // --- ADMIN / TESTE GLOBAL: A Consulta Mais Simples Que Deve Funcionar ---
-        let queryRef = db.collection('cautelas_abertas')
-            .where('status', '==', 'CONCLUÍDA')
-            .orderBy('timestamp_conclusao', 'desc');
+            htmlContent += renderHistoricalGroup('MINHAS (DESTINATÁRIO ORIGINAL)', snapDestinatario, 'historico-destinatario');
+            htmlContent += renderHistoricalGroup('RECEBIDAS (DEVOLUÇÃO)', snapRecebedor, 'historico-recebedor');
+            htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
 
-        // --- LÓGICA DO GESTOR (APLICA FILTRO SE NECESSÁRIO) ---
-        if (role === 'gestor') {
-            const unidadeDoGestor = user.unidade; 
+        } else { // role === 'gestor' || role === 'admin'
             
-            // Reconstrução da query de Gestor com o filtro de unidade
-            queryRef = db.collection('cautelas_abertas')
-                .where('unidade_destino', '==', unidadeDoGestor)
-                .where('status', '==', 'CONCLUÍDA')
-                .orderBy('timestamp_conclusao', 'desc');
+            // Lógica para GESTOR/ADMIN (Visão Geral Única)
+            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit'); 
+            
+            // GESTOR/ADMIN USA A TABELA PADRÃO
+            if (snapGeral.length > 0) {
+                let headerContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
+                
+                htmlContent = headerContent;
+                snapGeral.forEach(cautela => {
+                    htmlContent += renderCautelaRow(cautela); 
+                });
+                tbody.innerHTML = htmlContent;
+                
+            } else {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada para ${role}.</td></tr>`;
+            }
         }
+
+        // --- FINALIZAÇÃO DA EXIBIÇÃO ---
+        loading.style.display = 'none';
         
-        // Execução da Query
-        const snapGeral = await queryRef.get();
-        const cautelas = snapGeral.docs.map(doc => doc.data());
-        
-        // ... (Restante da renderização) ...
-        
-        if (cautelas.length > 0) {
-            let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
-            
-            cautelas.forEach(cautela => {
-                htmlContent += renderCautelaRow(cautela); 
-            });
-            tbody.innerHTML = htmlContent;
+        if (role === 'operacional') {
+            // Operacional: Injeta grupos no container e esconde a tabela padrão.
+            if (container) container.innerHTML = htmlContent;
+            table.style.display = 'none'; 
             
         } else {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada. VERIFIQUE ÍNDICES E DADOS.</td></tr>`;
+            // Gestor/Admin: Mostra a tabela padrão e garante que o container de grupos esteja limpo.
+            table.style.display = 'table';
+            if (container) container.innerHTML = ''; // Garante que nenhum grupo esteja visível
         }
-
-        loading.style.display = 'none';
-        table.style.display = 'table';
-    }
         
     } catch (e) {
         console.error("Erro ao carregar histórico de cautelas:", e);
-        
-        // Tratamento de Erro: Apenas mostra a tabela se for Gestor/Admin
+        if (container) container.innerHTML = '';
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
-        if (role !== 'operacional') {
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
-            table.style.display = 'table';
-        }
+        table.style.display = 'table';
     }
 }
         function renderHistoricalGroup(title, cautelas, groupId) {
