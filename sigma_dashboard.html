@@ -5866,37 +5866,30 @@ async function loadActiveCautelas() {
 
         // A. Pessoal: Custódia Ativa (RECEBIDA como destinatário)
         if (role === 'operacional' || role === 'gestor') {
-        
-        // 1. GRUPO CUSTÓDIA ATIVA / RASTREIO DE RESPONSABILIDADE
         const militarCompleto = currentUserData.nome_militar_completo;
-
+        
+        // --- 1. GRUPO CUSTÓDIA ATIVA (APENAS POSSE ATIVA) ---
+        
         // A. CUSTÓDIA ATIVA: RECEBIDA (Destinatário)
-        const custodiaRecebida = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
-        
-        // B. RASTREIO DE DEVOLUÇÃO: DEVOLUÇÃO (militar_completo_reversor)
-        // Se o militar logado é quem iniciou a devolução, ele deve rastrear aqui.
-        const devolucaoRastreio = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
-        
-        // Combina e popula o grupo de Custódia Ativa/Rastreio
-        const custodiaRaw = [
-            ...custodiaRecebida, 
-            ...devolucaoRastreio
-        ];
-        
-        // Remove duplicatas e popula o grupo
-        const uniqueCustodia = new Map();
-        custodiaRaw.forEach(c => uniqueCustodia.set(c.cautela_id, c));
-        
-        grupos.custodiaAtiva.data = Array.from(uniqueCustodia.values());
+        // Somente itens que estão sob POSSE ATIVA.
+        grupos.custodiaAtiva.data = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
         grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.cautela_id));
         
-        // --- 2. GRUPO RASTREIO PESSOAL (APENAS PARA EMITENTE ORIGINAL) ---
-        
-        // Rastreio para itens que ele EMITIU (ABERTA, RECEBIDA e DEVOLUÇÃO)
+        // --- 2. GRUPO RASTREIO PESSOAL (REMETENTE E REVERSOR) ---
+
+        // B. RASTREIO PESSOAL - PARTE 1: Emitente (ABERTA, RECEBIDA, DEVOLUÇÃO)
+        // Rastreamento para itens que ele EMITIU.
         const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
+
+        // C. RASTREIO PESSOAL - PARTE 2: Reversor (DEVOLUÇÃO)
+        // Rastreamento para itens que ele DEVOLVEU (e precisa acompanhar o retorno).
+        const rastreioReversor = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
         
-        // Remove itens que já foram vistos no grupo de Custódia/Rastreio de Devolução (para evitar duplicidade)
-        grupos.rastreioPessoal.data = rastreioEmitente.filter(c => !renderedIds.has(c.cautela_id));
+        // Concatena as duas listas de rastreio
+        let rastreioRaw = [...rastreioEmitente, ...rastreioReversor];
+
+        // Remove itens que já estão na Custódia Ativa (para não duplicar)
+        grupos.rastreioPessoal.data = rastreioRaw.filter(c => !renderedIds.has(c.cautela_id));
         grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.cautela_id));
     }
         // C. Gerencial/Admin: Monitoramento da Unidade/Global
