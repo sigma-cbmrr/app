@@ -6505,8 +6505,8 @@ async function loadHistoricalCautelas() {
     const user = currentUserData;
     
     // 1. LIMPEZA E CONTROLE INICIAL DE VISIBILIDADE
-    // (O CSS Global Forçado agora cuida das abas via body class)
-    if (container) container.innerHTML = ''; // Limpa o contêiner de abas
+    // O contêiner de abas (container) só precisa ser limpo no início.
+    if (container) container.innerHTML = ''; 
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
@@ -6514,35 +6514,30 @@ async function loadHistoricalCautelas() {
     try {
         if (role === 'operacional') {
             
-            // Lógica para OPERACIONAL: Chama a aba padrão (MINHAS)
-            // A função loadHistorico(tabName) cuida da renderização individual e do JS de abas.
-            // Injetamos o HTML fixo das 3 abas de volta no contêiner principal (se ele foi limpo antes)
-            
-            // Para evitar a duplicação de chamadas loadHistorico(tabName) aqui,
-            // usaremos a função loadHistorico('minhas') no showCautelasDashboard('Histórico')
-            
-            // AQUI NÃO FAZEMOS NADA ALÉM DE AGUARDAR O loadHistorico ser chamado pelo switchView
+            // OPERACIONAL: Apenas aguarda o carregamento da aba padrão ('minhas') via loadHistorico()
             
         } else { // role === 'gestor' || role === 'admin'
             
             // --- Lógica para GESTOR/ADMIN (Visão Geral Única) ---
             
             let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+            
             let queryRef = db.collection('cautelas_abertas')
                 .where('status', '==', 'CONCLUÍDA')
                 .orderBy('timestamp_conclusao', 'desc');
 
             if (role === 'gestor') {
-                // Filtra APENAS por cautelas que pertencem à unidade do Gestor (campo 'unidade' na cautela)
-                queryRef = queryRef.where('unidade', '==', user.unidade);
+                const unidadeDoGestor = user.unidade; 
+                queryRef = queryRef.where('unidade_destino', '==', unidadeDoGestor);
             }
             
+            // Execução da Query
             const snapGeral = await queryRef.get();
             const cautelas = snapGeral.docs.map(doc => doc.data());
             
             // GESTOR/ADMIN USA A TABELA PADRÃO
             if (cautelas.length > 0) {
-                let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
+                let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo} (${cautelas.length})</td></tr>`;
                 
                 cautelas.forEach(cautela => {
                     htmlContent += renderCautelaRow(cautela); 
@@ -6556,16 +6551,17 @@ async function loadHistoricalCautelas() {
             // Garante que o loading suma e a tabela apareça APENAS para Gestor/Admin
             loading.style.display = 'none';
             table.style.display = 'table';
-            
-            // Garantimos que o container de abas fique limpo para o Gestor/Admin
-            // if (container) container.innerHTML = ''; 
-            
         }
         
     } catch (e) {
-        // ... (Tratamento de Erro) ...
+        console.error("Erro ao carregar histórico de cautelas:", e);
+        
+        // Tratamento de Erro: Apenas mostra a tabela se for Gestor/Admin
         loading.style.display = 'none';
-        table.style.display = 'table';
+        if (role !== 'operacional') {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+            table.style.display = 'table';
+        }
     }
 }
         function renderHistoricalGroup(title, cautelas, groupId) {
