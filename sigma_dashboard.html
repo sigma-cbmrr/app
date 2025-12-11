@@ -5651,7 +5651,8 @@ function getSelectedCautelaItemsData() {
 
     return itens;
 }
-        async function iniciarCautelaProcesso() {
+        // Localização: Aproximadamente linha 1197
+async function iniciarCautelaProcesso() {
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     btnIniciar.disabled = true;
     btnIniciar.textContent = 'Processando Transação...';
@@ -5685,7 +5686,7 @@ function getSelectedCautelaItemsData() {
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
-            // **IMPORTANTE:** listaMestra deve ser um clone profundo para evitar mutação indesejada ANTES da transação
+            // **IMPORTANTE:** Clone profundo para garantir mutabilidade segura
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
             
             // Cálculo do Total (para Notificação)
@@ -5695,15 +5696,14 @@ function getSelectedCautelaItemsData() {
             
             const dataEmissao = new Date().toISOString().split('T')[0];
             
-            // 🛑 LÓGICA DE BAIXA (USANDO MAP FUNCIONAL PARA GARANTIR RETORNO DE CÓPIA) 🛑
+            // 🛑 LÓGICA DE BAIXA (MUTABILIDADE FORÇADA com forEach) 🛑
             itensParaCautela.forEach(cItem => {
                 
                 // Itera sobre setores
-                listaMestra = listaMestra.map(setor => ({
-                    ...setor,
+                listaMestra.forEach(setor => {
                     // Itera sobre itens
-                    itens: setor.itens.map(mItem => {
-                        if (mItem.id === cItem.id_base) { // Encontra o item base
+                    setor.itens.forEach(mItem => {
+                        if (mItem.id === cItem.id_base) {
                             
                             // Lógica para SINGLE (Funcional)
                             if (cItem.tipo === 'single') {
@@ -5717,28 +5717,27 @@ function getSelectedCautelaItemsData() {
                                 });
                             } 
                             
-                            // Lógica para MULTI (TOMBAMENTO) - Retorna NOVO OBJETO TOMBAMENTO
+                            // Lógica para MULTI (TOMBAMENTO) - Mutação Direta no Objeto
                             else if (cItem.tipo === 'multi' && mItem.tombamentos) {
                                 
-                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                    if (tomb.tomb === cItem.tombamento) {
-                                        // Retorna o objeto tomb com a propriedade 'cautela' adicionada.
-                                        return { 
-                                            ...tomb, 
-                                            cautela: { 
-                                                id: cautelaIdSequencial,
-                                                destinatario: destinatarioInput,
-                                                data: dataEmissao
-                                            }
-                                        };
-                                    }
-                                    return tomb; // Retorna o tombamento não modificado
-                                });
+                                // Encontra o objeto de tombamento por referência no array mItem.tombamentos
+                                const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
+                                
+                                if (tombIndex > -1) {
+                                    // 🛑 MUTAÇÃO DIRETA: Modifica o objeto no ARRAY por referência 🛑
+                                    mItem.tombamentos[tombIndex] = {
+                                        ...mItem.tombamentos[tombIndex], 
+                                        cautela: { 
+                                            id: cautelaIdSequencial,
+                                            destinatario: destinatarioInput,
+                                            data: dataEmissao
+                                        }
+                                    };
+                                }
                             }
                         }
-                        return mItem;
-                    })
-                }));
+                    });
+                });
             });
             // ---------------------------------------------
             
@@ -5759,7 +5758,7 @@ function getSelectedCautelaItemsData() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada (usando a cópia modificada)
+            // Salva a lista Mestra modificada (que agora deve ter a mutação do tombamento)
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
@@ -6062,14 +6061,19 @@ async function loadActiveCautelas() {
                 const li = document.createElement('li');
                 
                 const nomeItem = item.nome || 'Item sem nome';
+                
+                // 🛑 CORREÇÃO VISUAL DEFINITIVA: Exibe o tombamento real (item.tombamento) 🛑
                 const quantidadeOuTombamento = item.tombamento 
                     ? `(Tombamento: <strong>${item.tombamento}</strong>)` 
                     : `(Quantidade: <strong>${item.quantidade}</strong>)`;
                 
+                // Remove propriedades que causam confusão para garantir que o nome seja limpo no console
+                delete item.id_completo;
+                
                 li.innerHTML = `
                     <span style="font-weight: 500;">${itemCount++}. ${nomeItem}</span> <span style="font-size: 0.9em; color: #555;">${quantidadeOuTombamento}</span>
                 `;
-                
+                // ... (restante do estilo)
                 li.style.display = 'flex';
                 li.style.justifyContent = 'space-between';
                 li.style.alignItems = 'center';
