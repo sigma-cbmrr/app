@@ -560,6 +560,15 @@
             overflow: hidden;
             text-overflow: ellipsis; 
         }
+        .role-gestor #historico-abas-operacional,
+        .role-admin #historico-abas-operacional {
+            display: none !important;
+        }
+
+        /* Garante que o operacional veja (fallback) */
+        .role-operacional #historico-abas-operacional {
+            display: flex !important; /* Ou display: block, dependendo do seu layout */
+        }
 
         /* Greeting Card */
         .greeting-card { 
@@ -2503,14 +2512,19 @@
         });
 
         function setupUIBasedOnRole() {
-    const role = currentUserData.role || 'operacional';
-    const unit = currentUserData.unidade || 'N/D';
-// --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
-    const roleDisplay = document.getElementById('user-role-display');
-// Verifica se o elemento existe antes de tentar definir o texto
-    if (roleDisplay) { 
-        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
-}
+            const role = currentUserData.role || 'operacional';
+            const unit = currentUserData.unidade || 'N/D';
+            // --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
+            const roleDisplay = document.getElementById('user-role-display');
+            const body = document.body;
+            if (body) {
+                body.classList.remove('role-operacional', 'role-gestor', 'role-admin');
+                body.classList.add(`role-${role}`);
+            }
+            // Verifica se o elemento existe antes de tentar definir o texto
+            if (roleDisplay) { 
+                roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
+            }
     // ------------------------------------------
 
     atualizarSaudacao(currentUserData);
@@ -6477,44 +6491,32 @@ async function getCautelasForAdmin() {
  */
 async function loadHistoricalCautelas() {
     const tbody = document.getElementById('cautelas-historico-body'); 
-    const loading = document.getElementById('loading-historico');
+    const loading = document.getElementById('loading-historico'); // Está dentro do content-container
     const table = document.getElementById('cautelas-historico-table');
-    const container = document.getElementById('historico-cautelas-container'); 
-    const abasOperacional = document.getElementById('historico-abas-operacional'); 
+    const container = document.getElementById('historico-content-container'); // Onde vai o conteúdo da aba
     
     const role = currentUserData.role || 'operacional';
     const user = currentUserData;
     
     // 1. LIMPEZA E CONTROLE INICIAL DE VISIBILIDADE
-    if (container) container.innerHTML = '';
+    // (O CSS Global Forçado agora cuida das abas via body class)
+    if (container) container.innerHTML = ''; // Limpa o contêiner de abas
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
-    let htmlContent = '';
-    
-    // --- 2. CONTROLE FORÇADO DE VISIBILIDADE DAS ABAS (CORREÇÃO) ---
-    if (abasOperacional) {
-        if (role === 'operacional') {
-            abasOperacional.style.display = 'flex'; 
-        } else {
-            // FORÇA DISPLAY NONE para GESTOR/ADMIN, anulando qualquer CSS/JS concorrente
-            abasOperacional.style.setProperty('display', 'none', 'important');
-        }
-    }
-    
     try {
         if (role === 'operacional') {
             
-            // Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal)
-            const snapDestinatario = await queryCautelas(['CONCLUÍDA'], role, user, 'destinatario_original', 'personal');
-            const snapRecebedor = await queryCautelas(['CONCLUÍDA'], role, user, 'receptor_final_completo', 'personal');
-            const snapEmitidas = await queryCautelas(['CONCLUÍDA'], role, user, 'emitente', 'personal');
+            // Lógica para OPERACIONAL: Chama a aba padrão (MINHAS)
+            // A função loadHistorico(tabName) cuida da renderização individual e do JS de abas.
+            // Injetamos o HTML fixo das 3 abas de volta no contêiner principal (se ele foi limpo antes)
             
-            htmlContent += renderHistoricalGroup('MINHAS (DESTINATÁRIO ORIGINAL)', snapDestinatario, 'historico-destinatario');
-            htmlContent += renderHistoricalGroup('RECEBIDAS (DEVOLUÇÃO)', snapRecebedor, 'historico-recebedor');
-            htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
-
+            // Para evitar a duplicação de chamadas loadHistorico(tabName) aqui,
+            // usaremos a função loadHistorico('minhas') no showCautelasDashboard('Histórico')
+            
+            // AQUI NÃO FAZEMOS NADA ALÉM DE AGUARDAR O loadHistorico ser chamado pelo switchView
+            
         } else { // role === 'gestor' || role === 'admin'
             
             // Lógica para GESTOR/ADMIN (Visão Geral Única)
@@ -6523,9 +6525,8 @@ async function loadHistoricalCautelas() {
             
             // GESTOR/ADMIN USA A TABELA PADRÃO
             if (snapGeral.length > 0) {
-                let headerContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
+                let htmlContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
                 
-                htmlContent = headerContent;
                 snapGeral.forEach(cautela => {
                     htmlContent += renderCautelaRow(cautela); 
                 });
@@ -6534,26 +6535,18 @@ async function loadHistoricalCautelas() {
             } else {
                 tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada para ${role}.</td></tr>`;
             }
-        }
 
-        // --- FINALIZAÇÃO DA EXIBIÇÃO ---
-        loading.style.display = 'none';
-        
-        if (role === 'operacional') {
-            // Operacional: Injeta grupos no container e esconde a tabela padrão.
-            if (container) container.innerHTML = htmlContent;
-            table.style.display = 'none'; 
-            
-        } else {
-            // Gestor/Admin: Mostra a tabela padrão e garante que o container de grupos esteja limpo.
+            // Garante que o loading suma e a tabela apareça APENAS para Gestor/Admin
+            loading.style.display = 'none';
             table.style.display = 'table';
-            if (container) container.innerHTML = ''; // Garante que nenhum grupo esteja visível
+            
+            // Garantimos que o container de abas fique limpo para o Gestor/Admin
+            // if (container) container.innerHTML = ''; 
+            
         }
         
     } catch (e) {
-        console.error("Erro ao carregar histórico de cautelas:", e);
-        if (container) container.innerHTML = '';
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        // ... (Tratamento de Erro) ...
         loading.style.display = 'none';
         table.style.display = 'table';
     }
