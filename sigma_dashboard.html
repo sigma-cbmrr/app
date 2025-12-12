@@ -7141,68 +7141,83 @@ function formatarTelefone(input) {
         return [];
     }
 }
-        async function queryCautelas(statusArray, role, user, field = null, type = 'personal') {
+        // Localização: Função queryCautelas (Aproximadamente linha 1600 do arquivo completo)
+
+async function queryCautelas(statusArray, role, user, field = null, type = 'personal') {
     let query = db.collection('cautelas_abertas');
-    
-    // 1. Filtro por Status (Sempre presente)
-    if (statusArray.length > 0) {
-        query = query.where('status', 'in', statusArray);
-    } else {
-        return []; // Se não há status, não busca nada
+
+    // 🛑 1. Filtro por Status (Regra Pessoal e Admin/Global)
+    if (type === 'personal') {
+        // Pessoal sempre usa o filtro de status 'in'
+        if (statusArray.length > 0) {
+            query = query.where('status', 'in', statusArray);
+        } else {
+            return [];
+        }
+    } else if (role === 'admin' && type === 'unit') {
+        // Admin global também usa o filtro de status 'in' (não há conflito aqui)
+        if (statusArray.length > 0) {
+            query = query.where('status', 'in', statusArray);
+        } else {
+            return [];
+        }
     }
+    // NOTA: Para Gestor Monitoramento ('gestor' + 'unit'), o filtro de status é MANUAL (na memória)
+    // para evitar o duplo 'in'.
 
     // 2. Filtros Específicos por Perfil/Tipo
     const militarCompleto = user.nome_militar_completo;
-    
-    if (role === 'admin' && type === 'unit') {
-        // Admin: Sem restrições de unidade ou usuário (o status já é o filtro)
-        // Apenas continua a query.
-        
-    } else if (role === 'gestor' && type === 'unit') {
-        // Gestor: Filtra por listas de origem da sua unidade
+
+    if (role === 'gestor' && type === 'unit') {
+        // 🛑 CORREÇÃO DUPLO 'IN' PARA GESTOR: Aplica somente o filtro de Unidade/Lista 🛑
         const unitListIds = await getUnitListIds();
-        if (unitListIds.length > 0) {
-            // Filtro por campo 'local_origem_id'
-            // O Firestore permite 'in' para até 10 valores. Devemos assumir que não haverá mais de 10 listas por unidade.
-            if (unitListIds.length <= 10) {
-                 query = query.where('local_origem_id', 'in', unitListIds);
-            } else {
-                console.error("Muitas listas para filtro 'in'. Implementação de paginação necessária.");
-                return []; 
-            }
+        
+        if (unitListIds.length > 0 && unitListIds.length <= 10) {
+            // Aplica o filtro de Unidade/Lista usando o único 'in' permitido.
+            query = query.where('local_origem_id', 'in', unitListIds);
+            
         } else {
-            // Se o gestor não tem listas na unidade, não deve ver nada na visão gerencial
-            return [];
+            // Se o gestor não tem listas ou excedeu o limite, retorna uma consulta vazia.
+            return []; 
         }
 
-    } else if (role === 'operacional' || (role === 'gestor' && type === 'personal')) {
-        // Operacional ou Gestor na função pessoal: Filtra por Destinatário, Emitente, etc.
+    } else if (type === 'personal') {
+        // Filtra por Destinatário, Emitente, etc. (Regra já existente)
         if (field === 'destinatario') {
             query = query.where('destinatario', '==', militarCompleto);
         } else if (field === 'emitente') {
             query = query.where('emitente', '==', militarCompleto);
-        } else if (field === 'receptor_final') {
-             // Este campo será usado para o Histórico CONCLUÍDA
+        } else if (field === 'receptor_final_completo') {
              query = query.where('receptor_final_completo', '==', militarCompleto);
         } else if (field === 'destinatario_original') {
-             // Este campo será usado para o Histórico CONCLUÍDA
              query = query.where('destinatario_original', '==', militarCompleto);
+        } else if (field === 'militar_completo_reversor') {
+            query = query.where('militar_completo_reversor', '==', militarCompleto);
         }
     }
     
     // 3. Execução e Ordenação (Decrescente por data de emissão)
     try {
-        // Ordena para exibir as mais recentes primeiro
-        const snapshot = await query.orderBy('timestamp_emissao', 'desc').get(); 
-        const cautelas = [];
+        const snapshot = await query.orderBy('timestamp_emissao', 'desc').get();
+        let cautelas = [];
         snapshot.forEach(doc => {
-            cautelas.push({ id: doc.id, ...doc.data() });
+            const cautela = { id: doc.id, ...doc.data() };
+            
+            // 🛑 GESTOR MONITORAMENTO (UNIT): Filtra por status na MEMÓRIA 🛑
+            if (role === 'gestor' && type === 'unit') {
+                if (statusArray.includes(cautela.status)) {
+                    cautelas.push(cautela);
+                }
+            } else {
+                // Outros perfis (Admin, Pessoal) já aplicaram o filtro no Query.
+                cautelas.push(cautela);
+            }
         });
         return cautelas;
         
     } catch (error) {
         console.error("Erro na consulta de cautelas:", error);
-        return [];
+        throw error;
     }
 }
     /**
