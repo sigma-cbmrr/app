@@ -5198,42 +5198,40 @@ function showMainMenu() {
             // Chamar a nova função de carregamento logo após injetar o HTML
             setTimeout(() => loadCautionsToReceive(), 50);// [cite: 1137, 1138]
 
-        } else if (type === 'Histórico') { // [cite: 1139]
-            // 🛑 NOVO: Mostra a view Histórico e carrega os dados
-            htmlContent = `
-                <div class="op-card">
-                    <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                        <h3><i class="fas fa-archive"></i> Histórico de Cautelas</h3> 
-                        <button class="btn-modern-action" onclick="showMainMenu()">
-                            <i class="fas fa-arrow-left"></i> Voltar ao Menu
-                        </button>
-                    </div>
-                    
-                    <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
-                        Visualize as cautelas finalizadas de acordo com o seu papel na transação. 
+        } else if (type === 'Histórico') {
+    htmlContent = `
+        <div class="op-card">
+            <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                <h3><i class="fas fa-archive"></i> Histórico de Cautelas</h3>
+                <button class="btn-modern-action" onclick="showMainMenu()">
+                    <i class="fas fa-arrow-left"></i> Voltar ao Menu
+                </button>
+            </div>
+            
+            <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
+                Consulte as cautelas finalizadas.
+            </p>
 
-                    <div id="historico-abas-operacional" class="tab-navigation" style="display: flex; gap: 5px; margin-bottom: 15px;">
-                        <button class="btn-modern-action tab-button active" data-tab="minhas" onclick="loadHistorico('minhas')">
-                            Minhas (Dest. Original)
-                        </button>
-                        <button class="btn-modern-action tab-button" data-tab="devolucao" onclick="loadHistorico('devolucao')">
-                            Devolução (Recebidas) 
-                        </button>
-                        <button class="btn-modern-action tab-button" data-tab="emitidas" onclick="loadHistorico('emitidas')">
-                            Emitidas por Mim 
-                        </button>
-                    </div>
-                    
-                    <div id="historico-content-container">
-                        <div id="loading-historico" style="text-align: center; padding: 20px;">
-                            <i class="fas fa-spinner fa-spin"></i> Carregando histórico...
-                        </div>
-                    </div>
-                    
+            <div id="historico-filtros-operacional" style="margin-bottom: 20px; display: flex; align-items: center; gap: 15px;">
+                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
+                    <label for="hist-scope-filter" style="font-weight: bold; margin-bottom: 5px;"><i class="fas fa-filter"></i> Escopo da Consulta</label>
+                    <select id="hist-scope-filter" class="filter-input" onchange="loadHistoricalCautelas()">
+                        <option value="minhas">Minhas (Destinatário Original)</option>
+                        <option value="devolucao">Devolução (Recebidas de volta)</option>
+                        <option value="emitidas">Emitidas por Mim (Remetente)</option>
+                    </select>
                 </div>
-            `;
+                </div>
+            
+            <div id="historico-content-container">
+                <div id="loading-historico" style="text-align: center; padding: 20px;">
+                    <i class="fas fa-spinner fa-spin"></i> Carregando histórico...
+                </div>
+                </div>
+        </div>
+    `;
             // Chamar a função de carregamento principal (que dispara a aba 'minhas' por padrão)
-            setTimeout(() => loadHistorico('minhas'), 50); // [cite: 1149]
+            setTimeout(() => loadHistoricalCautelas(), 50); // [cite: 1149]
 
         } else {
             // ⬅️ Adicione este bloco para erros/valores inesperados
@@ -6491,99 +6489,100 @@ async function getCautelasForAdmin() {
 
 async function loadHistoricalCautelas() {
     const loading = document.getElementById('loading-historico');
-    const historicoContentContainer = document.getElementById('historico-content-container'); 
-    const abasOperacional = document.getElementById('historico-abas-operacional'); 
-    
+    const historicoContentContainer = document.getElementById('historico-content-container');
     const role = currentUserData.role || 'operacional';
     const user = currentUserData;
     
-    if (historicoContentContainer) historicoContentContainer.innerHTML = ''; 
-    loading.style.display = 'block';
+    // Mostra o loading no container principal
+    if (historicoContentContainer) historicoContentContainer.innerHTML = '<div id="loading-historico" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Carregando...</div>';
+    
+    let scopeType = '';
+    let filterField = null;
+    let titulo = '';
+    
+    // 1. Definição do Escopo (Gestor/Admin vs. Operacional)
+    if (role === 'gestor' || role === 'admin') {
+        // Escopo Gerencial/Global
+        scopeType = 'unit';
+        titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+    } else {
+        // Escopo Operacional (usa o filtro SELECT)
+        scopeType = 'personal';
+        const scopeFilter = document.getElementById('hist-scope-filter').value;
+        
+        if (scopeFilter === 'minhas') {
+            filterField = 'destinatario_original';
+            titulo = 'Histórico Pessoal (Destinatário Original)';
+        } else if (scopeFilter === 'devolucao') {
+            filterField = 'receptor_final_completo';
+            titulo = 'Histórico Pessoal (Recebidas de Devolução)';
+        } else if (scopeFilter === 'emitidas') {
+            filterField = 'emitente';
+            titulo = 'Histórico Pessoal (Emitidas por Mim)';
+        }
+    }
 
     try {
-        if (role === 'operacional') {
+        // 2. Executa a busca unificada (Gestor/Admin ou Operacional)
+        // O campo 'field' só será usado se scopeType for 'personal'.
+        const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, filterField, scopeType);
+        
+        // 3. Renderiza a Tabela Única
+        if (snapGeral.length > 0) {
             
-            if (abasOperacional) {
-                abasOperacional.style.setProperty('display', 'flex', 'important');
-            }
-            
-            const abasHtml = `
-                <div id="content-minhas" class="historico-tab-content active-tab" style="display:block;"><i class="fas fa-spinner fa-spin"></i> Carregando...</div>  <-- NOVO: Adiciona loading na aba inicial
-                <div id="content-devolucao" class="historico-tab-content"></div>
-                <div id="content-emitidas" class="historico-tab-content"></div>
+            let tableHtml = `
+                <div class="op-card" style="padding:15px; margin-bottom:0;">
+                    <h4 style="margin-top:0; color:#800020; border-bottom:1px solid #eee; padding-bottom:5px;">
+                        <i class="fas fa-archive"></i> ${titulo} (${snapGeral.length} registros)
+                    </h4>
+                    <table class="ca-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Dest. Original</th>
+                                <th>Emitente</th>
+                                <th>Local Origem</th>
+                                <th>Data Conclusão</th>
+                                <th>Itens</th>
+                            </tr>
+                        </thead>
+                        <tbody>
             `;
-            historicoContentContainer.innerHTML = abasHtml;
             
-            loadHistorico('minhas'); 
-            
-        } else {
-            
-            if (abasOperacional) {
-                abasOperacional.style.setProperty('display', 'none', 'important');
-            }
-            
-            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit');
-            
-            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-            
-            if (snapGeral.length > 0) {
-                
-                let tableHtml = `
-                    <div class="op-card" style="padding:15px; margin-bottom:0;">
-                        <h4 style="margin-top:0; color:#800020; border-bottom:1px solid #eee; padding-bottom:5px;">
-                            <i class="fas fa-archive"></i> ${titulo} (${snapGeral.length} registros)
-                        </h4>
-                        <table class="ca-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Dest. Original</th>
-                                    <th>Emitente</th>
-                                    <th>Local Origem</th>
-                                    <th>Data Conclusão</th>
-                                    <th>Itens</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-                
-                snapGeral.forEach(cautela => {
-                    const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-                    const dataFinal = cautela.timestamp_conclusao ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') : 'N/D';
-                    
-                    tableHtml += `
-                        <tr onclick="showCautelaDetails('${cautela.cautela_id}')" style="cursor:pointer;">
-                            <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
-                            <td data-label="Dest. Original">${cautela.destinatario_original || 'N/A'}</td>
-                            <td data-label="Emitente">${cautela.emitente}</td>
-                            <td data-label="Local Origem">${cautela.local_origem || 'N/D'}</td>
-                            <td data-label="Conclusão">${dataFinal}</td>
-                            <td data-label="Itens">${itensCount} itens</td>
-                        </tr>
-                    `;
-                });
+            snapGeral.forEach(cautela => {
+                const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+                const dataFinal = cautela.timestamp_conclusao ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') : 'N/D';
                 
                 tableHtml += `
-                            </tbody>
-                        </table>
-                    </div>
+                    <tr onclick="showCautelaDetails('${cautela.cautela_id}')" style="cursor:pointer;">
+                        <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
+                        <td data-label="Dest. Original">${cautela.destinatario_original || 'N/A'}</td>
+                        <td data-label="Emitente">${cautela.emitente}</td>
+                        <td data-label="Local Origem">${cautela.local_origem || 'N/D'}</td>
+                        <td data-label="Conclusão">${dataFinal}</td>
+                        <td data-label="Itens">${itensCount} itens</td>
+                    </tr>
                 `;
-                
-                historicoContentContainer.innerHTML = tableHtml;
+            });
+            
+            tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            historicoContentContainer.innerHTML = tableHtml;
 
-            } else {
-                historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:#999;">Nenhuma cautela concluída encontrada para ${role}.</div>`;
-            }
+        } else {
+            historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:#999;">Nenhuma cautela concluída encontrada neste escopo.</div>`;
         }
 
     } catch (e) {
         console.error("Erro ao carregar histórico de cautelas:", e);
         historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:red;">Erro ao carregar dados: ${e.message}</div>`;
-    } finally {
-        loading.style.display = 'none'; 
-    }
-}
-        function renderHistoricalGroup(title, cautelas, groupId) {
+    } 
+    // O finally não é mais necessário aqui, pois o loading foi tratado com o innerHTML.
+}        function renderHistoricalGroup(title, cautelas, groupId) {
     // Retorna string vazia se não houver dados
     if (cautelas.length === 0) {
         return ''; 
@@ -6690,52 +6689,7 @@ async function loadHistoricalCautelas() {
         if (btnDevolver) btnDevolver.disabled = false;
     }
 }
-        /**
- * Alterna a aba do Histórico e dispara o carregamento da função correspondente.
- */
-// Localização: Função loadHistorico (Aproximadamente linha 1504)
-
-function loadHistorico(tabName) {
-    const role = currentUserData.role || 'operacional';
-    
-    // 🛑 1. SE FOR GESTOR/ADMIN, FORÇAMOS A VISUALIZAÇÃO DA TABELA ÚNICA 🛑
-    // Isso garante que loadHistoricalCautelas rode e sobreescreva a estrutura de abas.
-    if (role === 'gestor' || role === 'admin') {
-        loadHistoricalCautelas();
-        return; // Sai da função após iniciar a visualização Gerencial/Global
-    }
-    
-    // 2. Para Operacional, continua a lógica de abas:
-    
-    // 2.1. Atualiza a UI das abas
-    document.querySelectorAll('.tab-navigation .tab-button').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.getAttribute('data-tab') === tabName) {
-            btn.classList.add('active');
-        }
-    });
-
-    // 2.2. Oculta e mostra o conteúdo (containers internos)
-    document.querySelectorAll('.historico-tab-content').forEach(content => {
-        content.classList.remove('active-tab');
-        content.style.display = 'none';
-    });
-    const targetContent = document.getElementById(`content-${tabName}`);
-    if (targetContent) {
-        targetContent.style.display = 'block';
-        targetContent.classList.add('active-tab');
-    }
-    
-    // 2.3. Dispara a função de carregamento de dados (Operacional)
-    if (tabName === 'minhas') {
-        loadHistoricoMinhas();
-    } else if (tabName === 'devolucao') {
-        loadHistoricoDevolucao();
-    } else if (tabName === 'emitidas') {
-        loadHistoricoEmitidas();
-    }
-}
-        // Função auxiliar para renderizar a tabela, minimizando a repetição
+       
 function renderHistoricoTable(containerId, cautelas) {
     const container = document.getElementById(containerId);
     const loading = document.getElementById('loading-historico');
@@ -6791,94 +6745,6 @@ function renderHistoricoTable(containerId, cautelas) {
     container.innerHTML = html;
 }
 
-// -------------------------------------------------------------
-// FUNÇÕES ESPECÍFICAS DE CARREGAMENTO POR ABA
-// -------------------------------------------------------------
-
-/**
- * Aba 1: MINHAS (Destinatário Original)
- * Filtro: destinatario_original == militarCompleto E status == CONCLUÍDA
- */
-async function loadHistoricoMinhas() {
-    const militarCompleto = currentUserData.nome_militar_completo;
-    const containerId = 'content-minhas';
-    const container = document.getElementById(containerId);
-    
-    if (!container) return;
-
-    // 1. Injeta o loading específico da aba (sobrescrevendo o HTML anterior)
-    container.innerHTML = '<p style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Buscando histórico...</p>';
-    
-    try {
-        const snap = await db.collection('cautelas_abertas')
-            .where('destinatario_original', '==', militarCompleto)
-            .where('status', '==', 'CONCLUÍDA')
-            .orderBy('timestamp_conclusao', 'desc')
-            .get();
-        
-        renderHistoricoTable(containerId, snap.docs.map(doc => doc.data()));
-    } catch (e) {
-        console.error("Erro em loadHistoricoMinhas:", e);
-        // O catch garante que a mensagem de erro substitua o loading
-        container.innerHTML = `<p style="color:red; text-align:center;">Erro ao carregar histórico: ${e.message}</p>`;
-    }
-}
-
-/**
- * Aba 2: DEVOLUÇÃO (Recebidas de volta, como Dono Provisório)
- * Filtro: receptor_final_completo == militarCompleto E status == CONCLUÍDA
- */
-async function loadHistoricoDevolucao() {
-    const militarCompleto = currentUserData.nome_militar_completo;
-    const containerId = 'content-devolucao';
-    const container = document.getElementById(containerId);
-    
-    if (!container) return;
-
-    // Injeta o loading específico da aba
-    container.innerHTML = '<p style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Buscando histórico de devoluções...</p>';
-    
-    try {
-        const snap = await db.collection('cautelas_abertas')
-            .where('receptor_final_completo', '==', militarCompleto)
-            .where('status', '==', 'CONCLUÍDA')
-            .orderBy('timestamp_conclusao', 'desc')
-            .get();
-        
-        renderHistoricoTable(containerId, snap.docs.map(doc => doc.data()));
-    } catch (e) {
-        console.error("Erro em loadHistoricoDevolucao:", e);
-        container.innerHTML = `<p style="color:red; text-align:center;">Erro ao carregar histórico: ${e.message}</p>`;
-    }
-}
-
-/**
- * Aba 3: EMITIDAS POR MIM
- * Filtro: emitente == militarCompleto E status == CONCLUÍDA
- */
-async function loadHistoricoEmitidas() {
-    const militarCompleto = currentUserData.nome_militar_completo;
-    const containerId = 'content-emitidas';
-    const container = document.getElementById(containerId);
-    
-    if (!container) return;
-
-    // Injeta o loading específico da aba
-    container.innerHTML = '<p style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Buscando histórico de emissões...</p>';
-    
-    try {
-        const snap = await db.collection('cautelas_abertas')
-            .where('emitente', '==', militarCompleto)
-            .where('status', '==', 'CONCLUÍDA')
-            .orderBy('timestamp_conclusao', 'desc')
-            .get();
-        
-        renderHistoricoTable(containerId, snap.docs.map(doc => doc.data()));
-    } catch (e) {
-        console.error("Erro em loadHistoricoEmitidas:", e);
-        container.innerHTML = `<p style="color:red; text-align:center;">Erro ao carregar histórico: ${e.message}</p>`;
-    }
-}
         function atualizarQuadroModal() {
     const postoSelect = document.getElementById('edit-user-posto');
     const quadroSelect = document.getElementById('edit-user-quadro');
