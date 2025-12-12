@@ -5967,49 +5967,83 @@ async function loadActiveCautelas() {
 
         // A. Pessoal: Custódia Ativa (RECEBIDA como destinatário)
         if (role === 'operacional' || role === 'gestor') {
-    const militarCompleto = currentUserData.nome_militar_completo;
-    
-    // --- 1. GRUPO CUSTÓDIA ATIVA (APENAS POSSE ATIVA) ---
-    
-    // A. CUSTÓDIA ATIVA: RECEBIDA (Destinatário)
-    // Somente itens que estão sob POSSE ATIVA.
-    grupos.custodiaAtiva.data = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
-    grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.cautela_id));
-    
-    // --- 2. GRUPO RASTREIO PESSOAL (REMETENTE E REVERSOR) ---
+            const militarCompleto = currentUserData.nome_militar_completo;
+        
+            // --- 1. GRUPO CUSTÓDIA ATIVA (APENAS POSSE ATIVA) ---
+            
+            // A. CUSTÓDIA ATIVA: RECEBIDA (Destinatário)
+            // Somente itens que estão sob POSSE ATIVA.
+            grupos.custodiaAtiva.data = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
+            grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.cautela_id));
+            
+            // --- 2. GRUPO RASTREIO PESSOAL (REMETENTE E REVERSOR) ---
 
-    // B. RASTREIO PESSOAL - PARTE 1: Emitente (ABERTA, RECEBIDA, DEVOLUÇÃO)
-    // Rastreamento para itens que ele EMITIU.
-    const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
+            // B. RASTREIO PESSOAL - PARTE 1: Emitente (ABERTA, RECEBIDA, DEVOLUÇÃO)
+            // Rastreamento para itens que ele EMITIU.
+            const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
 
-    // C. RASTREIO PESSOAL - PARTE 2: Reversor (DEVOLUÇÃO)
-    // Rastreamento para itens que ele DEVOLVEU (e precisa acompanhar o retorno).
-    const rastreioReversor = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
-    
-    // Concatena as duas listas de rastreio
-    let rastreioRaw = [...rastreioEmitente, ...rastreioReversor];
+            // C. RASTREIO PESSOAL - PARTE 2: Reversor (DEVOLUÇÃO)
+            // Rastreamento para itens que ele DEVOLVEU (e precisa acompanhar o retorno).
+            const rastreioReversor = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
+            
+            // Concatena as duas listas de rastreio
+            let rastreioRaw = [...rastreioEmitente, ...rastreioReversor];
 
-    // 🛑 CORREÇÃO: Desduplica o array rastreioRaw internamente, usando Map 🛑
-    const uniqueRastreio = new Map();
-    rastreioRaw.forEach(c => uniqueRastreio.set(c.cautela_id, c));
-    const rastreioDesduplicado = Array.from(uniqueRastreio.values());
-    
-    // Remove itens que já estão na Custódia Ativa (filtro contra o outro grupo)
-    grupos.rastreioPessoal.data = rastreioDesduplicado.filter(c => !renderedIds.has(c.cautela_id));
-    grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.cautela_id));
-}
+            // 🛑 CORREÇÃO: Desduplica o array rastreioRaw internamente, usando Map 🛑
+            const uniqueRastreio = new Map();
+            rastreioRaw.forEach(c => uniqueRastreio.set(c.cautela_id, c));
+            const rastreioDesduplicado = Array.from(uniqueRastreio.values());
+            
+            // Remove itens que já estão na Custódia Ativa (filtro contra o outro grupo)
+            grupos.rastreioPessoal.data = rastreioDesduplicado.filter(c => !renderedIds.has(c.cautela_id));
+            grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.cautela_id));
+        }
+        
         // C. Gerencial/Admin: Monitoramento da Unidade/Global
         if (role === 'gestor' || role === 'admin') {
-            grupos.monitoramento.data = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, null, 'unit');
             
-            // Remove itens que já foram vistos nos grupos pessoais
-            grupos.monitoramento.data = grupos.monitoramento.data.filter(c => !renderedIds.has(c.cautela_id));
-            
-            if (role === 'admin') {
-                 grupos.monitoramento.title = 'Monitoramento Global (ADMIN)';
-            } else {
-                 grupos.monitoramento.title = 'Monitoramento da Unidade (Material sob sua gestão)';
+            if (role === 'gestor') {
+                // 🛑 CORREÇÃO CRÍTICA PARA GESTOR (Evitar duplo 'in') 🛑
+                const unitListIds = await getUnitListIds();
+                let monitoramentoRaw = [];
+                const statuses = ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'];
+                
+                grupos.monitoramento.title = 'Monitoramento da Unidade (Material sob sua gestão)';
+                
+                // Verifica se há IDs de lista e se estamos dentro do limite de 10 do 'in'
+                if (unitListIds.length > 0 && unitListIds.length <= 10) {
+                    
+                    // 1. Executa a consulta APENAS com o filtro 'local_origem_id' ('in')
+                    let queryRef = db.collection('cautelas_abertas')
+                        .where('local_origem_id', 'in', unitListIds)
+                        .orderBy('timestamp_emissao', 'desc');
+
+                    const snapshot = await queryRef.get();
+                    snapshot.forEach(doc => {
+                        const cautela = { id: doc.id, ...doc.data() };
+                        
+                        // 2. Filtra por status ABERTA, RECEBIDA, DEVOLUÇÃO na MEMÓRIA
+                        if (statuses.includes(cautela.status)) {
+                            monitoramentoRaw.push(cautela);
+                        }
+                    });
+                    
+                } else if (unitListIds.length > 10) {
+                     console.error("ALERTA: Gestor tem mais de 10 Listas. Filtro de unidade está incompleto.");
+                } else {
+                     // Nenhum ID de lista, Monitoramento vazio.
+                }
+
+                grupos.monitoramento.data = monitoramentoRaw;
+                
+            } else { // role === 'admin'
+                grupos.monitoramento.title = 'Monitoramento Global (ADMIN)';
+                // Admin pode usar o 'in' para status, pois não usa o 'in' para local_origem_id
+                grupos.monitoramento.data = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, null, 'unit');
             }
+            
+            // Remove itens que já foram vistos nos grupos pessoais (APÓS A BUSCA)
+            grupos.monitoramento.data = grupos.monitoramento.data.filter(c => !renderedIds.has(c.cautela_id));
         }
         
         // --- 2. CONSOLIDAÇÃO E RENDERIZAÇÃO NA TABELA ---
