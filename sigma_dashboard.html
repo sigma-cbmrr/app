@@ -5317,8 +5317,9 @@ function showMainMenu() {
             }
         });
 
-        // 2. CONFIGURA LISTENERS / ESTADO (Adaptado para Histórico)
+        // 2. CONFIGURA LISTENERS / ESTADO (Adaptado para Histórico e Nova Cautela)
         if (targetView === 'hist') {
+            // Configura o Listener para o novo filtro de Histórico
             setupCautelaDestinatarioListener('hist-militar-input', 'hist-suggestions-list', 'hist-suggestions-box', true);
             
             // 🛑 LÓGICA DO OPERACIONAL: Preencher e desabilitar o campo 🛑
@@ -5331,11 +5332,14 @@ function showMainMenu() {
                 militarInput.style.backgroundColor = '#f0f0f0';
                 
                 // Operacional só pode buscar por si mesmo, então o filtro de Escopo ('todos') é inútil.
-                scopeSelect.querySelector('option[value="todos"]').disabled = true;
+                const todosOption = scopeSelect.querySelector('option[value="todos"]');
+                if (todosOption) todosOption.disabled = true;
+                
             } else {
                 militarInput.disabled = false;
                 militarInput.style.backgroundColor = '';
-                scopeSelect.querySelector('option[value="todos"]').disabled = false;
+                const todosOption = scopeSelect.querySelector('option[value="todos"]');
+                if (todosOption) todosOption.disabled = false;
             }
         } else {
             // Lógica original para Nova Cautela
@@ -5346,10 +5350,19 @@ function showMainMenu() {
         console.error("Erro ao carregar usuários para a busca:", error);
     }
 }
-        function setupCautelaDestinatarioListener() {
-    const input = document.getElementById('cautela-destinatario');
-    const suggestionsBox = document.getElementById('cautela-suggestions-box');
-    const suggestionsList = document.getElementById('cautela-suggestions-list');
+        // Localização: Próximo à linha 1160
+
+function setupCautelaDestinatarioListener(targetInputId, suggestionsListId, suggestionsBoxId, isHistorical = false) {
+    const input = document.getElementById(targetInputId);
+    const suggestionsBox = document.getElementById(suggestionsBoxId);
+    const suggestionsList = document.getElementById(suggestionsListId);
+    
+    // SAÍDA DE SEGURANÇA: Se algum elemento crítico não for encontrado, encerra a função.
+    if (!input || !suggestionsBox || !suggestionsList) {
+        // Isso pode ocorrer se o elemento ainda não foi injetado (showCautelasDashboard)
+        console.warn(`Elemento de autocompletar não encontrado: Input ID ${targetInputId} não existe.`);
+        return; 
+    }
     
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
     input.addEventListener('input', () => {
@@ -5361,6 +5374,7 @@ function showMainMenu() {
             return;
         }
 
+        // 🛑 CORREÇÃO: allTargetUsers é a base carregada em loadUsersForSearch (filtrada por Gestor) 🛑
         const filteredUsers = allTargetUsers.filter(user => 
             user.nome.toUpperCase().includes(searchTerm)
         );
@@ -5385,13 +5399,18 @@ function showMainMenu() {
             const selectedName = event.target.getAttribute('data-user-name');
             input.value = selectedName;
             suggestionsBox.style.display = 'none';
-            // Garante que o input seja marcado como modificado
-            input.dispatchEvent(new Event('change')); 
+            
+            // Para Histórico, disparamos a busca principal após a seleção
+            if (isHistorical) {
+                loadHistoricalCautelas(); 
+            } else {
+                // Para Nova Cautela, atualiza a contagem/validação
+                input.dispatchEvent(new Event('change')); 
+            }
         }
     });
 
     // 3. Oculta a caixa quando o foco sai do input, mas com um pequeno atraso
-    // para permitir o clique no LI antes que a caixa suma.
     input.addEventListener('blur', () => {
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
