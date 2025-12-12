@@ -5202,26 +5202,59 @@ function showMainMenu() {
     htmlContent = `
         <div class="op-card">
             <div class="header-container" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
-                <h3><i class="fas fa-archive"></i> Histórico de Cautelas</h3>
+                <h3><i class="fas fa-archive"></i> Histórico de Cautelas</h3> 
                 <button class="btn-modern-action" onclick="showMainMenu()">
                     <i class="fas fa-arrow-left"></i> Voltar ao Menu
                 </button>
             </div>
             
             <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">
-                Consulte as cautelas finalizadas.
+                Filtre por Militar, Nº Cautela ou Escopo de Responsabilidade.
             </p>
 
-            <div id="historico-filtros-operacional" style="margin-bottom: 20px; display: flex; align-items: center; gap: 15px;">
-                <div class="form-group" style="flex-grow: 1; margin-bottom: 0;">
-                    <label for="hist-scope-filter" style="font-weight: bold; margin-bottom: 5px;"><i class="fas fa-filter"></i> Escopo da Consulta</label>
-                    <select id="hist-scope-filter" class="filter-input" onchange="loadHistoricalCautelas()">
-                        <option value="minhas">Minhas (Destinatário Original)</option>
-                        <option value="devolucao">Devolução (Recebidas de volta)</option>
-                        <option value="emitidas">Emitidas por Mim (Remetente)</option>
+            <div class="modern-filter-card">
+                
+                <div class="filter-item">
+                    <label for="hist-militar-input"><i class="fas fa-user-tag"></i> Militar (Emitente/Destinatário)</label>
+                    <div class="custom-select-container">
+                        <input type="text" id="hist-militar-input" placeholder="Nome, Posto ou Matrícula" class="filter-input" autocomplete="off" oninput="setupCautelaDestinatarioListener('hist-militar-input', 'hist-suggestions-list', 'hist-suggestions-box')">
+                        <div id="hist-suggestions-box" class="suggestions-box">
+                            <ul id="hist-suggestions-list"></ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="filter-item" style="min-width: 150px; flex-grow: 0;">
+                    <label for="hist-cautela-id"><i class="fas fa-barcode"></i> Nº Cautela</label>
+                    <input type="text" id="hist-cautela-id" placeholder="Ex: CAUTELA-000123" class="filter-input" style="text-transform: uppercase;">
+                </div>
+
+                <div class="filter-item" style="min-width: 200px;">
+                    <label for="hist-scope-filter"><i class="fas fa-briefcase"></i> Papel na Cautela</label>
+                    <select id="hist-scope-filter" class="filter-input">
+                        <option value="todos">Todos (Escopo Gerencial)</option>
+                        <option value="emitidas">Emitidas por Mim</option>
+                        <option value="minhas">Destinatário Original</option>
+                        <option value="devolucao">Recebidas de Devolução</option>
                     </select>
                 </div>
+                
+                <div class="filter-item" style="min-width: 150px;">
+                    <label><i class="far fa-calendar-alt"></i> Data Inicial</label>
+                    <input type="date" id="hist-start-date" class="filter-input">
                 </div>
+                <div class="filter-item" style="min-width: 150px;">
+                    <label><i class="far fa-calendar-alt"></i> Data Final</label>
+                    <input type="date" id="hist-end-date" class="filter-input">
+                </div>
+                
+                <div class="filter-item" style="flex: 0;">
+                   <button class="btn-filter-modern" onclick="loadHistoricalCautelas()">
+                        <i class="fas fa-filter"></i> Filtrar
+                    </button>
+                </div>
+                
+            </div>
             
             <div id="historico-content-container">
                 <div id="loading-historico" style="text-align: center; padding: 20px;">
@@ -5230,8 +5263,19 @@ function showMainMenu() {
                 </div>
         </div>
     `;
-            // Chamar a função de carregamento principal (que dispara a aba 'minhas' por padrão)
-            setTimeout(() => loadHistoricalCautelas(), 50); // [cite: 1149]
+    
+    contentArea.innerHTML = htmlContent;
+    contentArea.style.display = 'block';
+
+    // Ações de carregamento (em timeout para o DOM ser injetado)
+    setTimeout(() => {
+        // 1. Carrega a lista de usuários para o autocompletar
+        loadUsersForSearch('hist'); 
+        // 2. Define o período padrão (opcional, adicione a lógica se desejar)
+        // Ex: document.getElementById('hist-start-date').valueAsDate = new Date(...);
+        // 3. Dispara o carregamento inicial (Gestor/Admin ou Operacional)
+        loadHistoricalCautelas();
+    }, 50);
 
         } else {
             // ⬅️ Adicione este bloco para erros/valores inesperados
@@ -5242,32 +5286,61 @@ function showMainMenu() {
         contentArea.style.display = 'block';
     }
 }
-    async function loadUsersForSearch() {
-    // 1. BUSCA IRRESTRITA E EXCLUSÃO DO PRÓPRIO USUÁRIO
-    let userQuery = db.collection('usuarios'); 
+    async function loadUsersForSearch(targetView) {
     const militarLogadoCompleto = currentUserData.nome_militar_completo;
-
+    
+    // --- 1. DEFINIÇÃO DO ESCOPO DE BUSCA ---
+    let userQuery = db.collection('usuarios');
+    // Para Gestor, filtra a busca por Unidade (Admin vê todos).
+    if (currentUserData.role === 'gestor') {
+        userQuery = userQuery.where('unidade', '==', currentUserData.unidade);
+    }
+    
     try {
         const usersSnapshot = await userQuery.get();
         // Zera o array global antes de popular
-        allTargetUsers = []; 
+        allTargetUsers = [];
         
         usersSnapshot.forEach(doc => {
             const user = doc.data();
             const nomeCompleto = user.nome_militar_completo; 
 
-            // Excluir o próprio usuário logado
-            if (nomeCompleto && nomeCompleto !== militarLogadoCompleto) {
-                // Salva o objeto completo no array (com ID e nome)
+            // Excluir o próprio usuário logado APENAS se não estiver na tela de Histórico.
+            // No Histórico, queremos que o Operacional/Gestor possa buscar por si mesmo (se o campo não for disabled).
+            const shouldExcludeSelf = (targetView !== 'hist'); 
+
+            if (nomeCompleto && (!shouldExcludeSelf || nomeCompleto !== militarLogadoCompleto)) {
                 allTargetUsers.push({
                     id: doc.id,
                     nome: nomeCompleto
                 });
             }
         });
-        
-        // 2. CONFIGURA LISTENERS APÓS CARREGAR DADOS
-        setupCautelaDestinatarioListener();
+
+        // 2. CONFIGURA LISTENERS / ESTADO (Adaptado para Histórico)
+        if (targetView === 'hist') {
+            setupCautelaDestinatarioListener('hist-militar-input', 'hist-suggestions-list', 'hist-suggestions-box', true);
+            
+            // 🛑 LÓGICA DO OPERACIONAL: Preencher e desabilitar o campo 🛑
+            const militarInput = document.getElementById('hist-militar-input');
+            const scopeSelect = document.getElementById('hist-scope-filter');
+
+            if (currentUserData.role === 'operacional') {
+                militarInput.value = militarLogadoCompleto;
+                militarInput.disabled = true;
+                militarInput.style.backgroundColor = '#f0f0f0';
+                
+                // Operacional só pode buscar por si mesmo, então o filtro de Escopo ('todos') é inútil.
+                scopeSelect.querySelector('option[value="todos"]').disabled = true;
+            } else {
+                militarInput.disabled = false;
+                militarInput.style.backgroundColor = '';
+                scopeSelect.querySelector('option[value="todos"]').disabled = false;
+            }
+        } else {
+            // Lógica original para Nova Cautela
+            setupCautelaDestinatarioListener('cautela-destinatario', 'cautela-suggestions-list', 'cautela-suggestions-box');
+        }
 
     } catch (error) {
         console.error("Erro ao carregar usuários para a busca:", error);
@@ -6488,101 +6561,153 @@ async function getCautelasForAdmin() {
 }
 
 async function loadHistoricalCautelas() {
-    const loading = document.getElementById('loading-historico');
     const historicoContentContainer = document.getElementById('historico-content-container');
     const role = currentUserData.role || 'operacional';
     const user = currentUserData;
     
-    // Mostra o loading no container principal
-    if (historicoContentContainer) historicoContentContainer.innerHTML = '<div id="loading-historico" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Carregando...</div>';
+    // Inicia com loading
+    if (historicoContentContainer) historicoContentContainer.innerHTML = '<div id="loading-historico" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Buscando histórico...</div>';
     
-    let scopeType = '';
-    let filterField = null;
+    // --- COLETA DOS FILTROS ---
+    const militarFiltro = document.getElementById('hist-militar-input')?.value.trim() || '';
+    const cautelaIdFiltro = document.getElementById('hist-cautela-id')?.value.trim().toUpperCase() || '';
+    const scopeFilter = document.getElementById('hist-scope-filter')?.value || 'todos';
+    const startDateInput = document.getElementById('hist-start-date')?.value;
+    const endDateInput = document.getElementById('hist-end-date')?.value;
+
+    let filterField = null; // Usado para filtros 'personal'
+    let scopeType = 'unit'; // Base de Gestor/Admin
     let titulo = '';
     
-    // 1. Definição do Escopo (Gestor/Admin vs. Operacional)
-    if (role === 'gestor' || role === 'admin') {
-        // Escopo Gerencial/Global
-        scopeType = 'unit';
-        titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-    } else {
-        // Escopo Operacional (usa o filtro SELECT)
+    // 1. DEFINIÇÃO DO ESCOPO E FILTROS DO FIREBASE
+    
+    if (role === 'operacional') {
+        // Operacional: Busca SEMPRE restrita ao militar logado.
         scopeType = 'personal';
-        const scopeFilter = document.getElementById('hist-scope-filter').value;
         
-        if (scopeFilter === 'minhas') {
+        // Define o campo de filtro com base no SELECT de Escopo
+        if (scopeFilter === 'emitidas') {
+            filterField = 'emitente';
+        } else if (scopeFilter === 'minhas') {
             filterField = 'destinatario_original';
-            titulo = 'Histórico Pessoal (Destinatário Original)';
         } else if (scopeFilter === 'devolucao') {
             filterField = 'receptor_final_completo';
-            titulo = 'Histórico Pessoal (Recebidas de Devolução)';
-        } else if (scopeFilter === 'emitidas') {
-            filterField = 'emitente';
-            titulo = 'Histórico Pessoal (Emitidas por Mim)';
         }
+        
+        // O valor a ser buscado é o nome do próprio Operacional
+        const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, filterField, scopeType);
+        titulo = `Histórico Pessoal (${scopeFilter.charAt(0).toUpperCase() + scopeFilter.slice(1)})`;
+        
+        // 🛑 FILTROS EM MEMÓRIA (Cautela ID e Data) 🛑
+        const cautelasFiltradas = snapGeral.filter(c => {
+            const dataConclusao = c.timestamp_conclusao ? c.timestamp_conclusao.toDate() : null;
+            
+            // Filtro Cautela ID
+            if (cautelaIdFiltro && !c.cautela_id.includes(cautelaIdFiltro)) return false;
+
+            // Filtro Data (Opcional)
+            if (startDateInput && dataConclusao && dataConclusao < new Date(startDateInput + 'T00:00:00')) return false;
+            if (endDateInput && dataConclusao && dataConclusao > new Date(endDateInput + 'T23:59:59')) return false;
+
+            return true;
+        });
+
+        await renderHistoricalTableFinal(historicoContentContainer, cautelasFiltradas, titulo);
+
+    } else { // Gestor ou Admin (Visão Gerencial/Global)
+        
+        titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+        
+        // Admin/Gestor: Busca inicial com filtros de unidade/global
+        const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, scopeType); 
+        
+        // 🛑 FILTROS EM MEMÓRIA (Nome Militar, Cautela ID e Data) 🛑
+        const cautelasFiltradas = snapGeral.filter(c => {
+            const dataConclusao = c.timestamp_conclusao ? c.timestamp_conclusao.toDate() : null;
+            
+            // 1. Filtro Nº Cautela
+            if (cautelaIdFiltro && !c.cautela_id.includes(cautelaIdFiltro)) return false;
+
+            // 2. Filtro Militar (Aplica se o input NÃO estiver vazio)
+            if (militarFiltro) {
+                const nomeMilitar = militarFiltro.toUpperCase();
+                // Verifica Emitente OU Destinatário Original (Regra do Gestor/Admin)
+                if (!c.emitente.toUpperCase().includes(nomeMilitar) && 
+                    !c.destinatario_original.toUpperCase().includes(nomeMilitar)) {
+                    return false;
+                }
+            }
+
+            // 3. Filtro Data (Opcional)
+            if (startDateInput && dataConclusao && dataConclusao < new Date(startDateInput + 'T00:00:00')) return false;
+            if (endDateInput && dataConclusao && dataConclusao > new Date(endDateInput + 'T23:59:59')) return false;
+
+            return true;
+        });
+
+        await renderHistoricalTableFinal(historicoContentContainer, cautelasFiltradas, titulo);
+    }
+}
+
+
+/**
+ * Função auxiliar que lida com a renderização final da tabela.
+ * (Substitui a lógica de injeção direta de HTML no final de loadHistoricalCautelas)
+ */
+async function renderHistoricalTableFinal(containerElement, cautelas, titulo) {
+    
+    // Limpa o container e remove o loading
+    if (containerElement) containerElement.innerHTML = '';
+    
+    if (cautelas.length === 0) {
+        containerElement.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:#999;">Nenhuma cautela concluída encontrada neste escopo.</div>`;
+        return;
     }
 
-    try {
-        // 2. Executa a busca unificada (Gestor/Admin ou Operacional)
-        // O campo 'field' só será usado se scopeType for 'personal'.
-        const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, filterField, scopeType);
-        
-        // 3. Renderiza a Tabela Única
-        if (snapGeral.length > 0) {
-            
-            let tableHtml = `
-                <div class="op-card" style="padding:15px; margin-bottom:0;">
-                    <h4 style="margin-top:0; color:#800020; border-bottom:1px solid #eee; padding-bottom:5px;">
-                        <i class="fas fa-archive"></i> ${titulo} (${snapGeral.length} registros)
-                    </h4>
-                    <table class="ca-table">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Dest. Original</th>
-                                <th>Emitente</th>
-                                <th>Local Origem</th>
-                                <th>Data Conclusão</th>
-                                <th>Itens</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-            
-            snapGeral.forEach(cautela => {
-                const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
-                const dataFinal = cautela.timestamp_conclusao ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') : 'N/D';
-                
-                tableHtml += `
-                    <tr onclick="showCautelaDetails('${cautela.cautela_id}')" style="cursor:pointer;">
-                        <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
-                        <td data-label="Dest. Original">${cautela.destinatario_original || 'N/A'}</td>
-                        <td data-label="Emitente">${cautela.emitente}</td>
-                        <td data-label="Local Origem">${cautela.local_origem || 'N/D'}</td>
-                        <td data-label="Conclusão">${dataFinal}</td>
-                        <td data-label="Itens">${itensCount} itens</td>
+    let tableHtml = `
+        <div class="op-card" style="padding:15px; margin-bottom:0;">
+            <h4 style="margin-top:0; color:#800020; border-bottom:1px solid #eee; padding-bottom:5px;">
+                <i class="fas fa-archive"></i> ${titulo} (${cautelas.length} registros)
+            </h4>
+            <table class="ca-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Dest. Original</th>
+                        <th>Emitente</th>
+                        <th>Local Origem</th>
+                        <th>Data Conclusão</th>
+                        <th>Itens</th>
                     </tr>
-                `;
-            });
-            
-            tableHtml += `
-                        </tbody>
-                    </table>
-                </div>
-            `;
-            
-            historicoContentContainer.innerHTML = tableHtml;
+                </thead>
+                <tbody>
+    `;
 
-        } else {
-            historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:#999;">Nenhuma cautela concluída encontrada neste escopo.</div>`;
-        }
+    cautelas.forEach(cautela => {
+        const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+        const dataFinal = cautela.timestamp_conclusao ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+        
+        tableHtml += `
+            <tr onclick="showCautelaDetails('${cautela.cautela_id}')" style="cursor:pointer;">
+                <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
+                <td data-label="Dest. Original">${cautela.destinatario_original || 'N/A'}</td>
+                <td data-label="Emitente">${cautela.emitente}</td>
+                <td data-label="Local Origem">${cautela.local_origem || 'N/D'}</td>
+                <td data-label="Conclusão">${dataFinal}</td>
+                <td data-label="Itens">${itensCount} itens</td>
+            </tr>
+        `;
+    });
 
-    } catch (e) {
-        console.error("Erro ao carregar histórico de cautelas:", e);
-        historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:red;">Erro ao carregar dados: ${e.message}</div>`;
-    } 
-    // O finally não é mais necessário aqui, pois o loading foi tratado com o innerHTML.
-}        function renderHistoricalGroup(title, cautelas, groupId) {
+    tableHtml += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    containerElement.innerHTML = tableHtml;
+}        
+        function renderHistoricalGroup(title, cautelas, groupId) {
     // Retorna string vazia se não houver dados
     if (cautelas.length === 0) {
         return ''; 
