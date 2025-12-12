@@ -6505,91 +6505,113 @@ async function getCautelasForAdmin() {
 
     return cautelas;
 }
-      /**
- * Carrega e renderiza o Histórico de Cautelas CONCLUÍDAS.
- * Controla a visibilidade das abas operacionais.
- */
+
 async function loadHistoricalCautelas() {
-    const tbody = document.getElementById('cautelas-historico-body'); 
+    // Note: Esta função usa IDs genéricos de containers e não depende mais do tbody e table padrões.
     const loading = document.getElementById('loading-historico');
-    const table = document.getElementById('cautelas-historico-table');
-    const container = document.getElementById('historico-cautelas-container'); 
+    // Este é o container pai que engloba as abas (Operacional) ou a tabela (Gestor/Admin)
+    const historicoContentContainer = document.getElementById('historico-content-container'); 
     const abasOperacional = document.getElementById('historico-abas-operacional'); 
     
     const role = currentUserData.role || 'operacional';
     const user = currentUserData;
     
-    // 1. LIMPEZA E CONTROLE INICIAL DE VISIBILIDADE
-    if (container) container.innerHTML = '';
-    tbody.innerHTML = '';
+    // 1. CONTROLE INICIAL DE VISIBILIDADE E LIMPEZA
+    if (historicoContentContainer) historicoContentContainer.innerHTML = ''; 
     loading.style.display = 'block';
-    table.style.display = 'none';
 
-    let htmlContent = '';
-    
-    // --- 2. CONTROLE FORÇADO DE VISIBILIDADE DAS ABAS (CORREÇÃO) ---
-    if (abasOperacional) {
-        if (role === 'operacional') {
-            abasOperacional.style.display = 'flex'; 
-        } else {
-            // FORÇA DISPLAY NONE para GESTOR/ADMIN, anulando qualquer CSS/JS concorrente
-            abasOperacional.style.setProperty('display', 'none', 'important');
-        }
-    }
-    
     try {
         if (role === 'operacional') {
+            // === FLUXO OPERACIONAL (COM ABAS) ===
             
-            // Lógica para OPERACIONAL (3 Grupos de Histórico Pessoal)
-            const snapDestinatario = await queryCautelas(['CONCLUÍDA'], role, user, 'destinatario_original', 'personal');
-            const snapRecebedor = await queryCautelas(['CONCLUÍDA'], role, user, 'receptor_final_completo', 'personal');
-            const snapEmitidas = await queryCautelas(['CONCLUÍDA'], role, user, 'emitente', 'personal');
+            // 1. Habilita as abas (garante que sejam vistas)
+            if (abasOperacional) {
+                abasOperacional.style.setProperty('display', 'flex', 'important');
+            }
             
-            htmlContent += renderHistoricalGroup('MINHAS (DESTINATÁRIO ORIGINAL)', snapDestinatario, 'historico-destinatario');
-            htmlContent += renderHistoricalGroup('RECEBIDAS (DEVOLUÇÃO)', snapRecebedor, 'historico-recebedor');
-            htmlContent += renderHistoricalGroup('EMITIDAS POR MIM', snapEmitidas, 'historico-emitente');
-
+            // 2. Recria os containers das abas (essencial para garantir que existam após o DOM ser limpo)
+            const abasHtml = `
+                <div id="loading-historico" style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Carregando histórico...</div>
+                <div id="content-minhas" class="historico-tab-content active-tab" style="display:block;"></div>
+                <div id="content-devolucao" class="historico-tab-content"></div>
+                <div id="content-emitidas" class="historico-tab-content"></div>
+            `;
+            historicoContentContainer.innerHTML = abasHtml;
+            
+            // 3. Dispara a lógica de carregamento da primeira aba (que usa loadHistoricoMinhas, etc.)
+            loadHistorico('minhas'); 
+            
         } else { // role === 'gestor' || role === 'admin'
             
-            // Lógica para GESTOR/ADMIN (Visão Geral Única)
-            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
-            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit'); 
+            // === FLUXO GESTOR/ADMIN (TABELA ÚNICA) ===
             
-            // GESTOR/ADMIN USA A TABELA PADRÃO
+            // 1. Oculta as abas (garante que não sejam vistas)
+            if (abasOperacional) {
+                abasOperacional.style.setProperty('display', 'none', 'important');
+            }
+            
+            // 2. Busca os dados de monitoramento gerencial/global
+            // A busca utiliza a lógica de filtro de unidade na queryCautelas (Gestor)
+            const snapGeral = await queryCautelas(['CONCLUÍDA'], role, user, null, 'unit');
+            
+            let titulo = (role === 'admin') ? 'Histórico Global (ADMIN)' : 'Histórico da Unidade (GESTOR)';
+            
             if (snapGeral.length > 0) {
-                let headerContent = `<tr><td colspan="6" class="group-title-cell" style="text-align:center; padding:10px; font-weight:bold;">${titulo}</td></tr>`;
                 
-                htmlContent = headerContent;
+                // CRIAÇÃO DA TABELA ÚNICA NO CONTAINER
+                let tableHtml = `
+                    <div class="op-card" style="padding:15px; margin-bottom:0;">
+                        <h4 style="margin-top:0; color:#800020; border-bottom:1px solid #eee; padding-bottom:5px;">
+                            <i class="fas fa-archive"></i> ${titulo} (${snapGeral.length} registros)
+                        </h4>
+                        <table class="ca-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Dest. Original</th>
+                                    <th>Emitente</th>
+                                    <th>Local Origem</th>
+                                    <th>Data Conclusão</th>
+                                    <th>Itens</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                
                 snapGeral.forEach(cautela => {
-                    htmlContent += renderCautelaRow(cautela); 
+                    const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+                    const dataFinal = cautela.timestamp_conclusao ? cautela.timestamp_conclusao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+                    
+                    tableHtml += `
+                        <tr onclick="showCautelaDetails('${cautela.cautela_id}')" style="cursor:pointer;">
+                            <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
+                            <td data-label="Dest. Original">${cautela.destinatario_original || 'N/A'}</td>
+                            <td data-label="Emitente">${cautela.emitente}</td>
+                            <td data-label="Local Origem">${cautela.local_origem || 'N/D'}</td>
+                            <td data-label="Conclusão">${dataFinal}</td>
+                            <td data-label="Itens">${itensCount} itens</td>
+                        </tr>
+                    `;
                 });
-                tbody.innerHTML = htmlContent;
                 
+                tableHtml += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+                
+                historicoContentContainer.innerHTML = tableHtml;
+
             } else {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#999; padding:20px;">Nenhuma cautela concluída encontrada para ${role}.</td></tr>`;
+                historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:#999;">Nenhuma cautela concluída encontrada para ${role}.</div>`;
             }
         }
 
-        // --- FINALIZAÇÃO DA EXIBIÇÃO ---
-        loading.style.display = 'none';
-        
-        if (role === 'operacional') {
-            // Operacional: Injeta grupos no container e esconde a tabela padrão.
-            if (container) container.innerHTML = htmlContent;
-            table.style.display = 'none'; 
-            
-        } else {
-            // Gestor/Admin: Mostra a tabela padrão e garante que o container de grupos esteja limpo.
-            table.style.display = 'table';
-            if (container) container.innerHTML = ''; // Garante que nenhum grupo esteja visível
-        }
-        
     } catch (e) {
         console.error("Erro ao carregar histórico de cautelas:", e);
-        if (container) container.innerHTML = '';
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
-        loading.style.display = 'none';
-        table.style.display = 'table';
+        historicoContentContainer.innerHTML = `<div class="op-card" style="padding:20px; text-align:center; color:red;">Erro ao carregar dados: ${e.message}</div>`;
+    } finally {
+        loading.style.display = 'none'; 
     }
 }
         function renderHistoricalGroup(title, cautelas, groupId) {
