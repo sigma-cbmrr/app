@@ -3599,7 +3599,39 @@ function formatarDataSimples(timestamp) {
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleDateString('pt-BR');
 }
+// --- FUNÇÕES DE LÓGICA DE HISTÓRICO (IMPORTADAS DO APP) ---
+function formatarDataSimples(timestamp) {
+    if (!timestamp) return "";
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('pt-BR');
+}
 
+/**
+ * Concatena uma nova entrada no histórico de pendências/observações,
+ * garantindo que a entrada anterior seja assinada antes da nova ser anexada.
+ */
+const montarHistoricoLinear = (obsAnterior, novoTexto, autorAnterior, dataAnterior) => {
+    const separator = ' | + NOVA: ';
+    
+    // Este bloco lida com a adição a uma cadeia de observações
+    if (obsAnterior.includes(separator)) {
+        let partes = obsAnterior.split(separator);
+        let ultimaParte = partes.pop(); 
+        let resto = partes.join(separator); 
+        // Assina a última parte não assinada (o texto puro)
+        let ultimaAssinada = `"${ultimaParte}" (Por: ${autorAnterior} em ${dataAnterior})`;
+        return `${resto}${separator}${ultimaAssinada}${separator}${novoTexto}`;
+    } else if (obsAnterior.trim() !== '') { 
+        // Este bloco é ativado na primeira adição. Assina a primeira entrada e anexa a segunda.
+        // A obsAnterior já deve estar formatada como texto puro, mas a salvamos para segurança.
+        let primeiraAssinada = `"${obsAnterior}" (Por: ${autorAnterior} em ${dataAnterior})`;
+        return `${primeiraAssinada}${separator}${novoTexto}`;
+    } else {
+        // Se a observação anterior estava vazia, apenas retorna a nova linha (que será assinada por outra função).
+        return novoTexto;
+    }
+};
+// ----------------------------------------------------
 const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
     const linhas = [];
     
@@ -5852,7 +5884,6 @@ function getSelectedCautelaItemsData() {
     try {
         await db.runTransaction(async (transaction) => {
             
-            // 1. FASE DE LEITURA
             const configRef = db.collection('config_geral').doc('contadores');
             const listaMestraRef = db.collection('listas_conferencia').doc(listaId);
             
@@ -5862,80 +5893,61 @@ function getSelectedCautelaItemsData() {
             if (!configDoc.exists) throw new Error("Documento de contadores não encontrado!");
             if (!listaMestraDoc.exists) throw new Error("Lista Mestra de Conferência não encontrada!");
             
-            // 2. FASE DE PROCESSAMENTO
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
             const militarCompleto = currentUserData.nome_militar_completo;
             const dataEmissaoFormatada = new Date().toLocaleDateString('pt-BR');
             
-            // Clone profundo
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
             
-            // Cálculo do Total (para Notificação)
             const totalItensMovimentados = itensParaCautela.reduce((sum, item) => {
                 return sum + item.quantidade;
             }, 0); 
 
-            // ----------------------------------------------------------------------
-            // 🛑 NOVA LÓGICA DE BAIXA ADMINISTRATIVA E CARIMBO (MAIS ROBUSTA) 🛑
-            // ----------------------------------------------------------------------
+            
+            // 🛑 LÓGICA DE BAIXA ADMINISTRATIVA E CARIMBO 🛑
             listaMestra.forEach(setor => {
                 setor.itens = setor.itens.map(mItem => {
                     const cItemsSetor = itensParaCautela.filter(item => item.id_base === mItem.id);
 
                     if (cItemsSetor.length > 0) {
-                        let carimboTexto = '';
                         
                         cItemsSetor.forEach(cItem => {
+                            let carimboTexto = '';
                             
                             if (cItem.tipo === 'single') {
-                                // ----------------------------------------------------
                                 // LÓGICA 1: Item Sem Tombamento (single)
-                                // ----------------------------------------------------
-                                mItem.quantidadeEsperada -= cItem.quantidade; // Baixa no estoque
-                                
-                                // Carimbo: ID, Status, Quantidade
+                                mItem.quantidadeEsperada -= cItem.quantidade; 
                                 carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] ${cItem.quantidade}UN`;
                                 
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                // ----------------------------------------------------
                                 // LÓGICA 2: Item Com Tombamento (multi)
-                                // ----------------------------------------------------
                                 
                                 mItem.tombamentos_cautelados = mItem.tombamentos_cautelados || [];
                                 
-                                // O item selecionado (cItem) já tem o tombamento específico
                                 const tombamentoSelecionado = cItem.tombamento;
-                                
-                                // Encontra o índice do tombamento no array principal para removê-lo
                                 const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === tombamentoSelecionado);
                                 
                                 if (tombIndex !== -1) {
-                                    // Remove do array principal (Baixa para conferência)
+                                    // Move o objeto tombamento para o array de cautelados
                                     const tombamentoMovido = mItem.tombamentos.splice(tombIndex, 1)[0];
                                     
-                                    // Adiciona ao array de cautelados (Rastreio)
                                     tombamentoMovido.cautela_id = cautelaIdSequencial; 
                                     tombamentoMovido.destinatario = destinatarioInput;
                                     mItem.tombamentos_cautelados.push(tombamentoMovido);
                                     
-                                    // Atualiza a quantidade esperada (total de tombamentos)
                                     mItem.quantidadeEsperada = (mItem.tombamentos.length || 0) + (mItem.tombamentos_cautelados.length || 0);
 
-                                    // Carimbo: ID, Status
                                     carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] Tomb: ${tombamentoSelecionado}`;
                                 }
                             }
 
-                            // ----------------------------------------------------
                             // 3. Carimbo no Histórico Unificado (pendencia.obs)
-                            // ----------------------------------------------------
                             if (carimboTexto) {
                                 mItem.pendencia = mItem.pendencia || {};
                                 mItem.pendencia.obs = mItem.pendencia.obs || '';
                                 
-                                // Usamos montarHistoricoLinear para gerenciar o separador interno '| + NOVA: '
                                 mItem.pendencia.obs = montarHistoricoLinear(
                                     mItem.pendencia.obs, 
                                     `${carimboTexto} Dest: ${destinatarioInput}`,
@@ -5943,19 +5955,14 @@ function getSelectedCautelaItemsData() {
                                     dataEmissaoFormatada
                                 );
                                 
-                                // Define o status de pendência ativa de cautela
                                 mItem.pendencia.status = 'CAUTELADO';
                             }
-                        }); // Fim do forEach (cItem)
+                        }); 
                     }
                     return mItem;
                 });
                 return setor;
             });
-            
-            // ----------------------------------------------------------------------
-            // FIM NOVA LÓGICA DE BAIXA
-            // ----------------------------------------------------------------------
             
             // Dados da Cautela Ativa (Documento a ser criado)
             const cautelaData = {
@@ -5974,7 +5981,6 @@ function getSelectedCautelaItemsData() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada (com as baixas e carimbos)
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
