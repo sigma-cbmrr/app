@@ -5479,13 +5479,11 @@ async function loadCustodiaItens() {
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     
-    // 🛑 ATUALIZAÇÃO DO CONTAINER PARA O NOVO LAYOUT 🛑
     itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
     btnIniciar.disabled = true;
 
     if (!localNomeCompleto) return;
     try {
-        // 1. Encontrar o LISTA_ID único a partir do NOME COMPLETO do local (Lógica preservada)
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         
@@ -5503,7 +5501,6 @@ async function loadCustodiaItens() {
             return;
         }
 
-        // 2. Buscar a lista mestra (Lógica preservada)
         const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
         if (!listaDoc.exists) {
             itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Lista Mestra de Materiais não encontrada.</p>';
@@ -5511,12 +5508,12 @@ async function loadCustodiaItens() {
         }
         const listaMestra = listaDoc.data().list || [];
 
-        // 3. Renderizar o HTML para seleção (Acordeão/Cards)
         let htmlContent = '<div class="inventory-accordion-container">';
         let totalItensDisponiveis = 0;
-        let isFirstSetor = true; // Para abrir o primeiro setor por padrão
+        let isFirstSetor = true; 
 
         listaMestra.forEach(setor => {
+            // Os itens disponíveis são APENAS aqueles que estão em item.tombamentos (e não em tombamentos_cautelados)
             const setorItems = (setor.itens || []).filter(i => 
                 (i.tipo === 'single' && i.quantidadeEsperada > 0) || 
                 (i.tipo === 'multi' && i.tombamentos && i.tombamentos.length > 0)
@@ -5532,9 +5529,8 @@ async function loadCustodiaItens() {
 
             const contentId = `content-${setor.id}`;
             const headerClass = isFirstSetor ? 'accordion-header active' : 'accordion-header';
-            const contentStyle = isFirstSetor ? 'max-height: 1500px;' : ''; // Inicia aberto
+            const contentStyle = isFirstSetor ? 'max-height: 1500px;' : ''; 
             
-            // --- Cabeçalho do Acordeão (Setor) ---
             htmlContent += `
                 <div class="${headerClass}" onclick="toggleAccordion(this, '${contentId}')">
                     <span>${setor.nome} (${setorTotal} disponíveis)</span>
@@ -5542,7 +5538,6 @@ async function loadCustodiaItens() {
                 </div>
             `;
             
-            // --- Corpo do Acordeão (Itens) ---
             htmlContent += `<div class="accordion-content" id="${contentId}" style="${contentStyle}">`;
             
             if (setorItems.length > 0) {
@@ -5578,10 +5573,8 @@ async function loadCustodiaItens() {
 
                     } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
                         
-                        // 🛑 CORREÇÃO CRÍTICA: FILTRA OS TOMBAMENTOS JÁ CAUTELADOS 🛑
-                        const tombamentosDisponiveis = item.tombamentos.filter(tomb => !tomb.cautela);
-                        
-                        if (tombamentosDisponiveis.length === 0) return; // Se não houver nenhum disponível, pula o card
+                        // AGORA: O ARRAY item.tombamentos SÓ CONTÉM ITENS DISPONÍVEIS
+                        const tombamentosDisponiveis = item.tombamentos; 
                         
                         // Renderização das Tags de Tombamento
                         let tagsHtml = tombamentosDisponiveis.map(tomb => {
@@ -5606,24 +5599,23 @@ async function loadCustodiaItens() {
                     }
                 });
                 
-                htmlContent += '</div>'; // Fecha items-card-grid
+                htmlContent += '</div>';
 
             } else {
                  htmlContent += '<p style="padding:10px; color:#999;">Nenhum item disponível para cautela neste setor.</p>';
             }
 
-            htmlContent += '</div>'; // Fecha accordion-content
+            htmlContent += '</div>';
 
             isFirstSetor = false;
         });
         
-        htmlContent += '</div>'; // Fecha inventory-accordion-container
+        htmlContent += '</div>';
 
         if (totalItensDisponiveis === 0) {
              itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green; padding:20px;">✅ Nenhum material disponível para cautela neste local.</p>';
         } else {
              itemListContainer.innerHTML = htmlContent;
-             // 4. Adicionar Listeners de Interatividade (Lógica de contagem preservada)
              document.querySelectorAll('input[name^="cautela-item"]').forEach(el => {
                  el.addEventListener('change', updateCautelaItemCount);
              });
@@ -5631,7 +5623,6 @@ async function loadCustodiaItens() {
                  el.addEventListener('input', updateCautelaItemCount);
                  el.addEventListener('change', updateCautelaItemCount);
              });
-             // Inicializa a contagem
              updateCautelaItemCount();
         }
 
