@@ -325,11 +325,9 @@ function renderizarConferencia() {
         
         setor.itens.forEach(item => {
             
-            // 1. CÁLCULO DE DISPONÍVEIS E TOTAIS (Política de Estoque)
             let totalEsperado = item.quantidadeEsperada || 0;
             let totalCautelado = item.quantidadeCautelada || 0;
-            // É NECESSÁRIO IMPLEMENTAR O CAMPO 'quantidadeComAlteracao' no backend/transação C/A para single!
-            let totalComAlteracao = item.quantidadeComAlteracao || 0; 
+            let totalComAlteracao = item.quantidadeComAlteracao || 0;
             let totalDisponivel = totalEsperado;
             
             let isCautelado = false;
@@ -339,7 +337,6 @@ function renderizarConferencia() {
             if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
                 totalEsperado = item.tombamentos.length;
                 
-                // Tombamentos em Cautela (cautela_id) OU Tombamentos em C/A (status_conferencia)
                 const indisponiveis = item.tombamentos.filter(tomb => 
                     tomb.cautela_id || (tomb.status_conferencia === 'CA')
                 );
@@ -347,40 +344,30 @@ function renderizarConferencia() {
                 totalIndisponivel = indisponiveis.length;
                 totalDisponivel = totalEsperado - totalIndisponivel;
                 
-                // Flag de bloqueio de S/A para o card geral
                 isAnyTombCautelado = item.tombamentos.some(tomb => tomb.cautela_id);
 
             } else if (item.tipo === 'single') {
-                // DISPONÍVEIS = TOTAL - (CAUTELADO + C/A de unidades)
                 totalIndisponivel = totalCautelado + totalComAlteracao;
                 totalDisponivel = totalEsperado - totalIndisponivel;
                 
                 isCautelado = totalCautelado > 0;
             }
 
-            // 2. LÓGICA DE BLOQUEIO DE AÇÕES
-            const isItemIniciado = totalEsperado > 0; // Verifica se o item existe
+            const isItemIniciado = totalEsperado > 0;
             
-            // S/A: BLOQUEADO se estiver CAUTELADO (para single OU multi)
             const isSA_disabled = isAnyTombCautelado || isCautelado ? 'disabled' : '';
-            
-            // C/A: Bloqueado SOMENTE para MULTI cautelado (obrigando o "Ciente")
             const isCA_disabled = isAnyTombCautelado && item.tipo === 'multi' ? 'disabled' : '';
 
 
             if (isItemIniciado) {
-                // 3. ESTRUTURA BASE DO CARD (Simplificada para a estrutura anterior do usuário)
                 
-                // Pendência HTML deve ser calculada antes para verificar o status
                 const pendenciaHtml = renderizarPendencia(item);
                 
                 let classExtra = '';
-                // Adiciona a classe de alerta se houver qualquer indisponibilidade no item
                 if (totalIndisponivel > 0 || item.pendencia) {
                     classExtra = 'status-existing-alert';
                 }
                 
-                // Lógica de Renderização:
                 if (item.tipo === 'multi') {
                     
                     htmlItens += `<div class="item-conferencia item-has-tombamentos ${classExtra}" data-type="multi" data-total-tombamentos="${totalEsperado}" data-status="pending" data-id="${item.id}">
@@ -391,17 +378,13 @@ function renderizarConferencia() {
                                             ${totalDisponivel} DISP. / ${totalEsperado} TOTAL
                                         </span>
                                     </div>
-                                    <div class="item-options">
-                                        <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')" ${isSA_disabled}>S/A</button>
-                                        <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')" ${isCA_disabled}>C/A</button>
-                                    </div>
                                     ${pendenciaHtml}
                                     ${renderizarTombamentos(item)}
                                   </div>`;
                     
-                    totalItensNoSetor += totalEsperado; // Conta todos os tombamentos
+                    totalItensNoSetor += totalEsperado;
                     
-                } else { // Tipo 'single'
+                } else {
                     
                     htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}">
                                     <div class="item-header">
@@ -424,7 +407,7 @@ function renderizarConferencia() {
                                         <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
                                     </div>
                                   </div>`;
-                    totalItensNoSetor++; // Conta o item único
+                    totalItensNoSetor++;
                 }
                 
                 window.itemStatus[item.id] = { status: 'pending', obs: '' };
