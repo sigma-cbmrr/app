@@ -816,31 +816,18 @@ async function finalizarRecebimentoDevolucao(cautela) {
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
 
-    // 🛑 VERIFICAÇÃO SINCRONA DE DADOS CRÍTICOS (CRASH PREVENTION) 🛑
-    // Usa optional chaining (?) para evitar crash se cautela for null/undefined
     const listaId = cautela?.local_origem_id; 
 
     if (!cautela || !CAUTELA_ID || !listaId) {
-        console.error("ERRO FATAL: Dados críticos ausentes. ", 
-                      { cautelaValid: !!cautela, CAUTELA_ID: CAUTELA_ID, LISTA_ID: listaId });
+        console.error("ERRO FATAL: Dados críticos ausentes. ", { cautelaValid: !!cautela, CAUTELA_ID: CAUTELA_ID, LISTA_ID: listaId });
         alert("Erro: Dados iniciais incompletos ou inválidos. Tente novamente.");
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
         return;
     }
-    // FIM VERIFICAÇÃO CRÍTICA
 
-    // Objeto do militar logado, que é o Dono Provisório (Receptor Final)
-    // Usar optional chaining aqui também é uma boa prática
-    const militarReceptor = {
-        postoGraduacao: userInfo?.postoGraduacao,
-        quadro: userInfo?.quadro,
-        nomeGuerra: userInfo?.nomeGuerra,
-    };
-    
-    // O ID da Lista Mestra está salvo na própria cautela
-    // Aqui usamos listaId que já foi verificado
-    // const listaId = cautela.local_origem_id; // Já definido acima
+    const militarCompleto = `${userInfo?.postoGraduacao} ${userInfo?.quadro} ${userInfo?.nomeGuerra}`;
+    const dataConclusaoFormatada = new Date().toLocaleDateString('pt-BR');
 
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
@@ -850,12 +837,8 @@ async function finalizarRecebimentoDevolucao(cautela) {
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
             
-            // 🛑 VERIFICAÇÃO DE STATUS ROBUSTA 🛑
-            const currentStatus = cautelaDoc.exists && cautelaDoc.data().status
-                                ? cautelaDoc.data().status
-                                : "";
+            const currentStatus = cautelaDoc.exists && cautelaDoc.data().status ? cautelaDoc.data().status : "";
             
-            // A verificação robusta contra espaços e case deve funcionar
             if (!cautelaDoc.exists || currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
                 console.warn(`Transação abortada. Status lido (limpo): ${currentStatus.trim().toUpperCase()}`); 
                 throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
@@ -867,39 +850,84 @@ async function finalizarRecebimentoDevolucao(cautela) {
             
             let listaMestra = listaMestraDoc.data().list;
             
-            // 🛑 LÓGICA DE SOMA (REVERSÃO DE ESTOQUE) 🛑
-            cautela.itens.forEach(cItem => {
-                const itemQtd = cItem.quantidade || 0;
-                
-                listaMestra = listaMestra.map(setor => ({
-                    ...setor,
-                    itens: setor.itens.map(mItem => {
-                        if (mItem.id === cItem.id_base) {
+            // 🛑 LÓGICA DE REVERSÃO DE ESTOQUE E CARIMBO DE RETORNO 🛑
+            listaMestra = listaMestra.map(setor => {
+                const itensSetorAtual = cautela.itens.filter(cItem => {
+                    // Mapeia o item da cautela para o ID base do setor (se a lógica de findItemInList for usada no futuro)
+                    // Aqui, verificamos se o setor contém itens relacionados à cautela.
+                    return setor.itens.some(mItem => mItem.id === cItem.id_base);
+                });
+
+                setor.itens = setor.itens.map(mItem => {
+                    const cItem = itensSetorAtual.find(i => i.id_base === mItem.id);
+                    if (!cItem) return mItem;
+
+                    let carimboTexto = '';
+
+                    if (cItem.tipo === 'single') {
+                        // ----------------------------------------------------
+                        // LÓGICA 1: Item Sem Tombamento (single)
+                        // ----------------------------------------------------
+                        mItem.quantidadeEsperada += cItem.quantidade; 
+                        
+                        carimboTexto = `[CAUTELA-${CAUTELA_ID}: RECEBIDA] ${cItem.quantidade}UN Restauradas. Status: CONCLUÍDA`;
+                        
+                    } else if (cItem.tipo === 'multi' && mItem.tombamentos_cautelados) {
+                        // ----------------------------------------------------
+                        // LÓGICA 2: Item Com Tombamento (multi)
+                        // ----------------------------------------------------
+                        
+                        // Encontra o índice do tombamento específico no array de cautelados
+                        const tombIndex = mItem.tombamentos_cautelados.findIndex(tomb => tomb.tomb === cItem.tombamento);
+                        
+                        if (tombIndex > -1) {
+                            const tombamentoRestaurado = mItem.tombamentos_cautelados.splice(tombIndex, 1)[0];
                             
-                            if (cItem.tipo === 'single') {
-                                mItem.quantidadeEsperada += itemQtd;
-                                mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
+                            // Limpa os carimbos da cautela antes de mover
+                            delete tombamentoRestaurado.cautela_id; 
+                            delete tombamentoRestaurado.destinatario; 
+                            
+                            mItem.tombamentos = mItem.tombamentos || [];
+                            mItem.tombamentos.push(tombamentoRestaurado);
+                            
+                            // Atualiza a quantidade esperada
+                            mItem.quantidadeEsperada = (mItem.tombamentos.length || 0) + (mItem.tombamentos_cautelados.length || 0);
 
-                            } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                    if (tomb.tomb === cItem.tombamento && tomb.cautela) {
-                                        delete tomb.cautela; 
-                                    }
-                                    return tomb;
-                                });
-                            }
+                            carimboTexto = `[CAUTELA-${CAUTELA_ID}: RECEBIDA] Tomb: ${cItem.tombamento} Restaurado. Status: CONCLUÍDA`;
                         }
-                        return mItem;
-                    })
-                }));
+                    }
+                    
+                    // ----------------------------------------------------
+                    // 3. Carimbo no Histórico Unificado (pendencia.obs)
+                    // ----------------------------------------------------
+                    if (carimboTexto) {
+                        mItem.pendencia = mItem.pendencia || {};
+                        mItem.pendencia.obs = mItem.pendencia.obs || '';
+                        
+                        // Assinatura e anexação da nova linha de histórico
+                        mItem.pendencia.obs = montarHistoricoLinear(
+                            mItem.pendencia.obs, 
+                            carimboTexto,
+                            militarCompleto, 
+                            dataConclusaoFormatada
+                        );
+                        
+                        // Se não houver mais cautelas ativas para o item (ou se for single), reverte o status
+                        if (mItem.tombamentos_cautelados && mItem.tombamentos_cautelados.length === 0) {
+                             mItem.pendencia.status = 'OK';
+                        }
+                    }
+                    return mItem;
+                });
+                return setor;
             });
-            // FIM DA LÓGICA DE SOMA
-
+            // FIM DA LÓGICA DE REVERSÃO
+            
             // 3. Ação: Mudar o status da cautela para CONCLUIDA (Vai para o Histórico)
             transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA', 
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
-                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`,
+                receptor_final_completo: militarCompleto,
             });
             
             // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
