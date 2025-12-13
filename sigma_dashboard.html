@@ -5876,6 +5876,10 @@ async function iniciarCautelaProcesso() {
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
+            const militarCompleto = currentUserData.nome_militar_completo;
+            const dataEmissaoFormatada = new Date().toLocaleDateString('pt-BR');
+            const militarCarimbo = ` (Por: ${militarCompleto} em ${dataEmissaoFormatada})`;
+            
             // Clone profundo
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
             
@@ -5883,53 +5887,84 @@ async function iniciarCautelaProcesso() {
             const totalItensMovimentados = itensParaCautela.reduce((sum, item) => {
                 return sum + item.quantidade;
             }, 0); 
-            
-            const dataEmissao = new Date().toISOString().split('T')[0];
-            
-            // 🛑 LÓGICA DE BAIXA (USANDO BUSCA POR TOMBAMENTO REAL) 🛑
+
+            // ----------------------------------------------------------------------
+            // 🛑 NOVA LÓGICA DE BAIXA ADMINISTRATIVA E CARIMBO (MAIS ROBUSTA) 🛑
+            // ----------------------------------------------------------------------
             itensParaCautela.forEach(cItem => {
                 
-                // --- Itens Single ---
-                if (cItem.tipo === 'single') {
-                    // Item base encontrado pelo ID
-                    let mItem = findItemInList(listaMestra, cItem.id_base); // Reutiliza a busca do item single
-                    
-                    if (mItem) {
-                        mItem.quantidadeEsperada -= cItem.quantidade;
-                        mItem.cautelas = mItem.cautelas || [];
-                        mItem.cautelas.push({
-                            id: cautelaIdSequencial,
-                            destinatario: destinatarioInput,
-                            quantidade: cItem.quantidade,
-                            data: dataEmissao
-                        });
-                    }
-                }
+                // Encontrar o item base na lista mestra
+                let mItem = findItemInList(listaMestra, cItem.id_base); 
                 
-                // --- Itens Multi ---
-                else if (cItem.tipo === 'multi') {
-                    // 🛑 NOVO: Busca o item base pelo tombamento real 🛑
-                    let mItem = findItemByTombamento(listaMestra, cItem.tombamento);
+                if (mItem) {
+                    let carimboTexto = '';
                     
-                    if (mItem && mItem.tombamentos) {
-                        // Encontra o objeto de tombamento por referência no array
+                    if (cItem.tipo === 'single') {
+                        // ----------------------------------------------------
+                        // LÓGICA 1: Item Sem Tombamento (single)
+                        // ----------------------------------------------------
+                        mItem.quantidadeEsperada -= cItem.quantidade; // Baixa no estoque
+                        
+                        // Carimbo: ID, Status, Quantidade
+                        carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] ${cItem.quantidade}UN`;
+                        
+                    } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
+                        // ----------------------------------------------------
+                        // LÓGICA 2: Item Com Tombamento (multi)
+                        // ----------------------------------------------------
+                        
+                        mItem.tombamentos_cautelados = mItem.tombamentos_cautelados || [];
+                        
+                        // Encontra o índice do tombamento específico
                         const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
                         
                         if (tombIndex > -1) {
-                            // MUTAÇÃO: Modifica o objeto no ARRAY por referência, garantindo a baixa
-                            mItem.tombamentos[tombIndex] = {
-                                ...mItem.tombamentos[tombIndex], 
-                                cautela: { 
-                                    id: cautelaIdSequencial,
-                                    destinatario: destinatarioInput,
-                                    data: dataEmissao
-                                }
-                            };
+                            // Move o objeto tombamento para o array de cautelados
+                            const tombamentoMovido = mItem.tombamentos.splice(tombIndex, 1)[0];
+                            
+                            // Carimba o tombamento movido para rastreio
+                            tombamentoMovido.cautela_id = cautelaIdSequencial; 
+                            tombamentoMovido.destinatario = destinatarioInput;
+                            mItem.tombamentos_cautelados.push(tombamentoMovido);
+                            
+                            // Atualiza a quantidade esperada (opcional, mas boa prática)
+                            mItem.quantidadeEsperada = mItem.tombamentos.length + mItem.tombamentos_cautelados.length;
                         }
+                        
+                        // Carimbo: ID, Status
+                        carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] Tomb: ${cItem.tombamento}`;
                     }
-                } // Fim do if(mItem)
+
+                    // ----------------------------------------------------
+                    // 3. Carimbo no Histórico Unificado (pendencia.obs)
+                    // ----------------------------------------------------
+                    if (carimboTexto) {
+                        // A nova linha de histórico é o Carimbo (Ex: [CAUTELA-XXX: EMITIDA] 1UN)
+                        const novaLinhaCautela = carimboTexto; 
+                        
+                        // Assina e anexa a nova linha ao histórico, preservando o anterior
+                        mItem.pendencia = mItem.pendencia || {};
+                        mItem.pendencia.obs = mItem.pendencia.obs || '';
+                        
+                        // Usamos montarHistoricoLinear para gerenciar o separador interno '| + NOVA: '
+                        [cite_start]// NOTA: 'montarHistoricoLinear' é uma função externa que deve ser definida no sigma_dashboard.txt [cite: 3455, 3460]
+                        mItem.pendencia.obs = montarHistoricoLinear(
+                            mItem.pendencia.obs, 
+                            `${novaLinhaCautela} Dest: ${destinatarioInput}`,
+                            militarCompleto, // Militar que fez a emissão (Emitente)
+                            dataEmissaoFormatada
+                        );
+                        
+                        // Atualiza o status de pendência para ser "cautelado"
+                        // Isso pode ser usado para dar prioridade de visualização.
+                        mItem.pendencia.status = 'CAUTELADO';
+                    }
+                }
             });
-            // ---------------------------------------------
+            
+            // ----------------------------------------------------------------------
+            // FIM NOVA LÓGICA DE BAIXA
+            // ----------------------------------------------------------------------
             
             // Dados da Cautela Ativa (Documento a ser criado)
             const cautelaData = {
@@ -5948,7 +5983,7 @@ async function iniciarCautelaProcesso() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada
+            // Salva a lista Mestra modificada (com as baixas e carimbos)
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
