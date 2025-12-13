@@ -5541,45 +5541,65 @@ async function loadCustodiaItens() {
         const listaMestra = listaDoc.data().list || [];
 
         let htmlContent = '<div class="inventory-accordion-container">';
-        let totalItensDisponiveis = 0;
+        let totalItensDisponiveisGlobal = 0;
         let isFirstSetor = true; 
 
         listaMestra.forEach(setor => {
-            // Os itens disponíveis são APENAS aqueles que estão em item.tombamentos (e não em tombamentos_cautelados)
-            const setorItems = (setor.itens || []).filter(i => 
-                (i.tipo === 'single' && i.quantidadeEsperada > 0) || 
-                (i.tipo === 'multi' && i.tombamentos && i.tombamentos.length > 0)
-            );
+            let setorTotalDisponivel = 0;
+            let setorItemsDisponiveis = [];
+
+            // 🛑 CÁLCULO DE DISPONIBILIDADE E FILTRO 🛑
+            (setor.itens || []).forEach(item => {
+                let itemDisponivelQtd = 0;
+                let tombamentosDisponiveis = [];
+
+                if (item.tipo === 'single') {
+                    const qtdCautelada = item.quantidadeCautelada || 0;
+                    itemDisponivelQtd = item.quantidadeEsperada - qtdCautelada;
+                    
+                } else if (item.tipo === 'multi' && item.tombamentos) {
+                    // Filtra os tombamentos que NÃO estão carimbados com cautela_id
+                    tombamentosDisponiveis = item.tombamentos.filter(tomb => !tomb.cautela_id);
+                    itemDisponivelQtd = tombamentosDisponiveis.length;
+                }
+
+                if (itemDisponivelQtd > 0) {
+                    // Prepara o item com as novas propriedades para a renderização
+                    const itemParaRenderizar = JSON.parse(JSON.stringify(item));
+                    itemParaRenderizar.quantidadeDisponivel = itemDisponivelQtd;
+                    itemParaRenderizar.tombamentosDisponiveis = tombamentosDisponiveis;
+                    
+                    setorItemsDisponiveis.push(itemParaRenderizar);
+                    setorTotalDisponivel += itemDisponivelQtd;
+                }
+            });
             
-            const setorTotal = setorItems.reduce((acc, item) => {
-                if(item.tipo === 'single') return acc + item.quantidadeEsperada;
-                if(item.tipo === 'multi') return acc + item.tombamentos.length;
-                return acc;
-            }, 0);
-            
-            totalItensDisponiveis += setorTotal;
+            totalItensDisponiveisGlobal += setorTotalDisponivel;
 
             const contentId = `content-${setor.id}`;
             const headerClass = isFirstSetor ? 'accordion-header active' : 'accordion-header';
             const contentStyle = isFirstSetor ? 'max-height: 1500px;' : ''; 
             
+            // --- Cabeçalho do Acordeão (Setor) ---
             htmlContent += `
                 <div class="${headerClass}" onclick="toggleAccordion(this, '${contentId}')">
-                    <span>${setor.nome} (${setorTotal} disponíveis)</span>
+                    <span>${setor.nome} (${setorTotalDisponivel} disponíveis)</span>
                     <i class="fas fa-chevron-down"></i>
                 </div>
             `;
             
+            // --- Corpo do Acordeão (Itens) ---
             htmlContent += `<div class="accordion-content" id="${contentId}" style="${contentStyle}">`;
             
-            if (setorItems.length > 0) {
+            if (setorItemsDisponiveis.length > 0) {
                 htmlContent += '<div class="items-card-grid">';
 
-                setorItems.forEach(item => {
+                setorItemsDisponiveis.forEach(item => { 
                     const itemIdBase = item.id;
+                    const disponivel = item.quantidadeDisponivel;
                     
                     if (item.tipo === 'single') {
-                        const maxQtd = item.quantidadeEsperada;
+                        const maxQtd = disponivel;
                         htmlContent += `
                             <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="single">
                                 <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
@@ -5603,10 +5623,8 @@ async function loadCustodiaItens() {
                                 <small style="display: block; margin-top: 5px; color:#a00030;">Disponível: ${maxQtd}</small>
                             </div>`;
 
-                    } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
-                        
-                        // AGORA: O ARRAY item.tombamentos SÓ CONTÉM ITENS DISPONÍVEIS
-                        const tombamentosDisponiveis = item.tombamentos; 
+                    } else if (item.tipo === 'multi') { 
+                        const tombamentosDisponiveis = item.tombamentosDisponiveis; 
                         
                         // Renderização das Tags de Tombamento
                         let tagsHtml = tombamentosDisponiveis.map(tomb => {
@@ -5624,7 +5642,7 @@ async function loadCustodiaItens() {
 
                         htmlContent += `
                             <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="multi">
-                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome} (${tombamentosDisponiveis.length} disponíveis)</h4>
+                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome} (${disponivel} disponíveis)</h4>
                                 <small style="color:#555;">Selecione os tombamentos:</small>
                                 <div class="tombamento-tag-list">${tagsHtml}</div>
                             </div>`;
@@ -5644,7 +5662,7 @@ async function loadCustodiaItens() {
         
         htmlContent += '</div>';
 
-        if (totalItensDisponiveis === 0) {
+        if (totalItensDisponiveisGlobal === 0) {
              itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green; padding:20px;">✅ Nenhum material disponível para cautela neste local.</p>';
         } else {
              itemListContainer.innerHTML = htmlContent;
@@ -5906,7 +5924,7 @@ function getSelectedCautelaItemsData() {
             }, 0); 
 
             
-            // 🛑 LÓGICA DE BAIXA ADMINISTRATIVA E CARIMBO 🛑
+            // 🛑 LÓGICA DE CARIMBO (RASTREIO) SEM BAIXA DE ESTOQUE 🛑
             listaMestra.forEach(setor => {
                 setor.itens = setor.itens.map(mItem => {
                     const cItemsSetor = itensParaCautela.filter(item => item.id_base === mItem.id);
@@ -5918,32 +5936,35 @@ function getSelectedCautelaItemsData() {
                             
                             if (cItem.tipo === 'single') {
                                 // LÓGICA 1: Item Sem Tombamento (single)
-                                mItem.quantidadeEsperada -= cItem.quantidade; 
+                                
+                                // Adiciona o campo quantidadeCautelada se não existir e incrementa
+                                mItem.quantidadeCautelada = (mItem.quantidadeCautelada || 0) + cItem.quantidade; 
+
+                                // A quantidadeEsperada (Estoque Total) NÃO É ALTERADA
+                                
                                 carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] ${cItem.quantidade}UN`;
                                 
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
                                 // LÓGICA 2: Item Com Tombamento (multi)
                                 
-                                mItem.tombamentos_cautelados = mItem.tombamentos_cautelados || [];
-                                
                                 const tombamentoSelecionado = cItem.tombamento;
-                                const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === tombamentoSelecionado);
                                 
-                                if (tombIndex !== -1) {
-                                    // Move o objeto tombamento para o array de cautelados
-                                    const tombamentoMovido = mItem.tombamentos.splice(tombIndex, 1)[0];
-                                    
-                                    tombamentoMovido.cautela_id = cautelaIdSequencial; 
-                                    tombamentoMovido.destinatario = destinatarioInput;
-                                    mItem.tombamentos_cautelados.push(tombamentoMovido);
-                                    
-                                    mItem.quantidadeEsperada = (mItem.tombamentos.length || 0) + (mItem.tombamentos_cautelados.length || 0);
+                                // O tombamento PERMANECE no array principal (para aparecer na conferência)
+                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                    if (tomb.tomb === tombamentoSelecionado) {
+                                        // CARIMBO INTERNO: marca o tombamento como cautelado para controlar a DISPONIBILIDADE
+                                        tomb.cautela_id = cautelaIdSequencial; 
+                                        tomb.destinatario = destinatarioInput;
+                                    }
+                                    return tomb;
+                                });
 
-                                    carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] Tomb: ${tombamentoSelecionado}`;
-                                }
+                                // A quantidadeEsperada (Estoque Total) NÃO É ALTERADA
+                                
+                                carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] Tomb: ${tombamentoSelecionado}`;
                             }
 
-                            // 3. Carimbo no Histórico Unificado (pendencia.obs)
+                            // 3. Carimbo no Histórico Unificado (pendencia.obs) - OBRIGATÓRIO PARA RASTREABILIDADE
                             if (carimboTexto) {
                                 mItem.pendencia = mItem.pendencia || {};
                                 mItem.pendencia.obs = mItem.pendencia.obs || '';
@@ -5955,6 +5976,7 @@ function getSelectedCautelaItemsData() {
                                     dataEmissaoFormatada
                                 );
                                 
+                                // Define o status de pendência ativa de cautela
                                 mItem.pendencia.status = 'CAUTELADO';
                             }
                         }); 
@@ -5984,7 +6006,7 @@ function getSelectedCautelaItemsData() {
             transaction.update(listaMestraRef, { list: listaMestra });
 
             // 4. Conclusão e Feedback
-            alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
+            alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens rastreados para ${destinatarioInput}.`);
         }); 
 
         showMainMenu(); 
