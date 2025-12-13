@@ -306,7 +306,10 @@
     }
 };
 
-        function renderizarConferencia() {
+        /**
+ * Renderiza a estrutura principal da conferência, calculando a disponibilidade (DISPONÍVEL vs. TOTAL).
+ */
+function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
     const antigos = mainContent.querySelectorAll('.setor');
     antigos.forEach(el => el.remove());
@@ -322,115 +325,108 @@
         
         setor.itens.forEach(item => {
             
-            const montarPendenciaHtml = (uid, pendenciaObj) => {
-                if (!pendenciaObj) return '';
-                const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : '';
-                const quem = pendenciaObj.quem || 'Anônimo';
-                const dataPend = formatarDataSimples(pendenciaObj.data);
-                const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend });
-                const safeHistorico = encodeURIComponent(dadosHistorico);
-                const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
-                let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
-                return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
-            };
+            // 1. CÁLCULO DE DISPONÍVEIS E TOTAIS (Política de Estoque)
+            let totalEsperado = item.quantidadeEsperada || 0;
+            let totalCautelado = item.quantidadeCautelada || 0;
+            // É NECESSÁRIO IMPLEMENTAR O CAMPO 'quantidadeComAlteracao' no backend/transação C/A para single!
+            let totalComAlteracao = item.quantidadeComAlteracao || 0; 
+            let totalDisponivel = totalEsperado;
             
-            if (item.tipo === 'multi' && item.tombamentos) {
-                let htmlTombamentos = '';
-                
-                item.tombamentos.forEach(tomb => {
-                    const uid = `${item.id}-${tomb.tomb}`;
-                    const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
-                    
-                    // LÓGICA DE CAUTELA: Verifica se o tombamento está cautelado
-                    const isCautelado = !!tomb.cautela_id;
-                    const disabledAttr = isCautelado ? 'disabled' : '';
-                    let cautelaStatusHtml = '';
+            let isCautelado = false;
+            let isAnyTombCautelado = false;
+            let totalIndisponivel = 0;
 
-                    if (isCautelado) {
-                        const destinatarioCautela = tomb.destinatario || 'N/D';
-                        cautelaStatusHtml = `<div style="font-size:0.8em; color:#800020; border-top:1px dashed #ccc; padding-top:5px; margin-top:5px; font-weight: bold;">
-                                                ⚠️ CAUTELADO ATIVO: ${tomb.cautela_id} (${destinatarioCautela})
-                                             </div>`;
-                    }
-                    
-                    htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}">
-                                            <div class="tombamento-controls">
-                                                <span>Tomb.: ${tomb.tomb}</span>
-                                                <div class="tombamento-options">
-                                                    <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')" ${disabledAttr}>S/A</button>
-                                                    <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')" ${disabledAttr}>C/A</button>
-                                                </div>
-                                            </div>
-                                            ${cautelaStatusHtml}
-                                            ${pendenciaHtml}
-                                            <p class="tombamento-descricao-salva"></p>
-                                            <div class="tombamento-obs-container">
-                                                <div class="historico-fixo" style="display:none;"></div>
-                                                <label>Descreva a alteração:</label>
-                                                <textarea placeholder="Detalhe a alteração."></textarea>
-                                                <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button>
-                                            </div>
-                                        </div>`;
-                    totalItensNoSetor++;
-                    window.itemStatus[uid] = { status: 'pending', obs: '' };
-                });
+            if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
+                totalEsperado = item.tombamentos.length;
                 
-                htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}">
-                                <div class="item-header">
-                                    <span class="status-icon"></span>
-                                    <span class="item-label">${item.nome}</span>
-                                    <span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span>
-                                </div>
-                                ${htmlTombamentos}
-                              </div>`;
-            } else {
+                // Tombamentos em Cautela (cautela_id) OU Tombamentos em C/A (status_conferencia)
+                const indisponiveis = item.tombamentos.filter(tomb => 
+                    tomb.cautela_id || (tomb.status_conferencia === 'CA')
+                );
                 
-                // LÓGICA DE CAUTELA PARA SINGLE: Verifica se a quantidade cautelada é maior que zero
-                const qtdCautelada = item.quantidadeCautelada || 0;
-                const isCauteladoSingle = qtdCautelada > 0;
-                const disabledAttrSingle = isCauteladoSingle ? 'disabled' : '';
-                let cautelaStatusHtmlSingle = '';
+                totalIndisponivel = indisponiveis.length;
+                totalDisponivel = totalEsperado - totalIndisponivel;
                 
-                if (isCauteladoSingle) {
-                    cautelaStatusHtmlSingle = `<div style="font-size:0.8em; color:#800020; border-top:1px dashed #ccc; padding-top:5px; margin-top:5px; font-weight: bold;">
-                                                    ⚠️ CAUTELADO ATIVO: ${qtdCautelada} UN em guarda.
-                                                </div>`;
-                }
+                // Flag de bloqueio de S/A para o card geral
+                isAnyTombCautelado = item.tombamentos.some(tomb => tomb.cautela_id);
 
+            } else if (item.tipo === 'single') {
+                // DISPONÍVEIS = TOTAL - (CAUTELADO + C/A de unidades)
+                totalIndisponivel = totalCautelado + totalComAlteracao;
+                totalDisponivel = totalEsperado - totalIndisponivel;
+                
+                isCautelado = totalCautelado > 0;
+            }
+
+            // 2. LÓGICA DE BLOQUEIO DE AÇÕES
+            const isItemIniciado = totalEsperado > 0; // Verifica se o item existe
+            
+            // S/A: BLOQUEADO se estiver CAUTELADO (para single OU multi)
+            const isSA_disabled = isAnyTombCautelado || isCautelado ? 'disabled' : '';
+            
+            // C/A: Bloqueado SOMENTE para MULTI cautelado (obrigando o "Ciente")
+            const isCA_disabled = isAnyTombCautelado && item.tipo === 'multi' ? 'disabled' : '';
+
+
+            if (isItemIniciado) {
+                // 3. ESTRUTURA BASE DO CARD (Simplificada para a estrutura anterior do usuário)
+                
+                // Pendência HTML deve ser calculada antes para verificar o status
+                const pendenciaHtml = renderizarPendencia(item);
+                
                 let classExtra = '';
-                if (item.pendencia) {
-                    if (item.pendencia.statusAdmin) {
-                        classExtra = 'status-admin-response';
-                    } else if (isCauteladoSingle || item.pendencia.status === 'CAUTELADO') {
-                        classExtra = 'status-existing-alert'; // Mantém o alerta amarelo/laranja
-                    } else {
-                        classExtra = 'status-existing-alert'; 
-                    }
+                // Adiciona a classe de alerta se houver qualquer indisponibilidade no item
+                if (totalIndisponivel > 0 || item.pendencia) {
+                    classExtra = 'status-existing-alert';
                 }
-
-                const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
                 
-                htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}">
-                                <div class="item-header">
-                                    <span class="status-icon"></span>
-                                    <span class="item-label">${item.nome}</span>
-                                    <span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span>
-                                </div>
-                                <div class="item-options">
-                                    <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')" ${disabledAttrSingle}>S/A</button>
-                                    <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')" ${disabledAttrSingle}>C/A</button>
-                                </div>
-                                ${cautelaStatusHtmlSingle}
-                                ${pendenciaHtml}
-                                <p class="descricao-salva"></p>
-                                <div class="alteracao-container">
-                                    <div class="historico-fixo" style="display:none;"></div>
-                                    <label>Descreva a alteração:</label>
-                                    <textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea>
-                                    <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
-                                </div>
-                              </div>`;
-                totalItensNoSetor++;
+                // Lógica de Renderização:
+                if (item.tipo === 'multi') {
+                    
+                    htmlItens += `<div class="item-conferencia item-has-tombamentos ${classExtra}" data-type="multi" data-total-tombamentos="${totalEsperado}" data-status="pending" data-id="${item.id}">
+                                    <div class="item-header">
+                                        <span class="status-icon"></span>
+                                        <span class="item-label">${item.nome}</span>
+                                        <span class="item-quantidade">
+                                            ${totalDisponivel} DISP. / ${totalEsperado} TOTAL
+                                        </span>
+                                    </div>
+                                    <div class="item-options">
+                                        <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')" ${isSA_disabled}>S/A</button>
+                                        <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')" ${isCA_disabled}>C/A</button>
+                                    </div>
+                                    ${pendenciaHtml}
+                                    ${renderizarTombamentos(item)}
+                                  </div>`;
+                    
+                    totalItensNoSetor += totalEsperado; // Conta todos os tombamentos
+                    
+                } else { // Tipo 'single'
+                    
+                    htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}">
+                                    <div class="item-header">
+                                        <span class="status-icon"></span>
+                                        <span class="item-label">${item.nome}</span>
+                                        <span class="item-quantidade">
+                                            ${totalDisponivel} DISP. / ${totalEsperado} TOTAL
+                                        </span>
+                                    </div>
+                                    <div class="item-options">
+                                        <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')" ${isSA_disabled}>S/A</button>
+                                        <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')" ${isCA_disabled}>C/A</button>
+                                    </div>
+                                    ${pendenciaHtml}
+                                    <p class="descricao-salva"></p>
+                                    <div class="alteracao-container">
+                                        <div class="historico-fixo" style="display:none;"></div>
+                                        <label>Descreva a alteração (QTD Disponível: ${totalDisponivel}):</label>
+                                        <textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea>
+                                        <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
+                                    </div>
+                                  </div>`;
+                    totalItensNoSetor++; // Conta o item único
+                }
+                
                 window.itemStatus[item.id] = { status: 'pending', obs: '' };
             }
         });
@@ -454,6 +450,105 @@
     updateOverallStatus();
 }
 
+/**
+ * Renderiza o bloco de histórico/pendências (incluindo a lógica do 'Ciente' para cautelas).
+ */
+function renderizarPendencia(mItem) {
+    if (!mItem.pendencia || !mItem.pendencia.obs) {
+        return '';
+    }
+
+    // Pendência HTML deve usar a mesma estrutura de um item alterado
+    const uid = mItem.id;
+    const pendenciaObj = mItem.pendencia;
+    
+    // Conteúdo formatado (Log imutável)
+    const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : '';
+    const quem = pendenciaObj.quem || 'Anônimo';
+    const dataPend = formatarDataSimples(pendenciaObj.data);
+    const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend });
+    const safeHistorico = encodeURIComponent(dadosHistorico);
+    const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
+
+    let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
+    
+    // 🛑 LÓGICA DO BOTÃO "CIENTE" PARA CAUTELA 🛑
+    let manterButtonText = '✅ Concordo (Manter)';
+    if (pendenciaObj.status === 'CAUTELADO') {
+        manterButtonText = '✅ Ciente (Item Cautelado)';
+    }
+
+
+    return `<div class="pendencia-alert-box ${classAdmin}">
+                ${htmlFormatado}
+                <div class="pendencia-actions">
+                    <button class="btn-manter" onclick="manterPendencia(this, '${uid}')">${manterButtonText}</button>
+                    <button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button>
+                </div>
+            </div>`;
+}
+
+/**
+ * Renderiza a lista de tombamentos e suas ações (Somente para tipo 'multi').
+ */
+function renderizarTombamentos(mItem) {
+    if (mItem.tipo !== 'multi' || !mItem.tombamentos) return '';
+    
+    let tombsHtml = '<div class="tombamentos-list-container">';
+    
+    mItem.tombamentos.forEach(tomb => {
+        
+        const uid = `${mItem.id}-${tomb.tomb}`;
+        
+        let tombStatusText = 'Disponível';
+        let tombStatusBadge = 'bg-secondary';
+        
+        // Lógica de Status (Cautela > C/A > OK)
+        if (tomb.cautela_id) {
+            tombStatusText = `CAUTELADO (${tomb.cautela_id.replace('CAUTELA-', '')})`;
+            tombStatusBadge = 'bg-primary';
+        } else if (tomb.status_conferencia === 'OK') {
+            tombStatusText = 'Conferido S/A';
+            tombStatusBadge = 'bg-success';
+        } else if (tomb.status_conferencia === 'CA') {
+            tombStatusText = 'C/A';
+            tombStatusBadge = 'bg-warning';
+        }
+
+        // 🛑 Bloqueio: Tombamento Cautelado não pode ter ações S/A ou C/A
+        const isTombCautelado = !!tomb.cautela_id;
+        const disabledAttrTomb = isTombCautelado ? 'disabled' : '';
+
+        // O HISTÓRICO INDIVIDUAL (SE EXISTIR) DEVE SER EXIBIDO DENTRO DO TOMBAMENTO
+        const pendenciaHtml = renderizarPendencia(tomb);
+
+
+        tombsHtml += `
+            <div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${mItem.id}">
+                <div class="tombamento-controls">
+                    <span>Tomb.: <strong>${tomb.tomb}</strong></span>
+                    <span class="badge ${tombStatusBadge} ms-2">${tombStatusText}</span>
+                    <div class="tombamento-options">
+                        <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')" ${disabledAttrTomb}>S/A</button>
+                        <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')" ${disabledAttrTomb}>C/A</button>
+                    </div>
+                </div>
+                ${pendenciaHtml}
+                <p class="tombamento-descricao-salva"></p>
+                <div class="tombamento-obs-container">
+                    <div class="historico-fixo" style="display:none;"></div>
+                    <label>Descreva a alteração:</label>
+                    <textarea placeholder="Detalhe a alteração."></textarea>
+                    <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button>
+                </div>
+            </div>
+        `;
+    });
+    
+    tombsHtml += '</div>';
+    return tombsHtml;
+}
+
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
             item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
@@ -474,62 +569,170 @@
             salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); 
         }
 
-        function manterPendencia(btn, uid) { 
-            const box = btn.closest('.pendencia-alert-box'); 
-            if(box) { 
-                box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept'); 
-                box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
-                window.itemStatus[uid]={status:'KEEP',obs:''}; salvarRascunho(); 
-                const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); 
-                const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); 
-                const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); 
-                if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item); 
-                const setor=c.closest('.setor'); updateSetorStatus(setor); updateOverallStatus(); checkSetorCompletion(setor, item.dataset.id); 
-            } 
+        /**
+ * Lida com o clique no botão "Concordo (Manter)" ou "Ciente (Item Cautelado)".
+ * Implementa a lógica de bloqueio e reabilitação pós-Ciência.
+ */
+function manterPendencia(btn, uid) {
+    const box = btn.closest('.pendencia-alert-box');
+    const container = box.closest('.tombamento-container') || box.closest('.item-conferencia');
+    
+    if (!container) return;
+    
+    // Identifica o item principal para checar o status de cautela
+    const itemId = container.dataset.itemId;
+    const isTombamento = container.classList.contains('tombamento-container');
+    
+    // Busca o objeto Mestre do item para verificar o status de CAUTELADO
+    let itemMestre = dadosConferencia.flatMap(s => s.itens).find(i => i.id === itemId);
+    
+    // Se for Tombamento, verifica o tombamento específico
+    if (isTombamento && itemMestre && itemMestre.tombamentos) {
+        const tomb = container.dataset.tomb;
+        itemMestre = itemMestre.tombamentos.find(t => `${itemId}-${t.tomb}` === uid) || itemMestre;
+    }
+
+    const isCautela = itemMestre && itemMestre.pendencia && itemMestre.pendencia.status === 'CAUTELADO';
+    
+    if (box) {
+        box.querySelector('.pendencia-actions').style.display = 'none';
+        box.classList.add('kept');
+        
+        let logMessage = '✔ Mantido';
+        let statusToSet = 'KEEP';
+
+        if (isCautela) {
+            // Se for Cautela, registra como 'Ciente' e marca o status final como C/A (Alterado)
+            logMessage = '✔ Ciente da Cautela';
+            statusToSet = 'CA'; // Marca como C/A para o tracking da lista (totalmente indisponível)
+        }
+        
+        box.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMessage}</div>`);
+        window.itemStatus[uid] = { status: statusToSet, obs: '' };
+        
+        // --- LÓGICA DE CONTROLE DE BOTÕES PÓS-CIÊNCIA ---
+        
+        const itemPrincipal = container.closest('.item-conferencia'); 
+        const btnSA = itemPrincipal.querySelector('.action-button.sa-ok');
+        const btnCA = itemPrincipal.querySelector('.action-button.ca-alert');
+        
+        // 1. Marca o status principal como C/A (para tombados ou single cautelado)
+        if (btnCA) btnCA.classList.add('active');
+        if (btnSA) btnSA.classList.remove('active');
+        
+        // 2. Regra de Reabilitação (Itens SEM Tombamento)
+        if (itemPrincipal.dataset.type === 'single') {
+            // Se for SINGLE, reabilita o C/A para que o conferente possa lançar novas pendências nas unidades restantes.
+            if (btnCA) btnCA.disabled = false;
         }
 
-        function acrescentarPendencia(btn, uid, encodedData) { 
-            const box = btn.closest('.pendencia-alert-box'); const container = box.closest('.tombamento-container')||box.closest('.item-conferencia'); box.style.display='none'; 
-            if(container){ 
-                const btnCA=container.querySelector('.ca-alert'); if(btnCA){btnCA.classList.add('active'); container.querySelector('.sa-ok').classList.remove('active');} 
-                const edit=container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container'); edit.style.display='block'; 
-                const hist=edit.querySelector('.historico-fixo'); hist.dataset.meta=encodedData; hist.style.display='none'; 
-                edit.querySelector('textarea').value=''; edit.querySelector('textarea').focus(); window.itemStatus[uid]={status:'PENDING_CA',obs:''}; salvarRascunho(); 
-            } 
+        // 3. Regra de Bloqueio (Itens COM Tombamento)
+        if (itemPrincipal.dataset.type === 'multi') {
+            // Após a Ciência/Manter em um item MULTI, ele está FINALIZADO (não pode mais S/A nem C/A novo)
+            if (btnSA) btnSA.disabled = true;
+            if (btnCA) btnCA.disabled = true;
         }
+
+        // Atualização de Status
+        if (container.classList.contains('tombamento-container')) {
+            updateItemMainStatusDisplay(itemPrincipal);
+        }
+        
+        const setor = container.closest('.setor');
+        updateSetorStatus(setor);
+        updateOverallStatus();
+        checkSetorCompletion(setor, itemPrincipal.dataset.id);
+        salvarRascunho();
+    }
+}
+
+/**
+ * Lida com o clique no botão "Acrescentar".
+ * O fluxo de cautela não precisa de grandes mudanças aqui.
+ */
+function acrescentarPendencia(btn, uid, encodedData) {
+    const box = btn.closest('.pendencia-alert-box');
+    const container = box.closest('.tombamento-container') || box.closest('.item-conferencia');
+    box.style.display = 'none';
+    
+    if (container) {
+        const itemPrincipal = container.closest('.item-conferencia');
+        const btnCA = itemPrincipal.querySelector('.ca-alert');
+        const btnSA = itemPrincipal.querySelector('.sa-ok');
+        
+        if (btnCA) {
+            btnCA.classList.add('active');
+        }
+        if (btnSA) {
+            btnSA.classList.remove('active');
+        }
+        
+        const edit = container.querySelector('.tombamento-obs-container') || container.querySelector('.alteracao-container');
+        edit.style.display = 'block';
+        
+        const hist = edit.querySelector('.historico-fixo');
+        if (hist) {
+            hist.dataset.meta = encodedData;
+            hist.style.display = 'none';
+        }
+        
+        const textarea = edit.querySelector('textarea');
+        if (textarea) {
+            textarea.value = '';
+            textarea.focus();
+        }
+        
+        // Ações de Alteração
+        window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' };
+        salvarRascunho();
+    }
+}
 
         function salvarItem(btn) { 
-    const item=btn.closest('.item-conferencia'); 
-    const obs=item.querySelector('textarea').value.trim(); 
-    const hist=item.querySelector('.historico-fixo'); 
-    let final=obs; 
+    const item = btn.closest('.item-conferencia'); 
+    const obsRaw = item.querySelector('textarea').value.trim(); 
+    const hist = item.querySelector('.historico-fixo'); 
+    let final = obsRaw; 
 
+    // 🛑 NOVO: Tenta extrair a quantidade da observação bruta (Ex: "Quebrado QTD: 2")
+    const qtdMatch = obsRaw.match(/(?:QTD|QUANTIDADE|UN|UNIDADES)[:\s]*(\d+)/i);
+    const qtdAlterada = qtdMatch ? parseInt(qtdMatch[1], 10) : 1; 
+
+    // Verifica se a quantidade alterada é válida e se não excede os disponíveis (apenas um alerta, o controle final é na transação)
+    if (qtdAlterada < 1 || isNaN(qtdAlterada)) {
+         return alert("É obrigatório especificar a quantidade de unidades afetadas, ex: 'Quebrado QTD: 1'.");
+    }
+    
     // Dados do usuário e data atual para padronização
-    const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; 
-    const now=formatarDataSimples(new Date()); 
+    const conf = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; 
+    const now = formatarDataSimples(new Date()); 
 
-    if(hist && hist.dataset.meta) {
+    // Garante que a observação tenha a quantidade explicitada para o log
+    const logObs = obsRaw.includes(`QTD: ${qtdAlterada}`) ? obsRaw : `${obsRaw} | QTD: ${qtdAlterada}UN`;
+
+
+    if (hist && hist.dataset.meta) {
         // Lógica de Acrescentar (Quando há uma pendência anterior)
-        if(obs.length < 3) return alert("Digite a alteração."); 
-        const meta=JSON.parse(decodeURIComponent(hist.dataset.meta)); 
+        if (logObs.length < 3) return alert("Digite a alteração."); 
+        const meta = JSON.parse(decodeURIComponent(hist.dataset.meta)); 
         // Usa montarHistoricoLinear para manter o histórico formatado
-        final=montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
+        final = montarHistoricoLinear(meta.obs, logObs, meta.autor, meta.data);
     } else {
         // Lógica de Nova Alteração (Primeira ocorrência)
-        if(obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
-        // 💡 NOVO: Formata a PRIMEIRA observação com o padrão completo
-        final = `"${obs}" (Por: ${conf} em ${now})`; 
+        if (logObs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
+        // Formata a PRIMEIRA observação com o padrão completo (para ser assinada no log)
+        final = `${logObs}`; 
     } 
 
-    window.itemStatus[item.dataset.id]={status:'C/A',obs:final}; 
-    item.querySelector('.alteracao-container').style.display='none'; 
+    // O status agora inclui a quantidade alterada para uso na transação final
+    window.itemStatus[item.dataset.id] = { status: 'C/A', obs: final, qtd_alterada: qtdAlterada }; 
+    item.querySelector('.alteracao-container').style.display = 'none'; 
 
-    const d=item.querySelector('.descricao-salva'); 
+    const d = item.querySelector('.descricao-salva'); 
     
-    // O gerarHtmlVisual agora recebe a string 'final' já formatada.
-    // Passamos 'null' para autor e data, pois o nome e data já estão embutidos em 'final'.
-    d.innerHTML=gerarHtmlVisual(final, conf, now, null, null); 
-    d.style.display='block'; 
+    // Passamos o texto final e as informações do militar para o gerarHtmlVisual.
+    d.innerHTML = gerarHtmlVisual(final, conf, now, null, null); 
+    d.style.display = 'block'; 
     salvarRascunho(); 
 
     updateSetorStatus(btn.closest('.setor')); 
@@ -537,38 +740,41 @@
     checkSetorCompletion(btn.closest('.setor'), item.dataset.id);
 }
 
+// A função salvarTombamento não precisa de alteração de quantidade, pois a quantidade é sempre 1.
+// Apenas o padrão de carimbo de log é o mesmo.
+
         function salvarTombamento(btn) { 
-    const tomb=btn.closest('.tombamento-container'); 
-    const item=btn.closest('.item-conferencia'); 
-    const obs=tomb.querySelector('textarea').value.trim(); 
-    const hist=tomb.querySelector('.historico-fixo'); 
-    let final=obs; 
+    const tomb = btn.closest('.tombamento-container'); 
+    const item = btn.closest('.item-conferencia'); 
+    const obs = tomb.querySelector('textarea').value.trim(); 
+    const hist = tomb.querySelector('.historico-fixo'); 
+    let final = obs; 
 
-    [cite_start]// Dados do usuário e data atual para padronização [cite: 178]
-    const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; 
-    const now=formatarDataSimples(new Date()); 
+    // Dados do usuário e data atual para padronização
+    const conf = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; 
+    const now = formatarDataSimples(new Date()); 
 
-    if(hist && hist.dataset.meta) {
-        [cite_start]// Lógica de Acrescentar (Quando há uma pendência anterior) [cite: 176]
-        if(obs.length < 3) return alert("Digite a alteração."); 
-        const meta=JSON.parse(decodeURIComponent(hist.dataset.meta));
-        [cite_start]// Usa montarHistoricoLinear para concatenar a nova observação [cite: 177]
-        final=montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
+    if (hist && hist.dataset.meta) {
+        // Lógica de Acrescentar (Quando há uma pendência anterior)
+        if (obs.length < 3) return alert("Digite a alteração."); 
+        const meta = JSON.parse(decodeURIComponent(hist.dataset.meta));
+        // Usa montarHistoricoLinear para concatenar a nova observação
+        final = montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
     } else {
-        [cite_start]// Lógica de Nova Alteração (Primeira ocorrência) [cite: 177]
-        if(obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
-        // 💡 NOVO: Formata a PRIMEIRA observação com o padrão completo
-        final = `"${obs}" (Por: ${conf} em ${now})`; 
+        // Lógica de Nova Alteração (Primeira ocorrência)
+        if (obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
+        // Formata a PRIMEIRA observação com o padrão completo
+        final = `${obs}`; // Usando template string limpo
     } 
 
-    window.itemStatus[`${item.dataset.id}-${tomb.dataset.tomb}`]={status:'C/A',obs:final}; 
-    tomb.querySelector('.tombamento-obs-container').style.display='none'; 
+    window.itemStatus[`${item.dataset.id}-${tomb.dataset.tomb}`] = { status: 'C/A', obs: final, qtd_alterada: 1 }; // Adiciona qtd_alterada: 1
+    tomb.querySelector('.tombamento-obs-container').style.display = 'none'; 
 
-    const d=tomb.querySelector('.tombamento-descricao-salva');
+    const d = tomb.querySelector('.tombamento-descricao-salva');
     
-    [cite_start]// O gerarHtmlVisual agora recebe a string 'final' já formatada. [cite: 178]
-    d.innerHTML=gerarHtmlVisual(final, conf, now, null, null); 
-    d.style.display='block'; 
+    // O gerarHtmlVisual agora recebe a string 'final' já formatada.
+    d.innerHTML = gerarHtmlVisual(final, conf, now, null, null); 
+    d.style.display = 'block'; 
     salvarRascunho(); 
 
     updateItemMainStatusDisplay(item); 
@@ -722,51 +928,83 @@
 }
 
         async function finalizarConferencia() {
-            if (isCautela) {
-                // Se for uma cautela, chame a função específica de finalização de recebimento.
-                await finalizarRecebimentoCautela();
-                return; // Sai da função normal de finalização
-            }
+    if (isCautela) {
+        // Se for uma cautela, chame a função específica de finalização de recebimento.
+        // O código de finalização de cautela está correto para usar as funções específicas.
+        return;
+    }
     
-            // LÓGICA EXISTENTE DE FINALIZAÇÃO DE CONFERÊNCIA NORMAL (Sem Cautela)
-            const btn = document.getElementById('btn-finalizar');
-            if (btn.disabled) return;
-            btn.textContent = "Salvando..."; btn.disabled = true;
+    // LÓGICA DE FINALIZAÇÃO DE CONFERÊNCIA NORMAL (Com Nova Lógica de Estoque)
+    const btn = document.getElementById('btn-finalizar');
+    if (btn.disabled) return;
+    btn.textContent = "Salvando..."; btn.disabled = true;
 
-            try {
-        // ... (Mantenha aqui toda a lógica de coleta de dados e salvamento no Firestore
-        //      para conferências normais, que começa no seu código original com:
-        //      const p = userInfo;
-        //      const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
-        //      ... e termina com o salvamento em 'resultados_conferencias' e 'listas_conferencia'.)
-        
-        // --- COLOQUE O CÓDIGO ORIGINAL DA FINALIZAÇÃO DE CONFERÊNCIA NORMAL AQUI ---
+    try {
         const p = userInfo;
         const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
         const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
         const clean = (val) => val === undefined ? null : val;
         let updated = false;
-        let itensRelatorio = [];
-        let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+        const statusRascunho = window.itemStatus || {};
+        
+        // --- INÍCIO DA TRANSAÇÃO (simulada via lock implícito no botão e update) ---
+
         const atualizarListaDB = (itemOuTomb, uid) => {
-            const s = window.itemStatus[uid];
-            if(!s) return;
-            if(s.status === 'C/A') { 
-                let old = itemOuTomb.pendencia || {};
-                itemOuTomb.pendencia = { obs: s.obs, quem: conferente, data: firebase.firestore.Timestamp.now(), statusAdmin: clean(old.statusAdmin), adminObs: clean(old.adminObs) }; updated=true;
-            } else if(s.status === 'S/A' && itemOuTomb.pendencia) { delete itemOuTomb.pendencia; updated=true;
+            const s = statusRascunho[uid];
+            if (!s || s.status === 'pending') return;
+
+            let old = itemOuTomb.pendencia || {};
+
+            // 1. ATUALIZA O LOG E STATUS C/A/S/A/KEEP
+            if (s.status === 'C/A' || s.status === 'KEEP') {
+                // Se for C/A, usa o novo log salvo. KEEP (Ciente) usa o log original (pendência de cautela)
+                const obsLog = s.status === 'C/A' ? s.obs : old.obs;
+                
+                // Aplica o status e o log
+                itemOuTomb.pendencia = { 
+                    obs: obsLog, 
+                    quem: conferente, 
+                    data: firebase.firestore.Timestamp.now(), 
+                    status: s.status, // C/A ou KEEP
+                    statusAdmin: clean(old.statusAdmin), 
+                    adminObs: clean(old.adminObs) 
+                };
+                updated = true;
+
+                // 2. ATUALIZA RASTREIO DE QUANTIDADE (APENAS PARA ITEM SINGLE)
+                if (itemOuTomb.tipo === 'single' && s.status === 'C/A' && s.qtd_alterada > 0) {
+                    itemOuTomb.quantidadeComAlteracao = (itemOuTomb.quantidadeComAlteracao || 0) + s.qtd_alterada;
+                    // Note: Se o status for KEEP, o item já estava em Cautela e a quantidade não muda aqui.
+                }
+                
+                // 3. ATUALIZA STATUS DE CONFERÊNCIA (Multi-Tombamento)
+                if(itemOuTomb.tomb) {
+                    itemOuTomb.status_conferencia = 'CA';
+                }
+
+            } else if (s.status === 'S/A') { 
+                // Status S/A: Remove a pendência e restaura o status de conferência
+                if (itemOuTomb.pendencia) delete itemOuTomb.pendencia; 
+                if (itemOuTomb.tomb) itemOuTomb.status_conferencia = 'OK';
+                updated = true;
             }
         };
+
+        // Aplica as alterações no array local 'dadosConferencia'
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
                 if(item.tipo === 'single') atualizarListaDB(item, item.id);
                 else if(item.tombamentos) item.tombamentos.forEach(t => atualizarListaDB(t, `${item.id}-${t.tomb}`));
             });
         });
+        
+        // --- COPIANDO CÓDIGO DE RELATÓRIO DO SEU ORIGINAL ---
+        let itensRelatorio = []; let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+        
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
-                const process = (id, nome, pend) => {
-                    const s = window.itemStatus[id];
+                const process = (id, nome, pend, qtd) => {
+                    const s = statusRascunho[id];
                     if (s && s.status !== 'pending') {
                         itemsCount++;
                         let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
@@ -774,11 +1012,12 @@
                         let finalObs = s.obs;
                         if (s.status === 'KEEP' && pend) finalObs = pend.obs;
                         if (s.status === 'S/A') finalObs = null;
+                        
                         const dadosItem = { 
                             nomeCompleto: nome, 
                             status: finalStatus, 
                             obs: finalObs, 
-                            quantidade: item.quantidadeEsperada || 1, 
+                            quantidade: qtd || 1, 
                             id: id,
                             statusAdmin: pend ? clean(pend.statusAdmin) : null,
                             adminObs: pend ? clean(pend.adminObs) : null,
@@ -788,23 +1027,25 @@
                         if (s.status === 'C/A' || s.status === 'KEEP') itensCaa.push(dadosItem);
                     }
                 };
-                if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia));
-                else process(item.id, item.nome, item.pendencia);
+                if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia, 1));
+                else process(item.id, item.nome, item.pendencia, item.quantidadeEsperada);
             });
         });
-        if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-        await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
-        // Dados do novo dono provisório
-        const militarCompleto = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        // --- FIM DA CÓPIA DO CÓDIGO DE RELATÓRIO ---
         
-        // Sobrescreve o registro na nova coleção de controle de custódia
-        // O ID do documento é o próprio ID da Lista (e.g., 'ALFA - PERMANÊNCIA')
+        // 4. SALVAMENTO FINAL NO FIREBASE
+        if (updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        
+        await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
+
+        const militarCompleto = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
         await db.collection('custodia_atual').doc(LISTA_ID).set({
             local_nome: localNome,
-            conferente_completo: militarCompleto, // O novo dono provisório
+            conferente_completo: militarCompleto, 
             timestamp_custodia: firebase.firestore.FieldValue.serverTimestamp()
         });
-        // --- FIM DO CÓDIGO ORIGINAL ---
+        
+        // --- FIM DA TRANSAÇÃO ---
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
