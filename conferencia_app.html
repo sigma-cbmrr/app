@@ -850,76 +850,64 @@ async function finalizarRecebimentoDevolucao(cautela) {
             
             let listaMestra = listaMestraDoc.data().list;
             
-            // 🛑 LÓGICA DE REVERSÃO DE ESTOQUE E CARIMBO DE RETORNO 🛑
-            listaMestra = listaMestra.map(setor => {
-                const itensSetorAtual = cautela.itens.filter(cItem => {
-                    // Mapeia o item da cautela para o ID base do setor (se a lógica de findItemInList for usada no futuro)
-                    // Aqui, verificamos se o setor contém itens relacionados à cautela.
-                    return setor.itens.some(mItem => mItem.id === cItem.id_base);
-                });
-
-                setor.itens = setor.itens.map(mItem => {
-                    const cItem = itensSetorAtual.find(i => i.id_base === mItem.id);
-                    if (!cItem) return mItem;
-
-                    let carimboTexto = '';
-
-                    if (cItem.tipo === 'single') {
-                        // ----------------------------------------------------
-                        // LÓGICA 1: Item Sem Tombamento (single)
-                        // ----------------------------------------------------
-                        mItem.quantidadeEsperada += cItem.quantidade; 
-                        
-                        carimboTexto = `[CAUTELA-${CAUTELA_ID}: RECEBIDA] ${cItem.quantidade}UN Restauradas. Status: CONCLUÍDA`;
-                        
-                    } else if (cItem.tipo === 'multi' && mItem.tombamentos_cautelados) {
-                        // ----------------------------------------------------
-                        // LÓGICA 2: Item Com Tombamento (multi)
-                        // ----------------------------------------------------
-                        
-                        // Encontra o índice do tombamento específico no array de cautelados
-                        const tombIndex = mItem.tombamentos_cautelados.findIndex(tomb => tomb.tomb === cItem.tombamento);
-                        
-                        if (tombIndex > -1) {
-                            const tombamentoRestaurado = mItem.tombamentos_cautelados.splice(tombIndex, 1)[0];
+            // LÓGICA DE REVERSÃO DE CARIMBO (RASTREIO) E DISPONIBILIDADE
+            cautela.itens.forEach(cItem => {
+                const itemQtd = cItem.quantidade || 0;
+                
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
+                        if (mItem.id === cItem.id_base) {
+                            let carimboTexto = '';
                             
-                            // Limpa os carimbos da cautela antes de mover
-                            delete tombamentoRestaurado.cautela_id; 
-                            delete tombamentoRestaurado.destinatario; 
-                            
-                            mItem.tombamentos = mItem.tombamentos || [];
-                            mItem.tombamentos.push(tombamentoRestaurado);
-                            
-                            // Atualiza a quantidade esperada
-                            mItem.quantidadeEsperada = (mItem.tombamentos.length || 0) + (mItem.tombamentos_cautelados.length || 0);
+                            if (cItem.tipo === 'single') {
+                                // LÓGICA 1: Item Sem Tombamento (single)
+                                
+                                // Decrementa a quantidade cautelada (aumenta a disponibilidade)
+                                mItem.quantidadeCautelada = (mItem.quantidadeCautelada || 0) - itemQtd;
+                                if (mItem.quantidadeCautelada < 0) mItem.quantidadeCautelada = 0;
+                                
+                                carimboTexto = `[CAUTELA-${CAUTELA_ID}: RECEBIDA] ${itemQtd}UN Restauradas. Status: CONCLUÍDA`;
 
-                            carimboTexto = `[CAUTELA-${CAUTELA_ID}: RECEBIDA] Tomb: ${cItem.tombamento} Restaurado. Status: CONCLUÍDA`;
+                            } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
+                                // LÓGICA 2: Item Com Tombamento (multi)
+                                
+                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                    // Limpa o carimbo interno do tombamento que está sendo devolvido
+                                    if (tomb.tomb === cItem.tombamento && tomb.cautela_id === CAUTELA_ID) {
+                                        delete tomb.cautela_id; 
+                                        delete tomb.destinatario;
+                                    }
+                                    return tomb;
+                                });
+                                
+                                carimboTexto = `[CAUTELA-${CAUTELA_ID}: RECEBIDA] Tomb: ${cItem.tombamento} Restaurado. Status: CONCLUÍDA`;
+                            }
+
+                            // Carimbo no Histórico Unificado (pendencia.obs)
+                            if (carimboTexto) {
+                                mItem.pendencia = mItem.pendencia || {};
+                                mItem.pendencia.obs = mItem.pendencia.obs || '';
+                                
+                                mItem.pendencia.obs = montarHistoricoLinear(
+                                    mItem.pendencia.obs, 
+                                    carimboTexto,
+                                    militarCompleto, 
+                                    dataConclusaoFormatada
+                                );
+
+                                // Verifica se ainda há cautelas ativas para este item para reverter o status 'CAUTELADO'
+                                const isStillCautelado = (mItem.tipo === 'single' && (mItem.quantidadeCautelada || 0) > 0) || 
+                                                         (mItem.tipo === 'multi' && mItem.tombamentos.some(t => t.cautela_id));
+                                
+                                if (!isStillCautelado) {
+                                    mItem.pendencia.status = 'OK';
+                                }
+                            }
                         }
-                    }
-                    
-                    // ----------------------------------------------------
-                    // 3. Carimbo no Histórico Unificado (pendencia.obs)
-                    // ----------------------------------------------------
-                    if (carimboTexto) {
-                        mItem.pendencia = mItem.pendencia || {};
-                        mItem.pendencia.obs = mItem.pendencia.obs || '';
-                        
-                        // Assinatura e anexação da nova linha de histórico
-                        mItem.pendencia.obs = montarHistoricoLinear(
-                            mItem.pendencia.obs, 
-                            carimboTexto,
-                            militarCompleto, 
-                            dataConclusaoFormatada
-                        );
-                        
-                        // Se não houver mais cautelas ativas para o item (ou se for single), reverte o status
-                        if (mItem.tombamentos_cautelados && mItem.tombamentos_cautelados.length === 0) {
-                             mItem.pendencia.status = 'OK';
-                        }
-                    }
-                    return mItem;
-                });
-                return setor;
+                        return mItem;
+                    })
+                }));
             });
             // FIM DA LÓGICA DE REVERSÃO
             
@@ -930,12 +918,12 @@ async function finalizarRecebimentoDevolucao(cautela) {
                 receptor_final_completo: militarCompleto,
             });
             
-            // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
+            // 4. Ação: Atualizar a Lista Mestra com o rastreio corrigido
             transaction.update(listaMestraRef, { list: listaMestra });
 
         }); // Fim da Transação
 
-        alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada e estoque restaurado. Status: CONCLUÍDA.`);
+        alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada e rastreamento restaurado. Status: CONCLUÍDA.`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
