@@ -1287,6 +1287,68 @@ async function finalizarRecebimentoDevolucao(cautela) {
     }
 }
         window.onload = carregarDadosRemotos;
+        /**
+ * Função Administrativa CRÍTICA: Limpa o status de Pendência/Cautela de um item na Lista Mestra.
+ * Deve ser usada APENAS para testes.
+ * @param {string} listaId - O ID da lista a ser atualizada (Ex: 'ALFA - PERMANENCIA').
+ * @param {string} itemId - O ID do item principal (sem tombamento, Ex: 'ITEM-001').
+ */
+async function limparStatusDeItemParaTeste(listaId, itemId) {
+    if (!confirm(`ATENÇÃO: Você tem certeza que deseja LIMPAR o status de Pendência/Cautela do item ${itemId} na lista ${listaId}? Isso é IRREVERSÍVEL no log de C/A!`)) {
+        return;
+    }
+
+    try {
+        const listaMestraRef = db.collection('listas_conferencia').doc(listaId);
+        
+        await db.runTransaction(async (transaction) => {
+            const listaMestraDoc = await transaction.get(listaMestraRef);
+            if (!listaMestraDoc.exists) throw new Error("Lista Mestra não encontrada!");
+            
+            let listaMestra = listaMestraDoc.data().list;
+            let itemEncontrado = false;
+            
+            listaMestra.forEach(setor => {
+                setor.itens = setor.itens.map(mItem => {
+                    if (mItem.id === itemId) {
+                        itemEncontrado = true;
+                        
+                        // 🛑 1. LIMPEZA DOS CARIMBOS E RASTREIOS
+                        delete mItem.pendencia; // Remove todo o histórico (Log) e status
+                        delete mItem.quantidadeCautelada; // Zera o rastreio de cautela (single)
+                        delete mItem.quantidadeComAlteracao; // Zera o rastreio de C/A (single)
+                        
+                        // 🛑 2. LIMPEZA DOS TOMBAMENTOS (se multi)
+                        if (mItem.tipo === 'multi' && mItem.tombamentos) {
+                            mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                delete tomb.cautela_id;
+                                delete tomb.destinatario;
+                                delete tomb.pendencia; // Remove pendência individual do tombamento
+                                tomb.status_conferencia = 'PENDING'; // Reseta o status de conferência
+                                return tomb;
+                            });
+                        }
+                    }
+                    return mItem;
+                });
+            });
+
+            if (!itemEncontrado) {
+                throw new Error(`Item ${itemId} não encontrado na lista.`);
+            }
+
+            // Salva a lista limpa
+            transaction.update(listaMestraRef, { list: listaMestra });
+        });
+
+        alert(`✅ Sucesso! Item ${itemId} na lista ${listaId} foi limpo.`);
+        location.reload(); // Recarrega para ver as mudanças
+
+    } catch (error) {
+        console.error("Erro ao limpar status do item:", error);
+        alert(`Falha na limpeza. Erro: ${error.message}`);
+    }
+}
     </script>
 </body>
 </html>
