@@ -5832,8 +5832,7 @@ function getSelectedCautelaItemsData() {
 
     return itens;
 }
-        // Localização: Aproximadamente linha 1197
-async function iniciarCautelaProcesso() {
+        async function iniciarCautelaProcesso() {
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     btnIniciar.disabled = true;
     btnIniciar.textContent = 'Processando Transação...';
@@ -5869,7 +5868,6 @@ async function iniciarCautelaProcesso() {
             
             const militarCompleto = currentUserData.nome_militar_completo;
             const dataEmissaoFormatada = new Date().toLocaleDateString('pt-BR');
-            const militarCarimbo = ` (Por: ${militarCompleto} em ${dataEmissaoFormatada})`;
             
             // Clone profundo
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
@@ -5882,75 +5880,77 @@ async function iniciarCautelaProcesso() {
             // ----------------------------------------------------------------------
             // 🛑 NOVA LÓGICA DE BAIXA ADMINISTRATIVA E CARIMBO (MAIS ROBUSTA) 🛑
             // ----------------------------------------------------------------------
-            itensParaCautela.forEach(cItem => {
-                
-                // Encontrar o item base na lista mestra
-                let mItem = findItemInList(listaMestra, cItem.id_base); 
-                
-                if (mItem) {
-                    let carimboTexto = '';
-                    
-                    if (cItem.tipo === 'single') {
-                        // ----------------------------------------------------
-                        // LÓGICA 1: Item Sem Tombamento (single)
-                        // ----------------------------------------------------
-                        mItem.quantidadeEsperada -= cItem.quantidade; // Baixa no estoque
-                        
-                        // Carimbo: ID, Status, Quantidade
-                        carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] ${cItem.quantidade}UN`;
-                        
-                    } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                        // ----------------------------------------------------
-                        // LÓGICA 2: Item Com Tombamento (multi)
-                        // ----------------------------------------------------
-                        
-                        mItem.tombamentos_cautelados = mItem.tombamentos_cautelados || [];
-                        
-                        // Encontra o índice do tombamento específico
-                        const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
-                        
-                        if (tombIndex > -1) {
-                            // Move o objeto tombamento para o array de cautelados
-                            const tombamentoMovido = mItem.tombamentos.splice(tombIndex, 1)[0];
-                            
-                            // Carimba o tombamento movido para rastreio
-                            tombamentoMovido.cautela_id = cautelaIdSequencial; 
-                            tombamentoMovido.destinatario = destinatarioInput;
-                            mItem.tombamentos_cautelados.push(tombamentoMovido);
-                            
-                            // Atualiza a quantidade esperada (opcional, mas boa prática)
-                            mItem.quantidadeEsperada = mItem.tombamentos.length + mItem.tombamentos_cautelados.length;
-                        }
-                        
-                        // Carimbo: ID, Status
-                        carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] Tomb: ${cItem.tombamento}`;
-                    }
+            listaMestra.forEach(setor => {
+                setor.itens = setor.itens.map(mItem => {
+                    const cItemsSetor = itensParaCautela.filter(item => item.id_base === mItem.id);
 
-                    // ----------------------------------------------------
-                    // 3. Carimbo no Histórico Unificado (pendencia.obs)
-                    // ----------------------------------------------------
-                    if (carimboTexto) {
-                        // A nova linha de histórico é o Carimbo (Ex: [CAUTELA-XXX: EMITIDA] 1UN)
-                        const novaLinhaCautela = carimboTexto; 
+                    if (cItemsSetor.length > 0) {
+                        let carimboTexto = '';
                         
-                        // Assina e anexa a nova linha ao histórico, preservando o anterior
-                        mItem.pendencia = mItem.pendencia || {};
-                        mItem.pendencia.obs = mItem.pendencia.obs || '';
-                        
-                        // Usamos montarHistoricoLinear para gerenciar o separador interno '| + NOVA: '
-                        [cite_start]// NOTA: 'montarHistoricoLinear' é uma função externa que deve ser definida no sigma_dashboard.txt [cite: 3455, 3460]
-                        mItem.pendencia.obs = montarHistoricoLinear(
-                            mItem.pendencia.obs, 
-                            `${novaLinhaCautela} Dest: ${destinatarioInput}`,
-                            militarCompleto, // Militar que fez a emissão (Emitente)
-                            dataEmissaoFormatada
-                        );
-                        
-                        // Atualiza o status de pendência para ser "cautelado"
-                        // Isso pode ser usado para dar prioridade de visualização.
-                        mItem.pendencia.status = 'CAUTELADO';
+                        cItemsSetor.forEach(cItem => {
+                            
+                            if (cItem.tipo === 'single') {
+                                // ----------------------------------------------------
+                                // LÓGICA 1: Item Sem Tombamento (single)
+                                // ----------------------------------------------------
+                                mItem.quantidadeEsperada -= cItem.quantidade; // Baixa no estoque
+                                
+                                // Carimbo: ID, Status, Quantidade
+                                carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] ${cItem.quantidade}UN`;
+                                
+                            } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
+                                // ----------------------------------------------------
+                                // LÓGICA 2: Item Com Tombamento (multi)
+                                // ----------------------------------------------------
+                                
+                                mItem.tombamentos_cautelados = mItem.tombamentos_cautelados || [];
+                                
+                                // O item selecionado (cItem) já tem o tombamento específico
+                                const tombamentoSelecionado = cItem.tombamento;
+                                
+                                // Encontra o índice do tombamento no array principal para removê-lo
+                                const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === tombamentoSelecionado);
+                                
+                                if (tombIndex !== -1) {
+                                    // Remove do array principal (Baixa para conferência)
+                                    const tombamentoMovido = mItem.tombamentos.splice(tombIndex, 1)[0];
+                                    
+                                    // Adiciona ao array de cautelados (Rastreio)
+                                    tombamentoMovido.cautela_id = cautelaIdSequencial; 
+                                    tombamentoMovido.destinatario = destinatarioInput;
+                                    mItem.tombamentos_cautelados.push(tombamentoMovido);
+                                    
+                                    // Atualiza a quantidade esperada (total de tombamentos)
+                                    mItem.quantidadeEsperada = (mItem.tombamentos.length || 0) + (mItem.tombamentos_cautelados.length || 0);
+
+                                    // Carimbo: ID, Status
+                                    carimboTexto = `[CAUTELA-${cautelaIdSequencial}: EMITIDA] Tomb: ${tombamentoSelecionado}`;
+                                }
+                            }
+
+                            // ----------------------------------------------------
+                            // 3. Carimbo no Histórico Unificado (pendencia.obs)
+                            // ----------------------------------------------------
+                            if (carimboTexto) {
+                                mItem.pendencia = mItem.pendencia || {};
+                                mItem.pendencia.obs = mItem.pendencia.obs || '';
+                                
+                                // Usamos montarHistoricoLinear para gerenciar o separador interno '| + NOVA: '
+                                mItem.pendencia.obs = montarHistoricoLinear(
+                                    mItem.pendencia.obs, 
+                                    `${carimboTexto} Dest: ${destinatarioInput}`,
+                                    militarCompleto, 
+                                    dataEmissaoFormatada
+                                );
+                                
+                                // Define o status de pendência ativa de cautela
+                                mItem.pendencia.status = 'CAUTELADO';
+                            }
+                        }); // Fim do forEach (cItem)
                     }
-                }
+                    return mItem;
+                });
+                return setor;
             });
             
             // ----------------------------------------------------------------------
@@ -5981,7 +5981,6 @@ async function iniciarCautelaProcesso() {
             alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
         }); 
 
-        // A transação foi bem-sucedida.
         showMainMenu(); 
         
     } catch (error) {
