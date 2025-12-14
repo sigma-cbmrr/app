@@ -5393,7 +5393,6 @@ async function loadCustodiaItens() {
     const localNomeCompleto = selectLocal.value;
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
-    
     // 🛑 ATUALIZAÇÃO DO CONTAINER PARA O NOVO LAYOUT 🛑
     itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
     btnIniciar.disabled = true;
@@ -5425,29 +5424,43 @@ async function loadCustodiaItens() {
             return;
         }
         const listaMestra = listaDoc.data().list || [];
-
         // 3. Renderizar o HTML para seleção (Acordeão/Cards)
         let htmlContent = '<div class="inventory-accordion-container">';
         let totalItensDisponiveis = 0;
         let isFirstSetor = true; // Para abrir o primeiro setor por padrão
 
         listaMestra.forEach(setor => {
+            
+            // 🛑 CORREÇÃO NO FILTRO 1: Incluir todos os itens que têm quantidade > 0 ou tombamentos, SEM PRECISAR DE ATUALIZAÇÃO DE ESTOQUE.
             const setorItems = (setor.itens || []).filter(i => 
                 (i.tipo === 'single' && i.quantidadeEsperada > 0) || 
                 (i.tipo === 'multi' && i.tombamentos && i.tombamentos.length > 0)
             );
             
+            // O cálculo do total precisa mudar para contar apenas os disponíveis
             const setorTotal = setorItems.reduce((acc, item) => {
-                if(item.tipo === 'single') return acc + item.quantidadeEsperada;
-                if(item.tipo === 'multi') return acc + item.tombamentos.length;
+                if(item.tipo === 'single') {
+                    // Item single: Calcula a quantidade disponível (total menos as cautelas)
+                    const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
+                    return acc + (item.quantidadeEsperada - qtdCautelada);
+                }
+                if(item.tipo === 'multi') {
+                    // Item multi: Conta apenas os tombamentos sem carimbo de cautela
+                    const disponiveis = (item.tombamentos || []).filter(tomb => !tomb.cautela).length;
+                    return acc + disponiveis;
+                }
                 return acc;
             }, 0);
             
+            // Se o setor não tem itens disponíveis, não o renderiza
+            if (setorTotal <= 0) return;
+
             totalItensDisponiveis += setorTotal;
 
             const contentId = `content-${setor.id}`;
             const headerClass = isFirstSetor ? 'accordion-header active' : 'accordion-header';
             const contentStyle = isFirstSetor ? 'max-height: 1500px;' : ''; // Inicia aberto
+        
             
             // --- Cabeçalho do Acordeão (Setor) ---
             htmlContent += `
@@ -5456,24 +5469,28 @@ async function loadCustodiaItens() {
                     <i class="fas fa-chevron-down"></i>
                 </div>
             `;
-            
             // --- Corpo do Acordeão (Itens) ---
             htmlContent += `<div class="accordion-content" id="${contentId}" style="${contentStyle}">`;
-            
             if (setorItems.length > 0) {
                 htmlContent += '<div class="items-card-grid">';
-
                 setorItems.forEach(item => {
                     const itemIdBase = item.id;
                     
                     if (item.tipo === 'single') {
-                        const maxQtd = item.quantidadeEsperada;
+                        // Calcula a quantidade real DISPONÍVEL
+                        const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
+                        const maxQtd = item.quantidadeEsperada - qtdCautelada;
+                        
+                        // Não renderiza se a quantidade disponível for zero
+                        if (maxQtd <= 0) return; 
+                        
                         htmlContent += `
                             <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="single">
                                 <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
-                                <div class="qtd-control-wrapper">
+                            <div class="qtd-control-wrapper">
                                     <label>
-                                        <input type="checkbox" name="cautela-item-base" 
+                                        <input type="checkbox" 
+                                               name="cautela-item-base" 
                                                data-id="${itemIdBase}" data-nome="${item.nome}" data-tipo="single" 
                                                data-max-qtd="${maxQtd}"
                                                onchange="toggleItemQuantity(this); updateCardClass(this.closest('.item-selection-card'));">
@@ -5521,24 +5538,25 @@ async function loadCustodiaItens() {
                     }
                 });
                 
-                htmlContent += '</div>'; // Fecha items-card-grid
+                htmlContent += '</div>';
+                // Fecha items-card-grid
 
             } else {
                  htmlContent += '<p style="padding:10px; color:#999;">Nenhum item disponível para cautela neste setor.</p>';
             }
 
-            htmlContent += '</div>'; // Fecha accordion-content
+            htmlContent += '</div>';
+            // Fecha accordion-content
 
             isFirstSetor = false;
         });
-        
         htmlContent += '</div>'; // Fecha inventory-accordion-container
 
         if (totalItensDisponiveis === 0) {
              itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green; padding:20px;">✅ Nenhum material disponível para cautela neste local.</p>';
         } else {
              itemListContainer.innerHTML = htmlContent;
-             // 4. Adicionar Listeners de Interatividade (Lógica de contagem preservada)
+            // 4. Adicionar Listeners de Interatividade (Lógica de contagem preservada)
              document.querySelectorAll('input[name^="cautela-item"]').forEach(el => {
                  el.addEventListener('change', updateCautelaItemCount);
              });
@@ -5546,7 +5564,7 @@ async function loadCustodiaItens() {
                  el.addEventListener('input', updateCautelaItemCount);
                  el.addEventListener('change', updateCautelaItemCount);
              });
-             // Inicializa a contagem
+            // Inicializa a contagem
              updateCautelaItemCount();
         }
 
