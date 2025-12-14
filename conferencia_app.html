@@ -562,40 +562,46 @@ function setTombamentoStatus(btn, status) {
     updateOverallStatus(); 
     if(status === 'ok') checkSetorCompletion(setor, item.dataset.id); 
 }
-        function setItemStatus(btn, status) { 
+       function setItemStatus(btn, status) { 
     const item = btn.closest('.item-conferencia'); 
     const setor = btn.closest('.setor');
     const itemId = item.dataset.id;
     
-    // Remove os ativos visuais atuais
-    item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
+    item.querySelectorAll('.action-button').forEach(b => b.classList.remove('active')); 
     btn.classList.add('active'); 
     
-    // Oculta elementos de edição/descrição antigos (que não serão mais usados)
-    item.querySelector('.descricao-salva').style.display='none'; 
+    item.querySelector('.descricao-salva').style.display = 'none'; 
     const alteracaoContainer = item.querySelector('.alteracao-container');
-    if (alteracaoContainer) alteracaoContainer.style.display='none';
+    if (alteracaoContainer) alteracaoContainer.style.display = 'none';
     
-    const pb=item.querySelector('.pendencia-alert-box'); 
-    if(pb)pb.style.display='none'; 
+    const pb = item.querySelector('.pendencia-alert-box'); 
+    if (pb) pb.style.display = 'none'; 
     
-    if(status==='ok'){
-        // Fluxo S/A (marca o restante como OK, zera o itemStatus)
-        item.className='item-conferencia status-ok'; 
-        item.querySelector('.status-icon').className='status-icon ok'; 
-        window.itemStatus[itemId]={status:'S/A',obs:''};
+    if (status === 'ok') {
+        // Fluxo S/A: Marca o item visualmente como OK e fecha a conferência.
+        item.className = 'item-conferencia status-ok'; 
+        item.querySelector('.status-icon').className = 'status-icon ok'; 
+        
+        // MANTÉM O LOG DE C/A, apenas marca o item como 'S/A' (Conferido Completo)
+        // Isso garante que o item é finalizado, preservando o log C/A anterior.
+        const currentLog = window.itemStatus[itemId]?.obs || '';
+
+        // Se o S/A foi clicado, o status final é S/A, mesmo que tenha log de C/A.
+        window.itemStatus[itemId] = { 
+            status: 'S/A', 
+            obs: currentLog, 
+            qtd_alterada: window.itemStatus[itemId]?.qtd_alterada || 0 
+        };
+        
+        recalcularESyncDisplay(item, setor); // Finaliza o item e verifica o avanço
+        
     } else {
-        // Fluxo C/A: Chama a nova lógica com modal/prompt
-        // Passamos 'false' para isAppending, pois é a chamada inicial do botão C/A
+        // Fluxo C/A: Inicia o lançamento com prompt.
         lancarNovaAlteracao(itemId, false); 
-        // A função lancarNovaAlteracao fará o resto do trabalho de atualização visual/status.
-        return; // Sai da função, pois a atualização é feita em lancarNovaAlteracao
+        return; 
     } 
     
     salvarRascunho(); 
-    updateSetorStatus(setor); 
-    updateOverallStatus(); 
-    if(status==='ok') checkSetorCompletion(setor, itemId); 
 }
 
         /**
@@ -1388,7 +1394,6 @@ function lancarNovaAlteracao(itemId, isAppending) {
     const item = document.querySelector(`.item-conferencia[data-id="${itemId}"]`);
     if (!item) return;
 
-    // Calcula os disponíveis atuais na tela
     const qtdDisplay = item.querySelector('.item-quantidade').textContent;
     const dispMatch = qtdDisplay.match(/(\d+)\s+DISP/);
     const totalDisponivelAtual = dispMatch ? parseInt(dispMatch[1], 10) : 0;
@@ -1400,10 +1405,9 @@ function lancarNovaAlteracao(itemId, isAppending) {
 
     const obsExistente = window.itemStatus[itemId]?.obs || '';
 
-    // 1. Coleta a Quantidade
     const qtdInput = prompt(`Unidades Disponíveis: ${totalDisponivelAtual}.\n\nQuantas unidades serão registradas com alteração (C/A)?`);
 
-    if (qtdInput === null) return; // Cancelado
+    if (qtdInput === null) return;
     
     const qtdAlterada = parseInt(qtdInput.trim(), 10);
     
@@ -1417,7 +1421,6 @@ function lancarNovaAlteracao(itemId, isAppending) {
         return;
     }
     
-    // 2. Coleta a Descrição
     const obsInput = prompt(`Descreva a alteração para ${qtdAlterada} UNIDADES: (Ex: "Rasgado")`);
 
     if (!obsInput || obsInput.trim().length < 3) {
@@ -1425,7 +1428,6 @@ function lancarNovaAlteracao(itemId, isAppending) {
         return;
     }
     
-    // 3. Processa e Salva a Alteração (Chamando salvarItem diretamente com os dados)
     const obsBruta = obsInput.trim();
     const conf = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     const now = formatarDataSimples(new Date());
@@ -1434,15 +1436,13 @@ function lancarNovaAlteracao(itemId, isAppending) {
     const logObs = `${obsBruta} | QTD: ${qtdAlterada}UN`;
 
     if (isAppending && obsExistente) {
-        // Acrescenta ao log existente
         finalLog = montarHistoricoLinear(obsExistente, logObs, conf, now);
     } else {
-        // Primeira ocorrência de C/A
         finalLog = logObs;
     }
     
-    // 4. Atualiza o window.itemStatus com o log e a quantidade (soma a quantidade)
     const currentQtdTotal = window.itemStatus[itemId]?.qtd_alterada || 0;
+    const setor = item.closest('.setor');
     
     window.itemStatus[itemId] = { 
         status: 'C/A', 
@@ -1450,7 +1450,6 @@ function lancarNovaAlteracao(itemId, isAppending) {
         qtd_alterada: currentQtdTotal + qtdAlterada 
     };
     
-    // 5. Atualiza a exibição na tela
     item.classList.add('status-alert');
     item.querySelector('.status-icon').className = 'status-icon alert';
     
@@ -1458,13 +1457,46 @@ function lancarNovaAlteracao(itemId, isAppending) {
     d.innerHTML = gerarHtmlVisual(finalLog, conf, now, null, null);
     d.style.display = 'block';
 
-    // Oculta/Exibe botões (C/A vs. Acrescentar)
-    updateItemStatusButtons(item, itemId, totalDisponivelAtual - qtdAlterada);
-
+    recalcularESyncDisplay(item, setor);
     salvarRascunho();
-    updateSetorStatus(item.closest('.setor'));
+}
+        /**
+ * Recalcula o status de DISPONÍVEL/TOTAL na tela com base no rascunho (window.itemStatus).
+ * Deve ser chamado após qualquer alteração (C/A ou S/A).
+ */
+function recalcularESyncDisplay(itemEl, setorEl) {
+    const itemId = itemEl.dataset.id;
+    const itemData = dadosConferencia.flatMap(s => s.itens).find(i => i.id === itemId);
+    if (!itemData) return;
+
+    let totalEsperado = itemData.quantidadeEsperada || 0;
+    let totalCautelado = itemData.quantidadeCautelada || 0;
+
+    // A nova quantidade total alterada é a soma da quantidade de rascunho e a quantidade existente no backend (se houver).
+    const qtdLancadaNoRascunho = window.itemStatus[itemId]?.qtd_alterada || 0;
+    let totalComAlteracao = (itemData.quantidadeComAlteracao || 0) + qtdLancadaNoRascunho; 
+    
+    // Calcula o novo estoque visível (incluindo cautelados)
+    const totalIndisponivel = totalCautelado + totalComAlteracao;
+    const totalDisponivel = totalEsperado - totalIndisponivel;
+    
+    // 1. Atualiza o display de quantidade no item
+    itemEl.querySelector('.item-quantidade').innerHTML = `${totalDisponivel} DISP. / ${totalEsperado} TOTAL`;
+    
+    // 2. Atualiza o estado dos botões (C/A, S/A, Acrescentar)
+    updateItemStatusButtons(itemEl, itemId, totalDisponivel);
+
+    // 3. Atualiza os contadores globais e verifica o avanço
+    updateSetorStatus(setorEl);
     updateOverallStatus();
-    checkSetorCompletion(item.closest('.setor'), itemId);
+
+    // 4. Se o total disponível para conferência é 0, o item está completo.
+    if (totalDisponivel <= 0) {
+        checkSetorCompletion(setorEl, itemId);
+    } else if (window.itemStatus[itemId]?.status === 'S/A') {
+        // Se a conferência foi fechada por S/A, também verifica o avanço.
+        checkSetorCompletion(setorEl, itemId);
+    }
 }
         /**
  * Gerencia a exibição dos botões de ação C/A para itens single: C/A inicial vs. Acrescentar.
