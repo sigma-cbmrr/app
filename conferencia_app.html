@@ -622,45 +622,49 @@ function renderizarTombamentos(mItem) {
     return tombsHtml;
 }
         
-function setTombamentoStatus(btn, status) { 
-    const tomb = btn.closest('.tombamento-container'); 
-    const item = btn.closest('.item-conferencia'); 
-    const setor = btn.closest('.setor'); 
-    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`; 
+function setTombamentoStatus(btn, type) {
+    const container = btn.closest('.tombamento-container');
+    const itemPrincipal = container.closest('.item-conferencia');
+    const itemId = itemPrincipal.dataset.id;
+    const tombId = container.dataset.tomb;
+    const uid = `${itemId}-${tombId}`;
+    const setor = container.closest('.setor');
 
-    tomb.querySelectorAll('.action-button').forEach(b => b.classList.remove('active')); 
-    btn.classList.add('active'); 
+    // Botões e Ícone do Tombamento
+    const btnSA = container.querySelector('.action-button.sa-ok');
+    const btnCA = container.querySelector('.action-button.ca-alert');
+    const statusIconTomb = container.querySelector('.status-icon');
 
-    tomb.querySelector('.tombamento-obs-container').style.display = 'none'; 
-    tomb.querySelector('.tombamento-descricao-salva').style.display = 'none'; 
-    
-    const pb = tomb.querySelector('.pendencia-alert-box'); 
-    if(pb) pb.style.display = 'none'; 
-
-    if(status === 'ok'){
-        window.itemStatus[uid] = { status: 'S/A', obs: '' }; 
+    if (type === 'ok') {
+        // --- FLUXO S/A ---
+        window.itemStatus[uid] = {status: 'S/A', obs: '', qtd_alterada: 0};
         
-        // 🛑 CORREÇÃO VISUAL S/A: Aplica a classe de sucesso e remove alerta
-        tomb.classList.remove('status-alert'); 
-        tomb.classList.add('status-ok'); 
+        // 🛑 FIX: Ativa o botão S/A e desativa o C/A
+        if (btnSA) btnSA.classList.add('active');
+        if (btnCA) btnCA.classList.remove('active');
+        
+        // 🛑 FIX: Aplica as classes visuais de OK no container
+        container.classList.add('status-ok'); 
+        container.classList.remove('status-alert');
+        if (statusIconTomb) statusIconTomb.className = 'status-icon ok'; 
+        
+        // Atualiza status do item principal e conferência
+        updateItemMainStatusDisplay(itemPrincipal);
+        updateSetorStatus(setor);
+        updateOverallStatus();
+        salvarRascunho();
+        return;
+    }
 
-        updateItemMainStatusDisplay(item);
-    } else {
-        tomb.querySelector('.tombamento-obs-container').style.display = 'block'; 
-        window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' }; 
-
-        // 🛑 CORREÇÃO VISUAL C/A: Aplica a classe de alerta e remove sucesso
-        tomb.classList.add('status-alert'); 
-        tomb.classList.remove('status-ok'); 
-
-        tomb.querySelector('textarea').focus(); 
-        updateItemMainStatusDisplay(item);
-    } 
-
-    salvarRascunho(); 
-    updateSetorStatus(setor); 
-    updateOverallStatus(); 
-    if(status === 'ok') checkSetorCompletion(setor, item.dataset.id); 
+    if (type === 'alert') {
+        // --- FLUXO C/A ---
+        // Aqui você deve ter uma chamada para abrir a caixa de texto
+        // e, em seguida, a chamada para a função de salvamento.
+        
+        // Assumindo que você usa uma função como lancarTombamentoAlteracao(uid, btn);
+        lancarTombamentoAlteracao(uid, btn); 
+        return;
+    }
 }
        function setItemStatus(btn, status) { 
     const item = btn.closest('.item-conferencia'); 
@@ -882,23 +886,45 @@ function acrescentarPendencia(btn, uid, encodedData) {
         // Lógica de Acrescentar (Quando há uma pendência anterior)
         if (obs.length < 3) return alert("Digite a alteração."); 
         const meta = JSON.parse(decodeURIComponent(hist.dataset.meta));
-        // Usa montarHistoricoLinear para concatenar a nova observação
         final = montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
     } else {
         // Lógica de Nova Alteração (Primeira ocorrência)
         if (obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
-        // Formata a PRIMEIRA observação com o padrão completo
-        final = `${obs}`; // Usando template string limpo
+        final = `${obs}`;
     } 
 
-    window.itemStatus[`${item.dataset.id}-${tomb.dataset.tomb}`] = { status: 'C/A', obs: final, qtd_alterada: 1 }; // Adiciona qtd_alterada: 1
+    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`; // Define o UID aqui para uso
+    window.itemStatus[uid] = { status: 'C/A', obs: final, qtd_alterada: 1 };
     tomb.querySelector('.tombamento-obs-container').style.display = 'none'; 
 
     const d = tomb.querySelector('.tombamento-descricao-salva');
-    
-    // O gerarHtmlVisual agora recebe a string 'final' já formatada.
     d.innerHTML = gerarHtmlVisual(final, conf, now, null, null); 
     d.style.display = 'block'; 
+    
+    // --- 🛑 FIX VISUAL (APÓS SALVAR O C/A) 🛑 ---
+    
+    const btnSATomb = tomb.querySelector('.action-button.sa-ok');
+    const btnCATomb = tomb.querySelector('.action-button.ca-alert');
+    const statusIconTomb = tomb.querySelector('.status-icon');
+    
+    // 1. Ativa o botão C/A
+    if (btnCATomb) btnCATomb.classList.add('active');
+    if (btnSATomb) btnSATomb.classList.remove('active');
+    
+    // 2. Aplica as classes visuais de ALERTA no container
+    tomb.classList.add('status-alert'); 
+    tomb.classList.remove('status-ok');
+    if (statusIconTomb) statusIconTomb.className = 'status-icon alert'; 
+    
+    // 3. Ativa o botão C/A do item principal (para garantir o feedback imediato)
+    const btnCA_Principal = item.querySelector('.item-options .ca-alert');
+    const btnSA_Principal = item.querySelector('.item-options .sa-ok');
+    
+    if (btnCA_Principal) btnCA_Principal.classList.add('active');
+    if (btnSA_Principal) btnSA_Principal.classList.remove('active');
+    
+    // --- 🛑 FIM DO FIX 🛑 ---
+
     salvarRascunho(); 
 
     updateItemMainStatusDisplay(item); 
