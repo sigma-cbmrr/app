@@ -5436,7 +5436,7 @@ async function loadCustodiaItens() {
             // O cálculo do total deve refletir o que será exibido
             const setorTotal = setorItems.reduce((acc, item) => {
                 if(item.tipo === 'single') {
-                    // 🛑 RECALCULA O DISPONÍVEL (Estoque - Cautelas Ativas) 🛑
+                    // Item single: Disponível = Estoque - Cautelas Ativas
                     const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
                     return acc + (item.quantidadeEsperada - qtdCautelada);
                 }
@@ -5474,7 +5474,7 @@ async function loadCustodiaItens() {
                     
                     if (item.tipo === 'single') {
                         
-                        // 🛑 NOVO CALCULO DE QUANTIDADE DISPONÍVEL 🛑
+                        // CÁLCULO DE QUANTIDADE DISPONÍVEL
                         const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
                         const maxQtdDisponivel = item.quantidadeEsperada - qtdCautelada;
                         const qtdTotalEstoque = item.quantidadeEsperada;
@@ -5511,29 +5511,48 @@ async function loadCustodiaItens() {
 
                     } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
                         
-                        // Tombamentos: Mantemos a lógica de filtragem, pois um tombamento é único e só pode ser cautelado uma vez.
-                        const tombamentosDisponiveis = item.tombamentos.filter(tomb => !tomb.cautela);
+                        // Tombamentos: Usamos o array completo (incluindo os cautelados)
+                        const tombamentosTotais = item.tombamentos;
                         
-                        if (tombamentosDisponiveis.length === 0) return;
+                        // Se não houver itens no estoque, não renderiza
+                        if (tombamentosTotais.length === 0) return;
                         
-                        // Renderização das Tags de Tombamento
-                        let tagsHtml = tombamentosDisponiveis.map(tomb => {
+                        // 🛑 NOVO PADRÃO DE ESTOQUE 🛑
+                        const disponiveis = tombamentosTotais.filter(tomb => !tomb.cautela).length;
+                        const estoqueMsg = `Estoque: ${tombamentosTotais.length} | Dispon&iacute;vel: ${disponiveis}`;
+                        
+                        // Renderização das Tags de Tombamento (Incluindo os Cautelados)
+                        let tagsHtml = tombamentosTotais.map(tomb => {
                             const itemIdTombado = `${itemIdBase}-${tomb.tomb}`;
+                            const isCautelado = !!tomb.cautela;
+                            const isDisabled = isCautelado ? 'disabled' : '';
+                            const statusClass = isCautelado ? 'cautelado' : '';
+                            
+                            // 🛑 PREPARAÇÃO PARA HOVER (Carimbo) 🛑
+                            let titleText = isCautelado ? 
+                                `Cautelado por: ${tomb.cautela.destinatario} em ${tomb.cautela.data}` : 
+                                `Tombamento livre`;
+                            
+                            // Adiciona o ícone universal de cautela (cadeado)
+                            const icon = isCautelado ? 
+                                `<i class="fas fa-lock" style="margin-left: 5px; color: #800020;"></i>` : '';
+
                             return `
-                                <div class="tombamento-tag" data-item-id="${itemIdTombado}">
+                                <div class="tombamento-tag ${statusClass}" data-item-id="${itemIdTombado}" title="${titleText}">
                                     <input type="checkbox" name="cautela-item-multi" 
                                            data-id="${itemIdTombado}" 
                                            data-nome="${item.nome} (Tomb: ${tomb.tomb})" data-tipo="multi" 
                                            data-qtd="1"
-                                           onchange="updateCardClass(this.closest('.item-selection-card'));">
-                                    ${tomb.tomb}
+                                           onchange="updateCardClass(this.closest('.item-selection-card'));"
+                                           ${isDisabled}>
+                                    ${tomb.tomb} ${icon}
                                 </div>`;
                         }).join('');
 
                         htmlContent += `
                             <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="multi">
-                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome} (${tombamentosDisponiveis.length} disponíveis)</h4>
-                                <small style="color:#555;">Estoque: ${item.tombamentos.length} | Selecione os tombamentos:</small>
+                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
+                                <small style="color:#555;">${estoqueMsg} | Selecione os tombamentos:</small>
                                 <div class="tombamento-tag-list">${tagsHtml}</div>
                             </div>`;
                     }
