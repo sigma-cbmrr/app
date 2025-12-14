@@ -2149,6 +2149,7 @@
                     <div class="global-actions">
                         <button class="btn-modern-action btn-sync" onclick="salvarDados()">Salvar</button>
                         <button class="btn-modern-action btn-backup" onclick="fazerBackupLocal()">Backup</button>
+                        <button class="btn-modern-action btn-delete" onclick="limparCarimbosCautela()">Limpar Carimbos Cautela</button>
                         <input type="file" id="import-json" style="display: none;" onchange="importarBackupLocal(event)">
                         <button class="btn-modern-action btn-create" onclick="document.getElementById('import-json').click()">Importar</button>
               
@@ -7272,6 +7273,57 @@ function renderCautelaRow(cautela) {
         </tr>
     `;
 }
+     // Adicionar esta função no final do bloco de funções do Editor de Listas (sigma_dashboard.txt)
+
+        async function limparCarimbosCautela() {
+            if (!currentEditingId) return alert("Nenhuma lista em edição.");
+
+            if (!confirm("TEM CERTEZA? Isso irá remover todos os registros de cautelas ativas (carimbos) para ESTA LISTA!")) {
+                return;
+            }
+
+            try {
+                // Percorre a lista local para remover os carimbos
+                dadosConferencia = dadosConferencia.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(item => {
+                        if (item.tipo === 'single' && item.cautelas) {
+                            delete item.cautelas; // Remove o array de cautelas
+                        }
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            item.tombamentos = item.tombamentos.map(tomb => {
+                                if (tomb.cautela) {
+                                    delete tomb.cautela; // Remove o carimbo do tombamento
+                                }
+                                return tomb;
+                            });
+                        }
+                        return item;
+                    })
+                }));
+
+                // Salva o estado limpo de volta no Firestore
+                await db.collection(COLECAO_LISTAS).doc(currentEditingId).update({ 
+                    list: dadosConferencia, 
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
+                });
+                
+                alert("Carimbos de cautela removidos e lista atualizada!");
+                
+                // Recarrega a lista para atualizar a visualização e garantir a consistência
+                renderizarLista();
+                
+                // 🛑 CRÍTICO: Limpa os resultados C/A antigos que podem estar linkados.
+                // A remoção dos carimbos remove a indisponibilidade, mas não o alerta C/A em si.
+                // Recomenda-se limpar manualmente os resultados da lista na coleção 'resultados_conferencias'
+                // para garantir que o Dashboard esteja 100% zerado, mas não podemos fazer isso automaticamente aqui
+                // sem o ID da lista.
+                
+            } catch (e) {
+                console.error("Erro ao limpar carimbos:", e);
+                alert("Erro ao limpar carimbos: " + e.message);
+            }
+        }   
         
     </script>
 </body>
