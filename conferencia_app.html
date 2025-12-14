@@ -533,24 +533,40 @@ function renderizarTombamentos(mItem) {
 }
 
         function setItemStatus(btn, status) { 
-            const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
-            item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
-            item.querySelector('.descricao-salva').style.display='none'; item.querySelector('.alteracao-container').style.display='none'; 
-            const pb=item.querySelector('.pendencia-alert-box'); if(pb)pb.style.display='none'; 
-            if(status==='ok'){item.className='item-conferencia status-ok'; item.querySelector('.status-icon').className='status-icon ok'; window.itemStatus[item.dataset.id]={status:'S/A',obs:''};} 
-            else {item.className='item-conferencia status-alert'; item.querySelector('.status-icon').className='status-icon alert'; item.querySelector('.alteracao-container').style.display='block'; window.itemStatus[item.dataset.id]={status:'PENDING_CA',obs:''}; item.querySelector('textarea').focus();} 
-            salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); 
-        }
-
-        function setTombamentoStatus(btn, status) { 
-            const tomb = btn.closest('.tombamento-container'); const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); const uid=`${item.dataset.id}-${tomb.dataset.tomb}`; 
-            tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
-            tomb.querySelector('.tombamento-obs-container').style.display='none'; tomb.querySelector('.tombamento-descricao-salva').style.display='none'; 
-            const pb=tomb.querySelector('.pendencia-alert-box'); if(pb)pb.style.display='none'; 
-            if(status==='ok'){window.itemStatus[uid]={status:'S/A',obs:''}; updateItemMainStatusDisplay(item);} 
-            else {tomb.querySelector('.tombamento-obs-container').style.display='block'; window.itemStatus[uid]={status:'PENDING_CA',obs:''}; tomb.querySelector('textarea').focus(); updateItemMainStatusDisplay(item);} 
-            salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); 
-        }
+    const item = btn.closest('.item-conferencia'); 
+    const setor = btn.closest('.setor');
+    const itemId = item.dataset.id;
+    
+    // Remove os ativos visuais atuais
+    item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
+    btn.classList.add('active'); 
+    
+    // Oculta elementos de edição/descrição antigos (que não serão mais usados)
+    item.querySelector('.descricao-salva').style.display='none'; 
+    const alteracaoContainer = item.querySelector('.alteracao-container');
+    if (alteracaoContainer) alteracaoContainer.style.display='none';
+    
+    const pb=item.querySelector('.pendencia-alert-box'); 
+    if(pb)pb.style.display='none'; 
+    
+    if(status==='ok'){
+        // Fluxo S/A (marca o restante como OK, zera o itemStatus)
+        item.className='item-conferencia status-ok'; 
+        item.querySelector('.status-icon').className='status-icon ok'; 
+        window.itemStatus[itemId]={status:'S/A',obs:''};
+    } else {
+        // Fluxo C/A: Chama a nova lógica com modal/prompt
+        // Passamos 'false' para isAppending, pois é a chamada inicial do botão C/A
+        lancarNovaAlteracao(itemId, false); 
+        // A função lancarNovaAlteracao fará o resto do trabalho de atualização visual/status.
+        return; // Sai da função, pois a atualização é feita em lancarNovaAlteracao
+    } 
+    
+    salvarRascunho(); 
+    updateSetorStatus(setor); 
+    updateOverallStatus(); 
+    if(status==='ok') checkSetorCompletion(setor, itemId); 
+}
 
         /**
  * Lida com o clique no botão "Concordo (Manter)" ou "Ciente (Item Cautelado)".
@@ -1330,6 +1346,127 @@ async function limparStatusDeItemParaTeste(listaId, itemId) {
     } catch (error) {
         console.error("Erro ao limpar status do item:", error);
         alert(`Falha na limpeza. Erro: ${error.message}`);
+    }
+}
+        /**
+ * Inicia o processo de lançamento de uma ou mais unidades em C/A para um item 'single'.
+ * Usa prompts para coletar QTD e OBS.
+ * @param {string} itemId - O ID do item a ser alterado.
+ * @param {boolean} isAppending - Indica se é uma nova alteração (true) ou o início (false).
+ */
+function lancarNovaAlteracao(itemId, isAppending) {
+    const item = document.querySelector(`.item-conferencia[data-id="${itemId}"]`);
+    if (!item) return;
+
+    // Calcula os disponíveis atuais na tela
+    const qtdDisplay = item.querySelector('.item-quantidade').textContent;
+    const dispMatch = qtdDisplay.match(/(\d+)\s+DISP/);
+    const totalDisponivelAtual = dispMatch ? parseInt(dispMatch[1], 10) : 0;
+    
+    if (totalDisponivelAtual <= 0) {
+        alert("Não há mais unidades disponíveis para lançamento de alteração.");
+        return;
+    }
+
+    const obsExistente = window.itemStatus[itemId]?.obs || '';
+
+    // 1. Coleta a Quantidade
+    const qtdInput = prompt(`Unidades Disponíveis: ${totalDisponivelAtual}.\n\nQuantas unidades serão registradas com alteração (C/A)?`);
+
+    if (qtdInput === null) return; // Cancelado
+    
+    const qtdAlterada = parseInt(qtdInput.trim(), 10);
+    
+    if (isNaN(qtdAlterada) || qtdAlterada <= 0) {
+        alert("Quantidade inválida. Operação cancelada.");
+        return;
+    }
+
+    if (qtdAlterada > totalDisponivelAtual) {
+        alert(`Você só pode alterar até ${totalDisponivelAtual} unidades disponíveis. Operação cancelada.`);
+        return;
+    }
+    
+    // 2. Coleta a Descrição
+    const obsInput = prompt(`Descreva a alteração para ${qtdAlterada} UNIDADES: (Ex: "Rasgado")`);
+
+    if (!obsInput || obsInput.trim().length < 3) {
+        alert("A descrição da alteração é obrigatória. Operação cancelada.");
+        return;
+    }
+    
+    // 3. Processa e Salva a Alteração (Chamando salvarItem diretamente com os dados)
+    const obsBruta = obsInput.trim();
+    const conf = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    const now = formatarDataSimples(new Date());
+
+    let finalLog = '';
+    const logObs = `${obsBruta} | QTD: ${qtdAlterada}UN`;
+
+    if (isAppending && obsExistente) {
+        // Acrescenta ao log existente
+        finalLog = montarHistoricoLinear(obsExistente, logObs, conf, now);
+    } else {
+        // Primeira ocorrência de C/A
+        finalLog = logObs;
+    }
+    
+    // 4. Atualiza o window.itemStatus com o log e a quantidade (soma a quantidade)
+    const currentQtdTotal = window.itemStatus[itemId]?.qtd_alterada || 0;
+    
+    window.itemStatus[itemId] = { 
+        status: 'C/A', 
+        obs: finalLog, 
+        qtd_alterada: currentQtdTotal + qtdAlterada 
+    };
+    
+    // 5. Atualiza a exibição na tela
+    item.classList.add('status-alert');
+    item.querySelector('.status-icon').className = 'status-icon alert';
+    
+    const d = item.querySelector('.descricao-salva');
+    d.innerHTML = gerarHtmlVisual(finalLog, conf, now, null, null);
+    d.style.display = 'block';
+
+    // Oculta/Exibe botões (C/A vs. Acrescentar)
+    updateItemStatusButtons(item, itemId, totalDisponivelAtual - qtdAlterada);
+
+    salvarRascunho();
+    updateSetorStatus(item.closest('.setor'));
+    updateOverallStatus();
+    checkSetorCompletion(item.closest('.setor'), itemId);
+}
+        /**
+ * Gerencia a exibição dos botões de ação C/A para itens single: C/A inicial vs. Acrescentar.
+ * @param {HTMLElement} item - O elemento do item.
+ * @param {string} itemId - O ID do item.
+ * @param {number} qtdRestante - Quantidade de unidades restantes disponíveis.
+ */
+function updateItemStatusButtons(item, itemId, qtdRestante) {
+    const itemOptions = item.querySelector('.item-options');
+    const btnSA = item.querySelector('.sa-ok');
+    
+    // Se não há mais unidades disponíveis, desabilita todas as ações de alteração/lançamento.
+    if (qtdRestante <= 0) {
+        itemOptions.innerHTML = `<span style="font-weight: bold; color: #d90f23;">C/A (TOTALMENTE CONFERIDO)</span>`;
+        if (btnSA) btnSA.disabled = true;
+        return;
+    }
+
+    const currentStatus = window.itemStatus[itemId]?.status;
+
+    if (currentStatus === 'C/A') {
+        // Se já existe C/A, substitui C/A por ACRESCENTAR
+        itemOptions.innerHTML = `
+            <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A (Unidades Restantes)</button>
+            <button class="action-button ca-alert active" onclick="lancarNovaAlteracao('${itemId}', true)">➕ Acrescentar Alteração</button>
+        `;
+    } else {
+        // Senão, mantém a exibição normal (apenas C/A e S/A)
+        itemOptions.innerHTML = `
+            <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button>
+            <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>
+        `;
     }
 }
     </script>
