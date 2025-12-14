@@ -162,26 +162,30 @@
         }
 
         function updateSetorStatus(setorEl) { 
-            const items = setorEl.querySelectorAll('.item-conferencia'); 
-            let completed = 0, total = 0; 
-            items.forEach(item => { 
-                if (item.dataset.type === 'single') { 
-                    total++; const s = window.itemStatus[item.dataset.id]?.status; 
-                    if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-                } else { 
-                    const tombs = item.querySelectorAll('.tombamento-container'); 
-                    tombs.forEach(t => { 
-                        total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
-                        if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-                    }); 
-                } 
+    const items = setorEl.querySelectorAll('.item-conferencia'); 
+    let completed = 0, total = 0; 
+    items.forEach(item => { 
+        if (item.dataset.type === 'single') { 
+            total++; 
+            const s = window.itemStatus[item.dataset.id]?.status; 
+            // 🛑 ADIÇÃO CRÍTICA: Incluir 'CIENTE' na contagem
+            if (s === 'S/A' || s === 'C/A' || s === 'KEEP' || s === 'CIENTE') completed++; 
+        } else { 
+            const tombs = item.querySelectorAll('.tombamento-container'); 
+            tombs.forEach(t => { 
+                total++; 
+                const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
+                // 🛑 ADIÇÃO CRÍTICA: Incluir 'CIENTE' na contagem
+                if (s === 'S/A' || s === 'C/A' || s === 'KEEP' || s === 'CIENTE') completed++; 
             }); 
-            setorEl.dataset.totalItems = total; 
-            const st = setorEl.querySelector('.setor-status'); 
-            st.dataset.completed = completed; 
-            if (completed === total && total > 0) { st.textContent = 'OK'; st.classList.add('ok'); } 
-            else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
-        }
+        } 
+    }); 
+    setorEl.dataset.totalItems = total; 
+    const st = setorEl.querySelector('.setor-status'); 
+    st.dataset.completed = completed; 
+    if (completed === total && total > 0) { st.textContent = 'OK'; st.classList.add('ok'); } 
+    else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
+}
 
         function updateItemMainStatusDisplay(item) { 
             if (item.dataset.type === 'single') return; 
@@ -660,10 +664,10 @@ function manterPendencia(btn, uid) {
     const itemId = itemPrincipal.dataset.id;
     const isTombamento = container.classList.contains('tombamento-container');
     
-    // O uid passado para o item single é item.id; para multi é item.id-tomb.tomb
-    const finalUid = isTombamento ? uid : itemId; // Garante que o item single use o itemId
+    // Para itens single (que não usam UID de tombamento), usamos o itemId
+    const finalUid = isTombamento ? uid : itemId; 
 
-    // ... (Lógica para verificar se é Cautela) ...
+    // ... (Lógica para verificar se é Cautela - Mantida a sua) ...
     let itemMestre = dadosConferencia.flatMap(s => s.itens).find(i => i.id === itemId);
     let isCautela = false;
     if (itemMestre) {
@@ -678,47 +682,40 @@ function manterPendencia(btn, uid) {
         box.classList.add('kept');
         
         let logMessage = isCautela ? '✔ Ciente da Cautela' : '✔ Mantido';
-        let statusToSet = 'CIENTE'; // Usa CIENTE para marcar como FINALIZADO no rascunho
+        let statusToSet = 'CIENTE'; 
         
         box.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMessage}</div>`);
         
-        // 🛑 CORREÇÃO: Usa o UID correto para o log.
+        // 🛑 CORREÇÃO DE STATUS: Salva CIENTE com o UID correto.
         window.itemStatus[finalUid] = { status: statusToSet, obs: '', qtd_alterada: isTombamento ? 1 : 0 };
         
-        // --- ATUALIZAÇÃO VISUAL (FIX TYPERROR E C/A ATIVO) ---
+        // --- ATUALIZAÇÃO VISUAL ---
         
-        const elementToMark = isTombamento ? container : itemPrincipal;
-        
-        // Aplica a classe de ALERTA para que o ícone fique C/A
-        elementToMark.classList.remove('status-ok'); 
-        elementToMark.classList.add('status-alert'); 
-        
-        const statusIcon = elementToMark.querySelector('.status-icon');
-        if (statusIcon) { // FIX TYPERROR
-            statusIcon.className = 'status-icon alert'; 
-        }
-
-        // LÓGICA C/A ATIVO: O item principal (se single) ou o tombamento (se multi) fica marcado.
-        // O botão C/A do item principal (se multi) deve ser ATIVADO para manter o feedback.
         const btnCA = itemPrincipal.querySelector('.action-button.ca-alert');
         const btnSA = itemPrincipal.querySelector('.action-button.sa-ok');
         
+        // Ativa o botão C/A do item principal
         if (btnCA) btnCA.classList.add('active');
         if (btnSA) btnSA.classList.remove('active');
 
         if (isTombamento) {
-            // Se for tombamento, chama o updateItemMainStatusDisplay
+            // 🛑 CORREÇÃO TOMBAMENTO: Aplica as classes diretamente no tombamento para fixar o ícone C/A local
+            container.classList.remove('status-ok'); 
+            container.classList.add('status-alert'); 
+            const statusIconTomb = container.querySelector('.status-icon');
+            if (statusIconTomb) statusIconTomb.className = 'status-icon alert';
+            
+            // Força a atualização do item PRINCIPAL (cabeçalho)
             updateItemMainStatusDisplay(itemPrincipal); 
         } else {
-             // Se for single, recalcula o display (que irá marcar como concluído se estoque=0 ou status=CIENTE)
+             // 🛑 CORREÇÃO SINGLE: Chama a função central para atualizar o ícone do cabeçalho e recalcular
              recalcularESyncDisplay(itemPrincipal, setor);
         }
         
         // Atualizações de conclusão
-        updateSetorStatus(setor);
+        updateSetorStatus(setor); // 🛑 ESSENCIAL: Agora conta CIENTE
         updateOverallStatus();
-        // A conclusão agora será tratada pela recalcularESyncDisplay ou updateItemMainStatusDisplay
-        // checkSetorCompletion(setor, itemId); // Será chamada pelas rotinas de display
+        // checkSetorCompletion já será chamada dentro das rotinas de display se for single/multi completo.
         salvarRascunho();
     }
 }
