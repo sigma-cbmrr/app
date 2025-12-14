@@ -203,37 +203,85 @@
             else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►';}); content.classList.add('expanded'); arrow.textContent = '▼'; } 
         }
 
-        function checkSetorCompletion(currentSetor, currentItemId) { 
-            const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); 
-            if (comp >= total) { autoAdvanceSetor(currentSetor.dataset.id); } else { focusNextItem(currentItemId); }
-        }
+        function checkSetorCompletion(setor, itemId) {
+    const itemEl = setor.querySelector(`.item-conferencia[data-id="${itemId}"]`);
+    if (!itemEl) return;
 
-        function focusNextItem(currentItemId) { 
-            const allItems = Array.from(document.querySelectorAll('.item-conferencia')); 
-            let baseId = currentItemId.split('-')[0]; 
-            const idx = allItems.findIndex(i => i.dataset.id === baseId); 
-            for (let i = idx; i < allItems.length; i++) { 
-                const item = allItems[i]; if (!item) continue; const id = item.dataset.id; 
-                if (item.dataset.type === 'single') { 
-                    const st = window.itemStatus[id]; 
-                    if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { 
-                        item.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-                        if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; 
-                    } 
-                } 
-                if (item.dataset.type === 'multi') { 
-                    const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { 
-                        const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; 
-                    }); 
-                    if (pendingTomb) { 
-                        pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-                        const uid = `${id}-${pendingTomb.dataset.tomb}`; 
-                        if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; 
-                    } 
-                } 
-            } 
-        }
+    // Lógica para determinar se um ITEM está completo
+    let isItemCompleted = false;
 
+    // 1. Verifica itens sem tombamento (single)
+    if (!itemEl.querySelector('.tombamento-container')) {
+        const itemStatus = window.itemStatus[itemId];
+        // Verifica se o estoque disponível é 0 (fechado por C/A) ou se foi marcado S/A
+        const isFullyAccounted = itemEl.querySelector('.item-quantidade').textContent.match(/^0\s+DISP/);
+        
+        if (itemStatus && (itemStatus.status === 'S/A' || isFullyAccounted)) {
+            isItemCompleted = true;
+        }
+    } 
+    // 2. Verifica itens com tombamento (multi)
+    else {
+        const todosTombamentos = itemEl.querySelectorAll('.tombamento-container');
+        let todosTombamentosCompletos = true;
+        
+        todosTombamentos.forEach(tomb => {
+            const uid = `${itemId}-${tomb.dataset.tomb}`;
+            const tombStatus = window.itemStatus[uid]?.status;
+            // Tombamento é completo se status for S/A, C/A, ou CIENTE
+            if (!tombStatus || (tombStatus !== 'S/A' && tombStatus !== 'C/A' && tombStatus !== 'CIENTE')) {
+                todosTombamentosCompletos = false;
+            }
+        });
+        
+        if (todosTombamentosCompletos) {
+            isItemCompleted = true;
+        }
+    }
+
+    // 🛑 ADICIONA O REQUISITO DE UX (ROLAGEM) 🛑
+    if (isItemCompleted) {
+        // Encontra o próximo item pendente e rola para ele
+        scrollToNextPendingItem(itemId);
+    }
+
+    // Lógica para verificar a conclusão do SETOR
+    const allItems = setor.querySelectorAll('.item-conferencia');
+    let setorCompleto = true;
+    
+    // Itera sobre todos os itens do setor para verificar se todos foram conferidos
+    allItems.forEach(i => {
+        const iId = i.dataset.id;
+        
+        // Se for item single E não estiver completo (S/A ou C/A/0 DISP)
+        if (!i.querySelector('.tombamento-container')) {
+            const iStatus = window.itemStatus[iId];
+            const isFullyAccounted = i.querySelector('.item-quantidade').textContent.match(/^0\s+DISP/);
+            
+            if (!iStatus || (iStatus.status !== 'S/A' && iStatus.status !== 'C/A' && !isFullyAccounted)) {
+                setorCompleto = false;
+            }
+        } 
+        // Se for item multi (com tombamento) E pelo menos um tombamento estiver pendente
+        else {
+            const tombamentos = i.querySelectorAll('.tombamento-container');
+            tombamentos.forEach(t => {
+                const uid = `${iId}-${t.dataset.tomb}`;
+                const tStatus = window.itemStatus[uid]?.status;
+                if (!tStatus || (tStatus !== 'S/A' && tStatus !== 'C/A' && tStatus !== 'CIENTE')) {
+                    setorCompleto = false;
+                }
+            });
+        }
+    });
+
+    if (setorCompleto) {
+        setor.classList.add('setor-completed');
+    } else {
+        setor.classList.remove('setor-completed');
+    }
+}
+        
         function autoAdvanceSetor(sid) { 
             const s = document.querySelector(`.setor[data-id="${sid}"]`); 
             if (s) toggleSetor(s.querySelector('.setor-header')); 
@@ -1452,6 +1500,30 @@ function lancarNovaAlteracao(itemId, isAppending) {
 
     recalcularESyncDisplay(item, setor);
     salvarRascunho();
+}
+        function scrollToNextPendingItem(currentItemId) {
+    const allItems = Array.from(document.querySelectorAll('.item-conferencia'));
+    
+    let nextPendingItem = null;
+    let foundCurrent = false;
+
+    for (const itemEl of allItems) {
+        if (itemEl.dataset.id === currentItemId) {
+            foundCurrent = true;
+            continue;
+        }
+
+        // Se é o próximo item (após o concluído) e ainda está pendente (sem status ok ou alert)
+        if (foundCurrent && !itemEl.classList.contains('status-ok') && !itemEl.classList.contains('status-alert')) {
+            nextPendingItem = itemEl;
+            break;
+        }
+    }
+
+    if (nextPendingItem) {
+        // Rola suavemente para o início do próximo item
+        nextPendingItem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 }
         /**
  * Recalcula o status de DISPONÍVEL/TOTAL na tela com base no rascunho (window.itemStatus).
