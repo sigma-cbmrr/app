@@ -551,6 +551,7 @@ function renderizarTombamentos(mItem) {
         tombsHtml += `
             <div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${mItem.id}">
                 <div class="tombamento-controls">
+                    <span class="status-icon"></span>
                     <span>Tomb.: <strong>${tomb.tomb}</strong></span>
                     <span class="badge ${tombStatusBadge} ms-2">${tombStatusText}</span>
                     <div class="tombamento-options">
@@ -664,10 +665,9 @@ function manterPendencia(btn, uid) {
     const itemId = itemPrincipal.dataset.id;
     const isTombamento = container.classList.contains('tombamento-container');
     
-    // Para itens single (que não usam UID de tombamento), usamos o itemId
     const finalUid = isTombamento ? uid : itemId; 
 
-    // ... (Lógica para verificar se é Cautela - Mantida a sua) ...
+    // Lógica para verificar se é Cautela... (mantida)
     let itemMestre = dadosConferencia.flatMap(s => s.itens).find(i => i.id === itemId);
     let isCautela = false;
     if (itemMestre) {
@@ -686,7 +686,6 @@ function manterPendencia(btn, uid) {
         
         box.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMessage}</div>`);
         
-        // 🛑 CORREÇÃO DE STATUS: Salva CIENTE com o UID correto.
         window.itemStatus[finalUid] = { status: statusToSet, obs: '', qtd_alterada: isTombamento ? 1 : 0 };
         
         // --- ATUALIZAÇÃO VISUAL ---
@@ -694,12 +693,12 @@ function manterPendencia(btn, uid) {
         const btnCA = itemPrincipal.querySelector('.action-button.ca-alert');
         const btnSA = itemPrincipal.querySelector('.action-button.sa-ok');
         
-        // Ativa o botão C/A do item principal
+        // 🛑 Ativa o botão C/A do item principal
         if (btnCA) btnCA.classList.add('active');
         if (btnSA) btnSA.classList.remove('active');
 
         if (isTombamento) {
-            // 🛑 CORREÇÃO TOMBAMENTO: Aplica as classes diretamente no tombamento para fixar o ícone C/A local
+            // 🛑 CORREÇÃO TOMBAMENTO: Aplica as classes e o ícone NO CONTAINER DO TOMBAMENTO (se o ícone existir no HTML)
             container.classList.remove('status-ok'); 
             container.classList.add('status-alert'); 
             const statusIconTomb = container.querySelector('.status-icon');
@@ -708,14 +707,12 @@ function manterPendencia(btn, uid) {
             // Força a atualização do item PRINCIPAL (cabeçalho)
             updateItemMainStatusDisplay(itemPrincipal); 
         } else {
-             // 🛑 CORREÇÃO SINGLE: Chama a função central para atualizar o ícone do cabeçalho e recalcular
+             // 🛑 CORREÇÃO SINGLE: A recalcularESyncDisplay garante o ícone do cabeçalho e ativação do botão
              recalcularESyncDisplay(itemPrincipal, setor);
         }
         
-        // Atualizações de conclusão
-        updateSetorStatus(setor); // 🛑 ESSENCIAL: Agora conta CIENTE
+        updateSetorStatus(setor);
         updateOverallStatus();
-        // checkSetorCompletion já será chamada dentro das rotinas de display se for single/multi completo.
         salvarRascunho();
     }
 }
@@ -1576,7 +1573,6 @@ function updateItemStatusButtons(item, itemId, qtdRestante) {
     const itemOptions = item.querySelector('.item-options');
     const currentQtdTotal = window.itemStatus[itemId]?.qtd_alterada || 0;
     
-    // Se todas as unidades disponíveis foram lançadas em C/A.
     if (qtdRestante <= 0 && currentQtdTotal > 0) {
         itemOptions.innerHTML = `<span style="font-weight: bold; color: #d90f23;">C/A (TOTALMENTE ALTERADO)</span>`;
         return;
@@ -1585,15 +1581,13 @@ function updateItemStatusButtons(item, itemId, qtdRestante) {
     let ca_onclick_action;
     
     if (currentQtdTotal > 0) {
-        // Se já tem C/A lançado, o botão C/A deve chamar a função para ACRESCENTAR
         ca_onclick_action = `lancarNovaAlteracao('${itemId}', true)`;
     } else {
-        // Se não tem C/A, o botão C/A deve chamar setItemStatus, iniciando o processo
         ca_onclick_action = `setItemStatus(this, 'alert')`;
     }
     
-    // O botão ativo deve ser o C/A se o status for 'C/A' para manter o feedback visual.
-    const isActive = window.itemStatus[itemId]?.status === 'C/A' ? 'active' : '';
+    // 🛑 CORREÇÃO: Inclui CIENTE na verificação de botão ativo
+    const isActive = (window.itemStatus[itemId]?.status === 'C/A' || window.itemStatus[itemId]?.status === 'CIENTE') ? 'active' : '';
     const isSAActive = window.itemStatus[itemId]?.status === 'S/A' ? 'active' : '';
 
     itemOptions.innerHTML = `
