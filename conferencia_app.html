@@ -656,48 +656,74 @@ function setTombamentoStatus(btn, status) {
  * Lida com o clique no botão "Concordo (Manter)" ou "Ciente (Item Cautelado)".
  * Implementa a lógica de bloqueio e reabilitação pós-Ciência.
  */
-function manterPendencia(btn, uid) { 
-    const box = btn.closest('.pendencia-alert-box'); 
-    if(box) { 
-        // 1. Atualização Visual do Log (Mantida)
-        box.querySelector('.pendencia-actions').style.display = 'none'; 
-        box.classList.add('kept'); 
-        box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
-        
-        // 2. Atualização do Status (Usando CIENTE para conclusão)
-        window.itemStatus[uid] = { status: 'CIENTE', obs: '' }; // Usamos CIENTE (e não KEEP)
-        salvarRascunho(); 
-        
-        const c = box.closest('.tombamento-container') || box.closest('.item-conferencia'); 
-        const item = c.classList.contains('item-conferencia') ? c : c.closest('.item-conferencia'); 
-        const setor = c.closest('.setor');
-        
-        // 3. Ativação do Botão C/A (Do item PRINCIPAL, se for tombamento)
-        if (c.classList.contains('tombamento-container')) {
-             // 🛑 CORREÇÃO: Busca o botão C/A no item principal para ativá-lo.
-             const btnCA_principal = item.querySelector('.item-options .ca-alert');
-             if(btnCA_principal) btnCA_principal.classList.add('active');
-             
-             // 🛑 NOVO: Marca o próprio tombamento como C/A/Alerta visualmente
-             c.classList.add('status-alert');
-             c.classList.remove('status-ok');
-             const statusIconTomb = c.querySelector('.status-icon');
-             if(statusIconTomb) statusIconTomb.className = 'status-icon alert';
+function manterPendencia(btn, uid) {
+    const box = btn.closest('.pendencia-alert-box');
+    const container = box.closest('.tombamento-container') || box.closest('.item-conferencia');
+    
+    if (!container) return;
+    
+    const itemPrincipal = container.closest('.item-conferencia');
+    const setor = container.closest('.setor');
+    const itemId = itemPrincipal.dataset.id;
+    const isTombamento = container.classList.contains('tombamento-container');
+    
+    const finalUid = isTombamento ? uid : itemId; 
 
-             updateItemMainStatusDisplay(item); 
+    // Lógica para verificar se é Cautela... (mantida)
+    let itemMestre = dadosConferencia.flatMap(s => s.itens).find(i => i.id === itemId);
+    let isCautela = false;
+    if (itemMestre) {
+        if (isTombamento) {
+            const tombData = itemMestre.tombamentos ? itemMestre.tombamentos.find(t => `${itemId}-${t.tomb}` === finalUid) : null;
+            if (tombData && tombData.cautela_id) { isCautela = true; }
+        } else if (itemMestre.quantidadeCautelada > 0) { isCautela = true; }
+    }
+
+    if (box) {
+        box.querySelector('.pendencia-actions').style.display = 'none';
+        box.classList.add('kept');
+        
+        let logMessage = isCautela ? '✔ Ciente da Cautela' : '✔ Mantido';
+        let statusToSet = 'CIENTE'; 
+        
+        box.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMessage}</div>`);
+        
+        window.itemStatus[finalUid] = { status: statusToSet, obs: '', qtd_alterada: isTombamento ? 1 : 0 };
+        
+        // --- ATUALIZAÇÃO VISUAL ---
+        
+        // 1. ATIVAÇÃO DOS BOTÕES NO ELEMENTO CLICADO (TOMBAMENTO OU SINGLE)
+        const btnSATomb = container.querySelector('.action-button.sa-ok');
+        const btnCATomb = container.querySelector('.action-button.ca-alert');
+        
+        if (btnCATomb) btnCATomb.classList.add('active'); // 🛑 FIX: Ativa o C/A do tombamento/item
+        if (btnSATomb) btnSATomb.classList.remove('active');
+
+        // 2. ATIVAÇÃO DO BOTÃO PRINCIPAL (APENAS PARA ITEM PRINCIPAL NO CABEÇALHO)
+        const btnCA_Principal = itemPrincipal.querySelector('.item-options .ca-alert');
+        const btnSA_Principal = itemPrincipal.querySelector('.item-options .sa-ok');
+        
+        if (btnCA_Principal) btnCA_Principal.classList.add('active');
+        if (btnSA_Principal) btnSA_Principal.classList.remove('active');
+
+        if (isTombamento) {
+            // Garante que o tombamento correto receba as classes visuais de alerta
+            container.classList.remove('status-ok'); 
+            container.classList.add('status-alert'); 
+            const statusIconTomb = container.querySelector('.status-icon');
+            if (statusIconTomb) statusIconTomb.className = 'status-icon alert';
+            
+            // Força a atualização do item PRINCIPAL (cabeçalho)
+            updateItemMainStatusDisplay(itemPrincipal); 
         } else {
-             // Fluxo Single (já está OK, ativa o C/A do item)
-             const btnCA = c.querySelector('.ca-alert'); 
-             if(btnCA) btnCA.classList.add('active');
-             
-             // Para item single, forçamos a reavaliação completa
-             recalcularESyncDisplay(item, setor);
+             // Fluxo single (já corrigido)
+             recalcularESyncDisplay(itemPrincipal, setor);
         }
         
-        updateSetorStatus(setor); 
-        updateOverallStatus(); 
-        checkSetorCompletion(setor, item.dataset.id); 
-    } 
+        updateSetorStatus(setor);
+        updateOverallStatus();
+        salvarRascunho();
+    }
 }
 /**
  * Lida com o clique no botão "Acrescentar".
