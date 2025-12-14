@@ -597,10 +597,20 @@ function setTombamentoStatus(btn, status) {
 
     if(status === 'ok'){
         window.itemStatus[uid] = { status: 'S/A', obs: '' }; 
+        
+        // 🛑 CORREÇÃO VISUAL S/A: Aplica a classe de sucesso e remove alerta
+        tomb.classList.remove('status-alert'); 
+        tomb.classList.add('status-ok'); 
+
         updateItemMainStatusDisplay(item);
     } else {
         tomb.querySelector('.tombamento-obs-container').style.display = 'block'; 
         window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' }; 
+
+        // 🛑 CORREÇÃO VISUAL C/A: Aplica a classe de alerta e remove sucesso
+        tomb.classList.add('status-alert'); 
+        tomb.classList.remove('status-ok'); 
+
         tomb.querySelector('textarea').focus(); 
         updateItemMainStatusDisplay(item);
     } 
@@ -651,73 +661,79 @@ function setTombamentoStatus(btn, status) {
  */
 function manterPendencia(btn, uid) {
     const box = btn.closest('.pendencia-alert-box');
+    // 'container' será o tombamento (se houver) ou o item principal (se single)
     const container = box.closest('.tombamento-container') || box.closest('.item-conferencia');
     
     if (!container) return;
     
-    // Identifica o item principal para checar o status de cautela
-    const itemId = container.dataset.itemId;
+    // O item principal deve ser identificado.
+    const itemPrincipal = container.closest('.item-conferencia');
+    const setor = container.closest('.setor');
+    
+    // Nota: O itemId do data-set em 'tombamento-container' deve ser o do item principal, 
+    // mas vamos usar o do itemPrincipal para garantir
+    const itemId = itemPrincipal.dataset.id;
     const isTombamento = container.classList.contains('tombamento-container');
     
-    // Busca o objeto Mestre do item para verificar o status de CAUTELADO
+    // Lógica para verificar se é Cautela (pendência que deve manter o status de C/A no log)
     let itemMestre = dadosConferencia.flatMap(s => s.itens).find(i => i.id === itemId);
-    
-    // Se for Tombamento, verifica o tombamento específico
-    if (isTombamento && itemMestre && itemMestre.tombamentos) {
-        const tomb = container.dataset.tomb;
-        itemMestre = itemMestre.tombamentos.find(t => `${itemId}-${t.tomb}` === uid) || itemMestre;
+    let isCautela = false;
+    if (itemMestre) {
+        if (isTombamento) {
+            const tombData = itemMestre.tombamentos ? itemMestre.tombamentos.find(t => `${itemId}-${t.tomb}` === uid) : null;
+            if (tombData && tombData.cautela_id) {
+                isCautela = true;
+            }
+        } else if (itemMestre.quantidadeCautelada > 0) {
+            isCautela = true;
+        }
     }
 
-    const isCautela = itemMestre && itemMestre.pendencia && itemMestre.pendencia.status === 'CAUTELADO';
-    
     if (box) {
         box.querySelector('.pendencia-actions').style.display = 'none';
         box.classList.add('kept');
         
         let logMessage = '✔ Mantido';
-        let statusToSet = 'KEEP';
+        let statusToSet = 'CIENTE'; // Status para indicar que o conferente está ciente (finalizado)
 
         if (isCautela) {
-            // Se for Cautela, registra como 'Ciente' e marca o status final como C/A (Alterado)
+            // Se for Cautela, o status de conferência FINAL é CIENTE, mas o status do item é C/A (Alterado)
             logMessage = '✔ Ciente da Cautela';
-            statusToSet = 'CA'; // Marca como C/A para o tracking da lista (totalmente indisponível)
+            // O item principal já é C/A, o tombamento só é marcado como CIENTE para conclusão
         }
         
         box.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMessage}</div>`);
+        
+        // 🛑 CORREÇÃO PRINCIPAL: Atualiza o status do tombamento/item para CIENTE
         window.itemStatus[uid] = { status: statusToSet, obs: '' };
         
-        // --- LÓGICA DE CONTROLE DE BOTÕES PÓS-CIÊNCIA ---
+        // --- ATUALIZAÇÃO VISUAL ---
         
-        const itemPrincipal = container.closest('.item-conferencia'); 
+        if (isTombamento) {
+            // 🛑 CORREÇÃO BUG B: Garante que o tombamento correto mude a classe para refletir que ele está resolvido
+            container.classList.add('status-alert'); 
+            container.querySelector('.status-icon').className = 'status-icon alert'; 
+            
+            updateItemMainStatusDisplay(itemPrincipal);
+        } else {
+             // 🛑 CORREÇÃO BUG A: Para item single, recalcula o display para forçar a atualização do ícone principal
+             recalcularESyncDisplay(itemPrincipal, setor);
+        }
+        
         const btnSA = itemPrincipal.querySelector('.action-button.sa-ok');
         const btnCA = itemPrincipal.querySelector('.action-button.ca-alert');
         
-        // 1. Marca o status principal como C/A (para tombados ou single cautelado)
-        if (btnCA) btnCA.classList.add('active');
-        if (btnSA) btnSA.classList.remove('active');
-        
-        // 2. Regra de Reabilitação (Itens SEM Tombamento)
-        if (itemPrincipal.dataset.type === 'single') {
-            // Se for SINGLE, reabilita o C/A para que o conferente possa lançar novas pendências nas unidades restantes.
-            if (btnCA) btnCA.disabled = false;
-        }
-
-        // 3. Regra de Bloqueio (Itens COM Tombamento)
-        if (itemPrincipal.dataset.type === 'multi') {
-            // Após a Ciência/Manter em um item MULTI, ele está FINALIZADO (não pode mais S/A nem C/A novo)
-            if (btnSA) btnSA.disabled = true;
-            if (btnCA) btnCA.disabled = true;
-        }
-
-        // Atualização de Status
-        if (container.classList.contains('tombamento-container')) {
-            updateItemMainStatusDisplay(itemPrincipal);
+        // Regra de Bloqueio (Reabilita C/A e S/A após Ciente para tombamentos, se necessário)
+        if (isTombamento) {
+             // Em itens multi, S/A e C/A do item principal devem estar desabilitados (após Ciente no tombamento)
+             if (btnSA) btnSA.disabled = true;
+             if (btnCA) btnCA.disabled = true;
         }
         
-        const setor = container.closest('.setor');
+        // Atualizações de conclusão
         updateSetorStatus(setor);
         updateOverallStatus();
-        checkSetorCompletion(setor, itemPrincipal.dataset.id);
+        checkSetorCompletion(setor, itemId);
         salvarRascunho();
     }
 }
