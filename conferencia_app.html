@@ -189,7 +189,7 @@
     else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
 }
 
-        function updateItemMainStatusDisplay(itemEl) {
+       function updateItemMainStatusDisplay(itemEl) {
     const itemId = itemEl.dataset.id;
     const tombamentos = itemEl.querySelectorAll('.tombamento-container');
     
@@ -202,7 +202,7 @@
         const uid = `${itemId}-${tomb.dataset.tomb}`;
         const currentStatus = window.itemStatus[uid]?.status;
 
-        if (currentStatus !== 'S/A' && currentStatus !== 'C/A' && currentStatus !== 'CIENTE' && currentStatus !== 'KEEP') { // Inclui KEEP na verificação de conclusão
+        if (currentStatus !== 'S/A' && currentStatus !== 'C/A' && currentStatus !== 'CIENTE' && currentStatus !== 'KEEP') {
             todosConferidos = false;
         }
 
@@ -238,6 +238,9 @@
         if (btnSA) btnSA.classList.remove('active');
         if (btnCA) btnCA.classList.remove('active');
     }
+    
+    // 🛑 CORREÇÃO CRÍTICA: Sincroniza o visual de todos os tombamentos filhos
+    syncTombamentoVisuals(itemEl);
 }
 
         function toggleSetor(header) { 
@@ -734,6 +737,8 @@ function manterPendencia(btn, uid) {
         
         window.itemStatus[finalUid] = { status: statusToSet, obs: '', qtd_alterada: isTombamento ? 1 : 0 };
         
+        // As seguintes linhas foram removidas/simplificadas pois syncTombamentoVisuals fará o trabalho em updateItemMainStatusDisplay
+        /*
         const btnSATomb = container.querySelector('.action-button.sa-ok');
         const btnCATomb = container.querySelector('.action-button.ca-alert');
         
@@ -745,17 +750,12 @@ function manterPendencia(btn, uid) {
             container.classList.add('status-alert'); 
             const statusIconTomb = container.querySelector('.status-icon');
             if (statusIconTomb) statusIconTomb.className = 'status-icon alert';
-            
-            updateItemMainStatusDisplay(itemPrincipal); 
         } else {
-            const btnCA_Principal = itemPrincipal.querySelector('.item-options .ca-alert');
-            const btnSA_Principal = itemPrincipal.querySelector('.item-options .sa-ok');
-            
-            if (btnCA_Principal) btnCA_Principal.classList.add('active');
-            if (btnSA_Principal) btnSA_Principal.classList.remove('active');
-            
-            recalcularESyncDisplay(itemPrincipal, setor);
+            // Lógica para item single...
         }
+        */
+        
+        updateItemMainStatusDisplay(itemPrincipal); 
         
         updateSetorStatus(setor);
         updateOverallStatus();
@@ -1684,6 +1684,37 @@ function updateItemStatusButtons(item, itemId, qtdRestante) {
         <button class="action-button sa-ok ${isSAActive}" onclick="setItemStatus(this, 'ok')">S/A</button>
         <button class="action-button ca-alert ${isActive}" onclick="${ca_onclick_action}">C/A ${currentQtdTotal > 0 ? '➕' : ''}</button>
     `;
+}
+        function syncTombamentoVisuals(itemEl) {
+    const itemId = itemEl.dataset.id;
+    itemEl.querySelectorAll('.tombamento-container').forEach(tomb => {
+        const tombId = tomb.dataset.tomb;
+        const uid = `${itemId}-${tombId}`;
+        const st = window.itemStatus[uid];
+        
+        const btnSA = tomb.querySelector('.action-button.sa-ok');
+        const btnCA = tomb.querySelector('.action-button.ca-alert');
+        const statusIcon = tomb.querySelector('.status-icon');
+
+        if (btnSA) btnSA.classList.remove('active');
+        if (btnCA) btnCA.classList.remove('active');
+        tomb.classList.remove('status-ok', 'status-alert');
+
+        if (st) {
+            if (st.status === 'S/A') {
+                if (btnSA) btnSA.classList.add('active');
+                tomb.classList.add('status-ok');
+                if (statusIcon) statusIcon.className = 'status-icon ok';
+            } else if (st.status === 'C/A' || st.status === 'KEEP' || st.status === 'CIENTE') {
+                if (btnCA) btnCA.classList.add('active');
+                tomb.classList.add('status-alert');
+                if (statusIcon) statusIcon.className = 'status-icon alert';
+            }
+        } else {
+            // Caso pending, garante que não haja status visual aplicado
+            if (statusIcon) statusIcon.className = 'status-icon';
+        }
+    });
 }
     </script>
 </body>
