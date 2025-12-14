@@ -320,11 +320,14 @@
                         const cautelas = i.cautelas || [];
                         if (cautelas.length > 0) {
                             const totalQtd = cautelas.reduce((sum, c) => sum + c.quantidade, 0);
-                            const destinatario = cautelas[0].destinatario; // Pega o destinatário da cautela mais antiga/primeira
+                            const maxQtdDisponivel = i.quantidadeEsperada - totalQtd;
+                            
+                            // Usamos o destinatário da primeira cautela para a descrição resumida
+                            const destinatario = cautelas[0].destinatario;
                             const data = cautelas[0].data;
                             
                             // Cria uma descrição clara para o novo conferente
-                            const obs = `ATENÇÃO: ${totalQtd} un. cauteladas para ${destinatario}. O item está formalmente fora de estoque.`;
+                            const obs = `ATENÇÃO: ${totalQtd} un. cauteladas para ${destinatario}. Disponíveis p/ conferência: ${maxQtdDisponivel} un.`;
                             
                             return {
                                 obs: obs,
@@ -344,7 +347,6 @@
                         
                         // 🛑 Lógica para Cautela Ativa (Estilo especial) 🛑
                         if (pendenciaObj.status === "CAUTELA_ATV") {
-                             // Cria o carimbo de hover/detalhes
                              const dadosCarimbo = JSON.stringify({ 
                                 obs: pendenciaObj.obs, autor: pendenciaObj.quem, data: pendenciaObj.data, isVirtual: true 
                             }); 
@@ -377,9 +379,10 @@
                         item.tombamentos.forEach(tomb => {
                             const uid = `${item.id}-${tomb.tomb}`; 
                             
-                            // 🛑 CÓDIGO CAUTELA ATIVA (Multi) 🛑
                             let pendencia = tomb.pendencia; // Pendência real (C/A)
-                            if (!pendencia && tomb.cautela) {
+                            let isCautelado = !!tomb.cautela; // Flag para controle
+                            
+                            if (!pendencia && isCautelado) {
                                 // Cria pendência virtual de cautela
                                 const obs = `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}. Item fora de estoque.`;
                                 pendencia = {
@@ -390,11 +393,20 @@
                                     isVirtual: true,
                                 };
                             }
-                            // ----------------------------------
 
                             const pendenciaHtml = montarPendenciaHtml(uid, pendencia); // Usa a pendência real OU virtual
                             
-                            htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options"><button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button></div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
+                            // 🛑 CONTROLE CRÍTICO DE BOTÕES (MULTI TOMBAMENTO) 🛑
+                            let tombBtnHtml = '';
+                            if (isCautelado) {
+                                // Tombamento Cautelado (Apenas Ciente)
+                                tombBtnHtml = `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>`;
+                            } else {
+                                // Tombamento Livre (S/A ou C/A normal)
+                                tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
+                            }
+                            
+                            htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options">${tombBtnHtml}</div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
      
                             totalItensNoSetor++;
                             window.itemStatus[uid] = { status: 'pending', obs: '' };
@@ -403,8 +415,13 @@
                     } else {
                         // 🛑 CÓDIGO CAUTELA ATIVA (Single) 🛑
                         let itemPendencia = item.pendencia;
+                        let hasCautelaCarimbo = false; // Flag para controle
                         if (!itemPendencia) {
-                            itemPendencia = getVirtualPendenciaSingle(item);
+                            const virtualPendencia = getVirtualPendenciaSingle(item);
+                            if (virtualPendencia) {
+                                itemPendencia = virtualPendencia;
+                                hasCautelaCarimbo = true;
+                            }
                         }
                         // ----------------------------------
                         
@@ -415,9 +432,30 @@
                             else classExtra = 'status-existing-alert';
                         }
                         
+                        // 🛑 CONTROLE CRÍTICO DE BOTÕES (SINGLE ITEM) 🛑
+                        let singleBtnHtml = '';
+                        
+                        if (hasCautelaCarimbo) {
+                            // Item Single Cautelado (S/A desabilitado, Ciente/C/A mantido)
+                            
+                            // Novo botão para abrir a caixa de texto
+                            const btnAcrescentar = `<button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>`;
+
+                            // Botão Ciente que marca o item como C/A sem abrir a caixa de texto
+                            const btnCiente = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button>`;
+                            
+                            // Juntamos o Ciente (que avança) e o +Alteração (que abre a caixa)
+                            singleBtnHtml = `${btnCiente}${btnAcrescentar}`;
+
+                        } else {
+                            // Item Single Livre (S/A e C/A normal)
+                            singleBtnHtml = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`;
+                        }
+
+
                         const pendenciaHtml = montarPendenciaHtml(item.id, itemPendencia);
                         
-                        htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options"><button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button></div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
+                        htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options">${singleBtnHtml}</div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
                         totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
                     }
                 });
@@ -429,23 +467,63 @@
         }
 
         function setItemStatus(btn, status) { 
-            const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
+            const item = btn.closest('.item-conferencia');
+            const setor = btn.closest('.setor'); 
             item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
             item.querySelector('.descricao-salva').style.display='none'; item.querySelector('.alteracao-container').style.display='none'; 
             const pb=item.querySelector('.pendencia-alert-box'); if(pb)pb.style.display='none'; 
-            if(status==='ok'){item.className='item-conferencia status-ok'; item.querySelector('.status-icon').className='status-icon ok'; window.itemStatus[item.dataset.id]={status:'S/A',obs:''};} 
-            else {item.className='item-conferencia status-alert'; item.querySelector('.status-icon').className='status-icon alert'; item.querySelector('.alteracao-container').style.display='block'; window.itemStatus[item.dataset.id]={status:'PENDING_CA',obs:''}; item.querySelector('textarea').focus();} 
-            salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); 
+            
+            // 🛑 TRATAMENTO DO NOVO STATUS 'cautela_ciente' 🛑
+            if (status === 'cautela_ciente') {
+                status = 'alert'; // Força o fluxo C/A para avançar e ser contado como alteração
+                item.className = 'item-conferencia status-alert'; 
+                item.querySelector('.status-icon').className = 'status-icon alert'; 
+                window.itemStatus[item.dataset.id] = { status: 'C/A', obs: 'CIENTE: Item cautelado conferido.' }; // Marca como C/A no rascunho
+            }
+            // ----------------------------------------------------
+
+            if(status==='ok'){
+                item.className='item-conferencia status-ok'; 
+                item.querySelector('.status-icon').className='status-icon ok';
+                window.itemStatus[item.dataset.id]={status:'S/A',obs:''};
+            } 
+            else {
+                item.className='item-conferencia status-alert'; 
+                item.querySelector('.status-icon').className='status-icon alert'; 
+                
+                // Abre a caixa de alteração APENAS se o status for 'alert' (botão C/A ou +Alteração)
+                item.querySelector('.alteracao-container').style.display='block'; 
+                window.itemStatus[item.dataset.id]={status:'PENDING_CA',obs:''};
+                item.querySelector('textarea').focus();
+            } 
+            salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok' || status==='cautela_ciente')checkSetorCompletion(setor,item.dataset.id);
         }
 
         function setTombamentoStatus(btn, status) { 
-            const tomb = btn.closest('.tombamento-container'); const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); const uid=`${item.dataset.id}-${tomb.dataset.tomb}`; 
+            const tomb = btn.closest('.tombamento-container');
+            const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); const uid=`${item.dataset.id}-${tomb.dataset.tomb}`; 
             tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
             tomb.querySelector('.tombamento-obs-container').style.display='none'; tomb.querySelector('.tombamento-descricao-salva').style.display='none'; 
             const pb=tomb.querySelector('.pendencia-alert-box'); if(pb)pb.style.display='none'; 
-            if(status==='ok'){window.itemStatus[uid]={status:'S/A',obs:''}; updateItemMainStatusDisplay(item);} 
-            else {tomb.querySelector('.tombamento-obs-container').style.display='block'; window.itemStatus[uid]={status:'PENDING_CA',obs:''}; tomb.querySelector('textarea').focus(); updateItemMainStatusDisplay(item);} 
-            salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok')checkSetorCompletion(setor,item.dataset.id); 
+            
+            // 🛑 TRATAMENTO DO NOVO STATUS 'cautela_ciente' 🛑
+            if (status === 'cautela_ciente') {
+                status = 'alert'; // Força o fluxo C/A para avançar e ser contado como alteração
+                window.itemStatus[uid] = { status: 'C/A', obs: 'CIENTE: Item cautelado conferido.' }; // Marca como C/A no rascunho
+            }
+            // ----------------------------------------------------
+            
+            if(status==='ok'){
+                window.itemStatus[uid]={status:'S/A',obs:''};
+                updateItemMainStatusDisplay(item);
+            } 
+            else {
+                tomb.querySelector('.tombamento-obs-container').style.display='block'; 
+                window.itemStatus[uid]={status:'PENDING_CA',obs:''}; 
+                tomb.querySelector('textarea').focus();
+                updateItemMainStatusDisplay(item);
+            } 
+            salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); if(status==='ok' || status==='cautela_ciente')checkSetorCompletion(setor,item.dataset.id);
         }
 
         function manterPendencia(btn, uid) { 
