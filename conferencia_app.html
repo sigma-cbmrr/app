@@ -666,12 +666,8 @@ function manterPendencia(btn, uid) {
     
     if (!container) return;
     
-    // O item principal deve ser identificado.
     const itemPrincipal = container.closest('.item-conferencia');
     const setor = container.closest('.setor');
-    
-    // Nota: O itemId do data-set em 'tombamento-container' deve ser o do item principal, 
-    // mas vamos usar o do itemPrincipal para garantir
     const itemId = itemPrincipal.dataset.id;
     const isTombamento = container.classList.contains('tombamento-container');
     
@@ -694,41 +690,42 @@ function manterPendencia(btn, uid) {
         box.classList.add('kept');
         
         let logMessage = '✔ Mantido';
-        let statusToSet = 'CIENTE'; // Status para indicar que o conferente está ciente (finalizado)
+        let statusToSet = 'CIENTE'; 
 
         if (isCautela) {
-            // Se for Cautela, o status de conferência FINAL é CIENTE, mas o status do item é C/A (Alterado)
             logMessage = '✔ Ciente da Cautela';
-            // O item principal já é C/A, o tombamento só é marcado como CIENTE para conclusão
+            // O status no log será CIENTE para concluir o fluxo do conferente
         }
         
         box.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMessage}</div>`);
         
-        // 🛑 CORREÇÃO PRINCIPAL: Atualiza o status do tombamento/item para CIENTE
+        // Atualiza o status do tombamento/item para CIENTE (finalizado)
         window.itemStatus[uid] = { status: statusToSet, obs: '' };
         
-        // --- ATUALIZAÇÃO VISUAL ---
+        // --- ATUALIZAÇÃO VISUAL E FIX DO ERROR ---
+        
+        // 🛑 FIX DO ERROR: Checagem segura para o ícone do tombamento (ou item single)
+        const elementToMarkAlert = isTombamento ? container : itemPrincipal;
+        elementToMarkAlert.classList.add('status-alert'); 
+        
+        const statusIcon = elementToMarkAlert.querySelector('.status-icon');
+        if (statusIcon) { // Garante que a propriedade 'className' só é setada se o elemento existir
+            statusIcon.className = 'status-icon alert'; 
+        }
         
         if (isTombamento) {
-            // 🛑 CORREÇÃO BUG B: Garante que o tombamento correto mude a classe para refletir que ele está resolvido
-            container.classList.add('status-alert'); 
-            container.querySelector('.status-icon').className = 'status-icon alert'; 
-            
-            updateItemMainStatusDisplay(itemPrincipal);
+            updateItemMainStatusDisplay(itemPrincipal); 
         } else {
-             // 🛑 CORREÇÃO BUG A: Para item single, recalcula o display para forçar a atualização do ícone principal
+             // Para item single: Recalcula o display para forçar a atualização do ícone principal e botões
              recalcularESyncDisplay(itemPrincipal, setor);
         }
-        
-        const btnSA = itemPrincipal.querySelector('.action-button.sa-ok');
+
+        // 🛑 LÓGICA DO USUÁRIO: O BOTÃO C/A DEVE FICAR ATIVO
         const btnCA = itemPrincipal.querySelector('.action-button.ca-alert');
+        const btnSA = itemPrincipal.querySelector('.action-button.sa-ok');
         
-        // Regra de Bloqueio (Reabilita C/A e S/A após Ciente para tombamentos, se necessário)
-        if (isTombamento) {
-             // Em itens multi, S/A e C/A do item principal devem estar desabilitados (após Ciente no tombamento)
-             if (btnSA) btnSA.disabled = true;
-             if (btnCA) btnCA.disabled = true;
-        }
+        if (btnCA) btnCA.classList.add('active');
+        if (btnSA) btnSA.classList.remove('active');
         
         // Atualizações de conclusão
         updateSetorStatus(setor);
@@ -737,7 +734,6 @@ function manterPendencia(btn, uid) {
         salvarRascunho();
     }
 }
-
 /**
  * Lida com o clique no botão "Acrescentar".
  * O fluxo de cautela não precisa de grandes mudanças aqui.
