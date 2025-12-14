@@ -578,22 +578,14 @@ function setTombamentoStatus(btn, status) {
     if (pb) pb.style.display = 'none'; 
     
     if (status === 'ok') {
-        // Fluxo S/A: Marca o item visualmente como OK e fecha a conferência.
+        // Fluxo S/A (Botão de Desfazer/Marcar OK):
+        // Zera o rastreamento de C/A e marca o item como 100% S/A.
         item.className = 'item-conferencia status-ok'; 
         item.querySelector('.status-icon').className = 'status-icon ok'; 
         
-        // MANTÉM O LOG DE C/A, apenas marca o item como 'S/A' (Conferido Completo)
-        // Isso garante que o item é finalizado, preservando o log C/A anterior.
-        const currentLog = window.itemStatus[itemId]?.obs || '';
-
-        // Se o S/A foi clicado, o status final é S/A, mesmo que tenha log de C/A.
-        window.itemStatus[itemId] = { 
-            status: 'S/A', 
-            obs: currentLog, 
-            qtd_alterada: window.itemStatus[itemId]?.qtd_alterada || 0 
-        };
+        window.itemStatus[itemId] = { status: 'S/A', obs: '', qtd_alterada: 0 }; // <--- Zera QTD_ALTERADA
         
-        recalcularESyncDisplay(item, setor); // Finaliza o item e verifica o avanço
+        recalcularESyncDisplay(item, setor);
         
     } else {
         // Fluxo C/A: Inicia o lançamento com prompt.
@@ -1498,38 +1490,38 @@ function recalcularESyncDisplay(itemEl, setorEl) {
         checkSetorCompletion(setorEl, itemId);
     }
 }
-        /**
+      /**
  * Gerencia a exibição dos botões de ação C/A para itens single: C/A inicial vs. Acrescentar.
- * @param {HTMLElement} item - O elemento do item.
- * @param {string} itemId - O ID do item.
- * @param {number} qtdRestante - Quantidade de unidades restantes disponíveis.
+ * Mantém o botão S/A sempre visível como opção de desfazer/finalizar OK.
  */
 function updateItemStatusButtons(item, itemId, qtdRestante) {
     const itemOptions = item.querySelector('.item-options');
-    const btnSA = item.querySelector('.sa-ok');
+    const currentQtdTotal = window.itemStatus[itemId]?.qtd_alterada || 0;
     
-    // Se não há mais unidades disponíveis, desabilita todas as ações de alteração/lançamento.
-    if (qtdRestante <= 0) {
-        itemOptions.innerHTML = `<span style="font-weight: bold; color: #d90f23;">C/A (TOTALMENTE CONFERIDO)</span>`;
-        if (btnSA) btnSA.disabled = true;
+    // Se todas as unidades disponíveis foram lançadas em C/A.
+    if (qtdRestante <= 0 && currentQtdTotal > 0) {
+        itemOptions.innerHTML = `<span style="font-weight: bold; color: #d90f23;">C/A (TOTALMENTE ALTERADO)</span>`;
         return;
     }
 
-    const currentStatus = window.itemStatus[itemId]?.status;
-
-    if (currentStatus === 'C/A') {
-        // Se já existe C/A, substitui C/A por ACRESCENTAR
-        itemOptions.innerHTML = `
-            <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A (Unidades Restantes)</button>
-            <button class="action-button ca-alert active" onclick="lancarNovaAlteracao('${itemId}', true)">➕ Acrescentar Alteração</button>
-        `;
+    let ca_onclick_action;
+    
+    if (currentQtdTotal > 0) {
+        // Se já tem C/A lançado, o botão C/A deve chamar a função para ACRESCENTAR
+        ca_onclick_action = `lancarNovaAlteracao('${itemId}', true)`;
     } else {
-        // Senão, mantém a exibição normal (apenas C/A e S/A)
-        itemOptions.innerHTML = `
-            <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button>
-            <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>
-        `;
+        // Se não tem C/A, o botão C/A deve chamar setItemStatus, iniciando o processo
+        ca_onclick_action = `setItemStatus(this, 'alert')`;
     }
+    
+    // O botão ativo deve ser o C/A se o status for 'C/A' para manter o feedback visual.
+    const isActive = window.itemStatus[itemId]?.status === 'C/A' ? 'active' : '';
+    const isSAActive = window.itemStatus[itemId]?.status === 'S/A' ? 'active' : '';
+
+    itemOptions.innerHTML = `
+        <button class="action-button sa-ok ${isSAActive}" onclick="setItemStatus(this, 'ok')">S/A</button>
+        <button class="action-button ca-alert ${isActive}" onclick="${ca_onclick_action}">C/A ${currentQtdTotal > 0 ? '➕' : ''}</button>
+    `;
 }
     </script>
 </body>
