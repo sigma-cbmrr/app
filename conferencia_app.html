@@ -804,11 +804,15 @@
  * e mudar o status da cautela para CONCLUÍDA (Finalizada e enviada ao histórico).
  * @param {object} cautela - O objeto de dados da cautela.
  */
+/**
+ * FINALIZA A DEVOLUÇÃO: Executa a transação final para somar os itens de volta à Lista Mestra 
+ * e mudar o status da cautela para CONCLUÍDA (Finalizada e enviada ao histórico).
+ * @param {object} cautela - O objeto de dados da cautela.
+ */
 async function finalizarRecebimentoDevolucao(cautela) {
     const btn = document.getElementById('btn-finalizar');
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
-
     if (!isCautela || !CAUTELA_ID) {
         alert("Erro: ID da cautela não encontrado.");
         btn.textContent = "ERRO AO FINALIZAR";
@@ -822,14 +826,11 @@ async function finalizarRecebimentoDevolucao(cautela) {
         quadro: userInfo.quadro,
         nomeGuerra: userInfo.nomeGuerra,
     };
-    
     // O ID da Lista Mestra está salvo na própria cautela
-    const listaId = cautela.local_origem_id; 
-
+    const listaId = cautela.local_origem_id;
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
         const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
-
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
@@ -856,8 +857,7 @@ async function finalizarRecebimentoDevolucao(cautela) {
             }
             
             let listaMestra = listaMestraDoc.data().list;
-            
-            // 🛑 LÓGICA DE SOMA (REVERSÃO DE ESTOQUE) 🛑
+            // 🛑 LÓGICA DE CARIMBO (REMOÇÃO DE CARIMBO) 🛑
             cautela.itens.forEach(cItem => {
                 const itemQtd = cItem.quantidade || 0;
                 
@@ -867,17 +867,17 @@ async function finalizarRecebimentoDevolucao(cautela) {
                         if (mItem.id === cItem.id_base) {
                             
                             if (cItem.tipo === 'single') {
-                                // 1. Item Único: SOMA A QUANTIDADE DE VOLTA
-                                mItem.quantidadeEsperada += itemQtd;
-                                
-                                // Opcional: Remover o carimbo da cautela do array (se for o caso)
+                                // 1. Item Único: ❌ REMOVIDO: SOMA A QUANTIDADE DE VOLTA
+                                // mItem.quantidadeEsperada += itemQtd;
+                
+                                // Opcional: Remover o carimbo da cautela do array
                                 mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
 
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
                                 // 2. Item Tombado: Remove o carimbo de cautela do tombamento específico
                                 mItem.tombamentos = mItem.tombamentos.map(tomb => {
                                     if (tomb.tomb === cItem.tombamento && tomb.cautela) {
-                                        delete tomb.cautela; // Remove o carimbo de cautela
+                                        delete tomb.cautela;
                                     }
                                     return tomb;
                                 });
@@ -887,7 +887,7 @@ async function finalizarRecebimentoDevolucao(cautela) {
                     })
                 }));
             });
-            // FIM DA LÓGICA DE SOMA
+            // FIM DA LÓGICA DE CARIMBO
 
             // 3. Ação: Mudar o status da cautela para CONCLUIDA (Vai para o Histórico)
             transaction.update(cautelaRef, { 
@@ -895,13 +895,11 @@ async function finalizarRecebimentoDevolucao(cautela) {
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), // Novo campo para ordenação
                 receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`, // Quem concluiu o recebimento
             });
-            
             // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
             transaction.update(listaMestraRef, { list: listaMestra });
-
         }); // Fim da Transação
 
-        alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada e estoque restaurado. Status: CONCLUÍDA.`);
+        alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada. Status: CONCLUÍDA.`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
