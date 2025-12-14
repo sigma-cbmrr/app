@@ -5390,7 +5390,6 @@ async function loadCustodiaItens() {
     const localNomeCompleto = selectLocal.value;
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
-    // 🛑 ATUALIZAÇÃO DO CONTAINER PARA O NOVO LAYOUT 🛑
     itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
     btnIniciar.disabled = true;
 
@@ -5424,20 +5423,20 @@ async function loadCustodiaItens() {
         // 3. Renderizar o HTML para seleção (Acordeão/Cards)
         let htmlContent = '<div class="inventory-accordion-container">';
         let totalItensDisponiveis = 0;
-        let isFirstSetor = true; // Para abrir o primeiro setor por padrão
+        let isFirstSetor = true;
 
         listaMestra.forEach(setor => {
             
-            // 🛑 CORREÇÃO NO FILTRO 1: Incluir todos os itens que têm quantidade > 0 ou tombamentos, SEM PRECISAR DE ATUALIZAÇÃO DE ESTOQUE.
+            // Filtro inicial do setor: Apenas itens com quantidade ou tombamentos.
             const setorItems = (setor.itens || []).filter(i => 
                 (i.tipo === 'single' && i.quantidadeEsperada > 0) || 
                 (i.tipo === 'multi' && i.tombamentos && i.tombamentos.length > 0)
             );
             
-            // O cálculo do total precisa mudar para contar apenas os disponíveis
+            // O cálculo do total deve refletir o que será exibido
             const setorTotal = setorItems.reduce((acc, item) => {
                 if(item.tipo === 'single') {
-                    // Item single: Calcula a quantidade disponível (total menos as cautelas)
+                    // 🛑 RECALCULA O DISPONÍVEL (Estoque - Cautelas Ativas) 🛑
                     const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
                     return acc + (item.quantidadeEsperada - qtdCautelada);
                 }
@@ -5449,14 +5448,14 @@ async function loadCustodiaItens() {
                 return acc;
             }, 0);
             
-            // Se o setor não tem itens disponíveis, não o renderiza
+            // Se o setor não tem itens disponíveis (pelo menos 1), não o renderiza
             if (setorTotal <= 0) return;
 
             totalItensDisponiveis += setorTotal;
 
             const contentId = `content-${setor.id}`;
             const headerClass = isFirstSetor ? 'accordion-header active' : 'accordion-header';
-            const contentStyle = isFirstSetor ? 'max-height: 1500px;' : ''; // Inicia aberto
+            const contentStyle = isFirstSetor ? 'max-height: 1500px;' : '';
         
             
             // --- Cabeçalho do Acordeão (Setor) ---
@@ -5474,12 +5473,17 @@ async function loadCustodiaItens() {
                     const itemIdBase = item.id;
                     
                     if (item.tipo === 'single') {
-                        // Calcula a quantidade real DISPONÍVEL
-                        const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
-                        const maxQtd = item.quantidadeEsperada - qtdCautelada;
                         
-                        // Não renderiza se a quantidade disponível for zero
-                        if (maxQtd <= 0) return; 
+                        // 🛑 NOVO CALCULO DE QUANTIDADE DISPONÍVEL 🛑
+                        const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
+                        const maxQtdDisponivel = item.quantidadeEsperada - qtdCautelada;
+                        const qtdTotalEstoque = item.quantidadeEsperada;
+                        
+                        // Não renderiza se não houver disponibilidade (redundante, mas seguro)
+                        if (maxQtdDisponivel <= 0) return; 
+                        
+                        // Mensagem de estoque para padronização
+                        const estoqueMsg = `Estoque: ${qtdTotalEstoque} | Dispon&iacute;vel: ${maxQtdDisponivel}`;
                         
                         htmlContent += `
                             <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="single">
@@ -5489,7 +5493,7 @@ async function loadCustodiaItens() {
                                         <input type="checkbox" 
                                                name="cautela-item-base" 
                                                data-id="${itemIdBase}" data-nome="${item.nome}" data-tipo="single" 
-                                               data-max-qtd="${maxQtd}"
+                                               data-max-qtd="${maxQtdDisponivel}"
                                                onchange="toggleItemQuantity(this); updateCardClass(this.closest('.item-selection-card'));">
                                         Selecionar
                                     </label>
@@ -5497,20 +5501,20 @@ async function loadCustodiaItens() {
                                            class="input-qtd-cautela"
                                            data-item-id="${itemIdBase}"
                                            min="1" 
-                                           max="${maxQtd}" 
+                                           max="${maxQtdDisponivel}" 
                                            value="1"
                                            disabled 
                                            style="width: 60px;">
                                 </div>
-                                <small style="display: block; margin-top: 5px; color:#a00030;">Disponível: ${maxQtd}</small>
+                                <small style="display: block; margin-top: 5px; color:#a00030;">${estoqueMsg}</small>
                             </div>`;
 
                     } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
                         
-                        // 🛑 CORREÇÃO CRÍTICA: FILTRA OS TOMBAMENTOS JÁ CAUTELADOS 🛑
+                        // Tombamentos: Mantemos a lógica de filtragem, pois um tombamento é único e só pode ser cautelado uma vez.
                         const tombamentosDisponiveis = item.tombamentos.filter(tomb => !tomb.cautela);
                         
-                        if (tombamentosDisponiveis.length === 0) return; // Se não houver nenhum disponível, pula o card
+                        if (tombamentosDisponiveis.length === 0) return;
                         
                         // Renderização das Tags de Tombamento
                         let tagsHtml = tombamentosDisponiveis.map(tomb => {
@@ -5529,31 +5533,27 @@ async function loadCustodiaItens() {
                         htmlContent += `
                             <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="multi">
                                 <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome} (${tombamentosDisponiveis.length} disponíveis)</h4>
-                                <small style="color:#555;">Selecione os tombamentos:</small>
+                                <small style="color:#555;">Estoque: ${item.tombamentos.length} | Selecione os tombamentos:</small>
                                 <div class="tombamento-tag-list">${tagsHtml}</div>
                             </div>`;
                     }
                 });
                 
                 htmlContent += '</div>';
-                // Fecha items-card-grid
 
             } else {
                  htmlContent += '<p style="padding:10px; color:#999;">Nenhum item disponível para cautela neste setor.</p>';
             }
 
             htmlContent += '</div>';
-            // Fecha accordion-content
-
             isFirstSetor = false;
         });
-        htmlContent += '</div>'; // Fecha inventory-accordion-container
+        htmlContent += '</div>';
 
         if (totalItensDisponiveis === 0) {
              itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green; padding:20px;">✅ Nenhum material disponível para cautela neste local.</p>';
         } else {
              itemListContainer.innerHTML = htmlContent;
-            // 4. Adicionar Listeners de Interatividade (Lógica de contagem preservada)
              document.querySelectorAll('input[name^="cautela-item"]').forEach(el => {
                  el.addEventListener('change', updateCautelaItemCount);
              });
@@ -5561,7 +5561,6 @@ async function loadCustodiaItens() {
                  el.addEventListener('input', updateCautelaItemCount);
                  el.addEventListener('change', updateCautelaItemCount);
              });
-            // Inicializa a contagem
              updateCautelaItemCount();
         }
 
@@ -5772,6 +5771,8 @@ function getSelectedCautelaItemsData() {
     return itens;
 }
         // Localização: Aproximadamente linha 1197
+// A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
+
 async function iniciarCautelaProcesso() {
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     btnIniciar.disabled = true;
@@ -5808,23 +5809,24 @@ async function iniciarCautelaProcesso() {
             
             // Clone profundo
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
+            
             // Cálculo do Total (para Notificação)
             const totalItensMovimentados = itensParaCautela.reduce((sum, item) => {
                 return sum + item.quantidade;
             }, 0);
             const dataEmissao = new Date().toISOString().split('T')[0];
             
-            // 🛑 LÓGICA DE BAIXA (APENAS CARIMBO) 🛑
-            itensParaCautela.forEach(cItem => {
+            // 🛑 LÓGICA DE CARIMBO (VALIDAÇÃO DE ESTOQUE REMOVIDA) 🛑
+            for (const cItem of itensParaCautela) {
                 
                 // --- Itens Single ---
                 if (cItem.tipo === 'single') {
-                    // Item base encontrado pelo ID
-                    let mItem = findItemInList(listaMestra, cItem.id_base); // Reutiliza a busca do item single
+                    let mItem = findItemInList(listaMestra, cItem.id_base);
                     
                     if (mItem) {
-                        // ❌ REMOVIDO: mItem.quantidadeEsperada -= cItem.quantidade; 
+                        // 🛑 Lógica de validação de estoque total removida, pois a UI (atributo MAX) garante a integridade. 🛑
                         
+                        // Aplica o carimbo
                         mItem.cautelas = mItem.cautelas || [];
                         mItem.cautelas.push({
                             id: cautelaIdSequencial,
@@ -5837,13 +5839,16 @@ async function iniciarCautelaProcesso() {
                 
                 // --- Itens Multi ---
                 else if (cItem.tipo === 'multi') {
-                    // Busca o item base pelo tombamento real
                     let mItem = findItemByTombamento(listaMestra, cItem.tombamento);
                     if (mItem && mItem.tombamentos) {
-                        // Encontra o objeto de tombamento por referência no array
                         const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
                         if (tombIndex > -1) {
-                            // MUTAÇÃO: Modifica o objeto no ARRAY por referência, garantindo o carimbo
+                            // 🛑 VALIDAÇÃO MANTIDA: Checa se o tombamento já possui carimbo. (A UI filtra, mas o cheque no backend é fundamental para multi).
+                            if (mItem.tombamentos[tombIndex].cautela) {
+                                throw new Error(`O tombamento ${cItem.tombamento} do item ${mItem.nome} já está cautelado.`);
+                            }
+                            
+                            // Aplica o carimbo
                             mItem.tombamentos[tombIndex] = {
                                 ...mItem.tombamentos[tombIndex], 
                                 cautela: { 
@@ -5854,8 +5859,8 @@ async function iniciarCautelaProcesso() {
                             };
                         }
                     }
-                } // Fim do if(mItem)
-            });
+                }
+            }
             // ---------------------------------------------
             
             // Dados da Cautela Ativa (Documento a ser criado)
@@ -5874,7 +5879,7 @@ async function iniciarCautelaProcesso() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada
+            // Salva a lista Mestra modificada (com o novo carimbo)
             transaction.update(listaMestraRef, { list: listaMestra });
             // 4. Conclusão e Feedback
             alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
