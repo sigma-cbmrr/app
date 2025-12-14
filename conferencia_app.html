@@ -202,12 +202,10 @@
         const uid = `${itemId}-${tomb.dataset.tomb}`;
         const currentStatus = window.itemStatus[uid]?.status;
 
-        // 1. Verifica se o tombamento está conferido (FINALIZADO)
         if (currentStatus !== 'S/A' && currentStatus !== 'C/A' && currentStatus !== 'CIENTE') {
             todosConferidos = false;
         }
 
-        // 2. Verifica se tem alerta (C/A ou CIENTE)
         if (currentStatus === 'C/A' || currentStatus === 'CIENTE') {
             temPendenciaOuAlerta = true;
         }
@@ -218,29 +216,23 @@
     const btnCA = itemEl.querySelector('.action-button.ca-alert');
     
     if (todosConferidos) {
-        // Agora, se todos foram conferidos, definimos o status principal
         
         if (temPendenciaOuAlerta) {
-            // Um ou mais tombamentos têm C/A ou CIENTE (Alerta)
             itemEl.className = 'item-conferencia status-alert';
             if (statusIcon) statusIcon.className = 'status-icon alert'; 
             if (btnCA) btnCA.classList.add('active');
             if (btnSA) btnSA.classList.remove('active');
         } else {
-            // Todos S/A (OK)
             itemEl.className = 'item-conferencia status-ok';
             if (statusIcon) statusIcon.className = 'status-icon ok'; 
             if (btnSA) btnSA.classList.add('active');
             if (btnCA) btnCA.classList.remove('active');
         }
         
-        // **IMPORTANTE:** Chame a conclusão do setor aqui, pois o item principal foi FINALIZADO.
         const setor = itemEl.closest('.setor');
         if (setor) checkSetorCompletion(setor, itemId);
 
     } else {
-        // Ainda pendente
-        // Usa a classe 'item-has-tombamentos' para itens multi que ainda não foram concluídos
         itemEl.className = 'item-conferencia item-has-tombamentos';
         if (statusIcon) statusIcon.className = 'status-icon'; 
         if (btnSA) btnSA.classList.remove('active');
@@ -637,44 +629,34 @@ function setTombamentoStatus(btn, type) {
     const btnCA = container.querySelector('.action-button.ca-alert');
     const statusIconTomb = container.querySelector('.status-icon');
 
-    // 🛑 1. LIMPEZA TOTAL DE ESTADO DO TOMBAMENTO CLICADO
     container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
+    container.classList.remove('status-ok', 'status-alert');
     if (obsContainer) obsContainer.style.display = 'none';
     if (descSalva) descSalva.style.display = 'none';
     
-    // 2. LÓGICA DE TRANSIÇÃO DE ESTADO
     if (type === 'ok') {
-        // --- FLUXO S/A ---
         window.itemStatus[uid] = {status: 'S/A', obs: '', qtd_alterada: 0};
         
-        // Ativação Visual S/A
         if (btnSA) btnSA.classList.add('active');
         
         container.classList.add('status-ok'); 
-        container.classList.remove('status-alert');
         if (statusIconTomb) statusIconTomb.className = 'status-icon ok'; 
         
     } else if (type === 'alert') {
-        // --- FLUXO C/A (INICIAL) ---
         
-        // Ativação Visual C/A (INICIAL)
         if (btnCA) btnCA.classList.add('active');
 
-        // Abre o formulário
         if (obsContainer) {
             obsContainer.style.display = 'block';
             obsContainer.querySelector('textarea').focus();
         }
         
-        // Marca PENDING_CA (O C/A final será salvo em salvarTombamento)
         window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' };
         
         container.classList.add('status-alert'); 
-        container.classList.remove('status-ok');
         if (statusIconTomb) statusIconTomb.className = 'status-icon alert'; 
     }
     
-    // 3. ATUALIZAÇÃO GERAL
     updateItemMainStatusDisplay(itemPrincipal);
     updateSetorStatus(setor);
     updateOverallStatus();
@@ -893,25 +875,27 @@ function acrescentarPendencia(btn, uid, encodedData) {
     const hist = tomb.querySelector('.historico-fixo'); 
     let final = obs; 
     
-    // ... (Lógica de montagem de log - Mantida) ...
     const conf = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; 
     const now = formatarDataSimples(new Date()); 
-    // ...
-
-    // ... (Lógica de montagem de log 'final' - Mantida) ...
-    if (obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
+    
+    if (hist && hist.dataset.meta) {
+        if (obs.length < 3) return alert("Digite a alteração."); 
+        const meta = JSON.parse(decodeURIComponent(hist.dataset.meta)); 
+        final = montarHistoricoLinear(meta.obs, obs, meta.autor, meta.data);
+    } else {
+        if (obs.length < 3) return alert("Descreva a alteração em detalhes (mínimo 3 caracteres).");
+        final = obs; 
+    }
 
     const uid = `${item.dataset.id}-${tomb.dataset.tomb}`;
     window.itemStatus[uid] = { status: 'C/A', obs: final, qtd_alterada: 1 };
     
-    // 🛑 RESET E EXIBIÇÃO APÓS SALVAMENTO
-    tomb.querySelector('.tombamento-obs-container').style.display = 'none'; // Esconde formulário
+    tomb.querySelector('.tombamento-obs-container').style.display = 'none'; 
     
     const d = tomb.querySelector('.tombamento-descricao-salva');
     d.innerHTML = gerarHtmlVisual(final, conf, now, null, null); 
     d.style.display = 'block'; 
     
-    // 🛑 FIX VISUAL (APÓS SALVAR O C/A) - GARANTINDO O ESTADO FINAL
     const btnSATomb = tomb.querySelector('.action-button.sa-ok');
     const btnCATomb = tomb.querySelector('.action-button.ca-alert');
     const statusIconTomb = tomb.querySelector('.status-icon');
@@ -923,14 +907,11 @@ function acrescentarPendencia(btn, uid, encodedData) {
     tomb.classList.remove('status-ok');
     if (statusIconTomb) statusIconTomb.className = 'status-icon alert'; 
     
-    // Ativa o botão C/A do item principal
     const btnCA_Principal = item.querySelector('.item-options .ca-alert');
     const btnSA_Principal = item.querySelector('.item-options .sa-ok');
     if (btnCA_Principal) btnCA_Principal.classList.add('active');
     if (btnSA_Principal) btnSA_Principal.classList.remove('active');
     
-    // --- FIM DO FIX ---
-
     salvarRascunho(); 
     updateItemMainStatusDisplay(item); 
     updateSetorStatus(setor); 
@@ -939,51 +920,83 @@ function acrescentarPendencia(btn, uid, encodedData) {
 }
 
         function restaurarRascunho() {
-            const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
-            try {
-                const parsed = JSON.parse(saved); window.itemStatus = parsed.status; 
-                document.getElementById('draft-message').style.display = 'block';
-                Object.keys(window.itemStatus).forEach(uid => {
-                    const st = window.itemStatus[uid]; let container, isTombamento=false;
-                    container = document.querySelector(`.item-conferencia[data-id="${uid}"]`);
-                    if (!container) {
-                        const allTombs = document.querySelectorAll('.tombamento-container');
-                        for (let t of allTombs) { if (`${t.closest('.item-conferencia').dataset.id}-${t.dataset.tomb}` === uid) { container = t; isTombamento = true; break; } }
+    const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
+    try {
+        const parsed = JSON.parse(saved); window.itemStatus = parsed.status; 
+        document.getElementById('draft-message').style.display = 'block';
+        Object.keys(window.itemStatus).forEach(uid => {
+            const st = window.itemStatus[uid]; let container, isTombamento=false;
+            let itemPrincipal = null;
+            
+            container = document.querySelector(`.item-conferencia[data-id="${uid}"]`);
+            
+            if (!container) {
+                const allTombs = document.querySelectorAll('.tombamento-container');
+                for (let t of allTombs) { 
+                    itemPrincipal = t.closest('.item-conferencia');
+                    if (`${itemPrincipal.dataset.id}-${t.dataset.tomb}` === uid) { 
+                        container = t; 
+                        isTombamento = true; 
+                        break; 
+                    } 
+                }
+            }
+            
+            if (container) {
+                const btnSA=container.querySelector('.sa-ok'), btnCA=container.querySelector('.ca-alert');
+                const statusIcon = container.querySelector('.status-icon');
+                
+                if(btnSA)btnSA.classList.remove('active'); if(btnCA)btnCA.classList.remove('active');
+                const descEl = container.querySelector('.descricao-salva') || container.querySelector('.tombamento-descricao-salva');
+                
+                if (isTombamento) {
+                    container.classList.remove('status-ok', 'status-alert');
+                    if (st.status === 'S/A') {
+                        if (btnSA) btnSA.classList.add('active');
+                        container.classList.add('status-ok');
+                        if (statusIcon) statusIcon.className = 'status-icon ok';
+                    } else if (st.status === 'C/A' || st.status === 'KEEP' || st.status === 'CIENTE') {
+                        if (btnCA) btnCA.classList.add('active');
+                        container.classList.add('status-alert');
+                        if (statusIcon) statusIcon.className = 'status-icon alert';
                     }
-                    if (container) {
-                        const btnSA=container.querySelector('.sa-ok'), btnCA=container.querySelector('.ca-alert');
-                        if(btnSA)btnSA.classList.remove('active'); if(btnCA)btnCA.classList.remove('active');
-                        const descEl = container.querySelector('.descricao-salva') || container.querySelector('.tombamento-descricao-salva');
-                        
-                        if (st.status === 'S/A') { if(btnSA)btnSA.classList.add('active'); if(!isTombamento) container.querySelector('.status-icon').className='status-icon ok'; }
-                        else if (st.status === 'C/A' || st.status === 'KEEP') { 
-                            if(btnCA)btnCA.classList.add('active'); 
-                            if(!isTombamento) container.querySelector('.status-icon').className='status-icon alert'; 
-                            if(descEl && st.status === 'C/A') {
-                                const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-                                const now=formatarDataSimples(new Date());
-                                descEl.innerHTML=gerarHtmlVisual(st.obs,conf,now,null,null); 
-                                descEl.style.display='block';
-                                const pendBox = container.querySelector('.pendencia-alert-box'); if(pendBox) pendBox.style.display = 'none';
-                            } else if(st.status === 'KEEP') {
-                                const pendBox = container.querySelector('.pendencia-alert-box');
-                                if(pendBox) {
-                                    pendBox.classList.add('kept'); pendBox.querySelector('.pendencia-actions').style.display='none';
-                                    if(!pendBox.innerHTML.includes('✔ Mantido')) pendBox.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>');
-                                }
-                            }
+                }
+
+                if (st.status === 'S/A') { 
+                    if(btnSA)btnSA.classList.add('active'); 
+                    if(!isTombamento) container.querySelector('.status-icon').className='status-icon ok'; 
+                }
+                else if (st.status === 'C/A' || st.status === 'KEEP' || st.status === 'CIENTE') { 
+                    if(btnCA)btnCA.classList.add('active'); 
+                    if(!isTombamento) container.querySelector('.status-icon').className='status-icon alert'; 
+                    if(descEl && st.status === 'C/A') {
+                        const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+                        const now=formatarDataSimples(new Date());
+                        descEl.innerHTML=gerarHtmlVisual(st.obs,conf,now,null,null); 
+                        descEl.style.display='block';
+                        const pendBox = container.querySelector('.pendencia-alert-box'); if(pendBox) pendBox.style.display = 'none';
+                    } else if(st.status === 'KEEP' || st.status === 'CIENTE') { 
+                        const pendBox = container.querySelector('.pendencia-alert-box');
+                        if(pendBox) {
+                            pendBox.classList.add('kept'); pendBox.querySelector('.pendencia-actions').style.display='none';
+                            let logMsg = st.status === 'CIENTE' ? '✔ Ciente da Cautela' : '✔ Mantido';
+                            if(!pendBox.innerHTML.includes(logMsg.split(' ')[1])) pendBox.insertAdjacentHTML('beforeend', `<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">${logMsg}</div>`);
                         }
-                        else if (st.status === 'PENDING_CA') {
-                            const edit = container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container');
-                            if(edit) edit.style.display='block';
-                            if(btnCA) btnCA.classList.add('active');
-                        }
-                        if(isTombamento) updateItemMainStatusDisplay(container.closest('.item-conferencia'));
                     }
-                });
-                document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s)); updateOverallStatus();
-            } catch (e) { console.error("Erro restore", e); }
-        }
+                }
+                else if (st.status === 'PENDING_CA') {
+                    const edit = container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container');
+                    if(edit) edit.style.display='block';
+                    if(btnCA) btnCA.classList.add('active');
+                }
+                
+                if(isTombamento && itemPrincipal) updateItemMainStatusDisplay(itemPrincipal);
+                else if (!isTombamento) updateItemMainStatusDisplay(container);
+            }
+        });
+        document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s)); updateOverallStatus();
+    } catch (e) { console.error("Erro restore", e); }
+}
         function adaptarCautelaParaRender(cautelaData) {
             if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
 
