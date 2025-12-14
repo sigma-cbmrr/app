@@ -306,31 +306,117 @@
 };
 
         function renderizarConferencia() {
-            const mainContent = document.getElementById('main-content'); const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
-            let htmlSetores = ''; const setorIds = []; dadosConferencia.forEach(s => setorIds.push(s.id)); window.setorIds = setorIds;
+            const mainContent = document.getElementById('main-content');
+            const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
+            let htmlSetores = ''; const setorIds = []; dadosConferencia.forEach(s => setorIds.push(s.id));
+            window.setorIds = setorIds;
 
             dadosConferencia.forEach((setor, index) => {
                 const isFirstSetor = (index === 0); let htmlItens = ''; let totalItensNoSetor = 0;
                 setor.itens.forEach(item => {
+                    
+                    // 🛑 NOVA FUNÇÃO: Cria um objeto pendencia temporário para Cautela Ativa (Single)
+                    const getVirtualPendenciaSingle = (i) => {
+                        const cautelas = i.cautelas || [];
+                        if (cautelas.length > 0) {
+                            const totalQtd = cautelas.reduce((sum, c) => sum + c.quantidade, 0);
+                            const destinatario = cautelas[0].destinatario; // Pega o destinatário da cautela mais antiga/primeira
+                            const data = cautelas[0].data;
+                            
+                            // Cria uma descrição clara para o novo conferente
+                            const obs = `ATENÇÃO: ${totalQtd} un. cauteladas para ${destinatario}. O item está formalmente fora de estoque.`;
+                            
+                            return {
+                                obs: obs,
+                                quem: "Sistema/Cautela",
+                                data: data,
+                                status: "CAUTELA_ATV", // Status especial
+                                isVirtual: true,
+                            };
+                        }
+                        return null;
+                    };
+                    // ----------------------------------------------------------------------------------
+
                     const montarPendenciaHtml = (uid, pendenciaObj) => {
+                     
                         if (!pendenciaObj) return '';
+                        
+                        // 🛑 Lógica para Cautela Ativa (Estilo especial) 🛑
+                        if (pendenciaObj.status === "CAUTELA_ATV") {
+                             // Cria o carimbo de hover/detalhes
+                             const dadosCarimbo = JSON.stringify({ 
+                                obs: pendenciaObj.obs, autor: pendenciaObj.quem, data: pendenciaObj.data, isVirtual: true 
+                            }); 
+                             const safeCarimbo = encodeURIComponent(dadosCarimbo);
+
+                             // HTML com estilo de cautela (diferente de C/A)
+                            return `<div class="pendencia-alert-box status-cautela" 
+                                        style="border-left: 3px solid #f57c00; background-color: #fff8e0; cursor: default;"
+                                        title="Item com cautela ativa.">
+                                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;">
+                                            <i class="fas fa-boxes"></i> ${pendenciaObj.quem}
+                                        </div>
+                                        <p style="margin: 0; font-size: 0.9em;">
+                                            ${pendenciaObj.obs}
+                                        </p>
+                                    </div>`;
+                        }
+                        // ----------------------------------------------------
+
                         const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; const quem = pendenciaObj.quem || 'Anônimo'; const dataPend = formatarDataSimples(pendenciaObj.data);
                         const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); const safeHistorico = encodeURIComponent(dadosHistorico);
+              
                         const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
                         let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
                         return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
                     };
+                    
                     if (item.tipo === 'multi' && item.tombamentos) {
                         let htmlTombamentos = '';
                         item.tombamentos.forEach(tomb => {
-                            const uid = `${item.id}-${tomb.tomb}`; const pendenciaHtml = montarPendenciaHtml(uid, tomb.pendencia);
+                            const uid = `${item.id}-${tomb.tomb}`; 
+                            
+                            // 🛑 CÓDIGO CAUTELA ATIVA (Multi) 🛑
+                            let pendencia = tomb.pendencia; // Pendência real (C/A)
+                            if (!pendencia && tomb.cautela) {
+                                // Cria pendência virtual de cautela
+                                const obs = `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}. Item fora de estoque.`;
+                                pendencia = {
+                                    obs: obs,
+                                    quem: "Sistema/Cautela",
+                                    data: tomb.cautela.data,
+                                    status: "CAUTELA_ATV",
+                                    isVirtual: true,
+                                };
+                            }
+                            // ----------------------------------
+
+                            const pendenciaHtml = montarPendenciaHtml(uid, pendencia); // Usa a pendência real OU virtual
+                            
                             htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options"><button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button></div></div>${pendenciaHtml}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div></div>`;
-                            totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
+     
+                            totalItensNoSetor++;
+                            window.itemStatus[uid] = { status: 'pending', obs: '' };
                         });
                         htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
                     } else {
-                        let classExtra = ''; if (item.pendencia) { if (item.pendencia.statusAdmin) classExtra = 'status-admin-response'; else classExtra = 'status-existing-alert'; }
-                        const pendenciaHtml = montarPendenciaHtml(item.id, item.pendencia);
+                        // 🛑 CÓDIGO CAUTELA ATIVA (Single) 🛑
+                        let itemPendencia = item.pendencia;
+                        if (!itemPendencia) {
+                            itemPendencia = getVirtualPendenciaSingle(item);
+                        }
+                        // ----------------------------------
+                        
+                        let classExtra = '';
+                        if (itemPendencia) { 
+                            if (itemPendencia.statusAdmin) classExtra = 'status-admin-response'; 
+                            else if (itemPendencia.status === "CAUTELA_ATV") classExtra = 'status-existing-alert'; // Reutiliza o estilo "alerta existente"
+                            else classExtra = 'status-existing-alert';
+                        }
+                        
+                        const pendenciaHtml = montarPendenciaHtml(item.id, itemPendencia);
+                        
                         htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options"><button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button></div>${pendenciaHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
                         totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
                     }
