@@ -560,43 +560,55 @@
             if(status==='ok' || status==='cautela_ciente')checkSetorCompletion(setor,item.dataset.id);
         }
         
-        function setTombamentoStatus(btn, uid, status) {
-    const tombamento = document.querySelector(`.tombamento[data-uid="${uid}"]`);
-    if (!tombamento) return;
+        function setTombamentoStatus(btn, status) {
+    // 1. Identifica o contêiner do tombamento e o UID (Identificador Único)
+    const tomb = btn.closest('.tombamento-container'); [cite: 1913]
+    if (!tomb) return;
 
-    tombamento.querySelectorAll('.status-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+    const item = btn.closest('.item-conferencia'); [cite: 1913]
+    const setor = btn.closest('.setor'); [cite: 1913]
+    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`; [cite: 1913] // Reutiliza a construção do UID
 
-    const itemPaiId = tombamento.closest('.item-conferencia').dataset.id;
-    const itemPai = dadosConferencia.find(s => s.itens.some(i => i.id === itemPaiId)).itens.find(i => i.id === itemPaiId);
-    const tombObj = itemPai.tombamentos.find(t => `${itemPaiId}-${t.tomb}` === uid);
+    // 2. Manipulação da UI (remove 'active' de todos e adiciona no clicado)
+    tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); [cite: 1913]
+    btn.classList.add('active'); 
+
+    // Esconde/mostra elementos dependentes
+    tomb.querySelector('.tombamento-obs-container').style.display='none'; [cite: 1921]
+    tomb.querySelector('.tombamento-descricao-salva').style.display='none'; [cite: 1913]
     
-    tombamento.querySelector('.pendencia-alert-box')?.classList.add('hidden');
-    
-    switch(status) {
-        case 'ok':
-            window.itemStatus[uid] = { status: 'S/A', obs: '' };
-            tombamento.querySelector('.ca-alert')?.classList.remove('active');
-            break;
-        case 'cautela_ciente':
-            // CIENTE: Define status C/A para UI, mas obs vazia para MANTER a pendência C/A anterior
-            window.itemStatus[uid] = { status: 'C/A', obs: '' }; 
-            tombamento.querySelector('.ca-alert')?.classList.add('active'); 
-            break;
-        case 'alert':
-            window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' };
-            tombamento.querySelector('.ca-alert')?.classList.add('active');
-            tombamento.querySelector('.pendencia-alert-box')?.classList.remove('hidden');
-            break;
+    const pb = tomb.querySelector('.pendencia-alert-box'); [cite: 1914]
+    // Protege o alerta de Cautela Ativa
+    if (pb && pb.getAttribute('data-status-type') !== 'cautela') { [cite: 1914, 1915]
+        pb.style.display='none'; [cite: 1915]
     }
 
-    salvarRascunho();
-    updateItemMainStatusDisplay(itemPaiId);
-    updateSetorStatus(tombamento.closest('.setor-container').dataset.setor);
-    updateOverallStatus();
-    checkSetorCompletion();
+    // 3. Lógica de Status (CIENTE/S/A/C/A)
+    if (status === 'cautela_ciente') {
+        // CIENTE: MANTÉM Pendência C/A anterior (status KEEP), mas sem obs nova.
+        window.itemStatus[uid] = { status: 'KEEP', obs: '' }; [cite: 1916]
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block'; [cite: 1917]
+        updateItemMainStatusDisplay(item); [cite: 1918]
+    }
+    else if(status==='ok'){
+        window.itemStatus[uid]={status:'S/A',obs:''}; [cite: 1919]
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none'; [cite: 1920]
+        updateItemMainStatusDisplay(item); [cite: 1920]
+    } 
+    else { // status === 'alert' (Abre caixa de texto para + Alteração)
+        tomb.querySelector('.tombamento-obs-container').style.display='block'; [cite: 1921]
+        window.itemStatus[uid]={status:'PENDING_CA',obs:''}; [cite: 1921]
+        tomb.querySelector('textarea').focus();
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block'; [cite: 1922]
+        updateItemMainStatusDisplay(item); [cite: 1922]
+    } 
+    
+    // 4. Finalização
+    salvarRascunho(); [cite: 1923]
+    updateSetorStatus(setor); [cite: 1923]
+    updateOverallStatus(); [cite: 1923]
+    if(status==='ok' || status==='cautela_ciente')checkSetorCompletion(setor,item.dataset.id); [cite: 1924]
 }
-
         function manterPendencia(btn, uid) { 
             const box = btn.closest('.pendencia-alert-box');
             if(box) { 
