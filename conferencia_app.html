@@ -875,173 +875,134 @@
     return '';
 }
 
-        async function finalizarConferencia(btn, tipo) {
-    if (!USER_ID || !CURRENT_LIST_ID) {
-        alert("Erro: Dados do usuário ou da lista ausentes.");
-        return;
+        // A função completa fornecida no passo anterior, que deve substituir a sua:
+
+async function finalizarConferencia() {
+    if (isCautela) {
+        // Se for uma cautela, chame a função específica de finalização de recebimento.
+        await finalizarRecebimentoCautela();
+        return; // Sai da função normal de finalização
     }
-
-    if (!confirm(`Tem certeza que deseja finalizar esta conferência como "${tipo}"?`)) {
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = "Finalizando...";
-
-    const db = firebase.firestore();
-    const listaMestraRef = db.collection(COLECAO_LISTAS).doc(CURRENT_LIST_ID);
-    const resultadosRef = db.collection(COLECAO_RESULTADOS);
-
-    const conferente = `${USER_DATA.postoGraduacao} ${USER_DATA.quadro} ${USER_DATA.nomeGuerra}`;
-    const setor = document.querySelector('.setor-header').textContent.split(': ')[1];
-
-    let itensRelatorio = [];
-    let itensCaa = [];
-    let itemsCount = 0;
-    let cA_count = 0;
-
-    // Sub-função para atualizar a lista mestra (listas_conferencia)
-    const atualizarListaDB = (itemOuTomb, uid) => {
-        const s = window.itemStatus[uid];
-        if(!s) return;
-        
-        // Lógica CRÍTICA de Preservação/Atualização de Pendência (C/A)
-        if(s.status === 'C/A' || s.status === 'KEEP') { 
-            let old = itemOuTomb.pendencia || {};
-            
-            // Se a observação do rascunho for vazia (KEEP/CIENTE) E JÁ TINHA PENDÊNCIA, 
-            // a Pendência anterior é MANTIDA (NÃO CRIA NOVO CARIMBO).
-            if (s.obs.trim() === '' && itemOuTomb.pendencia) {
-                // Não faz nada com itemOuTomb.pendencia.
-            } else {
-                // Se for um novo C/A (ACRESCENTAR) ou se a Pendência não existia, atualiza.
-                itemOuTomb.pendencia = { 
-                    obs: s.obs, 
-                    quem: conferente, 
-                    data: firebase.firestore.FieldValue.serverTimestamp(), 
-                    statusAdmin: clean(old.statusAdmin), 
-                    adminObs: clean(old.adminObs) 
-                }; 
-            }
-            updated=true;
-
-        } else if(s.status === 'S/A' && itemOuTomb.pendencia) { 
-            // Se o conferente marcou S/A e havia Pendência (C/A), DELETA a Pendência (C/A).
-            delete itemOuTomb.pendencia; 
-            updated=true;
-        }
-    };
-
-    // Sub-função para processar itens e gerar o relatório (CRÍTICA para o PDF)
-    dadosConferencia.forEach(setor => {
-        setor.itens.forEach(item => {
-            const process = (id, nome, pend, itemContext) => { 
-                const s = window.itemStatus[id];
-                if (s && s.status !== 'pending') {
-                    itemsCount++;
-                    let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
-                    if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
-                    
-                    let finalObs = s.obs;
-                    
-                    if (s.status === 'KEEP' && pend) finalObs = pend.obs;
-                    if (s.status === 'S/A') finalObs = null;
-                    
-                    // INJEÇÃO CRÍTICA DO CARIMBO DE CAUTELA PARA O RELATÓRIO (PDF) 
-                    const cautelaReportText = getCautelaTextForReport(itemContext);
-                    
-                    if (cautelaReportText) {
-                        if (finalObs) {
-                            finalObs = `${finalObs} | + CAUTELA: ${cautelaReportText}`;
-                        } else {
-                            finalObs = cautelaReportText; 
-                        }
-                        // Se houver cautela, o item deve ser contado como C/A no dashboard, a menos que seja S/A no inventário
-                        if (finalStatus !== 'S/A' && tipo === 'INVENTARIO') {
-                            finalStatus = 'C/A';
-                        }
-                    }
-                    // FIM DA INJEÇÃO 
-
-                    const dadosItem = { 
-                        nomeCompleto: nome, 
-                        status: finalStatus, 
-                        obs: finalObs, 
-                        quantidade: item.quantidadeEsperada || 1, 
-                        id: id,
-                        statusAdmin: pend ? clean(pend.statusAdmin) : null,
-                        adminObs: pend ? clean(pend.adminObs) : null,
-                        setor: setor.nome
-                    };
-                    itensRelatorio.push(dadosItem);
-                    if (finalStatus === 'C/A') itensCaa.push(dadosItem);
-                }
-            };
-
-            if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia, t));
-            else process(item.id, item.nome, item.pendencia, item);
-        });
-    });
-
-    if (itemsCount === 0) {
-        alert("Nenhum item foi conferido. A conferência não pode ser finalizada.");
-        btn.disabled = false;
-        btn.textContent = "Finalizar Conferência";
-        return;
-    }
+    
+    // LÓGICA EXISTENTE DE FINALIZAÇÃO DE CONFERÊNCIA NORMAL (Sem Cautela)
+    const btn = document.getElementById('btn-finalizar');
+    if (btn.disabled) return;
+    btn.textContent = "Salvando..."; btn.disabled = true;
 
     try {
-        await db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(listaMestraRef);
-            if (!doc.exists) throw "Lista mestre não encontrada!";
+        // --- Variáveis Globais Corretas para o App ---
+        const p = userInfo;
+        const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
+        const clean = (val) => val === undefined ? null : val;
+        let updated = false;
+        let itensRelatorio = [];
+        let itensCaa = []; let itemsCount = 0; let cA_count = 0;
+        
+        // A Lógica de Pendência (atualizarListaDB) deve ser a sua versão mais recente.
+        const atualizarListaDB = (itemOuTomb, uid) => {
+            const s = window.itemStatus[uid];
+            if(!s) return;
+            
+            if(s.status === 'C/A' || s.status === 'KEEP') { 
+                let old = itemOuTomb.pendencia || {};
+                
+                // Se a observação do rascunho for vazia (KEEP/CIENTE) E JÁ TINHA PENDÊNCIA, 
+                // a Pendência anterior é MANTIDA (NÃO CRIA NOVO CARIMBO).
+                if (s.obs.trim() === '' && itemOuTomb.pendencia) {
+                    // Não faz nada com itemOuTomb.pendencia.
+                } else {
+                    // Se for um novo C/A (ACRESCENTAR) ou se a Pendência não existia, atualiza.
+                    itemOuTomb.pendencia = { 
+                        obs: s.obs, 
+                        quem: conferente, 
+                        data: firebase.firestore.Timestamp.now(), 
+                        statusAdmin: clean(old.statusAdmin), 
+                        adminObs: clean(old.adminObs) 
+                    }; 
+                }
+                updated=true;
 
-            let listaMestra = doc.data().list;
-            let updated = false;
-
-            listaMestra.forEach(setorMestra => {
-                setorMestra.itens.forEach(itemMestra => {
-                    if (itemMestra.tipo === 'multi' && itemMestra.tombamentos) {
-                        itemMestra.tombamentos.forEach(tombMestra => {
-                            atualizarListaDB(tombMestra, `${itemMestra.id}-${tombMestra.tomb}`);
-                        });
-                    } else {
-                        atualizarListaDB(itemMestra, itemMestra.id);
-                    }
-                });
-            });
-
-            if (updated) {
-                transaction.update(listaMestraRef, { list: listaMestra, lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            } else if(s.status === 'S/A' && itemOuTomb.pendencia) { 
+                // Se o conferente marcou S/A e havia Pendência (C/A), DELETA a Pendência (C/A).
+                delete itemOuTomb.pendencia; 
+                updated=true;
             }
+        };
 
-            transaction.set(resultadosRef.doc(), {
-                listaId: CURRENT_LIST_ID,
-                dataConferencia: firebase.firestore.FieldValue.serverTimestamp(),
-                conferente: conferente,
-                conferenteId: USER_ID,
-                tipo: tipo,
-                setor: setor,
-                itemsCaa: itensCaa.length,
-                itemsTotal: itemsCount,
-                items: itensRelatorio
+        dadosConferencia.forEach(setor => {
+            setor.itens.forEach(item => {
+                if(item.tipo === 'single') atualizarListaDB(item, item.id);
+                else if(item.tombamentos) item.tombamentos.forEach(t => atualizarListaDB(t, `${item.id}-${t.tomb}`));
             });
         });
-
-        alert(`✅ Conferência finalizada! Itens C/A: ${itensCaa.length}/${itemsCount}`);
         
-        if (tipo === 'RECEBIMENTO_CAUTELA' || tipo === 'DEVOLUCAO_CAUTELA') {
-            await finalizarRecebimentoDevolucao(btn, tipo);
-        } else {
-            limparRascunho();
-            window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        }
+        // --- FUNÇÃO PROCESS (GERA RELATÓRIO E INJETA CAUTELA PARA PDF) ---
+        dadosConferencia.forEach(setor => {
+            setor.itens.forEach(item => {
+                const process = (id, nome, pend, itemContext) => { 
+                    const s = window.itemStatus[id];
+                    if (s && s.status !== 'pending') {
+                        itemsCount++;
+                        let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
+                        if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
+                       
+                        let finalObs = s.obs;
+                        if (s.status === 'KEEP' && pend) finalObs = pend.obs;
+                        if (s.status === 'S/A') finalObs = null;
+                        
+                        // INJEÇÃO CRÍTICA DO CARIMBO DE CAUTELA PARA O RELATÓRIO (PDF) 
+                        const cautelaReportText = getCautelaTextForReport(itemContext);
+                        
+                        if (cautelaReportText) {
+                            if (finalObs) {
+                                finalObs = `${finalObs} | + CAUTELA: ${cautelaReportText}`;
+                            } else {
+                                finalObs = cautelaReportText; 
+                            }
+                        }
+                        // FIM DA INJEÇÃO 
+                        
+                        const dadosItem = { 
+                            nomeCompleto: nome, 
+                            status: finalStatus, 
+                            obs: finalObs, 
+                            quantidade: item.quantidadeEsperada || 1, 
+                            id: id,
+                            statusAdmin: pend ? clean(pend.statusAdmin) : null,
+                            adminObs: pend ? clean(pend.adminObs) : null,
+                            setor: setor.nome
+                        };
+                        itensRelatorio.push(dadosItem);
+                        if (finalStatus === 'C/A') itensCaa.push(dadosItem);
+                    }
+                };
 
-    } catch (error) {
-        console.error("Erro CRÍTICO ao finalizar conferência:", error);
-        alert(`Erro ao finalizar. Nenhum dado foi alterado. Erro: ${error.message}`);
-        btn.disabled = false;
-        btn.textContent = "Finalizar Conferência";
-    }
+                if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia, t));
+                else process(item.id, item.nome, item.pendencia, item);
+            });
+        });
+        // --- FIM DA FUNÇÃO PROCESS ---
+
+        if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
+        
+        // 🛑 NOVO CÓDIGO CRÍTICO: Atualiza a custódia atual
+        const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
+        await custodiaRef.set({
+            lista_id: LISTA_ID,
+            local_nome: localNome,
+            conferente_completo: conferente, // O militar logado (Dono Provisório)
+            timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+        // ------------------------------------
+
+        limparRascunho();
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html"; }
+
+    } catch (e) { console.error(e);
+        alert("Erro: " + e.message); btn.disabled = false; }
 }
         async function finalizarRecebimentoCautela() {
     const btn = document.getElementById('btn-finalizar');
