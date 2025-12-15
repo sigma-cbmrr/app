@@ -3720,41 +3720,30 @@ function reimprimirPDF(data) {
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
 
-        // --- NOVO BLOCO: Lógica Opcional de Desenho de Logos ---
-        const drawLogo = (domId, x) => {
+        // --- FUNÇÃO LOGODRAW RESTAURADA PARA A VERSÃO ORIGINAL FUNCIONAL ---
+        const logoDraw = (domId, x) => { 
             const el = document.querySelector(`img[src*="${domId}"]`);
-            if (el) {
-                try {
-                    // Cria uma nova instância de imagem para garantir que a imagem seja totalmente carregada
-                    const img = new Image();
-                    img.crossOrigin = 'Anonymous'; // Importante para evitar erros CORS no Canvas
-                    img.onload = function() {
-                        const c = document.createElement('canvas');
-                        c.width = 160;
-                        c.height = 160;
-                        c.getContext('2d').drawImage(img, 0, 0, 160, 160);
-                        doc.addImage(c.toDataURL('image/png'), 'PNG', x, 10, LOGO_S, LOGO_S);
-                    };
-                    // Tenta usar o src do elemento DOM
-                    img.src = el.src; 
-
-                    // Fallback se o src for local/CORS e falhar (deve ser tratado com console.warn, mas não interrompe o fluxo)
-                    if (!img.complete) {
-                         // Se a imagem não for carregada imediatamente, adicionamos a imagem sem usar o evento onload
-                         // Se houver erro de CORS, o try/catch no bloco principal ainda permite que o PDF prossiga.
-                         doc.text('[Logo]', x + (LOGO_S/2), 10 + (LOGO_S/2), { align: 'center' });
-                    }
-                } catch (e) {
-                    console.warn(`Falha ao desenhar imagem ${domId}:`, e.message);
-                }
+            if(el) { 
+                try{
+                    const c=document.createElement('canvas');
+                    c.width=160;
+                    c.height=160;
+                    c.getContext('2d').drawImage(el,0,0,160,160);
+                    // Adiciona a imagem ao PDF
+                    doc.addImage(c.toDataURL('image/png'),'PNG',x,10,LOGO_S,LOGO_S);
+                }catch(e){
+                    console.warn(`Falha ao desenhar imagem ${domId}`);
+                } 
+            } else {
+                 console.warn(`Elemento img[src*="${domId}"] não encontrado no DOM. O logo não será exibido.`);
             }
         };
-
-        // --- CHAMADAS PARA DESENHAR AS LOGOS ---
-        // Desenha as logos (essa chamada agora é síncrona e não deve bloquear o restante do PDF)
-        drawLogo('cbmrr.png', MARGIN);
-        drawLogo('logo_sigma.png', PG_W - MARGIN - LOGO_S);
         
+        // --- CHAMADAS PARA DESENHAR AS LOGOS ---
+        // 1. Logo CBM-RR (Esquerda)
+        logoDraw('cbmrr.png', MARGIN);
+        // 2. Logo SIGMA (Direita)
+        logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
         // CABEÇALHO
         doc.setFontSize(10);
         doc.setTextColor(51); 
@@ -3833,7 +3822,7 @@ function reimprimirPDF(data) {
                 const dataConf = dataTimestamp.toLocaleDateString('pt-BR');
                 const conf = data.conferente; 
                 
-                // 1. LÓGICA DO CARIMBO DE CAUTELA ATIVA (NOVO)
+                // 🛑 INÍCIO DA IMPLEMENTAÇÃO CIRÚRGICA DO CARIMBO DE CAUTELA 🛑
                 let carimboCautela = '';
                 if (item.cautelas && item.cautelas.length > 0) {
                     // Item Single
@@ -3843,20 +3832,24 @@ function reimprimirPDF(data) {
                     ).join(' | ');
                     carimboCautela = `[CAUTELA ATIVA] ${totalQtd} un cauteladas. Detalhes: ${cautelasInfo}`;
                 } else if (item.tombamento && item.obs.includes('CAUTELADO [CAUTELA-')) {
-                    // Item Multi/Tombamento (tenta extrair do OBS, já que o item do relatório é um tombamento único)
-                    // Este é um fallback, mas a informação já pode estar na obs formatada.
+                    // Esta lógica não é ideal, mas foi mantida para compatibilidade, caso a informação de cautela esteja no OBS original.
                 }
 
-                // 2. Anexar o carimbo de cautela (se existir) ao histórico
+                // Anexar o carimbo de cautela (se existir) ao histórico
                 if (carimboCautela) {
-                    finalObs = (finalObs !== '-' ? finalObs + ' | ' : '') + carimboCautela;
+                    // CORREÇÃO DA CONCATENAÇÃO: Garante que a OBS da cautela seja adicionada corretamente.
+                    if (finalObs && finalObs !== '-') {
+                        finalObs = finalObs + ' | ' + carimboCautela;
+                    } else {
+                        finalObs = carimboCautela;
+                    }
                 }
-                // FIM DA LÓGICA DO CARIMBO DE CAUTELA (NOVO)
+                // 🛑 FIM DA IMPLEMENTAÇÃO CIRÚRGICA 🛑
 
                 
                 // 3. Usa a função padrão para obter o array 
                 let linhasFormatadas = [];
-                if (finalObs !== '-') {
+                if (finalObs && finalObs !== '-') { // Garante que a formatação não seja feita se finalObs for vazio ou '-'
                     linhasFormatadas = gerarLinhasFormatadas(
                         finalObs, 
             
