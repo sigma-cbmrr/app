@@ -353,10 +353,11 @@
                             }); 
                              const safeCarimbo = encodeURIComponent(dadosCarimbo);
 
-                             // HTML com estilo de cautela (diferente de C/A)
+                             // ✅ CORREÇÃO: Adicionar data-status-type="cautela" para proteção
                             return `<div class="pendencia-alert-box status-cautela" 
                                         style="border-left: 3px solid #f57c00; background-color: #fff8e0; cursor: default;"
-                                        title="Item com cautela ativa.">
+                                        title="Item com cautela ativa."
+                                        data-status-type="cautela"> 
                                         <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;">
                                             <i class="fas fa-boxes"></i> ${pendenciaObj.quem}
                                         </div>
@@ -478,19 +479,16 @@
             item.querySelector('.alteracao-container').style.display='none'; 
             
             const pb = item.querySelector('.pendencia-alert-box'); 
-
-            // 🛑 CORREÇÃO CRÍTICA: NÃO ESCONDER se for um alerta de cautela ativa 🛑
-            let isCautelaAlert = false;
-            if (pb && pb.querySelector('.status-cautela')) {
-                isCautelaAlert = true;
-            }
-            if (pb && !isCautelaAlert) {
+            
+            // 🛑 CORREÇÃO CRÍTICA: Proteger o alerta de Cautela Ativa de ser escondido 🛑
+            // Apenas esconde o alerta se ele existir E não for do tipo 'cautela' (pendências C/A normais)
+            if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
                 pb.style.display='none';
             }
             // ---------------------------------------------------------------------
 
             
-            // 🛑 TRATAMENTO EXCLUSIVO para 'cautela_ciente' (Avança e Marca C/A)
+            // TRATAMENTO EXCLUSIVO para 'cautela_ciente' (Avança e Marca C/A)
             if (status === 'cautela_ciente') {
                 item.className = 'item-conferencia status-alert'; // Cor amarela (C/A)
                 item.querySelector('.status-icon').className = 'status-icon alert'; 
@@ -498,8 +496,8 @@
                 // Salva o C/A com o carimbo de Ciente
                 window.itemStatus[item.dataset.id] = { status: 'C/A', obs: 'CIENTE: Item cautelado conferido.' };
 
-                // O alerta visual de cautela (pendencia-alert-box status-cautela) permanece visível
-                if(pb && isCautelaAlert) pb.style.display = 'block'; 
+                // ✅ GARANTE VISIBILIDADE: Alerta de cautela fica visível
+                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block'; 
             }
             // FIM do tratamento exclusivo
             
@@ -508,8 +506,8 @@
                 item.querySelector('.status-icon').className='status-icon ok';
                 window.itemStatus[item.dataset.id]={status:'S/A',obs:''};
 
-                // Garante que o carimbo de cautela sumiu se o usuário deu S/A, mas não deveria acontecer neste caso
-                if(pb && isCautelaAlert) pb.style.display = 'none'; 
+                // Remove o carimbo de cautela se o usuário der S/A (o que não deveria ser possível se estivesse 100% cautelado, mas a lógica de 'single' permite)
+                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none'; 
             } 
             else { // status === 'alert' (Abre caixa de texto para + Alteração)
                 item.className='item-conferencia status-alert'; 
@@ -520,8 +518,8 @@
                 window.itemStatus[item.dataset.id]={status:'PENDING_CA',obs:''};
                 item.querySelector('textarea').focus();
 
-                // Mantém o alerta de cautela visível durante a edição
-                if(pb && isCautelaAlert) pb.style.display = 'block';
+                // ✅ GARANTE VISIBILIDADE: Alerta de cautela fica visível durante a edição
+                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
             } 
             
             salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); 
@@ -535,24 +533,20 @@
             tomb.querySelector('.tombamento-obs-container').style.display='none'; tomb.querySelector('.tombamento-descricao-salva').style.display='none'; 
             const pb = tomb.querySelector('.pendencia-alert-box'); 
             
-            // 🛑 CORREÇÃO CRÍTICA: NÃO ESCONDER se for um alerta de cautela ativa 🛑
-            let isCautelaAlert = false;
-            if (pb && pb.querySelector('.status-cautela')) {
-                isCautelaAlert = true;
-            }
-            if (pb && !isCautelaAlert) {
+            // 🛑 CORREÇÃO CRÍTICA: Proteger o alerta de Cautela Ativa de ser escondido 🛑
+            if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
                 pb.style.display='none';
             }
             // ---------------------------------------------------------------------
 
             
-            // 🛑 TRATAMENTO EXCLUSIVO para 'cautela_ciente' (Avança e Marca C/A)
+            // TRATAMENTO EXCLUSIVO para 'cautela_ciente' (Avança e Marca C/A)
             if (status === 'cautela_ciente') {
                 // Salva o C/A com o carimbo de Ciente
                 window.itemStatus[uid] = { status: 'C/A', obs: 'CIENTE: Item cautelado conferido.' };
 
-                // Garante que o carimbo de cautela permaneça visível
-                if(pb && isCautelaAlert) pb.style.display = 'block'; 
+                // ✅ GARANTE VISIBILIDADE: Alerta de cautela fica visível
+                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block'; 
                 
                 updateItemMainStatusDisplay(item);
             }
@@ -561,8 +555,8 @@
             else if(status==='ok'){
                 window.itemStatus[uid]={status:'S/A',obs:''};
                 
-                // Garante que o carimbo de cautela sumiu se o usuário deu S/A, mas não deveria acontecer neste caso
-                if(pb && isCautelaAlert) pb.style.display = 'none'; 
+                // Remove o carimbo de cautela se o usuário deu S/A
+                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none'; 
                 
                 updateItemMainStatusDisplay(item);
             } 
@@ -571,8 +565,8 @@
                 window.itemStatus[uid]={status:'PENDING_CA',obs:''}; 
                 tomb.querySelector('textarea').focus();
                 
-                 // Mantém o alerta de cautela visível durante a edição
-                if(pb && isCautelaAlert) pb.style.display = 'block';
+                 // ✅ GARANTE VISIBILIDADE: Alerta de cautela fica visível durante a edição
+                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
                 
                 updateItemMainStatusDisplay(item);
             } 
