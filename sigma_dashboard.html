@@ -3607,52 +3607,55 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
     
     // 1. FORMATAÇÃO DA RESPOSTA DO GESTOR (ADMIN)
     if (adminStatus) {
-        // Armazenamos o Status e a Observação separados para facilitar a formatação no HTML
-        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`; 
+        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`;
         linhas.push(gestorLinha);
     }
     
     const separator = ' | + NOVA: ';
+    const cautelaSeparator = ' | + CAUTELA: '; // NOVO: Separador de Cautela
     
-    // 2. FORMATAÇÃO DAS OBSERVAÇÕES DO CONFERENTE (LINEAR HISTORY)
-    if (textoBruto.includes(separator)) {
-        const partes = textoBruto.split(separator);
-        partes.forEach(p => {
-            p = p.trim();
-            const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-            const match = p.match(regex);
-            
-            // Verifica se é a AÇÃO GESTOR já salva no histórico.
-            if (match && match[1].includes('[AÇÃO GESTOR:')) {
-                return; 
-            }
+    // 2. TRATAMENTO DO HISTÓRICO LINEAR
+    // Substitui o separador de cautela por um separador de nova linha temporário para evitar que a regex o trate como nova observação.
+    const textoComCautelaTratada = textoBruto.replace(cautelaSeparator, ' \n\n[CAUTELA_LINE_START]\n\n');
+    
+    // Divide pelo separador de NOVA OBSERVAÇÃO
+    let partes = [textoComCautelaTratada];
+    if (textoComCautelaTratada.includes(separator)) {
+        partes = textoComCautelaTratada.split(separator);
+    }
 
-            // Se for observação de Conferente:
-            if (match) {
-                // Formato padrão: Por: NOME em DATA: "OBS"
-                linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
-            } else {
-                // Se for texto simples (fallback, não deve acontecer com o padrão atual)
-                linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+    partes.forEach(p => {
+        p = p.trim();
+        
+        // 🛑 NOVO: TRATAMENTO DA LINHA DE CAUTELA
+        if (p.includes('[CAUTELA_LINE_START]')) {
+            // Remove a flag interna
+            const cautelaText = p.replace(/(\n\n\[CAUTELA_LINE_START\]\n\n)/g, '').trim();
+            // Adiciona a linha de cautela com um prefixo de identificação
+            if (cautelaText) {
+                linhas.push(`[CAUTELA]: ${cautelaText}`);
             }
-        });
-    } else {
-        const p = textoBruto.trim();
+            return;
+        }
+
         const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
         const match = p.match(regex);
-
-        // Verifica se é uma AÇÃO GESTOR na primeira linha 
-        if (match && match[1].includes('[AÇÃO GESTOR:')) {
-            return; // Já tratado na seção 1
-        }
         
-        // Se for a primeira observação de Conferente:
+        // Verifica se é a AÇÃO GESTOR já salva no histórico.
+        if (match && match[1].includes('[AÇÃO GESTOR:')) {
+            return; 
+        }
+
+        // Se for observação de Conferente:
         if (match) {
+            // Formato padrão: Por: NOME em DATA: "OBS"
             linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
         } else {
+            // Se for texto simples (fallback)
             linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
         }
-    }
+    });
+
     return linhas;
 };
 
@@ -3663,24 +3666,22 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
     
     linhas.forEach(l => { 
         if (l.includes('(Admin):')) { 
-            // Formato de entrada: [STATUS] (Admin): Observação do Gestor
+            // Formato Gestor (Existente)
             const [carimboStatus, obsText] = l.split(':');
-            const statusText = carimboStatus.match(/\[(.*?)\]/)[1]; // Ex: "EM SOLUÇÃO"
+            const statusText = carimboStatus.match(/\[(.*?)\]/)[1];
             
             let icon = '';
-            let statusColor = '#f57c00'; // Amarelo/Laranja padrão para Em Solução
-            let obsColor = '#555';
-
-            // Mapeamento dos Ícones e Cores
+            let statusColor = '#f57c00';
+            
             switch(statusText.toUpperCase().trim()) {
                 case 'SOLUCIONADO':
                 case 'REMOVER':
                     icon = '✅️';
-                    statusColor = '#1b8a3e'; // Verde
+                    statusColor = '#1b8a3e';
                     break;
                 case 'CAUTELADO':
                     icon = '🔃';
-                    statusColor = '#0d47a1'; // Azul
+                    statusColor = '#0d47a1'; 
                     break;
                 case 'EM SOLUÇÃO':
                 default:
@@ -3688,22 +3689,26 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
                     break;
             }
             
-            // Formatado como: **Gestor** <span style="color: StatusColor;">⚠️ *Status*: </span> Observação
             html += `<li>
                         <span style="color: #d90f23;"><b>Gestor</b></span>:
                         <span style="color: ${statusColor}; font-style: italic;">
                             ${icon} ${statusText}
                         </span>
                         : ${obsText.trim()}
-                    </li>`; 
+                    </li>`;
+        } else if (l.includes('[CAUTELA]:')) { // NOVO: TRATAMENTO DE CAUTELA
+            const cautelaText = l.replace('[CAUTELA]:', '').trim();
+            // Estilo visual chamativo para a cautela (como se fosse um Alerta/Nota)
+            html += `<li style="background-color: #fff8e1; border-left: 3px solid #f57c00; padding: 5px 0 5px 8px; margin: 5px 0;">
+                        <span style="font-weight: bold; color: #f57c00;">
+                            <i class="fas fa-hand-holding-box"></i> Cautela Ativa: 
+                        </span>
+                        ${cautelaText}
+                    </li>`;
         } else { 
-            // Formato Conferente: • **Por [Usuário + Data]:**
-            // Quebra a linha: Carimbo ("Por: NOME em DATA") e o Resto (": "OBS")
+            // Formato Conferente (Existente)
             const [carimbo, ...resto] = l.split(':');
-            
-            // Aplica BOLD no Carimbo: "Por: NOME em DATA"
             const carimboBold = carimbo.replace('Por:', '**Por**');
-            
             html += `<li class="linha-obs">• ${carimboBold}:${resto.join(':')}</li>`;
         } 
     });
