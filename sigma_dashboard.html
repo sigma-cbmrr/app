@@ -3713,16 +3713,15 @@ const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminOb
 };
 
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
-function reimprimirPDF(data) {
+function function reimprimirPDF(data) {
     try {
         const { jsPDF } = window.jspdf;
+       
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
 
-        // MANTÉM A LÓGICA DE BUSCA DE IMAGEM DO DASHBOARD
-        // Busca a imagem já carregada no DOM para desenhar no PDF
+        // --- FUNÇÃO LOGODRAW (ORIGINAL E FUNCIONAL) ---
         const logoDraw = (domId, x) => { 
-            // Utilizamos uma consulta que verifica se o src contém o domId
             const el = document.querySelector(`img[src*="${domId}"]`);
             if(el) { 
                 try{
@@ -3733,7 +3732,6 @@ function reimprimirPDF(data) {
                     // Adiciona a imagem ao PDF
                     doc.addImage(c.toDataURL('image/png'),'PNG',x,10,LOGO_S,LOGO_S);
                 }catch(e){
-                    // Em caso de falha no canvas (como CORS), o processo continua
                     console.warn(`Falha ao desenhar imagem ${domId}`);
                 } 
             } else {
@@ -3745,8 +3743,7 @@ function reimprimirPDF(data) {
         // 1. Logo CBM-RR (Esquerda)
         logoDraw('cbmrr.png', MARGIN);
         // 2. Logo SIGMA (Direita)
-        logoDraw('logo_sigma.png', PG_W-MARGIN-LOGO_S);
-        
+        logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
         // CABEÇALHO
         doc.setFontSize(10);
         doc.setTextColor(51); 
@@ -3796,7 +3793,6 @@ function reimprimirPDF(data) {
         doc.setFont('helvetica','bold');
         doc.setTextColor(128, 0, 32);
         doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
-
         // TABELA DE ITENS
         let tableBody = [];
         const RED_FILL = [217, 15, 35]; 
@@ -3807,58 +3803,90 @@ function reimprimirPDF(data) {
         if (data.itensRelatorio && data.itensRelatorio.length > 0) listaParaImprimir = data.itensRelatorio;
         else if (data.itensCaa && data.itensCaa.length > 0) listaParaImprimir = data.itensCaa;
         else tableBody.push([{ content: 'CONFERÊNCIA REALIZADA SEM ALTERAÇÕES (REGISTRO LEGADO)', colSpan: 4, styles: { halign: 'center', fillColor: GREEN_FILL, textColor: 255, fontStyle: 'bold', cellPadding: 5 } }]);
-        
         if (listaParaImprimir.length > 0) {
             let currentSector = null;
             listaParaImprimir.forEach(item => {
                 // Lógica de Agrupamento por Setor
                 let setorItem = item.setor || "ITENS GERAIS";
                 if(setorItem !== currentSector) {
-                    tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
+                    tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } 
+                    }]);
                     currentSector = setorItem;
                 }
 
                 // Lógica de Formatação de Observações
                 let finalObs = item.obs || '-';
                 
+    
                 // ADICIONADO: Variáveis de contexto para a formatação
                 const dataConf = dataTimestamp.toLocaleDateString('pt-BR');
                 const conf = data.conferente; 
                 
-                // 1. Usa a função padrão para obter o array de linhas formatadas
+                // 🛑 INÍCIO DA IMPLEMENTAÇÃO CIRÚRGICA DO CARIMBO DE CAUTELA 🛑
+                let carimboCautela = '';
+                if (item.cautelas && item.cautelas.length > 0) {
+                    // Item Single
+                    const totalQtd = item.cautelas.reduce((sum, c) => sum + (c.quantidade || 0), 0);
+                    const cautelasInfo = item.cautelas.map(c => 
+                        `[CAUTELA ${c.id || 'N/D'}]: ${c.quantidade || 0} un para ${c.destinatario || 'N/D'} em ${c.data || 'N/D'}`
+                    ).join(' | ');
+                    carimboCautela = `[CAUTELA ATIVA] ${totalQtd} un cauteladas. Detalhes: ${cautelasInfo}`;
+                } else if (item.tombamento && item.obs.includes('CAUTELADO [CAUTELA-')) {
+                    // Esta lógica foi mantida
+                }
+
+                // Anexar o carimbo de cautela (se existir) ao histórico
+                if (carimboCautela) {
+                    if (finalObs && finalObs !== '-') {
+                        finalObs = finalObs + ' | ' + carimboCautela;
+                    } else {
+                        finalObs = carimboCautela;
+                    }
+                }
+                // 🛑 FIM DA IMPLEMENTAÇÃO CIRÚRGICA 🛑
+
+                
+                // 3. Usa a função padrão para obter o array 
                 let linhasFormatadas = [];
-                if (finalObs !== '-') {
+                if (finalObs && finalObs !== '-') { 
                     linhasFormatadas = gerarLinhasFormatadas(
                         finalObs, 
+            
                         conf, 
                         dataConf,
                         item.statusAdmin, 
                         item.adminObs
+              
                     );
                 }
                 
-                // 2. Transforma o array de linhas em uma string separada por quebra de linha
+                // 4. Transforma o array de linhas em uma string separada por quebra de linha
                 // O prefixo '•' já está incluso na função gerarLinhasFormatadas para observações.
                 finalObs = linhasFormatadas.map(l => {
                     // Substitui o prefixo de admin (ex: "⚠️ [SOLUCIONADO] (Admin):") para um formato de relatório mais limpo
                     if(l.includes('(Admin):')) {
                         return l.replace('⚠️ ', 'RESPOSTA DA GESTÃO: ');
+         
                     }
                     return l;
                 }).join('\n');
-                
                 if (finalObs.trim() === '') finalObs = '-'; // Volta para '-' se ficar vazio.
-
                 // FIM DA LÓGICA DE FORMATAÇÃO DE OBSERVAÇÕES
                 
                 let bgStatus = GREEN_FILL;
                 if (item.status === 'C/A' || item.status === 'KEEP') bgStatus = RED_FILL;
                 
+                // 🛑 CORREÇÃO DA QUANTIDADE PARA ITENS COM TOMBAMENTO 🛑
+                // Se o item tem a propriedade tombamento (indicando que é um item multi), define a quantidade como 1.
+                const itemQuantidade = (item.tombamento) ? 1 : (item.quantidade || 1);
+
                 // Adiciona a linha à tabela
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
-                    { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center', valign: 'middle' } }, 
-                    { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle' } }, 
+                    // Usa a variável itemQuantidade para exibir 1 ou a quantidade normal
+                    { content: `QTD: ${itemQuantidade}`, styles: { halign: 'center', valign: 'middle' } }, 
+                    { 
+                    content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle' } }, 
                     { content: finalObs, styles: { halign: 'left', valign: 'middle' } } 
                 ]);
             });
@@ -3870,16 +3898,17 @@ function reimprimirPDF(data) {
             head: [['Item', 'Quantidade', 'Status', 'Observação']], 
             body: tableBody, 
             theme: 'striped', 
+          
             styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 1.5 }, 
             columnStyles: { 
                 0:{cellWidth:80, halign:'left'}, 
                 1:{cellWidth:20,halign:'center'}, 
                 2:{cellWidth:20,halign:'center'}, 
                 3:{cellWidth:'auto',halign:'left'} 
+    
             }, 
             headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
         });
-
         // Rodapé com Paginação
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
@@ -3898,8 +3927,7 @@ function reimprimirPDF(data) {
         console.error(e);
         alert("Erro ao gerar PDF: " + e.message);
     }
-}
-        // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
+}        // --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
         
         function sairDoSistema() { 
             auth.signOut().then(() => { 
