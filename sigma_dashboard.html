@@ -6201,24 +6201,21 @@ async function loadActiveCautelas() {
 }
         async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
-    const btnReceber = document.getElementById('btn-receber-cautela'); // Para status ABERTA
-    const btnDevolver = document.getElementById('btn-devolver-cautela'); // Para status RECEBIDA
-    const btnConfirmarDevolucao = document.getElementById('btn-confirmar-devolucao'); // NOVO: Para status DEVOLUÇÃO
+    const btnReceber = document.getElementById('btn-receber-cautela');
+    const btnDevolver = document.getElementById('btn-devolver-cautela');
+    const btnConfirmarDevolucao = document.getElementById('btn-confirmar-devolucao');
     
-    // 1. Resetar modal e exibir
     document.getElementById('modal-cautela-id').textContent = cautelaId;
     document.getElementById('modal-status').textContent = 'Carregando...';
     modal.style.display = 'flex';
-    btnReceber.style.display = 'none'; // Esconde o botão normal de recebimento
-    if (btnDevolver) btnDevolver.style.display = 'none'; // Esconde o botão de devolução
-    if (btnConfirmarDevolucao) btnConfirmarDevolucao.style.display = 'none'; // Esconde o novo botão
+    btnReceber.style.display = 'none';
+    if (btnDevolver) btnDevolver.style.display = 'none';
+    if (btnConfirmarDevolucao) btnConfirmarDevolucao.style.display = 'none';
 
-    // Limpar conteúdos anteriores (Adicionado limpeza para os novos campos de rastreabilidade)
     if (document.getElementById('modal-destinatario-original')) document.getElementById('modal-destinatario-original').textContent = '';
     if (document.getElementById('modal-destinatario-atual')) document.getElementById('modal-destinatario-atual').textContent = '';
     if (document.getElementById('modal-ultimo-detentor')) document.getElementById('modal-ultimo-detentor').textContent = '';
 
-    // Campos existentes
     document.getElementById('modal-emitente').textContent = '';
     document.getElementById('modal-local-origem').textContent = '';
     document.getElementById('modal-data-emissao').textContent = '';
@@ -6226,7 +6223,6 @@ async function loadActiveCautelas() {
     document.getElementById('modal-itens-cautela').innerHTML = '<li style="text-align:center;">Carregando itens...</li>';
 
     try {
-        // 2. Buscar dados da cautela no Firestore
         const docRef = db.collection('cautelas_abertas').doc(cautelaId);
         const doc = await docRef.get();
         
@@ -6239,47 +6235,30 @@ async function loadActiveCautelas() {
         const cautela = doc.data();
         const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
 
-        // 3. Preencher Detalhes Principais - COM RASTREABILIDADE
-        
-        // 🛑 LÓGICA DE RASTREABILIDADE (PONTO 2) 🛑
-        
-        // A. Emitente (Origem da cautela - USUARIO A)
-        document.getElementById('modal-emitente').textContent = cautela.emitente || 'N/D';
-        
-        // B. Destinatário Original (Quem recebeu a cautela inicialmente - USUARIO B)
-        // Este campo DEVE ser criado na função de emissão e NUNCA mais alterado.
         const destinatarioOriginal = cautela.destinatario_original || 'Necessita Campo "original"';
         if (document.getElementById('modal-destinatario-original')) {
-             document.getElementById('modal-destinatario-original').textContent = destinatarioOriginal;
+            document.getElementById('modal-destinatario-original').textContent = destinatarioOriginal;
         }
         
-        // C. Destinatário Atual (Quem tem a posse/responsabilidade AGORA - USUARIO B ou Dono Provisório USUARIO C)
         if (document.getElementById('modal-destinatario-atual')) {
-             document.getElementById('modal-destinatario-atual').textContent = cautela.destinatario || 'N/D';
+            document.getElementById('modal-destinatario-atual').textContent = cautela.destinatario || 'N/D';
         }
         
-        // D. Último Detentor (Quem enviou a devolução - USUARIO B, usando o campo militar_completo_reversor)
-        // Só faz sentido se o status for DEVOLUÇÃO.
         let ultimoDetentor = 'N/A';
         if (cautela.status === 'DEVOLUÇÃO') {
-             ultimoDetentor = cautela.militar_completo_reversor || 'Não registrado';
+            ultimoDetentor = cautela.militar_completo_reversor || 'Não registrado';
         } else if (cautela.status === 'RECEBIDA' || cautela.status === 'ABERTA') {
-             // Se não está em devolução, o último detentor é o próprio destinatário.
-             ultimoDetentor = cautela.destinatario;
+            ultimoDetentor = cautela.destinatario;
         }
         if (document.getElementById('modal-ultimo-detentor')) {
-             document.getElementById('modal-ultimo-detentor').textContent = ultimoDetentor;
+            document.getElementById('modal-ultimo-detentor').textContent = ultimoDetentor;
         }
 
-
-        // Informações de Borda (mantido)
+        document.getElementById('modal-emitente').textContent = cautela.emitente || 'N/D';
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
         document.getElementById('modal-data-emissao').textContent = dataEmissao;
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
         
-        // FIM DA LÓGICA DE RASTREABILIDADE
-        
-        // 4. Preencher a Lista de Itens (mantido o seu código)
         const itensList = document.getElementById('modal-itens-cautela');
         itensList.innerHTML = '';
         
@@ -6291,18 +6270,15 @@ async function loadActiveCautelas() {
                 
                 const nomeItem = item.nome || 'Item sem nome';
                 
-                // 🛑 CORREÇÃO VISUAL DEFINITIVA: Exibe o tombamento real (item.tombamento) 🛑
-                const quantidadeOuTombamento = item.tombamento 
-                    ? `(Tombamento: <strong>${item.tombamento}</strong>)` 
+                const quantidadeOuTombamento = item.tombamento
+                    ? `(Tombamento: <strong>${item.tombamento}</strong>)`
                     : `(Quantidade: <strong>${item.quantidade}</strong>)`;
                 
-                // Remove propriedades que causam confusão para garantir que o nome seja limpo no console
                 delete item.id_completo;
                 
                 li.innerHTML = `
                     <span style="font-weight: 500;">${itemCount++}. ${nomeItem}</span> <span style="font-size: 0.9em; color: #555;">${quantidadeOuTombamento}</span>
                 `;
-                // ... (restante do estilo)
                 li.style.display = 'flex';
                 li.style.justifyContent = 'space-between';
                 li.style.alignItems = 'center';
@@ -6317,50 +6293,41 @@ async function loadActiveCautelas() {
             itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
         }
 
-        // 5. Lógica de Ação dos Botões (mantida)
         const militarCompleto = currentUserData.nome_militar_completo;
         const modalStatusElement = document.getElementById('modal-status');
         
-        
         // A. Cautelas ABERTAS (A RECEBER - Fluxo Normal)
-        if (currentUserData.role === 'operacional' && cautela.destinatario === militarCompleto && cautela.status === 'ABERTA') {
+        if (cautela.destinatario === militarCompleto && cautela.status === 'ABERTA') {
             btnReceber.style.display = 'block';
             btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
             modalStatusElement.textContent = `Status: ${cautela.status}`;
             
         // B. Cautelas EM DEVOLUÇÃO (A RECEBER - Novo Fluxo Dono Provisório)
-        } else if (currentUserData.role === 'operacional' && cautela.destinatario === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
+        } else if (cautela.destinatario === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
             if (btnConfirmarDevolucao) {
                 btnConfirmarDevolucao.style.display = 'block';
                 btnConfirmarDevolucao.textContent = 'Confirmar Recebimento da Devolução';
                 
-                // NOVO ONCLICK: Inicia a conferência para o Dono Provisório (logado)
                 btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, cautela.destinatario);
             }
-            // Exibir o status de DEVOLUÇÃO
             modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">DEVOLUÇÃO</span><br>Aguardando sua conferência.`;
             
         // C. Cautelas RECEBIDAS (A DEVOLVER - Fluxo Usuário A)
-        } else if (currentUserData.role === 'operacional' && cautela.destinatario === militarCompleto && cautela.status === 'RECEBIDA') {
-            // Busca o destinatário da devolução (Último Conferente).
+        } else if (cautela.destinatario === militarCompleto && cautela.status === 'RECEBIDA') {
             const ultimoConferente = await getLastConferente(cautela.local_origem);
             
             if (btnDevolver) {
                 btnDevolver.style.display = 'block';
                 btnDevolver.textContent = 'INICIAR DEVOLUÇÃO';
                 
-                // Adiciona a informação de quem vai receber de volta no modal
                 modalStatusElement.innerHTML = `Status: ${cautela.status}<br><span style="font-size:0.8em; color:#0d47a1;">Devolução p/: <strong>${ultimoConferente}</strong></span>`;
 
-                // Configura o onclick para iniciar a transação de devolução (no Dashboard)
                 btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente); 
             }
         
         // D. Cautelas EM DEVOLUÇÃO (QUEM ENVIOU - Usuário A que ainda rastreia)
-        } else if (currentUserData.role === 'operacional' && cautela.militar_completo_reversor === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
-             // Este bloco é para o Usuário A ver a cautela que ele enviou, mas não pode clicar
-             // No modal, mostra para quem foi enviada.
-             modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${cautela.destinatario}</strong></span>`;
+        } else if (cautela.militar_completo_reversor === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
+            modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${cautela.destinatario}</strong></span>`;
 
         // E. LÓGICA PADRÃO (Outros Status / Não é o destinatário)
         } else {
@@ -6371,10 +6338,8 @@ async function loadActiveCautelas() {
             modalStatusElement.textContent = `Status: ${cautela.status}`;
         }
         
-    // 🛑 CHAVE DE FECHAMENTO DO TRY 🛑
     } catch (e) {
         console.error("Erro ao carregar detalhes da cautela:", e);
-        // Garante que os campos de rastreabilidade sejam limpos se houver erro
         if (document.getElementById('modal-destinatario-original')) document.getElementById('modal-destinatario-original').textContent = 'ERRO';
         if (document.getElementById('modal-destinatario-atual')) document.getElementById('modal-destinatario-atual').textContent = 'ERRO';
         if (document.getElementById('modal-ultimo-detentor')) document.getElementById('modal-ultimo-detentor').textContent = 'ERRO';
@@ -6383,7 +6348,6 @@ async function loadActiveCautelas() {
         document.getElementById('modal-itens-cautela').innerHTML = `<li style="text-align:center; color:red;">Erro ao buscar dados: ${e.message}</li>`;
         document.getElementById('modal-status').textContent = `Status: ERRO`;
     }
-    // 🛑 CHAVE DE FECHAMENTO DA FUNÇÃO 🛑
 }
 
 function iniciarRecebimentoCautela(cautelaId) {
