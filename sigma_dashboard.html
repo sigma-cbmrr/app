@@ -2484,6 +2484,7 @@
         let dadosConferencia = []; // Para o editor
         let currentEditingId = null;
         let conferente = '';
+        let userCache = {};
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -5066,6 +5067,7 @@ function getNovaCautelaFormHTML() {
                     <label for="cautela-destinatario">Destinatário da Cautela (Quem irá receber):</label>
                     
                     <div class="custom-select-container">
+                        <input type="hidden" id="cautela-destinatario-uid">
                         <input type="text" id="cautela-destinatario" placeholder="Digite o nome, posto ou matrícula do usuário" required autocomplete="off">
                         <div id="cautela-suggestions-box" class="suggestions-box">
                             <ul id="cautela-suggestions-list">
@@ -5321,11 +5323,13 @@ function showMainMenu() {
     const input = document.getElementById('cautela-destinatario');
     const suggestionsBox = document.getElementById('cautela-suggestions-box');
     const suggestionsList = document.getElementById('cautela-suggestions-list');
-    
+    const uidInput = document.getElementById('cautela-destinatario-uid'); // NOVO: Campo UID
+
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
     input.addEventListener('input', () => {
         const searchTerm = input.value.trim().toUpperCase();
         suggestionsList.innerHTML = '';
+        uidInput.value = ''; // Sempre limpa o UID ao digitar
         
         if (searchTerm.length < 3) {
             suggestionsBox.style.display = 'none';
@@ -5339,8 +5343,8 @@ function showMainMenu() {
         if (filteredUsers.length > 0) {
             let html = '';
             filteredUsers.forEach(user => {
-                // Adiciona o nome completo (value) e o ID (data-id) na lista
-                html += `<li data-user-name="${user.nome}">${user.nome}</li>`;
+                // NOVO: Armazena o ID do Doc/UID no atributo data-uid
+                html += `<li data-user-name="${user.nome}" data-uid="${user.id}">${user.nome}</li>`;
             });
             
             suggestionsList.innerHTML = html;
@@ -5349,20 +5353,22 @@ function showMainMenu() {
             suggestionsBox.style.display = 'none';
         }
     });
-    
-    // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
+
+    // 2. LISTENER DE SELEÇÃO (Preenche o Input, Esconde a Lista e SALVA O UID)
     suggestionsList.addEventListener('click', (event) => {
         if (event.target.tagName === 'LI') {
             const selectedName = event.target.getAttribute('data-user-name');
+            const selectedUid = event.target.getAttribute('data-uid'); // NOVO: Captura o UID
+            
             input.value = selectedName;
+            uidInput.value = selectedUid; // NOVO: Salva o UID
             suggestionsBox.style.display = 'none';
-            // Garante que o input seja marcado como modificado
-            input.dispatchEvent(new Event('change')); 
+            
+            input.dispatchEvent(new Event('change'));
         }
     });
 
-    // 3. Oculta a caixa quando o foco sai do input, mas com um pequeno atraso
-    // para permitir o clique no LI antes que a caixa suma.
+    // 3. Oculta a caixa quando o foco sai do input
     input.addEventListener('blur', () => {
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
@@ -5848,14 +5854,21 @@ async function iniciarCautelaProcesso() {
     btnIniciar.disabled = true;
     btnIniciar.textContent = 'Processando Transação...';
 
-    const destinatarioInput = document.getElementById('cautela-destinatario').value.trim();
+    const destinatarioNomeCompleto = document.getElementById('cautela-destinatario').value.trim();
+    // NOVO: Captura o UID/Doc ID do destinatário
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value.trim(); 
+
     const localOrigem = document.getElementById('cautela-local-origem').value;
     const obsRaw = document.getElementById('cautela-obs').value.trim();
     const itensParaCautela = getSelectedCautelaItemsData();
     const listaId = await getListaIdFromLocalName(localOrigem);
+    
+    // NOVO: Captura o UID do emitente (você)
+    const emitenteUid = firebase.auth().currentUser.uid;
+    const emitenteNomeCompleto = currentUserData.nome_militar_completo; // Nome atual do emitente
 
-    if (!destinatarioInput || itensParaCautela.length === 0 || !listaId) {
-        alert('Falha na validação dos dados. Verifique o destinatário e a seleção de itens.');
+    if (!destinatarioUid || itensParaCautela.length === 0 || !listaId) {
+        alert('Falha na validação dos dados. Selecione um destinatário válido e itens.');
         updateCautelaItemCount(); 
         return;
     }
@@ -5877,53 +5890,44 @@ async function iniciarCautelaProcesso() {
             let novoContador = (configDoc.data().cautela_seq || 0) + 1;
             const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
             
-            // Clone profundo
             let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
             
-            // Cálculo do Total (para Notificação)
             const totalItensMovimentados = itensParaCautela.reduce((sum, item) => {
                 return sum + item.quantidade;
             }, 0);
             const dataEmissao = new Date().toISOString().split('T')[0];
             
-            // 🛑 LÓGICA DE CARIMBO (VALIDAÇÃO DE ESTOQUE REMOVIDA) 🛑
+            // LÓGICA DE CARIMBO (Mantida)
             for (const cItem of itensParaCautela) {
                 
-                // --- Itens Single ---
                 if (cItem.tipo === 'single') {
                     let mItem = findItemInList(listaMestra, cItem.id_base);
                     
                     if (mItem) {
-                        // 🛑 Lógica de validação de estoque total removida, pois a UI (atributo MAX) garante a integridade. 🛑
-                        
-                        // Aplica o carimbo
                         mItem.cautelas = mItem.cautelas || [];
                         mItem.cautelas.push({
                             id: cautelaIdSequencial,
-                            destinatario: destinatarioInput,
+                            destinatario: destinatarioNomeCompleto, // MANTÉM NOME NO CARIMBO
                             quantidade: cItem.quantidade,
                             data: dataEmissao
                         });
                     }
                 }
                 
-                // --- Itens Multi ---
                 else if (cItem.tipo === 'multi') {
                     let mItem = findItemByTombamento(listaMestra, cItem.tombamento);
                     if (mItem && mItem.tombamentos) {
                         const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
                         if (tombIndex > -1) {
-                            // 🛑 VALIDAÇÃO MANTIDA: Checa se o tombamento já possui carimbo. (A UI filtra, mas o cheque no backend é fundamental para multi).
                             if (mItem.tombamentos[tombIndex].cautela) {
                                 throw new Error(`O tombamento ${cItem.tombamento} do item ${mItem.nome} já está cautelado.`);
                             }
                             
-                            // Aplica o carimbo
                             mItem.tombamentos[tombIndex] = {
                                 ...mItem.tombamentos[tombIndex], 
                                 cautela: { 
                                     id: cautelaIdSequencial,
-                                    destinatario: destinatarioInput,
+                                    destinatario: destinatarioNomeCompleto, // MANTÉM NOME NO CARIMBO
                                     data: dataEmissao
                                 }
                             };
@@ -5931,14 +5935,19 @@ async function iniciarCautelaProcesso() {
                     }
                 }
             }
-            // ---------------------------------------------
             
             // Dados da Cautela Ativa (Documento a ser criado)
             const cautelaData = {
                 cautela_id: cautelaIdSequencial,
-                emitente: currentUserData.nome_militar_completo,
-                destinatario: destinatarioInput,
-                destinatario_original: destinatarioInput,
+                // 🛑 CORREÇÃO CRÍTICA 1: Salva o ID e o Nome ATUAL do Emitente
+                emitente_uid: emitenteUid,
+                emitente: emitenteNomeCompleto, 
+
+                // 🛑 CORREÇÃO CRÍTICA 2: Salva o ID e o Nome ATUAL do Destinatário
+                destinatario_uid: destinatarioUid,
+                destinatario: destinatarioNomeCompleto, 
+                destinatario_original: destinatarioNomeCompleto, 
+                
                 local_origem: localOrigem,
                 local_origem_id: listaId,
                 observacoes_emissao: obsRaw,
@@ -5949,10 +5958,9 @@ async function iniciarCautelaProcesso() {
             // 3. FASE DE ESCRITA
             transaction.update(configRef, { cautela_seq: novoContador });
             transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            // Salva a lista Mestra modificada (com o novo carimbo)
             transaction.update(listaMestraRef, { list: listaMestra });
-            // 4. Conclusão e Feedback
-            alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioInput}.`);
+            
+            alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioNomeCompleto}.`);
         }); 
 
         // A transação foi bem-sucedida.
@@ -5963,8 +5971,7 @@ async function iniciarCautelaProcesso() {
         alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Erro: ${error.message}`);
         updateCautelaItemCount();
     }
-}
-        /**
+}        /**
  * Função robusta para encontrar o objeto item (mItem) na lista mestra
  * dado seu ID base.
  * @param {Array} lista - O array listaMestra.
@@ -6208,7 +6215,8 @@ async function loadActiveCautelas() {
         table.style.display = 'table';
     }
 }
-        async function showCautelaDetails(cautelaId) {
+        // Localização: Linha ~1740
+async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
     const btnDevolver = document.getElementById('btn-devolver-cautela');
@@ -6244,32 +6252,59 @@ async function loadActiveCautelas() {
         const cautela = doc.data();
         const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
 
-        const destinatarioOriginal = cautela.destinatario_original || 'Necessita Campo "original"';
+        // 🛑 NOVO: LOOKUP DE NOMES EM TEMPO REAL USANDO OS UID's SALVOS 🛑
+        
+        // Lookup Destinatário ATUAL (destinatario_uid)
+        let destAtualCompleto = cautela.destinatario || 'N/D';
+        if (cautela.destinatario_uid) {
+            const destData = await getUserInfoByUid(cautela.destinatario_uid);
+            destAtualCompleto = destData ? destData.nome_militar_completo : cautela.destinatario || 'Usuário Indisponível';
+        }
+        
+        // Lookup Destinatário ORIGINAL (destinatario_original, que é um nome)
+        // Se a cautela for antiga, o original pode ser apenas um nome.
+        const destinatarioOriginal = cautela.destinatario_original || 'N/D'; 
+        
+        // Lookup Emitente (emitente_uid)
+        let emitenteCompleto = cautela.emitente || 'N/D';
+        if (cautela.emitente_uid) {
+            const emitData = await getUserInfoByUid(cautela.emitente_uid);
+            emitenteCompleto = emitData ? emitData.nome_militar_completo : cautela.emitente || 'Usuário Indisponível';
+        }
+        
+        // Lookup Reversor (militar_completo_reversor, que ainda é um nome, mas precisamos do UID para rastrear)
+        // Como o fluxo de devolução será atualizado, mantemos a busca pelo nome por enquanto.
+        let ultimoDetentor = 'N/A';
+        if (cautela.status === 'DEVOLUÇÃO') {
+            ultimoDetentor = cautela.militar_completo_reversor || 'Não registrado';
+        } else if (cautela.status === 'RECEBIDA' || cautela.status === 'ABERTA') {
+            ultimoDetentor = destAtualCompleto; // Usa o nome atualizado
+        }
+        // -------------------------------------------------------------------
+        
+        // --- PREENCHIMENTO DOS CAMPOS ---
+        
         if (document.getElementById('modal-destinatario-original')) {
             document.getElementById('modal-destinatario-original').textContent = destinatarioOriginal;
         }
         
         if (document.getElementById('modal-destinatario-atual')) {
-            document.getElementById('modal-destinatario-atual').textContent = cautela.destinatario || 'N/D';
+            document.getElementById('modal-destinatario-atual').textContent = destAtualCompleto; // Usa nome atualizado
         }
         
-        let ultimoDetentor = 'N/A';
-        if (cautela.status === 'DEVOLUÇÃO') {
-            ultimoDetentor = cautela.militar_completo_reversor || 'Não registrado';
-        } else if (cautela.status === 'RECEBIDA' || cautela.status === 'ABERTA') {
-            ultimoDetentor = cautela.destinatario;
-        }
         if (document.getElementById('modal-ultimo-detentor')) {
             document.getElementById('modal-ultimo-detentor').textContent = ultimoDetentor;
         }
 
-        document.getElementById('modal-emitente').textContent = cautela.emitente || 'N/D';
+        document.getElementById('modal-emitente').textContent = emitenteCompleto; // Usa nome atualizado
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
         document.getElementById('modal-data-emissao').textContent = dataEmissao;
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
         
         const itensList = document.getElementById('modal-itens-cautela');
         itensList.innerHTML = '';
+        
+        // ... (restante do preenchimento de itens e lógica de botões permanece abaixo)
         
         if (cautela.itens && cautela.itens.length > 0) {
             
@@ -6302,27 +6337,28 @@ async function loadActiveCautelas() {
             itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
         }
 
+        // LÓGICA DE BOTÕES: Precisa usar o NOME ATUALIZADO (destAtualCompleto) para comparação
         const militarCompleto = currentUserData.nome_militar_completo;
         const modalStatusElement = document.getElementById('modal-status');
         
         // A. Cautelas ABERTAS (A RECEBER - Fluxo Normal)
-        if (cautela.destinatario === militarCompleto && cautela.status === 'ABERTA') {
+        if (destAtualCompleto === militarCompleto && cautela.status === 'ABERTA') { // Usa destAtualCompleto
             btnReceber.style.display = 'block';
             btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
             modalStatusElement.textContent = `Status: ${cautela.status}`;
             
         // B. Cautelas EM DEVOLUÇÃO (A RECEBER - Novo Fluxo Dono Provisório)
-        } else if (cautela.destinatario === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
+        } else if (destAtualCompleto === militarCompleto && cautela.status === 'DEVOLUÇÃO') { // Usa destAtualCompleto
             if (btnConfirmarDevolucao) {
                 btnConfirmarDevolucao.style.display = 'block';
                 btnConfirmarDevolucao.textContent = 'Confirmar Recebimento da Devolução';
                 
-                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, cautela.destinatario);
+                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, destAtualCompleto);
             }
             modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">DEVOLUÇÃO</span><br>Aguardando sua conferência.`;
             
         // C. Cautelas RECEBIDAS (A DEVOLVER - Fluxo Usuário A)
-        } else if (cautela.destinatario === militarCompleto && cautela.status === 'RECEBIDA') {
+        } else if (destAtualCompleto === militarCompleto && cautela.status === 'RECEBIDA') { // Usa destAtualCompleto
             const ultimoConferente = await getLastConferente(cautela.local_origem);
             
             if (btnDevolver) {
@@ -6336,7 +6372,7 @@ async function loadActiveCautelas() {
         
         // D. Cautelas EM DEVOLUÇÃO (QUEM ENVIOU - Usuário A que ainda rastreia)
         } else if (cautela.militar_completo_reversor === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
-            modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${cautela.destinatario}</strong></span>`;
+            modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${destAtualCompleto}</strong></span>`;
 
         // E. LÓGICA PADRÃO (Outros Status / Não é o destinatário)
         } else {
@@ -7363,7 +7399,32 @@ function renderCautelaRow(cautela) {
                 console.error("Erro ao limpar carimbos:", e);
                 alert("Erro ao limpar carimbos: " + e.message);
             }
-        }   
+        }
+        async function getUserInfoByUid(uid) {
+    if (userCache[uid]) {
+        return userCache[uid];
+    }
+    
+    try {
+        // Tenta encontrar o documento onde o UID é o ID do documento
+        const doc = await db.collection('usuarios').doc(uid).get(); 
+        
+        if (doc.exists) {
+            userCache[uid] = { id: doc.id, ...doc.data() };
+            return userCache[uid];
+        }
+
+        // Se a busca direta falhar (caso de dados legados ou IDs não sendo o UID),
+        // pode ser necessário buscar pelo campo 'uid' ou 'nome_guerra' (fallback complexo),
+        // mas focamos na solução mais estável: o ID do Documento.
+        
+        return null;
+        
+    } catch (e) {
+        console.warn(`Falha ao buscar militar pelo UID ${uid}: ${e.message}`);
+        return null;
+    }
+}
         
     </script>
 </body>
