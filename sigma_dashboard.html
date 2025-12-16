@@ -3205,32 +3205,31 @@ window.addEventListener('message', function(event) {
 
     ul.innerHTML = '<li>Carregando...</li>';
     try {
+        // 2. Cria a string ISO de hoje (YYYY-MM-DD) do fuso horário local
+        const today = new Date();
+        const isoDate = today.toISOString().split('T')[0];
         
-        // 2. Consulta Ampla por UID e ordena pelo mais recente (limita a 100 para segurança)
+        // 3. Consulta Otimizada: Filtra por UID (imutável) E pela data ISO de hoje
         const snap = await db.collection(COLECAO_RESULTADOS)
                              .where('conferente_uid', '==', conferenteUid) 
-                             .orderBy('timestamp', 'desc') 
-                             .limit(100) // Limita a 100 resultados para evitar consultas pesadas, mas busca mais do que 20.
+                             .where('data_iso', '==', isoDate) // 🛑 NOVO FILTRO ESTÁTICO DE DATA
+                             .orderBy('timestamp', 'desc') // Ordena (necessário para a consulta)
                              .get(); 
                              
-        const hojeStr = new Date().toLocaleDateString('pt-BR');
         let docs = [];
+        snap.forEach(d => docs.push(d.data()));
+        
         let html = '';
-
-        snap.forEach(d => {
-            const data = d.data();
-            const dt = data.timestamp.toDate();
-            
-            // 3. Filtro de Data Local
-            if(dt.toLocaleDateString('pt-BR') === hojeStr) {
-                // Se for de hoje, ele deve ser incluído
-                html += criarItemHistoricoHTML(data);
-            }
+        docs.forEach(d => {
+            // Não precisa mais de filtro de data local, apenas constrói o HTML
+            html += criarItemHistoricoHTML(d);
         });
         
         ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+        
     } catch(e){ 
         console.error("Erro ao carregar conferências de hoje:", e); 
+        // ⚠️ Se o erro for de índice, aparecerá no console.
         ul.innerHTML = 'Erro ao carregar conferências de hoje.';
     }
 }
