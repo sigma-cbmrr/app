@@ -1169,33 +1169,35 @@ async function finalizarConferencia() {
         
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-            const listaMestraDoc = await transaction.get(listaMestraRef);
             
             if (!cautelaDoc.exists) {
+                // Se o documento não existe, lançamos o erro original
                 throw new Error("Cautela não encontrada.");
             }
 
-            // 🛑 CORREÇÃO CRÍTICA: Validação do Status para 'DEVOLUÇÃO'
-            const currentStatus = cautelaDoc.data().status;
+            // Lê o status, usando '' se for null/undefined
+            const currentStatus = cautelaDoc.data().status || '';
             
             if (currentStatus !== 'DEVOLUÇÃO') {
-                console.warn(`Transação abortada. Status lido: ${currentStatus}`); 
-                throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
+                // 🛑 CORREÇÃO NO LANÇAMENTO DO ERRO: Mensagem mais clara
+                throw new Error(`Status incorreto: Cautela ID ${CAUTELA_ID} está em ${currentStatus}, mas esperava 'DEVOLUÇÃO'.`);
             }
-            // Fim da Correção Null-Safe
+            
+            const listaMestraDoc = await transaction.get(listaMestraRef);
 
             if (!listaMestraDoc.exists) {
                 throw new Error("Lista Mestra de Conferência (Origem) não encontrada!");
             }
             
             let listaMestra = listaMestraDoc.data().list;
+            
             // 🛑 LÓGICA DE CARIMBO (REMOÇÃO DE CARIMBO) 🛑
             cautela.itens.forEach(cItem => {
-                const itemQtd = cItem.quantidade || 0;
                 
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
+                        // Verifica se é o item correto (single ou multi)
                         if (mItem.id === cItem.id_base) {
                             
                             if (cItem.tipo === 'single') {
@@ -1205,6 +1207,7 @@ async function finalizarConferencia() {
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
                                 // Item Tombado: Remove o carimbo de cautela do tombamento específico
                                 mItem.tombamentos = mItem.tombamentos.map(tomb => {
+                                    // Verifica o ID da cautela no carimbo antes de deletar
                                     if (tomb.tomb === cItem.tombamento && tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
                                         delete tomb.cautela;
                                     }
@@ -1221,11 +1224,10 @@ async function finalizarConferencia() {
             // 3. Ação: Mudar o status da cautela para CONCLUIDA (Vai para o Histórico)
             transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA', // Status final
-                timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), // Novo campo para ordenação
-                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`, // Quem concluiu o recebimento
-                // 🛑 ATUALIZAÇÃO DO DESTINATÁRIO PARA O DESTINATÁRIO ORIGINAL
+                timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
+                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`,
                 destinatario: cautela.destinatario_original,
-                destinatario_uid: cautela.destinatario_uid, // Mantém o UID original
+                destinatario_uid: cautela.destinatario_uid,
             });
             // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
             transaction.update(listaMestraRef, { list: listaMestra });
@@ -1237,6 +1239,7 @@ async function finalizarConferencia() {
         
     } catch (error) {
         console.error("Erro CRÍTICO ao finalizar devolução e restaurar estoque:", error);
+        // Exibe o erro específico que acabamos de lançar, se for o caso
         alert(`Erro ao finalizar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
