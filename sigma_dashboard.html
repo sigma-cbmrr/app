@@ -5299,12 +5299,12 @@ function showMainMenu() {
         usersSnapshot.forEach(doc => {
             const user = doc.data();
             const nomeCompleto = user.nome_militar_completo; 
-
+            
             // Excluir o próprio usuário logado
             if (nomeCompleto && nomeCompleto !== militarLogadoCompleto) {
                 // Salva o objeto completo no array (com ID e nome)
                 allTargetUsers.push({
-                    id: doc.id,
+                    id: doc.id, // 🛑 CRÍTICO: Este é o UID
                     nome: nomeCompleto
                 });
             }
@@ -5341,7 +5341,7 @@ function showMainMenu() {
         if (filteredUsers.length > 0) {
             let html = '';
             filteredUsers.forEach(user => {
-                // NOVO: Armazena o ID do Doc/UID no atributo data-uid
+                // 🛑 CORRIGIDO: Armazena o ID do Doc/UID no atributo data-uid
                 html += `<li data-user-name="${user.nome}" data-uid="${user.id}">${user.nome}</li>`;
             });
             
@@ -5356,10 +5356,10 @@ function showMainMenu() {
     suggestionsList.addEventListener('click', (event) => {
         if (event.target.tagName === 'LI') {
             const selectedName = event.target.getAttribute('data-user-name');
-            const selectedUid = event.target.getAttribute('data-uid'); // NOVO: Captura o UID
+            const selectedUid = event.target.getAttribute('data-uid'); // 🛑 Captura o UID
             
             input.value = selectedName;
-            uidInput.value = selectedUid; // NOVO: Salva o UID
+            uidInput.value = selectedUid; // 🛑 Salva o UID no campo oculto
             suggestionsBox.style.display = 'none';
             
             input.dispatchEvent(new Event('change'));
@@ -5382,12 +5382,15 @@ function showMainMenu() {
 }
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
-    // **CRÍTICO:** Usa o nome completo do militar logado, que é a chave do Dono Provisório.
-    const currentUserId = conferente;
+    
+    // 🛑 CORREÇÃO CRÍTICA: Usa o UID do militar logado, que é a chave imutável na custodia_atual
+    const militarUid = firebase.auth().currentUser.uid;
 
-    if (!selectLocal || !currentUserId) {
-        console.warn("Dados do usuário ou seletor de local ausente.");
-        selectLocal.innerHTML = '<option value="" disabled selected>Erro: Usuário não identificado.</option>';
+    if (!selectLocal || !militarUid) {
+        // Usa o nome completo (variável global 'conferente') como fallback na mensagem de erro
+        const fallbackNome = currentUserData.nome_militar_completo || 'Usuário Desconhecido';
+        console.warn(`Dados do usuário ou seletor de local ausente. UID: ${militarUid}`);
+        selectLocal.innerHTML = `<option value="" disabled selected>Erro: Usuário (${fallbackNome}) não identificado.</option>`;
         return;
     }
     
@@ -5395,25 +5398,23 @@ async function loadCustodiaLocais() {
     selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
     
     try {
-        // 🛑 FLUXO CORRIGIDO: Busca na coleção de CONTROLE DE CUSTÓDIA ATUAL 🛑
+        // 🛑 FILTRO POR UID: Busca na coleção 'custodia_atual' usando o UID
         const custodyRef = db.collection('custodia_atual');
         const resultsSnapshot = await custodyRef
-            // Filtra EXCLUSIVAMENTE onde o conferente_completo é o militar logado (Dono Provisório)
-            .where('conferente_completo', '==', currentUserId) 
+            .where('conferente_uid', '==', militarUid) // 🛑 Filtra EXCLUSIVAMENTE pelo UID
             .get();
         
         const locaisDeCustodia = new Set();
         
         // Coleta os nomes de local_nome para preencher o dropdown
         resultsSnapshot.forEach(doc => {
-            // O campo 'local_nome' (Ex: "ALFA - RESGATE 01") é o valor que o usuário vê.
             locaisDeCustodia.add(doc.data().local_nome);
         });
         
         // Monta as opções do SELECT.
         let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
         if (locaisDeCustodia.size === 0) {
-            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia (Dono Provisório).</option>';
+            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia (UID não vinculado).</option>';
         } else {
             // Ordena os nomes antes de adicionar ao select
             Array.from(locaisDeCustodia).sort().forEach(local => {
@@ -5423,13 +5424,14 @@ async function loadCustodiaLocais() {
         
         selectLocal.innerHTML = optionsHtml;
         selectLocal.disabled = false;
+        
     } catch (error) {
         console.error("Erro ao carregar locais sob custódia:", error);
         selectLocal.disabled = false;
         selectLocal.innerHTML = '<option value="" disabled selected>Erro ao carregar locais.</option>';
     }
 }
-     async function loadCustodiaItens() {
+		async function loadCustodiaItens() {
     const selectLocal = document.getElementById('cautela-local-origem');
     const localNomeCompleto = selectLocal.value;
     const itemListContainer = document.getElementById('itens-custodia-list');
