@@ -5324,6 +5324,9 @@ function showMainMenu() {
     const suggestionsBox = document.getElementById('cautela-suggestions-box');
     const suggestionsList = document.getElementById('cautela-suggestions-list');
     const uidInput = document.getElementById('cautela-destinatario-uid');
+    
+    // 🛑 SINALIZADOR CRÍTICO: Usado para dizer ao BLUR para não limpar o campo após o clique.
+    let hasSuccessfullySelected = false; 
 
     if (!input || !suggestionsBox || !suggestionsList || !uidInput) {
         console.error("Elementos do Autocomplete de Cautela não encontrados. Não é possível configurar o listener.");
@@ -5338,7 +5341,8 @@ function showMainMenu() {
         // CRÍTICO: Limpa o UID e a cor do border ao digitar qualquer coisa nova
         uidInput.value = ''; 
         input.style.borderColor = '#ccc'; 
-
+        hasSuccessfullySelected = false; // Garante que a flag esteja desativada
+        
         if (searchTerm.length < 3) {
             suggestionsBox.style.display = 'none';
             return;
@@ -5354,10 +5358,10 @@ function showMainMenu() {
                 const fullUserName = user.nome; 
                 const safeName = fullUserName.replace(/'/g, "&#39;"); 
 
-                // Lógica de Melhoria Visual (Mantida)
+                // Lógica de Melhoria Visual
                 const parts = fullUserName.split(' ');
-                const postoQuadro = parts.slice(0, 3).join(' ');
-                const nomeGuerra = parts.slice(3).join(' ');
+                const postoQuadro = parts.slice(0, 3).join(' '); 
+                const nomeGuerra = parts.slice(3).join(' ');      
 
                 html += `<li data-user-name="${safeName}" data-uid="${user.id}">
                             <span style="font-weight: bold; color: #800020;">${postoQuadro}</span> ${nomeGuerra}
@@ -5378,28 +5382,31 @@ function showMainMenu() {
         if (listItem) {
             const selectedNameRaw = listItem.getAttribute('data-user-name');
             const selectedUid = listItem.getAttribute('data-uid');
-            
             const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
 
-            // 🛑 DEBUG: Verifica se o UID está sendo capturado
-            console.log("Selecionado. UID: ", selectedUid, " Nome:", selectedName);
+            // 🛑 DEBUG CLIQUE (Verifique no console se aparece)
+            console.log("SELEÇÃO CLIQUE - Capturado. UID:", selectedUid, " Nome:", selectedName);
 
             if (selectedName && selectedUid) {
                 
-                // CRÍTICO: Preenche imediatamente e usa um pequeno delay apenas para o fechamento
-                // Isso garante que o valor seja injetado antes de qualquer evento de blur externo.
+                // 1. Injeta os valores IMEDIATAMENTE.
                 input.value = selectedName; 
                 uidInput.value = selectedUid;
                 input.style.borderColor = '#1b8a3e';
+                suggestionsBox.style.display = 'none';
                 
-                // Usa um delay para fechar, dando tempo para o blur se resolver
+                // 2. Seta a flag para sinalizar ao BLUR que o preenchimento foi feito.
+                hasSuccessfullySelected = true;
+                
+                // 3. Dispara o 'change' e reseta a flag (250ms é seguro)
                 setTimeout(() => {
-                    suggestionsBox.style.display = 'none';
                     input.dispatchEvent(new Event('change'));
-                }, 100); 
+                    hasSuccessfullySelected = false; // Permite que o próximo blur seja validado
+                    console.log("SELEÇÃO CLIQUE - Finalizada. Flag hasSuccessfullySelected resetada.");
+                }, 250); 
                 
             } else {
-                console.warn("Falha: UID ou Nome não capturado do item da lista.");
+                console.warn("Falha na Captura do Item da Lista: UID ou Nome ausente.");
                 uidInput.value = '';
                 input.style.borderColor = 'red';
             }
@@ -5408,34 +5415,42 @@ function showMainMenu() {
 
     // 3. LÓGICA DE VALIDAÇÃO NO BLUR (Perda de Foco)
     input.addEventListener('blur', () => {
-        // Atraso para garantir que o clique do mouse (evento 'click') seja processado primeiro
+        
+        // 🛑 CRÍTICO: Se acabamos de preencher, ignoramos o blur.
+        if (hasSuccessfullySelected) {
+            console.log("BLUR IGNORADO: Seleção de clique recente. Valor mantido.");
+            // Garante que a caixa de sugestões feche, caso não tenha fechado no clique
+            suggestionsBox.style.display = 'none';
+            return; 
+        }
+
+        // Atraso para garantir que eventos de clique incompletos sejam processados
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
             
             const finalName = input.value.trim();
             
-            // Verifica o estado final:
-            if (finalName.length > 0 && !uidInput.value) {
-                // Cenário: Usuário digitou (finalName > 0) mas NÃO clicou na sugestão (uidInput.value está vazio)
-                
-                // 🛑 CORREÇÃO CRÍTICA AQUI: Se o campo não tem UID, ele deve ser considerado inválido e LIMPO.
-                // Isso força o usuário a interagir corretamente com o autocomplete.
+            // 🛑 DEBUG FINAL (Verifique no console o estado antes da validação)
+            console.log("BLUR VALIDATION (200ms) - Final Name:", finalName, " UID:", uidInput.value);
 
-                // Verifica se o nome digitado NÃO corresponde a um nome válido (evita falsa validação)
+
+            if (finalName.length > 0 && !uidInput.value) {
+                // Cenário: Usuário digitou mas NÃO clicou na sugestão
+                
                 const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
 
                 if (!isNameValid) {
                     input.value = ''; 
                     input.style.borderColor = 'red';
-                    uidInput.value = ''; // Garante que o UID também seja limpo
-                    
+                    uidInput.value = ''; 
+                    console.warn("BLUR - Inválido/Não selecionado. Campo Limpo.");
                 } else {
-                    // Cenário raro: Nome digitado é VÁLIDO (igual ao completo), mas o UID não foi setado no click.
-                    // Tentativa de recuperação forçando o preenchimento do UID por fallback.
+                    // Fallback para usuário que digitou o nome completo (e é válido), mas faltou o UID.
                     const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
                     if (validUser) {
-                        uidInput.value = validUser.id; // Corrige o UID no blur
+                        uidInput.value = validUser.id; 
                         input.style.borderColor = '#1b8a3e';
+                        console.log("BLUR - UID preenchido por fallback de nome válido.");
                     } else {
                         input.value = '';
                         input.style.borderColor = 'red';
@@ -5446,11 +5461,11 @@ function showMainMenu() {
                 // Campo vazio, garantir que o UID esteja vazio e resetar a cor
                 uidInput.value = '';
                 input.style.borderColor = '#ccc';
+                console.log("BLUR - Campo Vazio. Resetado.");
             }
+            // Se finalName > 0 E uidInput.value > 0: Seleção válida (nada acontece, borda verde persiste).
             
-            // Se finalName > 0 E uidInput.value > 0: Seleção válida (não faz nada, borda verde persiste).
-
-        }, 200); // Aumentado o delay do blur para 200ms
+        }, 200); 
     });
 
     // 4. Garante que a caixa reapareça ao focar se houver texto
