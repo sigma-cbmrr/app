@@ -3199,12 +3199,13 @@ window.addEventListener('message', function(event) {
     const ul = document.getElementById('today-list');
     if (!ul) return;
     
-    const conferenteUid = firebase.auth().currentUser.uid; // Obtém o UID logado
+    // 🛑 CRÍTICO: Usar o UID do usuário logado (imutável)
+    const conferenteUid = firebase.auth().currentUser.uid; 
     if (!conferenteUid) return;
 
     ul.innerHTML = '<li>Carregando...</li>';
     try {
-        // 🛑 CORREÇÃO CRÍTICA: Filtrar por conferente_uid (imutável)
+        // 🛑 CORREÇÃO FINAL: Filtra pelo UID, não pelo nome completo.
         const snap = await db.collection(COLECAO_RESULTADOS)
                              .where('conferente_uid', '==', conferenteUid) 
                              .limit(20)
@@ -3213,11 +3214,15 @@ window.addEventListener('message', function(event) {
         const hojeStr = new Date().toLocaleDateString('pt-BR');
         let docs = [];
         snap.forEach(d => docs.push(d.data()));
+        
+        // Se você não tiver um índice por 'timestamp' no Firestore, é melhor
+        // ordenar primeiro e depois fazer o filtro de data local.
         docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
         
         let html = '';
         docs.forEach(d => {
             const dt = d.timestamp.toDate();
+            // Filtro de Data Local (pois a query não pode ter dois 'where's sem índice composto)
             if(dt.toLocaleDateString('pt-BR') === hojeStr) {
                 html += criarItemHistoricoHTML(d);
             }
@@ -3226,7 +3231,7 @@ window.addEventListener('message', function(event) {
         ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
     } catch(e){ 
         console.error(e); 
-        ul.innerHTML = 'Erro.';
+        ul.innerHTML = 'Erro ao carregar conferências de hoje.';
     }
 }
 	async function loadMyHistory() {
