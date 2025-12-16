@@ -3136,51 +3136,40 @@ sortedUnits.forEach(unit => {
             document.getElementById('btn-start-dash').focus();
         }
 
-        function iniciarConferenciaDashboard() {
-            const listaId = document.getElementById('dash-select-lista').value;
-            const listaSelect = document.getElementById('dash-select-lista');
-            const nomeLista = listaSelect.options[listaSelect.selectedIndex].text;
-            
-            if(!listaId) return alert("Selecione uma lista.");
-            
-            // --- CORREÇÃO: Padroniza o nome do usuário para a chave do rascunho ---
-            // Define o nome de guerra em MAIÚSCULAS para consistência.
-            const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
-            
-            // Constrói a URL com o user padronizado (para leitura no app)
-            const url = `conferencia_app.html?id=${listaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}`;
-            
-            // Salva para resume
-            localStorage.setItem('sigma_active_conf', JSON.stringify({
-                id: listaId, 
-                nomeLista: nomeLista, 
-                user: userForDraft, // <-- CHAVE PADRONIZADA
-                url: url
-            }));
-            verificarConferenciaAtiva();
-            document.getElementById('modal-nova-conferencia').style.display = 'none';
-            
-            // --- LÓGICA DE ABERTURA DO IFRAME (RE-INSERIDA) ---
-            const container = document.getElementById('app-runner-container');
-            const iframe = document.getElementById('app-iframe');
-            iframe.src = url; 
-            container.style.display = 'block';
-        }
+        // Localização: Linha ~1353
+async function iniciarConferenciaDashboard() {
+    const listaSelecionada = document.getElementById('select-lista').value;
+    const listaId = await getListaIdFromLocalName(listaSelecionada);
 
-        window.addEventListener('message', function(event) {
-            if (event.data && event.data.type === 'SIGMA_FINISHED') {
-                document.getElementById('app-runner-container').style.display = 'none';
-                document.getElementById('app-iframe').src = "";
-                
-                localStorage.removeItem('sigma_active_conf');
+    if (!listaId) {
+        alert('Selecione uma lista válida para iniciar a conferência.');
+        return;
+    }
+
+    const militarCompleto = currentUserData.nome_militar_completo;
+
+    // 🛑 NOVO: UID do militar logado
+    const userUid = firebase.auth().currentUser.uid; 
     
-                verificarConferenciaAtiva();
+    // Usamos o nome de guerra para exibição no rascunho
+    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
 
-                loadCaaData();
-                carregarConferenciasHoje();
-                alert("Conferência salva!");
-            }
-        });
+    // 🛑 ATUALIZAÇÃO DA URL: Adiciona o 'user_uid'
+    const url = `conferencia_app.html?id=${listaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}&user_uid=${userUid}`;
+    
+    // Salva para resume
+    localStorage.setItem('sigma_active_conf', JSON.stringify({
+        id: listaId,
+        local: listaSelecionada,
+        user: userForDraft,
+        // 🛑 ATUALIZAÇÃO DO RASCUNHO: Salva o UID também
+        user_uid: userUid, 
+        timestamp: new Date().getTime()
+    }));
+    
+    // Abre a nova janela
+    window.open(url, '_blank', 'toolbar=no,scrollbars=yes,resizable=yes,top=50,left=50,width=1000,height=800');
+}
         
         // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
