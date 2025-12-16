@@ -2775,48 +2775,50 @@ async function countActiveCautelas() {
     // O tamanho do Set é a contagem total desduplicada de todas as cautelas ativas
     return countedIds.size;
 }
+// Localização: Linha ~2792
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
-    // 🛑 NOVO: Elemento do contador de Cautelas a Receber
     const cautelaReceiveCountEl = document.getElementById('op-cautela-receive-count');
     const myActiveCautelaCountEl = document.getElementById('op-my-active-cautela-count');
-    if (!ul || !countEl || !cautelaReceiveCountEl || !myActiveCautelaCountEl) {
-        console.warn("Elemento de card operacional não encontrado. Pulando atualização.");
+    
+    // 🛑 VILÃO 1: Obtém o UID para todas as consultas relacionadas ao usuário logado
+    const conferenteUid = firebase.auth().currentUser.uid;
+    if (!conferenteUid || !ul || !countEl || !cautelaReceiveCountEl || !myActiveCautelaCountEl) {
+        console.warn("Elemento de card operacional ou UID ausente. Pulando atualização.");
         return; 
     }
     
     try {
-        // --- 1. CONTAGEM TOTAL DE CONFERÊNCIAS (EXISTENTE) ---
+        // --- 1. CONSULTA DE TODAS AS CONFERÊNCIAS (SNAP TOTAL) ---
+        // 🛑 CORREÇÃO CRÍTICA: Filtra por conferente_uid (imutável)
         const snapTotal = await db.collection(COLECAO_RESULTADOS)
-            .where('conferente', '==', currentUserData.nome_militar_completo)
+            .where('conferente_uid', '==', conferenteUid) 
+            .orderBy('timestamp', 'desc') // Ordena para pegar os mais recentes
             .get();
-        const totalConferences = snapTotal.size;
-        countEl.textContent = totalConferences;
-        if (countEl) countEl.textContent = totalConferences;
+
+        const totalConferences = snapTotal.size; 
+        countEl.textContent = totalConferences; 
 
         // --- 2. CONTAGEM DE CAUTELAS A RECEBER (NOVO) ---
         const totalCautelasAReceber = await getCautelasAReceberCount();
-        cautelaReceiveCountEl.textContent = totalCautelasAReceber;
-        if (cautelaReceiveCountEl) cautelaReceiveCountEl.textContent = totalCautelasAReceber; 
-        // FIM NOVO
+        cautelaReceiveCountEl.textContent = totalCautelasAReceber; 
         
         // --- 3. CONTAR MINHAS CAUTELAS ATIVAS (NOVO) ---
         const totalMyActiveCautelas = await countActiveCautelas();
-        myActiveCautelaCountEl.textContent = totalMyActiveCautelas;
-        if (myActiveCautelaCountEl) myActiveCautelaCountEl.textContent = totalMyActiveCautelas; 
-        // FIM NOVO
+        myActiveCautelaCountEl.textContent = totalMyActiveCautelas; 
         
+        // --- 4. FILTRAGEM PARA CONFERÊNCIAS DE HOJE (DO SNAP TOTAL) ---
         const hojeStr = new Date().toLocaleDateString('pt-BR');
-        let countToday = 0; // Contagem das conferências de hoje
         let html = '';
         
-        snapTotal.forEach(d => {
-            const dt = d.data().timestamp.toDate();
-            // Filtro de data para listar apenas as de hoje
+        snapTotal.docs.forEach(doc => {
+            const data = doc.data();
+            const dt = data.timestamp.toDate();
+            
+            // Filtro de data local (apenas as que caem na data de hoje)
             if(dt.toLocaleDateString('pt-BR') === hojeStr) {
-                html += criarItemHistoricoHTML(d.data());
-                countToday++; // Contagem de hoje
+                html += criarItemHistoricoHTML(data);
             }
         });
         
@@ -2827,7 +2829,7 @@ async function updateOperacionalCards() {
     } catch(e) { 
         console.error("Erro ao carregar dados operacionais:", e);
         if(countEl) countEl.textContent = 'Erro';
-        ul.innerHTML = 'Erro.';
+        if(ul) ul.innerHTML = 'Erro.';
     }
 }
         
@@ -3196,42 +3198,9 @@ window.addEventListener('message', function(event) {
 });        
         // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
-    const ul = document.getElementById('today-list');
-    if (!ul) return;
-    
-    // 1. Obtém o UID do militar logado
-    const conferenteUid = firebase.auth().currentUser.uid; 
-    if (!conferenteUid) return;
-
-    ul.innerHTML = '<li>Carregando...</li>';
-    try {
-        // 2. Cria a string ISO de hoje (YYYY-MM-DD) do fuso horário local
-        const today = new Date();
-        const isoDate = today.toISOString().split('T')[0];
-        
-        // 3. Consulta Otimizada: Filtra por UID (imutável) E pela data ISO de hoje
-        const snap = await db.collection(COLECAO_RESULTADOS)
-                             .where('conferente_uid', '==', conferenteUid) 
-                             .where('data_iso', '==', isoDate) // 🛑 NOVO FILTRO ESTÁTICO DE DATA
-                             .orderBy('timestamp', 'desc') // Ordena (necessário para a consulta)
-                             .get(); 
-                             
-        let docs = [];
-        snap.forEach(d => docs.push(d.data()));
-        
-        let html = '';
-        docs.forEach(d => {
-            // Não precisa mais de filtro de data local, apenas constrói o HTML
-            html += criarItemHistoricoHTML(d);
-        });
-        
-        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
-        
-    } catch(e){ 
-        console.error("Erro ao carregar conferências de hoje:", e); 
-        // ⚠️ Se o erro for de índice, aparecerá no console.
-        ul.innerHTML = 'Erro ao carregar conferências de hoje.';
-    }
+    // 🛑 CHAMA A FUNÇÃO UNIFICADA QUE JÁ ATUALIZA TODOS OS CARDS E A LISTA DE HOJE
+    // Isso garante que a lógica de filtro UID/Data seja sempre a mesma.
+    await updateOperacionalCards(); 
 }
 	async function loadMyHistory() {
     const ul = document.getElementById('my-history-list');
