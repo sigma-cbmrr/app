@@ -5318,12 +5318,12 @@ function showMainMenu() {
     }
 }
 		
-       function setupCautelaDestinatarioListener() {
+      function setupCautelaDestinatarioListener() {
     // Referências dos elementos
     const input = document.getElementById('cautela-destinatario');
     const suggestionsBox = document.getElementById('cautela-suggestions-box');
     const suggestionsList = document.getElementById('cautela-suggestions-list');
-    const uidInput = document.getElementById('cautela-destinatario-uid'); // Campo oculto do UID
+    const uidInput = document.getElementById('cautela-destinatario-uid');
 
     if (!input || !suggestionsBox || !suggestionsList || !uidInput) {
         console.error("Elementos do Autocomplete de Cautela não encontrados. Não é possível configurar o listener.");
@@ -5337,7 +5337,7 @@ function showMainMenu() {
         
         // CRÍTICO: Limpa o UID e a cor do border ao digitar qualquer coisa nova
         uidInput.value = ''; 
-        input.style.borderColor = '#ccc'; // Reset da cor
+        input.style.borderColor = '#ccc'; 
 
         if (searchTerm.length < 3) {
             suggestionsBox.style.display = 'none';
@@ -5346,20 +5346,18 @@ function showMainMenu() {
 
         const filteredUsers = allTargetUsers.filter(user => 
             user.nome.toUpperCase().includes(searchTerm)
-        ).sort((a, b) => a.nome.localeCompare(b.nome)); // Ordena alfabeticamente a lista
+        ).sort((a, b) => a.nome.localeCompare(b.nome));
 
         if (filteredUsers.length > 0) {
             let html = '';
             filteredUsers.forEach(user => {
-                // AQUI ESTÁ A CHAVE: O valor data-user-name DEVE ser o NOME COMPLETO.
                 const fullUserName = user.nome; 
                 const safeName = fullUserName.replace(/'/g, "&#39;"); 
 
-                // 💡 MELHORIA VISUAL (Renderiza apenas uma parte em negrito para facilitar a leitura)
+                // Lógica de Melhoria Visual (Mantida)
                 const parts = fullUserName.split(' ');
-                // Ex: "2º SGT QPCBM JHONATH" -> [2º, SGT, QPCBM, JHONATH]
-                const postoQuadro = parts.slice(0, 3).join(' '); // 2º SGT QPCBM
-                const nomeGuerra = parts.slice(3).join(' ');      // JHONATH
+                const postoQuadro = parts.slice(0, 3).join(' ');
+                const nomeGuerra = parts.slice(3).join(' ');
 
                 html += `<li data-user-name="${safeName}" data-uid="${user.id}">
                             <span style="font-weight: bold; color: #800020;">${postoQuadro}</span> ${nomeGuerra}
@@ -5381,23 +5379,24 @@ function showMainMenu() {
             const selectedNameRaw = listItem.getAttribute('data-user-name');
             const selectedUid = listItem.getAttribute('data-uid');
             
-            // Desfaz o escape HTML do nome antes de injetar
             const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
 
-            // 🛑 DEBUG (Mantido): Verifica se o UID está sendo capturado
+            // 🛑 DEBUG: Verifica se o UID está sendo capturado
             console.log("Selecionado. UID: ", selectedUid, " Nome:", selectedName);
 
             if (selectedName && selectedUid) {
                 
-                // CRÍTICO: Usar setTimeout para evitar conflito com o blur
+                // CRÍTICO: Preenche imediatamente e usa um pequeno delay apenas para o fechamento
+                // Isso garante que o valor seja injetado antes de qualquer evento de blur externo.
+                input.value = selectedName; 
+                uidInput.value = selectedUid;
+                input.style.borderColor = '#1b8a3e';
+                
+                // Usa um delay para fechar, dando tempo para o blur se resolver
                 setTimeout(() => {
-                    input.value = selectedName; // 🛑 INJETA O NOME COMPLETO CORRETO
-                    uidInput.value = selectedUid; // ✅ Popula o campo oculto
-                    input.style.borderColor = '#1b8a3e'; // Sinaliza sucesso visualmente
                     suggestionsBox.style.display = 'none';
-
                     input.dispatchEvent(new Event('change'));
-                }, 50); 
+                }, 100); 
                 
             } else {
                 console.warn("Falha: UID ou Nome não capturado do item da lista.");
@@ -5407,56 +5406,61 @@ function showMainMenu() {
         }
     });
 
-    // 3. LÓGICA DE VALIDAÇÃO E OCULTAÇÃO NO BLUR (Perda de Foco)
+    // 3. LÓGICA DE VALIDAÇÃO NO BLUR (Perda de Foco)
     input.addEventListener('blur', () => {
+        // Atraso para garantir que o clique do mouse (evento 'click') seja processado primeiro
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
             
             const finalName = input.value.trim();
             
-            // Se o campo de texto tem conteúdo, mas o UID está vazio, o usuário digitou mas não selecionou.
+            // Verifica o estado final:
             if (finalName.length > 0 && !uidInput.value) {
-                // 🛑 CORREÇÃO: Verifica se o NOME COMPLETO digitado existe no array.
-                const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
+                // Cenário: Usuário digitou (finalName > 0) mas NÃO clicou na sugestão (uidInput.value está vazio)
                 
+                // 🛑 CORREÇÃO CRÍTICA AQUI: Se o campo não tem UID, ele deve ser considerado inválido e LIMPO.
+                // Isso força o usuário a interagir corretamente com o autocomplete.
+
+                // Verifica se o nome digitado NÃO corresponde a um nome válido (evita falsa validação)
+                const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
+
                 if (!isNameValid) {
-                    // Nome digitado é inválido / incompleto / não selecionado. Limpa o texto visível.
                     input.value = ''; 
                     input.style.borderColor = 'red';
-                    
-                    // 🛑 Removendo o alert para não interromper o usuário, a borda vermelha e
-                    // a limpeza do campo já forçam o recomeço.
-                    // alert("Por favor, selecione um usuário válido na lista de sugestões."); 
+                    uidInput.value = ''; // Garante que o UID também seja limpo
                     
                 } else {
-                    // Cenário raro: Nome completo foi digitado, mas o UID não foi setado no click.
-                    // Tentamos encontrar o UID por nome (Fallback lento, mas necessário para este cenário)
+                    // Cenário raro: Nome digitado é VÁLIDO (igual ao completo), mas o UID não foi setado no click.
+                    // Tentativa de recuperação forçando o preenchimento do UID por fallback.
                     const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
                     if (validUser) {
                         uidInput.value = validUser.id; // Corrige o UID no blur
                         input.style.borderColor = '#1b8a3e';
+                    } else {
+                        input.value = '';
+                        input.style.borderColor = 'red';
+                        uidInput.value = '';
                     }
                 }
-            } else if (finalName.length > 0 && uidInput.value) {
-                 // Preenchimento bem-sucedido via clique
-                input.style.borderColor = '#1b8a3e';
             } else if (finalName.length === 0) {
                 // Campo vazio, garantir que o UID esteja vazio e resetar a cor
                 uidInput.value = '';
                 input.style.borderColor = '#ccc';
             }
             
-        }, 150);
+            // Se finalName > 0 E uidInput.value > 0: Seleção válida (não faz nada, borda verde persiste).
+
+        }, 200); // Aumentado o delay do blur para 200ms
     });
 
     // 4. Garante que a caixa reapareça ao focar se houver texto
     input.addEventListener('focus', () => {
         if (input.value.length >= 3) {
-            // Recria a lista na memória (simulando um 'input' para reabrir)
             input.dispatchEvent(new Event('input')); 
         }
     });
 }
+		
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
     
