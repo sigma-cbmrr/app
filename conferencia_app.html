@@ -306,201 +306,184 @@
 };
 
         function renderizarConferencia() {
-            const mainContent = document.getElementById('main-content');
-            const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
-            let htmlSetores = ''; const setorIds = []; dadosConferencia.forEach(s => setorIds.push(s.id));
-            window.setorIds = setorIds;
+    const mainContent = document.getElementById('main-content');
+    const antigos = mainContent.querySelectorAll('.setor'); antigos.forEach(el => el.remove());
+    let htmlSetores = ''; const setorIds = []; dadosConferencia.forEach(s => setorIds.push(s.id));
+    window.setorIds = setorIds;
 
-            dadosConferencia.forEach((setor, index) => {
-                const isFirstSetor = (index === 0); let htmlItens = ''; let totalItensNoSetor = 0;
-                
-                // --- Função Auxiliar para Criar Pendência Virtual de Cautela (Single) ---
-                const getVirtualPendenciaSingle = (i) => {
-                    const cautelas = i.cautelas || [];
-                    if (cautelas.length > 0) {
-                        const totalQtd = cautelas.reduce((sum, c) => sum + c.quantidade, 0);
-                        const maxQtdDisponivel = i.quantidadeEsperada - totalQtd;
-                        
-                        const primeiraCautela = cautelas[0] || {};
-                        const destinatario = primeiraCautela.destinatario || 'Destinatário Desconhecido';
-                        const data = primeiraCautela.data || 'Data Desconhecida'; 
-                        
-                        // ✅ CORREÇÃO AQUI: USANDO .id (campo que armazena CAUTELA-XXXXXX no carimbo)
-                        const idCautela = primeiraCautela.id ? `[${primeiraCautela.id}]` : '';
+    // --- Função Auxiliar para Criar Pendência Virtual de Cautela (Single) ---
+    const getVirtualPendenciaSingle = (i) => {
+        const cautelas = i.cautelas || [];
+        if (cautelas.length > 0) {
+            const totalQtd = cautelas.reduce((sum, c) => sum + c.quantidade, 0);
+            const maxQtdDisponivel = i.quantidadeEsperada - totalQtd;
+            
+            const primeiraCautela = cautelas[0] || {};
+            const destinatario = primeiraCautela.destinatario || 'Destinatário Desconhecido';
+            const data = primeiraCautela.data || 'Data Desconhecida'; 
+            
+            const idCautela = primeiraCautela.id ? `[${primeiraCautela.id}]` : '';
 
-                        // Novo texto de exibição
-                        const obs = `${totalQtd} un cauteladas ${idCautela} para ${destinatario} em ${data}.`;
-                        
-                        return {
+            const obs = `${totalQtd} un cauteladas ${idCautela} para ${destinatario} em ${data}.`;
+            
+            return {
+                obs: obs,
+                quem: "Sistema/Cautela",
+                data: data,
+                status: "CAUTELA_ATV",
+                isVirtual: true,
+            };
+        }
+        return null;
+    };
+    // ----------------------------------------------------------------------
+
+    // --- Função Auxiliar para Montar o HTML da Pendência/Cautela ---
+    const montarPendenciaHtml = (uid, pendenciaObj) => {
+        
+        if (!pendenciaObj) return '';
+        
+        // Lógica para Cautela Ativa (Estilo especial)
+        if (pendenciaObj.status === "CAUTELA_ATV") {
+            const dadosCarimbo = JSON.stringify({ 
+                obs: pendenciaObj.obs, autor: pendenciaObj.quem, data: pendenciaObj.data, isVirtual: true 
+            }); 
+            const safeCarimbo = encodeURIComponent(dadosCarimbo);
+
+            return `<div class="pendencia-alert-box status-cautela" 
+                        style="border-left: 3px solid #f57c00; background-color: #fff8e0; cursor: default; text-align: left;"
+                        title="Item com cautela ativa."
+                        data-status-type="cautela"> 
+                            <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;">
+                                <i class="fas fa-boxes"></i> ${pendenciaObj.quem}
+                            </div>
+                            <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap; text-align: left;"> 
+                                <i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i><span style="display:inline-block; vertical-align: top;">${pendenciaObj.obs}</span>
+                            </p>
+                        </div>`;
+        }
+        
+        // Lógica para Pendência C/A Real (ou S/A ReadOnly)
+        const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; const quem = pendenciaObj.quem || 'Anônimo'; const dataPend = formatarDataSimples(pendenciaObj.data);
+        const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); const safeHistorico = encodeURIComponent(dadosHistorico);
+        
+        const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
+        let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
+
+        if (pendenciaObj.isReadOnly) {
+            return `<div class="pendencia-alert-box ${classAdmin}" style="border-left: 3px solid #d32f2f; margin-top: 10px;">
+                        <div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>
+                        ${htmlFormatado}
+                        </div>`;
+        } else {
+            return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
+        }
+    };
+    // ----------------------------------------------------------------------
+
+    dadosConferencia.forEach((setor, index) => {
+        const isFirstSetor = (index === 0); let htmlItens = ''; let totalItensNoSetor = 0;
+        
+        setor.itens.forEach(item => {
+            
+            if (item.tipo === 'multi' && item.tombamentos) {
+                let htmlTombamentos = '';
+                item.tombamentos.forEach(tomb => {
+                    const uid = `${item.id}-${tomb.tomb}`; 
+                    
+                    let pendenciaReal = tomb.pendencia; // Pendência C/A real (se existir)
+                    let alertaCautelaHtml = '';
+                    let pendenciaRealHtml = montarPendenciaHtml(uid, pendenciaReal);
+                    let isCautelado = !!tomb.cautela; // Flag para controle
+                    
+                    // 🛑 CORREÇÃO CRÍTICA: Suprime o carimbo de cautela redundante se for recebimento de cautela
+                    if (isCautelado && !isCautela) { // SÓ EXIBE SE NÃO FOR RECEBIMENTO DE CAUTELA
+                        const idCautela = tomb.cautela.id ? `[${tomb.cautela.id}]` : '';
+                        const obs = `CAUTELADO ${idCautela} para ${tomb.cautela.destinatario} em ${tomb.cautela.data}.`;
+
+                        const virtualPendencia = {
                             obs: obs,
                             quem: "Sistema/Cautela",
-                            data: data,
+                            data: tomb.cautela.data,
                             status: "CAUTELA_ATV",
                             isVirtual: true,
                         };
+                        alertaCautelaHtml = montarPendenciaHtml(uid, virtualPendencia);
+                        
+                        if (pendenciaReal) {
+                            pendenciaReal.isReadOnly = true;
+                            pendenciaRealHtml = montarPendenciaHtml(uid, pendenciaReal);
+                        }
                     }
-                    return null;
-                };
-                // ----------------------------------------------------------------------
-
-                // --- Função Auxiliar para Montar o HTML da Pendência/Cautela ---
-                const montarPendenciaHtml = (uid, pendenciaObj) => {
-                 
-                    if (!pendenciaObj) return '';
                     
-                    // 🛑 Lógica para Cautela Ativa (Estilo especial) 🛑
-                    if (pendenciaObj.status === "CAUTELA_ATV") {
-                         const dadosCarimbo = JSON.stringify({ 
-                            obs: pendenciaObj.obs, autor: pendenciaObj.quem, data: pendenciaObj.data, isVirtual: true 
-                        }); 
-                         const safeCarimbo = encodeURIComponent(dadosCarimbo);
-
-                        // ✅ CORREÇÃO DE ESTILO FINAL: Alinhamento e Marcador Garantidos
-                        return `<div class="pendencia-alert-box status-cautela" 
-                                    style="border-left: 3px solid #f57c00; background-color: #fff8e0; cursor: default; text-align: left;"
-                                    title="Item com cautela ativa."
-                                    data-status-type="cautela"> 
-                                    <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;">
-                                        <i class="fas fa-boxes"></i> ${pendenciaObj.quem}
-                                    </div>
-                                    <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap; text-align: left;"> 
-                                        <i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i><span style="display:inline-block; vertical-align: top;">${pendenciaObj.obs}</span>
-                                    </p>
-                                </div>`;
-                    }
-                    // ----------------------------------------------------
-                    
-                    // Lógica para Pendência C/A Real (ou S/A ReadOnly)
-                    const obs = pendenciaObj.obs ? pendenciaObj.obs.replace(/'/g, "\\'") : ''; const quem = pendenciaObj.quem || 'Anônimo'; const dataPend = formatarDataSimples(pendenciaObj.data);
-                    const dadosHistorico = JSON.stringify({ obs: obs, autor: quem, data: dataPend }); const safeHistorico = encodeURIComponent(dadosHistorico);
-          
-                    const htmlFormatado = gerarHtmlVisual(obs, quem, dataPend, pendenciaObj.statusAdmin, pendenciaObj.adminObs);
-                    let classAdmin = pendenciaObj.statusAdmin ? "admin-reply" : "";
-
-                    if (pendenciaObj.isReadOnly) {
-                        // Usado para exibir C/A anterior de itens cautelados (sem botões de ação)
-                         return `<div class="pendencia-alert-box ${classAdmin}" style="border-left: 3px solid #d32f2f; margin-top: 10px;">
-                                 <div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>
-                                 ${htmlFormatado}
-                                 </div>`;
+                    // CONTROLE CRÍTICO DE BOTÕES (MULTI TOMBAMENTO)
+                    let tombBtnHtml = '';
+                    if (isCautelado) {
+                        tombBtnHtml = `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>`;
                     } else {
-                        // Versão COM BOTÕES de ação (Manter/Acrescentar)
-                        return `<div class="pendencia-alert-box ${classAdmin}">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
+                        tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
                     }
-                };
-                // ----------------------------------------------------------------------
-
-
-                setor.itens.forEach(item => {
                     
-                    if (item.tipo === 'multi' && item.tombamentos) {
-                        let htmlTombamentos = '';
-                        item.tombamentos.forEach(tomb => {
-                            const uid = `${item.id}-${tomb.tomb}`; 
-                            
-                            let pendenciaReal = tomb.pendencia; // Pendência C/A real (se existir)
-                            let alertaCautelaHtml = '';
-                            let pendenciaRealHtml = montarPendenciaHtml(uid, pendenciaReal);
-                            let isCautelado = !!tomb.cautela; // Flag para controle
-                            
-                            if (isCautelado) {
-                                // ✅ CORREÇÃO DE LÓGICA DE CARIMBO DE TOMBAMENTO
-                                const idCautela = tomb.cautela.id ? `[${tomb.cautela.id}]` : '';
-                                const obs = `CAUTELADO ${idCautela} para ${tomb.cautela.destinatario} em ${tomb.cautela.data}.`;
-
-                                const virtualPendencia = {
-                                    obs: obs,
-                                    quem: "Sistema/Cautela",
-                                    data: tomb.cautela.data,
-                                    status: "CAUTELA_ATV",
-                                    isVirtual: true,
-                                };
-                                alertaCautelaHtml = montarPendenciaHtml(uid, virtualPendencia);
-                                
-                                // Se houver pendência C/A, converte o alerta C/A para ReadOnly (exibe, mas sem botões)
-                                if (pendenciaReal) {
-                                     pendenciaReal.isReadOnly = true;
-                                     pendenciaRealHtml = montarPendenciaHtml(uid, pendenciaReal);
-                                }
-                            }
-                            
-                            // 🛑 CONTROLE CRÍTICO DE BOTÕES (MULTI TOMBAMENTO) 🛑
-                            let tombBtnHtml = '';
-                            if (isCautelado) {
-                                // Tombamento Cautelado (Apenas Ciente)
-                                tombBtnHtml = `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>`;
-                            } else {
-                                // Tombamento Livre (S/A ou C/A normal)
-                                tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
-                            }
-                            
-                            // ✅ Renderiza os dois blocos separados
-                            htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}">
-                                <div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options">${tombBtnHtml}</div></div>
-                                ${alertaCautelaHtml}${pendenciaRealHtml} 
-                                <p class="tombamento-descricao-salva"></p>
-                                <div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div>
-                            </div>`;
-     
-                            totalItensNoSetor++;
-                            window.itemStatus[uid] = { status: 'pending', obs: '' };
-                        });
-                        htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
-                    } else {
-                        // 🛑 CÓDIGO CAUTELA ATIVA (Single) 🛑 - CORREÇÃO DE LÓGICA
-                        let pendenciaReal = item.pendencia; // Pendência C/A real (se existir)
-                        let alertaCautelaHtml = '';
-                        let hasCautelaCarimbo = (item.cautelas && item.cautelas.length > 0); // FLAG SET HERE
-                        let pendenciaRealHtml = montarPendenciaHtml(item.id, pendenciaReal);
-
-                        if (hasCautelaCarimbo) {
-                            // 1. Criar o HTML do Carimbo de Cautela (usa o novo texto)
-                            const virtualPendencia = getVirtualPendenciaSingle(item);
-                            if (virtualPendencia) {
-                                alertaCautelaHtml = montarPendenciaHtml(item.id, virtualPendencia); 
-                                
-                                // Se houver um C/A real, converte o alerta C/A para ReadOnly (exibe, mas sem botões)
-                                if (pendenciaReal) {
-                                    pendenciaReal.isReadOnly = true;
-                                    pendenciaRealHtml = montarPendenciaHtml(item.id, pendenciaReal);
-                                }
-                            }
-                        }
-                        
-                        // 2. O HTML da Pendência C/A real é montado acima e reutilizado aqui.
-
-
-                        let classExtra = '';
-                        // A classe 'status-existing-alert' deve ser aplicada se houver cautela OU pendencia real
-                        if (hasCautelaCarimbo || pendenciaRealHtml) {
-                             classExtra = 'status-existing-alert';
-                        }
-                        
-                        // 🛑 CONTROLE CRÍTICO DE BOTÕES (SINGLE ITEM) 🛑
-                        let singleBtnHtml = '';
-                        
-                        if (hasCautelaCarimbo) {
-                            // Item Single Cautelado (S/A desabilitado, Ciente/+Alteração)
-                            const btnAcrescentar = `<button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>`;
-                            const btnCiente = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button>`;
-                            singleBtnHtml = `${btnCiente}${btnAcrescentar}`;
-
-                        } else {
-                            // Item Single Livre (S/A e C/A normal)
-                            singleBtnHtml = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`;
-                        }
-
-                        // ✅ Renderiza os dois blocos separadamente
-                        htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options">${singleBtnHtml}</div>${alertaCautelaHtml}${pendenciaRealHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
-                        totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
-                    }
+                    // Renderiza os dois blocos separados
+                    htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}">
+                        <div class="tombamento-controls"><span>Tomb.: ${tomb.tomb}</span><div class="tombamento-options">${tombBtnHtml}</div></div>
+                        ${alertaCautelaHtml}${pendenciaRealHtml} 
+                        <p class="tombamento-descricao-salva"></p>
+                        <div class="tombamento-obs-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea placeholder="Detalhe a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button></div>
+                    </div>`;
+        
+                    totalItensNoSetor++;
+                    window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
-                const expandedClass = isFirstSetor ? 'expanded' : ''; const arrowChar = isFirstSetor ? '▼' : '►';
-                htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div></div><span class="arrow">${arrowChar}</span></div><div class="setor-content ${expandedClass}">${htmlItens}</div></div>`;
-            });
-            mainContent.querySelector('#btn-finalizar').insertAdjacentHTML('beforebegin', htmlSetores);
-            updateOverallStatus();
-        }
+                htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-total-tombamentos="${item.tombamentos.length}" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div>${htmlTombamentos}</div>`;
+            } else {
+                // CÓDIGO CAUTELA ATIVA (Single)
+                let pendenciaReal = item.pendencia; // Pendência C/A real (se existir)
+                let alertaCautelaHtml = '';
+                let hasCautelaCarimbo = (item.cautelas && item.cautelas.length > 0); // FLAG SET HERE
+                let pendenciaRealHtml = montarPendenciaHtml(item.id, pendenciaReal);
+
+                // 🛑 JÁ ESTAVA CORRETO: Se for recebimento (isCautela), a flag hasCautelaCarimbo não deve disparar o alerta aqui.
+                if (hasCautelaCarimbo && !isCautela) { // SÓ EXIBE SE NÃO FOR RECEBIMENTO DE CAUTELA
+                    const virtualPendencia = getVirtualPendenciaSingle(item);
+                    if (virtualPendencia) {
+                        alertaCautelaHtml = montarPendenciaHtml(item.id, virtualPendencia); 
+                        
+                        if (pendenciaReal) {
+                            pendenciaReal.isReadOnly = true;
+                            pendenciaRealHtml = montarPendenciaHtml(item.id, pendenciaReal);
+                        }
+                    }
+                }
+                
+                let classExtra = '';
+                if (hasCautelaCarimbo || pendenciaRealHtml) {
+                    classExtra = 'status-existing-alert';
+                }
+                
+                // CONTROLE CRÍTICO DE BOTÕES (SINGLE ITEM)
+                let singleBtnHtml = '';
+                
+                if (hasCautelaCarimbo) {
+                    const btnAcrescentar = `<button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>`;
+                    const btnCiente = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button>`;
+                    singleBtnHtml = `${btnCiente}${btnAcrescentar}`;
+
+                } else {
+                    singleBtnHtml = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`;
+                }
+
+                // Renderiza os dois blocos separadamente
+                htmlItens += `<div class="item-conferencia ${classExtra}" data-type="single" data-status="pending" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span></div><div class="item-options">${singleBtnHtml}</div>${alertaCautelaHtml}${pendenciaRealHtml}<p class="descricao-salva"></p><div class="alteracao-container"><div class="historico-fixo" style="display:none;"></div><label>Descreva a alteração:</label><textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
+                totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
+            }
+        });
+        const expandedClass = isFirstSetor ? 'expanded' : ''; const arrowChar = isFirstSetor ? '▼' : '►';
+        htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div></div><span class="arrow">${arrowChar}</span></div><div class="setor-content ${expandedClass}">${htmlItens}</div></div>`;
+    });
+    mainContent.querySelector('#btn-finalizar').insertAdjacentHTML('beforebegin', htmlSetores);
+    updateOverallStatus();
+}
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia');
             const setor = btn.closest('.setor'); 
