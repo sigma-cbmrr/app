@@ -5324,25 +5324,30 @@ function showMainMenu() {
     const suggestionsBox = document.getElementById('cautela-suggestions-box');
     const suggestionsList = document.getElementById('cautela-suggestions-list');
     const uidInput = document.getElementById('cautela-destinatario-uid');
-    
-    // 🛑 SINALIZADOR CRÍTICO: Usado para dizer ao BLUR para não limpar o campo após o clique.
-    let hasSuccessfullySelected = false; 
 
     if (!input || !suggestionsBox || !suggestionsList || !uidInput) {
         console.error("Elementos do Autocomplete de Cautela não encontrados. Não é possível configurar o listener.");
         return;
     }
 
+    // 🛑 0. CORREÇÃO CRÍTICA DO BLUR/CLICK (MOUSEDOWN)
+    // Previne que o campo perca o foco (blur) quando o usuário clica na lista.
+    suggestionsBox.addEventListener('mousedown', (event) => {
+        if (event.target.closest('li')) {
+            event.preventDefault(); // Impede o 'blur' do input, permitindo que o 'click' seja processado.
+            console.log("MOUSEDOWN - BLUR do input temporariamente prevenido.");
+        }
+    });
+
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
     input.addEventListener('input', () => {
         const searchTerm = input.value.trim().toUpperCase();
         suggestionsList.innerHTML = '';
         
-        // CRÍTICO: Limpa o UID e a cor do border ao digitar qualquer coisa nova
+        // Limpa o UID e a cor do border ao digitar qualquer coisa nova
         uidInput.value = ''; 
         input.style.borderColor = '#ccc'; 
-        hasSuccessfullySelected = false; // Garante que a flag esteja desativada
-        
+
         if (searchTerm.length < 3) {
             suggestionsBox.style.display = 'none';
             return;
@@ -5389,21 +5394,17 @@ function showMainMenu() {
 
             if (selectedName && selectedUid) {
                 
-                // 1. Injeta os valores IMEDIATAMENTE.
-                input.value = selectedName; 
+                // Preenche os valores
+                input.value = selectedName; // 🛑 Preenchimento que não será mais limpado
                 uidInput.value = selectedUid;
                 input.style.borderColor = '#1b8a3e';
                 suggestionsBox.style.display = 'none';
                 
-                // 2. Seta a flag para sinalizar ao BLUR que o preenchimento foi feito.
-                hasSuccessfullySelected = true;
+                // Força o foco de volta para o input (complemento do mousedown)
+                input.focus(); 
                 
-                // 3. Dispara o 'change' e reseta a flag (250ms é seguro)
-                setTimeout(() => {
-                    input.dispatchEvent(new Event('change'));
-                    hasSuccessfullySelected = false; // Permite que o próximo blur seja validado
-                    console.log("SELEÇÃO CLIQUE - Finalizada. Flag hasSuccessfullySelected resetada.");
-                }, 250); 
+                // Dispara o change para revalidação
+                input.dispatchEvent(new Event('change'));
                 
             } else {
                 console.warn("Falha na Captura do Item da Lista: UID ou Nome ausente.");
@@ -5416,26 +5417,17 @@ function showMainMenu() {
     // 3. LÓGICA DE VALIDAÇÃO NO BLUR (Perda de Foco)
     input.addEventListener('blur', () => {
         
-        // 🛑 CRÍTICO: Se acabamos de preencher, ignoramos o blur.
-        if (hasSuccessfullySelected) {
-            console.log("BLUR IGNORADO: Seleção de clique recente. Valor mantido.");
-            // Garante que a caixa de sugestões feche, caso não tenha fechado no clique
-            suggestionsBox.style.display = 'none';
-            return; 
-        }
-
-        // Atraso para garantir que eventos de clique incompletos sejam processados
+        // Pequeno atraso para garantir que o 'focus' forçado no clique seja processado
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
             
             const finalName = input.value.trim();
             
             // 🛑 DEBUG FINAL (Verifique no console o estado antes da validação)
-            console.log("BLUR VALIDATION (200ms) - Final Name:", finalName, " UID:", uidInput.value);
-
+            console.log("BLUR VALIDATION - Final Name:", finalName, " UID:", uidInput.value);
 
             if (finalName.length > 0 && !uidInput.value) {
-                // Cenário: Usuário digitou mas NÃO clicou na sugestão
+                // Cenário: Usuário digitou (finalName > 0) mas NÃO clicou na sugestão (uidInput.value está vazio)
                 
                 const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
 
@@ -5445,13 +5437,14 @@ function showMainMenu() {
                     uidInput.value = ''; 
                     console.warn("BLUR - Inválido/Não selecionado. Campo Limpo.");
                 } else {
-                    // Fallback para usuário que digitou o nome completo (e é válido), mas faltou o UID.
+                    // Fallback (Usuário digitou o nome completo VÁLIDO manualmente)
                     const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
                     if (validUser) {
                         uidInput.value = validUser.id; 
                         input.style.borderColor = '#1b8a3e';
                         console.log("BLUR - UID preenchido por fallback de nome válido.");
                     } else {
+                        // Caso a pesquisa falhe por algum motivo, limpa para forçar o clique
                         input.value = '';
                         input.style.borderColor = 'red';
                         uidInput.value = '';
@@ -5463,9 +5456,9 @@ function showMainMenu() {
                 input.style.borderColor = '#ccc';
                 console.log("BLUR - Campo Vazio. Resetado.");
             }
-            // Se finalName > 0 E uidInput.value > 0: Seleção válida (nada acontece, borda verde persiste).
+            // Se finalName > 0 E uidInput.value > 0: Seleção válida.
             
-        }, 200); 
+        }, 100); 
     });
 
     // 4. Garante que a caixa reapareça ao focar se houver texto
