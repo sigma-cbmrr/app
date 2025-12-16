@@ -6216,6 +6216,7 @@ async function loadActiveCautelas() {
     }
 }
         // Localização: Linha ~1740
+// Localização: Linha ~1740
 async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
@@ -6249,62 +6250,83 @@ async function showCautelaDetails(cautelaId) {
             return;
         }
 
-        const cautela = doc.data();
+        let cautela = doc.data(); // Usar 'let' para permitir modificação
+
+        // 🛑 LÓGICA DE FALLBACK CRÍTICA PARA CAUTELAS LEGADAS 🛑
+        
+        // 1. Fallback para Destinatário UID
+        if (!cautela.destinatario_uid && cautela.destinatario) {
+            const fallbackUid = await findUidByName(cautela.destinatario);
+            if (fallbackUid) {
+                // Atualiza o objeto Cautela em memória com o UID encontrado
+                cautela.destinatario_uid = fallbackUid; 
+                
+                // OPCIONAL: Atualizar o Firestore com o UID (Migração "On-the-fly")
+                db.collection('cautelas_abertas').doc(cautelaId).update({
+                    destinatario_uid: fallbackUid
+                }).catch(e => console.warn("Falha na migração on-the-fly do destinatário:", e));
+            }
+        }
+        
+        // 2. Fallback para Emitente UID
+        if (!cautela.emitente_uid && cautela.emitente) {
+             const fallbackUid = await findUidByName(cautela.emitente);
+             if (fallbackUid) {
+                 cautela.emitente_uid = fallbackUid;
+                 
+                 // OPCIONAL: Atualizar o Firestore com o UID (Migração "On-the-fly")
+                 db.collection('cautelas_abertas').doc(cautelaId).update({
+                    emitente_uid: fallbackUid
+                 }).catch(e => console.warn("Falha na migração on-the-fly do emitente:", e));
+             }
+        }
+        // ---------------- FIM FALLBACK -----------------------
+        
         const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
 
-        // 🛑 NOVO: LOOKUP DE NOMES EM TEMPO REAL USANDO OS UID's SALVOS 🛑
-        
-        // Lookup Destinatário ATUAL (destinatario_uid)
+        // Lookup Destinatário ATUAL
         let destAtualCompleto = cautela.destinatario || 'N/D';
         if (cautela.destinatario_uid) {
             const destData = await getUserInfoByUid(cautela.destinatario_uid);
             destAtualCompleto = destData ? destData.nome_militar_completo : cautela.destinatario || 'Usuário Indisponível';
         }
         
-        // Lookup Destinatário ORIGINAL (destinatario_original, que é um nome)
-        // Se a cautela for antiga, o original pode ser apenas um nome.
-        const destinatarioOriginal = cautela.destinatario_original || 'N/D'; 
-        
-        // Lookup Emitente (emitente_uid)
+        // Lookup Emitente
         let emitenteCompleto = cautela.emitente || 'N/D';
         if (cautela.emitente_uid) {
             const emitData = await getUserInfoByUid(cautela.emitente_uid);
             emitenteCompleto = emitData ? emitData.nome_militar_completo : cautela.emitente || 'Usuário Indisponível';
         }
         
-        // Lookup Reversor (militar_completo_reversor, que ainda é um nome, mas precisamos do UID para rastrear)
-        // Como o fluxo de devolução será atualizado, mantemos a busca pelo nome por enquanto.
+        // Lookup Reversor (o campo reversor é preenchido na iniciarDevolucaoCautela do Dashboard)
         let ultimoDetentor = 'N/A';
         if (cautela.status === 'DEVOLUÇÃO') {
             ultimoDetentor = cautela.militar_completo_reversor || 'Não registrado';
         } else if (cautela.status === 'RECEBIDA' || cautela.status === 'ABERTA') {
-            ultimoDetentor = destAtualCompleto; // Usa o nome atualizado
+            ultimoDetentor = destAtualCompleto; 
         }
-        // -------------------------------------------------------------------
-        
-        // --- PREENCHIMENTO DOS CAMPOS ---
-        
+        // ... (resto da lógica de preenchimento do modal e botões) ...
+
+        const destinatarioOriginal = cautela.destinatario_original || 'N/D';
         if (document.getElementById('modal-destinatario-original')) {
             document.getElementById('modal-destinatario-original').textContent = destinatarioOriginal;
         }
         
         if (document.getElementById('modal-destinatario-atual')) {
-            document.getElementById('modal-destinatario-atual').textContent = destAtualCompleto; // Usa nome atualizado
+            document.getElementById('modal-destinatario-atual').textContent = destAtualCompleto;
         }
         
         if (document.getElementById('modal-ultimo-detentor')) {
             document.getElementById('modal-ultimo-detentor').textContent = ultimoDetentor;
         }
 
-        document.getElementById('modal-emitente').textContent = emitenteCompleto; // Usa nome atualizado
+        document.getElementById('modal-emitente').textContent = emitenteCompleto;
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
         document.getElementById('modal-data-emissao').textContent = dataEmissao;
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
         
         const itensList = document.getElementById('modal-itens-cautela');
         itensList.innerHTML = '';
-        
-        // ... (restante do preenchimento de itens e lógica de botões permanece abaixo)
         
         if (cautela.itens && cautela.itens.length > 0) {
             
@@ -6337,18 +6359,18 @@ async function showCautelaDetails(cautelaId) {
             itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
         }
 
-        // LÓGICA DE BOTÕES: Precisa usar o NOME ATUALIZADO (destAtualCompleto) para comparação
+        // LÓGICA DE BOTÕES: Usa o NOME ATUALIZADO (destAtualCompleto) para comparação
         const militarCompleto = currentUserData.nome_militar_completo;
         const modalStatusElement = document.getElementById('modal-status');
         
         // A. Cautelas ABERTAS (A RECEBER - Fluxo Normal)
-        if (destAtualCompleto === militarCompleto && cautela.status === 'ABERTA') { // Usa destAtualCompleto
+        if (destAtualCompleto === militarCompleto && cautela.status === 'ABERTA') {
             btnReceber.style.display = 'block';
             btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
             modalStatusElement.textContent = `Status: ${cautela.status}`;
             
         // B. Cautelas EM DEVOLUÇÃO (A RECEBER - Novo Fluxo Dono Provisório)
-        } else if (destAtualCompleto === militarCompleto && cautela.status === 'DEVOLUÇÃO') { // Usa destAtualCompleto
+        } else if (destAtualCompleto === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
             if (btnConfirmarDevolucao) {
                 btnConfirmarDevolucao.style.display = 'block';
                 btnConfirmarDevolucao.textContent = 'Confirmar Recebimento da Devolução';
@@ -6358,7 +6380,7 @@ async function showCautelaDetails(cautelaId) {
             modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">DEVOLUÇÃO</span><br>Aguardando sua conferência.`;
             
         // C. Cautelas RECEBIDAS (A DEVOLVER - Fluxo Usuário A)
-        } else if (destAtualCompleto === militarCompleto && cautela.status === 'RECEBIDA') { // Usa destAtualCompleto
+        } else if (destAtualCompleto === militarCompleto && cautela.status === 'RECEBIDA') {
             const ultimoConferente = await getLastConferente(cautela.local_origem);
             
             if (btnDevolver) {
@@ -7422,6 +7444,31 @@ function renderCautelaRow(cautela) {
         
     } catch (e) {
         console.warn(`Falha ao buscar militar pelo UID ${uid}: ${e.message}`);
+        return null;
+    }
+}
+        /**
+ * Tenta encontrar o UID de um militar usando seu nome militar completo (Posto Quadro Nome Guerra).
+ * Usado como fallback para cautelas legadas.
+ * @param {string} nomeCompleto - O nome completo (Ex: '2º SGT QPCBM JHONATH').
+ * @returns {string|null} O ID do documento (UID) se encontrado.
+ */
+async function findUidByName(nomeCompleto) {
+    if (!nomeCompleto) return null;
+    
+    // NOTA: Esta consulta requer um índice composto no Firestore (nome_militar_completo, limit)
+    try {
+        const snap = await db.collection('usuarios')
+            .where('nome_militar_completo', '==', nomeCompleto)
+            .limit(1)
+            .get();
+            
+        if (!snap.empty) {
+            return snap.docs[0].id; // Retorna o ID do documento (que é o UID)
+        }
+        return null;
+    } catch (e) {
+        console.error("Erro no fallback de UID por nome:", e);
         return null;
     }
 }
