@@ -6307,9 +6307,7 @@ async function loadActiveCautelas() {
         table.style.display = 'table';
     }
 }
-        // Localização: Linha ~1740
-// Localização: Linha ~1740
-// Localização: Aproximadamente linha 4610 do seu código (após a função findUidByName)
+        // Localização: Aproximadamente linha 4610
 
 async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
@@ -6350,52 +6348,65 @@ async function showCautelaDetails(cautelaId) {
         }
 
         let cautela = doc.data(); 
+        const currentStatus = cautela.status || 'N/D';
 
-        // 🛑 LÓGICA CRÍTICA DE ATUALIZAÇÃO DO NOME DE EXIBIÇÃO 🛑
-
-        // FUNÇÃO AUXILIAR PARA OBTER O NOME ATUALIZADO
+        // FUNÇÃO AUXILIAR DE RESOLUÇÃO DE NOME (MANTIDA)
         const getUpdatedName = async (uid, fallbackName) => {
              if (uid) {
                 const userData = await getUserInfoByUid(uid);
-                // Retorna o nome militar completo atualizado do banco de dados (se encontrado)
-                return userData ? userData.nome_militar_completo : fallbackName || 'Usuário Não Encontrado (UID:' + uid + ')';
+                return userData ? userData.nome_militar_completo : fallbackName || 'Usuário Indisponível';
             }
-            // Retorna o nome salvo no documento como fallback
             return fallbackName || 'N/D';
         };
 
-        // 1. DESTINATÁRIO ATUAL (Recebedor / Possuidor)
-        // Usa destinatario_uid para buscar o nome mais atualizado.
-        const destinatarioAtualizado = await getUpdatedName(cautela.destinatario_uid, cautela.destinatario);
+        // 🛑 LÓGICA DE RESOLUÇÃO DE NOMES COM BASE NO STATUS (REGRA DE OURO) 🛑
 
-        // 2. EMITENTE (Quem gerou a cautela)
-        // Usa emitente_uid para buscar o nome mais atualizado.
-        const emitenteAtualizado = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
+        // Variável de nome estático (usada para Dest. Original) que será adicionada em futuras emissões
+        const destinatarioOriginalUid = cautela.destinatario_original_uid || null; 
+
+        // 1. RESOLUÇÃO DO EMITENTE
+        let emitenteDisplay;
+        if (currentStatus === 'ABERTA') {
+             // DINÂMICO
+            emitenteDisplay = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
+        } else {
+            // ESTÁTICO (RECEBIDA, DEVOLUÇÃO, CONCLUÍDA)
+            emitenteDisplay = cautela.emitente; // Confia na string salva
+        }
+
+        // 2. RESOLUÇÃO DO DESTINATÁRIO ORIGINAL
+        let destOriginalDisplay;
+        if (currentStatus === 'ABERTA' && cautela.destinatario_original_uid) {
+            // DINÂMICO (Se houver UID original, e a cautela estiver em trânsito inicial)
+            destOriginalDisplay = await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original);
+        } else {
+            // ESTÁTICO (ABERTA sem UID original, RECEBIDA, DEVOLUÇÃO, CONCLUÍDA)
+            destOriginalDisplay = cautela.destinatario_original || 'N/D'; // Confia na string salva
+        }
         
-        // 3. DESTINATÁRIO ORIGINAL (Primeiro recebedor)
-        // Como o original_destinatario não tem um UID salvo no documento (apenas a string),
-        // usamos a string salva, mas com um lookup de fallback por segurança.
-        // NOTA: Se o militar for promovido APÓS RECEBER A CAUTELA (status RECEBIDA), o nome
-        // deste campo não será afetado, pois ele registra o primeiro destino.
-        const destinatarioOriginal = cautela.destinatario_original || 'N/D'; 
+        // 3. RESOLUÇÃO DO RECEBEDOR (ATUAL)
+        let destinatarioAtualDisplay;
+        if (currentStatus === 'CONCLUÍDA') {
+            // ESTÁTICO (Congela na conclusão)
+            destinatarioAtualDisplay = cautela.destinatario || 'N/D'; // Confia na string salva no fim
+        } else {
+            // DINÂMICO (ABERTA, RECEBIDA, DEVOLUÇÃO)
+            destinatarioAtualDisplay = await getUpdatedName(cautela.destinatario_uid, cautela.destinatario);
+        }
         
-        // --- FIM DA LÓGICA CRÍTICA ---
+        // --- PREENCHIMENTO FINAL ---
 
         const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
 
-        // 🛑 PREENCHIMENTO DOS CAMPOS DE TEXTO NA UI COM OS NOMES ATUALIZADOS 🛑
-        
-        if (modalEmitente) modalEmitente.textContent = emitenteAtualizado;
-        if (modalDestOriginal) modalDestOriginal.textContent = destinatarioOriginal;
-        if (modalDestAtual) modalDestAtual.textContent = destinatarioAtualizado;
+        if (modalEmitente) modalEmitente.textContent = emitenteDisplay;
+        if (modalDestOriginal) modalDestOriginal.textContent = destOriginalDisplay;
+        if (modalDestAtual) modalDestAtual.textContent = destinatarioAtualDisplay;
 
         let ultimoDetentor = 'N/A';
-        if (cautela.status === 'DEVOLUÇÃO') {
-            // Se está em devolução, o último detentor foi quem iniciou a devolução
-            ultimoDetentor = cautela.militar_completo_reversor || cautela.destinatario_original || 'Não registrado';
-        } else if (cautela.status === 'RECEBIDA' || cautela.status === 'ABERTA') {
-            // Se está ativa, o detentor atual é o destinatário atualizado
-            ultimoDetentor = destinatarioAtualizado; 
+        if (currentStatus === 'DEVOLUÇÃO') {
+            ultimoDetentor = cautela.militar_completo_reversor || destOriginalDisplay || 'Não registrado';
+        } else if (currentStatus === 'RECEBIDA' || currentStatus === 'ABERTA') {
+            ultimoDetentor = destinatarioAtualDisplay; 
         }
 
         if (document.getElementById('modal-ultimo-detentor')) {
@@ -6406,7 +6417,7 @@ async function showCautelaDetails(cautelaId) {
         document.getElementById('modal-data-emissao').textContent = dataEmissao;
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
         
-        // ... (o resto da lógica de preenchimento de itens e botões não foi alterada)
+        // ... (o resto da lógica de preenchimento de itens e botões) ...
         
         const itensList = document.getElementById('modal-itens-cautela');
         itensList.innerHTML = '';
@@ -6442,44 +6453,44 @@ async function showCautelaDetails(cautelaId) {
             itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
         }
 
-        // LÓGICA DE BOTÕES: Usa o NOME ATUALIZADO (destinatarioAtualizado) para comparação
+        // LÓGICA DE BOTÕES: Usa o NOME ATUALIZADO (destinatarioAtualDisplay) para comparação
         const militarCompleto = currentUserData.nome_militar_completo;
         const modalStatusElement = document.getElementById('modal-status');
         
         // A. Cautelas ABERTAS (A RECEBER - Fluxo Normal)
-        if (destinatarioAtualizado === militarCompleto && cautela.status === 'ABERTA') {
+        if (destinatarioAtualDisplay === militarCompleto && currentStatus === 'ABERTA') {
             if (btnReceber) {
                 btnReceber.style.display = 'block';
                 btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
             }
-            modalStatusElement.textContent = `Status: ${cautela.status}`;
+            modalStatusElement.textContent = `Status: ${currentStatus}`;
             
         // B. Cautelas EM DEVOLUÇÃO (A RECEBER - Novo Fluxo Dono Provisório)
-        } else if (destinatarioAtualizado === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
+        } else if (destinatarioAtualDisplay === militarCompleto && currentStatus === 'DEVOLUÇÃO') {
             if (btnConfirmarDevolucao) {
                 btnConfirmarDevolucao.style.display = 'block';
                 btnConfirmarDevolucao.textContent = 'Confirmar Recebimento da Devolução';
                 
-                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, destinatarioAtualizado);
+                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, destinatarioAtualDisplay);
             }
             modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">DEVOLUÇÃO</span><br>Aguardando sua conferência.`;
             
         // C. Cautelas RECEBIDAS (A DEVOLVER - Fluxo Usuário A)
-        } else if (destinatarioAtualizado === militarCompleto && cautela.status === 'RECEBIDA') {
+        } else if (destinatarioAtualDisplay === militarCompleto && currentStatus === 'RECEBIDA') {
             const ultimoConferente = await getLastConferente(cautela.local_origem);
             
             if (btnDevolver) {
                 btnDevolver.style.display = 'block';
                 btnDevolver.textContent = 'INICIAR DEVOLUÇÃO';
                 
-                modalStatusElement.innerHTML = `Status: ${cautela.status}<br><span style="font-size:0.8em; color:#0d47a1;">Devolução p/: <strong>${ultimoConferente}</strong></span>`;
+                modalStatusElement.innerHTML = `Status: ${currentStatus}<br><span style="font-size:0.8em; color:#0d47a1;">Devolução p/: <strong>${ultimoConferente}</strong></span>`;
 
                 btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente); 
             }
         
         // D. Cautelas EM DEVOLUÇÃO (QUEM ENVIOU - Usuário A que ainda rastreia)
-        } else if (cautela.militar_completo_reversor === militarCompleto && cautela.status === 'DEVOLUÇÃO') {
-            modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${destinatarioAtualizado}</strong></span>`;
+        } else if (cautela.militar_completo_reversor === militarCompleto && currentStatus === 'DEVOLUÇÃO') {
+            modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">EM TRÂNSITO</span><br><span style="font-size:0.8em; color:#0d47a1;">Aguardando recebimento por: <strong>${destinatarioAtualDisplay}</strong></span>`;
 
         // E. LÓGICA PADRÃO (Outros Status / Não é o destinatário)
         } else {
@@ -6487,7 +6498,7 @@ async function showCautelaDetails(cautelaId) {
             if (btnDevolver) btnDevolver.style.display = 'none';
             if (btnConfirmarDevolucao) btnConfirmarDevolucao.style.display = 'none';
             
-            modalStatusElement.textContent = `Status: ${cautela.status}`;
+            modalStatusElement.textContent = `Status: ${currentStatus}`;
         }
         
     } catch (e) {
