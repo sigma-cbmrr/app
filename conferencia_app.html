@@ -1144,17 +1144,7 @@ async function finalizarConferencia() {
         btn.disabled = false;
     }
 }
-        /**
- * FINALIZA A DEVOLUÇÃO: Executa a transação final para somar os itens de volta à Lista Mestra 
- * e mudar o status da cautela para CONCLUÍDA (Finalizada e enviada ao histórico).
- * @param {object} cautela - O objeto de dados da cautela.
- */
-/**
- * FINALIZA A DEVOLUÇÃO: Executa a transação final para somar os itens de volta à Lista Mestra 
- * e mudar o status da cautela para CONCLUÍDA (Finalizada e enviada ao histórico).
- * @param {object} cautela - O objeto de dados da cautela.
- */
-async function finalizarRecebimentoDevolucao(cautela) {
+        async function finalizarRecebimentoDevolucao(cautela) {
     const btn = document.getElementById('btn-finalizar');
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
@@ -1176,22 +1166,19 @@ async function finalizarRecebimentoDevolucao(cautela) {
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
         const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
+        
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
             const listaMestraDoc = await transaction.get(listaMestraRef);
-            
-            // 🛑 CORREÇÃO FINAL: VERIFICAÇÃO DE STATUS NULL-SAFE 🛑
             
             if (!cautelaDoc.exists) {
                 throw new Error("Cautela não encontrada.");
             }
 
-            // Lê o status de forma segura, usando string vazia como default se for null/undefined
-            const currentStatus = cautelaDoc.data().status || ""; 
+            // 🛑 CORREÇÃO CRÍTICA: Validação do Status para 'DEVOLUÇÃO'
+            const currentStatus = cautelaDoc.data().status;
             
-            // Compara o status lido de forma robusta
-            if (currentStatus.trim().toUpperCase() !== 'DEVOLUÇÃO') {
-                // Se o status for diferente, lança o erro com o status atual lido
+            if (currentStatus !== 'DEVOLUÇÃO') {
                 console.warn(`Transação abortada. Status lido: ${currentStatus}`); 
                 throw new Error(`Cautela não está no status 'DEVOLUÇÃO'. Status atual: ${currentStatus}`);
             }
@@ -1212,16 +1199,13 @@ async function finalizarRecebimentoDevolucao(cautela) {
                         if (mItem.id === cItem.id_base) {
                             
                             if (cItem.tipo === 'single') {
-                                // 1. Item Único: ❌ REMOVIDO: SOMA A QUANTIDADE DE VOLTA
-                                // mItem.quantidadeEsperada += itemQtd;
-                
-                                // Opcional: Remover o carimbo da cautela do array
-                                mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
+                                // Remover o carimbo da cautela do array (filtro seguro)
+                                mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
 
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                // 2. Item Tombado: Remove o carimbo de cautela do tombamento específico
+                                // Item Tombado: Remove o carimbo de cautela do tombamento específico
                                 mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                    if (tomb.tomb === cItem.tombamento && tomb.cautela) {
+                                    if (tomb.tomb === cItem.tombamento && tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
                                         delete tomb.cautela;
                                     }
                                     return tomb;
@@ -1239,6 +1223,9 @@ async function finalizarRecebimentoDevolucao(cautela) {
                 status: 'CONCLUÍDA', // Status final
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), // Novo campo para ordenação
                 receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`, // Quem concluiu o recebimento
+                // 🛑 ATUALIZAÇÃO DO DESTINATÁRIO PARA O DESTINATÁRIO ORIGINAL
+                destinatario: cautela.destinatario_original,
+                destinatario_uid: cautela.destinatario_uid, // Mantém o UID original
             });
             // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
             transaction.update(listaMestraRef, { list: listaMestra });
@@ -1249,7 +1236,6 @@ async function finalizarRecebimentoDevolucao(cautela) {
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        // O erro agora deve vir da linha 'Cautela não está no status...' se for falha de string
         console.error("Erro CRÍTICO ao finalizar devolução e restaurar estoque:", error);
         alert(`Erro ao finalizar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
