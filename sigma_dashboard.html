@@ -5325,12 +5325,20 @@ function showMainMenu() {
     const suggestionsList = document.getElementById('cautela-suggestions-list');
     const uidInput = document.getElementById('cautela-destinatario-uid'); // Campo oculto do UID
 
+    if (!input || !suggestionsBox || !suggestionsList || !uidInput) {
+        console.error("Elementos do Autocomplete de Cautela não encontrados. Não é possível configurar o listener.");
+        return;
+    }
+
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
     input.addEventListener('input', () => {
         const searchTerm = input.value.trim().toUpperCase();
         suggestionsList.innerHTML = '';
-        uidInput.value = ''; // Limpa o UID ao digitar
         
+        // 🛑 CRÍTICO: Limpa o UID e a cor do border ao digitar qualquer coisa nova
+        uidInput.value = ''; 
+        input.style.borderColor = '#ccc'; // Reset da cor
+
         if (searchTerm.length < 3) {
             suggestionsBox.style.display = 'none';
             return;
@@ -5338,15 +5346,22 @@ function showMainMenu() {
 
         const filteredUsers = allTargetUsers.filter(user => 
             user.nome.toUpperCase().includes(searchTerm)
-        );
+        ).sort((a, b) => a.nome.localeCompare(b.nome)); // Ordena alfabeticamente a lista
 
         if (filteredUsers.length > 0) {
             let html = '';
             filteredUsers.forEach(user => {
-                // 🛑 NOVO: Injeta o Nome e o UID de forma simples e direta.
+                // NOVO: Injeta o Nome e o UID de forma simples e direta.
                 const safeName = user.nome.replace(/'/g, "&#39;"); 
 
-                html += `<li data-user-name="${safeName}" data-uid="${user.id}">${user.nome}</li>`;
+                // Adicionado um pequeno destaque (badge) para melhorar a visualização na lista
+                const parts = user.nome.split(' ');
+                const postoQuadro = parts.slice(0, 2).join(' ');
+                const nomeGuerra = parts[parts.length - 1];
+
+                html += `<li data-user-name="${safeName}" data-uid="${user.id}">
+                            <span style="font-weight: bold; color: #800020;">${postoQuadro}</span> ${nomeGuerra}
+                         </li>`;
             });
             
             suggestionsList.innerHTML = html;
@@ -5355,48 +5370,83 @@ function showMainMenu() {
             suggestionsBox.style.display = 'none';
         }
     });
-    
+
     // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
     suggestionsList.addEventListener('click', (event) => {
-        // 🛑 Lógica melhorada: Prioriza o elemento LI ou o pai mais próximo 🛑
+        // Lógica robusta para capturar o LI ou o pai mais próximo que seja um LI
         const listItem = event.target.closest('li'); 
 
         if (listItem) {
             const selectedNameRaw = listItem.getAttribute('data-user-name');
             const selectedUid = listItem.getAttribute('data-uid');
             
-            // 🛑 CRÍTICO: Desfaz o escape HTML do nome antes de injetar
+            // Desfaz o escape HTML do nome antes de injetar
             const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
 
-            // Verifica se o nome foi capturado (CRÍTICO)
             if (selectedName && selectedUid) {
                 
-                // 🛑 AÇÃO CRÍTICA: Preenchimento do Campo
-                input.value = selectedName; 
-                uidInput.value = selectedUid;
-                
-                suggestionsBox.style.display = 'none';
+                // 🛑 CORREÇÃO CRÍTICA: Envolver a ação de preenchimento em um setTimeout
+                // para garantir que o evento de clique termine antes de qualquer 'blur'
+                // ou evento de foco subsequente, evitando a perda dos dados.
+                setTimeout(() => {
+                    input.value = selectedName;
+                    uidInput.value = selectedUid; // ✅ CRÍTICO: Popula o campo oculto
+                    input.style.borderColor = '#1b8a3e'; // Sinaliza sucesso visualmente
+                    suggestionsBox.style.display = 'none';
 
-                // Dispara evento
-                input.dispatchEvent(new Event('change'));
+                    // Dispara evento 'change' para revalidar formulário (se necessário)
+                    input.dispatchEvent(new Event('change'));
+                }, 50); // Atraso de 50ms para prevenir conflito de eventos
                 
             } else {
-                 console.warn("Falha: UID ou Nome não capturado do item da lista.");
+                console.warn("Falha: UID ou Nome não capturado do item da lista.");
+                uidInput.value = '';
+                input.style.borderColor = 'red';
             }
         }
     });
 
-    // 3. Oculta a caixa quando o foco sai do input, mas com um pequeno atraso
+    // 3. LÓGICA DE VALIDAÇÃO E OCULTAÇÃO NO BLUR (Perda de Foco)
     input.addEventListener('blur', () => {
+        // Atraso para permitir que o evento 'click' na lista seja executado antes
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
+            
+            const finalName = input.value.trim();
+            
+            // Se o campo de texto tem conteúdo, mas o UID está vazio, o usuário digitou mas não selecionou.
+            if (finalName.length > 0 && !uidInput.value) {
+                // Verifica se o nome digitado corresponde exatamente a algum nome completo da lista
+                const isNameValid = allTargetUsers.some(user => user.nome === finalName.toUpperCase());
+                
+                if (!isNameValid) {
+                    // Nome digitado é inválido / incompleto / não selecionado. Limpa o texto visível.
+                    // Isso força o usuário a clicar ou a corrigir.
+                    input.value = ''; 
+                    input.style.borderColor = 'red';
+                    alert("Por favor, selecione um usuário válido na lista de sugestões.");
+                } else {
+                    // O nome é válido (pode ter sido digitado e conferido), mas o UID ainda está vazio
+                    // (Isso é um cenário de falha rara que forçamos o clique para evitar)
+                    // Não fazemos nada aqui e deixamos o blur falhar/passar.
+                    input.style.borderColor = '#ccc';
+                }
+            } else if (finalName.length > 0 && uidInput.value) {
+                 // Preenchimento bem-sucedido via clique ou validação forçada
+                input.style.borderColor = '#1b8a3e';
+            } else if (finalName.length === 0 && uidInput.value) {
+                // Caso o usuário apague o nome, mas o UID ainda esteja preenchido.
+                uidInput.value = '';
+            }
+            
         }, 150);
     });
-    
-    // 4. Garante que a caixa reapareça ao focar
+
+    // 4. Garante que a caixa reapareça ao focar se houver texto
     input.addEventListener('focus', () => {
         if (input.value.length >= 3) {
-             suggestionsBox.style.display = 'block';
+            // Recria a lista na memória (simulando um 'input' para reabrir)
+            input.dispatchEvent(new Event('input')); 
         }
     });
 }
