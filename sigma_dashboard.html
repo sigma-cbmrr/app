@@ -6826,11 +6826,13 @@ async function loadHistoricalCautelas() {
     `;
     return html;
 }
-        async function getLastConferente(localOrigem) {
-            if (!localOrigem) return "N/D";
+        // Localização: Aproximadamente linha 6310
+
+async function getLastConferente(localOrigem) {
+    if (!localOrigem) return "N/D";
     
     try {
-        // Busca o resultado de conferência mais recente para o local de origem.
+        // 1. Busca o resultado de conferência mais recente para o local de origem.
         const snap = await db.collection(COLECAO_RESULTADOS)
             .where('local', '==', localOrigem)
             .orderBy('timestamp', 'desc')
@@ -6839,13 +6841,28 @@ async function loadHistoricalCautelas() {
             
         if (!snap.empty) {
             const lastResult = snap.docs[0].data();
-            // Retorna o nome completo do conferente encontrado.
-            return lastResult.conferente || "N/D";
+            
+            // 🛑 2. VERIFICA O UID (CHAVE IMUTÁVEL)
+            const conferenteUid = lastResult.conferente_uid; 
+            
+            if (conferenteUid) {
+                // 3. SE TEM UID, FAZ O LOOKUP PARA OBTER O NOME ATUALIZADO
+                const userData = await getUserInfoByUid(conferenteUid);
+                
+                if (userData && userData.nome_militar_completo) {
+                    // Retorna o nome atualizado do militar
+                    return userData.nome_militar_completo;
+                }
+            }
+            
+            // 4. FALLBACK: Se não tem UID ou lookup falhou, retorna o nome estático
+            // (Isso lida com registros legados).
+            return lastResult.conferente || "N/D (Sem UID ou Cadastro)";
         }
         
         return "N/D (Nenhum histórico recente)";
     } catch (e) {
-        console.error("Erro ao buscar último conferente:", e);
+        console.error("Erro ao buscar último conferente (UID Lookup):", e);
         return "N/D (Erro de consulta)";
     }
 }
@@ -7515,7 +7532,8 @@ function renderCautelaRow(cautela) {
                 alert("Erro ao limpar carimbos: " + e.message);
             }
         }
-        async function getUserInfoByUid(uid) {
+        // Localização: Aproximadamente linha 6445
+async function getUserInfoByUid(uid) {
     if (userCache[uid]) {
         return userCache[uid];
     }
@@ -7529,10 +7547,6 @@ function renderCautelaRow(cautela) {
             return userCache[uid];
         }
 
-        // Se a busca direta falhar (caso de dados legados ou IDs não sendo o UID),
-        // pode ser necessário buscar pelo campo 'uid' ou 'nome_guerra' (fallback complexo),
-        // mas focamos na solução mais estável: o ID do Documento.
-        
         return null;
         
     } catch (e) {
