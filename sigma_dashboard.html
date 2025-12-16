@@ -5335,13 +5335,13 @@ function showMainMenu() {
     suggestionsBox.addEventListener('mousedown', (event) => {
         if (event.target.closest('li')) {
             event.preventDefault(); // Impede o 'blur' do input, permitindo que o 'click' seja processado.
-            console.log("MOUSEDOWN - BLUR do input temporariamente prevenido.");
+            // console.log("MOUSEDOWN - BLUR do input temporariamente prevenido.");
         }
     });
 
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
     input.addEventListener('input', () => {
-        const searchTerm = input.value.trim().toUpperCase();
+        const searchTerm = input.value.trim(); // Não converte para UPPERCASE aqui para usar na RegExp
         suggestionsList.innerHTML = '';
         
         // Limpa o UID e a cor do border ao digitar qualquer coisa nova
@@ -5353,23 +5353,32 @@ function showMainMenu() {
             return;
         }
 
+        const searchTermUpper = searchTerm.toUpperCase(); // Termo em caixa alta para a busca
+        
         const filteredUsers = allTargetUsers.filter(user => 
-            user.nome.toUpperCase().includes(searchTerm)
+            user.nome.toUpperCase().includes(searchTermUpper)
         ).sort((a, b) => a.nome.localeCompare(b.nome));
 
         if (filteredUsers.length > 0) {
+            
+            // 🛑 CRIA A EXPRESSÃO REGULAR PARA O DESTAQUE
+            // 'gi' = global (todas as ocorrências) e case-insensitive (ignora caixa alta/baixa)
+            const regex = new RegExp(`(${searchTerm})`, 'gi');
+            
             let html = '';
             filteredUsers.forEach(user => {
                 const fullUserName = user.nome; 
                 const safeName = fullUserName.replace(/'/g, "&#39;"); 
 
-                // Lógica de Melhoria Visual
-                const parts = fullUserName.split(' ');
-                const postoQuadro = parts.slice(0, 3).join(' '); 
-                const nomeGuerra = parts.slice(3).join(' ');      
-
+                // 🛑 CORREÇÃO: Usa a regex para substituir a ocorrência do termo de busca
+                // pelo termo envolvido em tags <strong>.
+                const highlightedName = fullUserName.replace(regex, '<strong>$1</strong>');
+                
+                // O layout visual anterior (separando posto/quadro) foi removido
+                // para simplificar e garantir que o destaque funcione em qualquer parte do nome.
+                
                 html += `<li data-user-name="${safeName}" data-uid="${user.id}">
-                            <span style="font-weight: bold; color: #800020;">${postoQuadro}</span> ${nomeGuerra}
+                             <span style="color: #800020;">${highlightedName}</span>
                          </li>`;
             });
             
@@ -5389,13 +5398,12 @@ function showMainMenu() {
             const selectedUid = listItem.getAttribute('data-uid');
             const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
 
-            // 🛑 DEBUG CLIQUE (Verifique no console se aparece)
-            console.log("SELEÇÃO CLIQUE - Capturado. UID:", selectedUid, " Nome:", selectedName);
+            // console.log("SELEÇÃO CLIQUE - Capturado. UID:", selectedUid, " Nome:", selectedName);
 
             if (selectedName && selectedUid) {
                 
                 // Preenche os valores
-                input.value = selectedName; // 🛑 Preenchimento que não será mais limpado
+                input.value = selectedName; 
                 uidInput.value = selectedUid;
                 input.style.borderColor = '#1b8a3e';
                 suggestionsBox.style.display = 'none';
@@ -5417,17 +5425,14 @@ function showMainMenu() {
     // 3. LÓGICA DE VALIDAÇÃO NO BLUR (Perda de Foco)
     input.addEventListener('blur', () => {
         
-        // Pequeno atraso para garantir que o 'focus' forçado no clique seja processado
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
             
             const finalName = input.value.trim();
             
-            // 🛑 DEBUG FINAL (Verifique no console o estado antes da validação)
-            console.log("BLUR VALIDATION - Final Name:", finalName, " UID:", uidInput.value);
+            // console.log("BLUR VALIDATION - Final Name:", finalName, " UID:", uidInput.value);
 
             if (finalName.length > 0 && !uidInput.value) {
-                // Cenário: Usuário digitou (finalName > 0) mas NÃO clicou na sugestão (uidInput.value está vazio)
                 
                 const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
 
@@ -5435,16 +5440,15 @@ function showMainMenu() {
                     input.value = ''; 
                     input.style.borderColor = 'red';
                     uidInput.value = ''; 
-                    console.warn("BLUR - Inválido/Não selecionado. Campo Limpo.");
+                    // console.warn("BLUR - Inválido/Não selecionado. Campo Limpo.");
                 } else {
-                    // Fallback (Usuário digitou o nome completo VÁLIDO manualmente)
+                    // Fallback
                     const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
                     if (validUser) {
                         uidInput.value = validUser.id; 
                         input.style.borderColor = '#1b8a3e';
-                        console.log("BLUR - UID preenchido por fallback de nome válido.");
+                        // console.log("BLUR - UID preenchido por fallback de nome válido.");
                     } else {
-                        // Caso a pesquisa falhe por algum motivo, limpa para forçar o clique
                         input.value = '';
                         input.style.borderColor = 'red';
                         uidInput.value = '';
@@ -5454,9 +5458,8 @@ function showMainMenu() {
                 // Campo vazio, garantir que o UID esteja vazio e resetar a cor
                 uidInput.value = '';
                 input.style.borderColor = '#ccc';
-                console.log("BLUR - Campo Vazio. Resetado.");
+                // console.log("BLUR - Campo Vazio. Resetado.");
             }
-            // Se finalName > 0 E uidInput.value > 0: Seleção válida.
             
         }, 100); 
     });
