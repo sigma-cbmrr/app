@@ -5318,8 +5318,8 @@ function showMainMenu() {
     }
 }
 		
-        function setupCautelaDestinatarioListener() {
-    // Referências dos elementos (OK)
+       function setupCautelaDestinatarioListener() {
+    // Referências dos elementos
     const input = document.getElementById('cautela-destinatario');
     const suggestionsBox = document.getElementById('cautela-suggestions-box');
     const suggestionsList = document.getElementById('cautela-suggestions-list');
@@ -5335,7 +5335,7 @@ function showMainMenu() {
         const searchTerm = input.value.trim().toUpperCase();
         suggestionsList.innerHTML = '';
         
-        // 🛑 CRÍTICO: Limpa o UID e a cor do border ao digitar qualquer coisa nova
+        // CRÍTICO: Limpa o UID e a cor do border ao digitar qualquer coisa nova
         uidInput.value = ''; 
         input.style.borderColor = '#ccc'; // Reset da cor
 
@@ -5351,13 +5351,15 @@ function showMainMenu() {
         if (filteredUsers.length > 0) {
             let html = '';
             filteredUsers.forEach(user => {
-                // NOVO: Injeta o Nome e o UID de forma simples e direta.
-                const safeName = user.nome.replace(/'/g, "&#39;"); 
+                // AQUI ESTÁ A CHAVE: O valor data-user-name DEVE ser o NOME COMPLETO.
+                const fullUserName = user.nome; 
+                const safeName = fullUserName.replace(/'/g, "&#39;"); 
 
-                // Adicionado um pequeno destaque (badge) para melhorar a visualização na lista
-                const parts = user.nome.split(' ');
-                const postoQuadro = parts.slice(0, 2).join(' ');
-                const nomeGuerra = parts[parts.length - 1];
+                // 💡 MELHORIA VISUAL (Renderiza apenas uma parte em negrito para facilitar a leitura)
+                const parts = fullUserName.split(' ');
+                // Ex: "2º SGT QPCBM JHONATH" -> [2º, SGT, QPCBM, JHONATH]
+                const postoQuadro = parts.slice(0, 3).join(' '); // 2º SGT QPCBM
+                const nomeGuerra = parts.slice(3).join(' ');      // JHONATH
 
                 html += `<li data-user-name="${safeName}" data-uid="${user.id}">
                             <span style="font-weight: bold; color: #800020;">${postoQuadro}</span> ${nomeGuerra}
@@ -5373,7 +5375,6 @@ function showMainMenu() {
 
     // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
     suggestionsList.addEventListener('click', (event) => {
-        // Lógica robusta para capturar o LI ou o pai mais próximo que seja um LI
         const listItem = event.target.closest('li'); 
 
         if (listItem) {
@@ -5383,20 +5384,20 @@ function showMainMenu() {
             // Desfaz o escape HTML do nome antes de injetar
             const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
 
+            // 🛑 DEBUG (Mantido): Verifica se o UID está sendo capturado
+            console.log("Selecionado. UID: ", selectedUid, " Nome:", selectedName);
+
             if (selectedName && selectedUid) {
                 
-                // 🛑 CORREÇÃO CRÍTICA: Envolver a ação de preenchimento em um setTimeout
-                // para garantir que o evento de clique termine antes de qualquer 'blur'
-                // ou evento de foco subsequente, evitando a perda dos dados.
+                // CRÍTICO: Usar setTimeout para evitar conflito com o blur
                 setTimeout(() => {
-                    input.value = selectedName;
-                    uidInput.value = selectedUid; // ✅ CRÍTICO: Popula o campo oculto
+                    input.value = selectedName; // 🛑 INJETA O NOME COMPLETO CORRETO
+                    uidInput.value = selectedUid; // ✅ Popula o campo oculto
                     input.style.borderColor = '#1b8a3e'; // Sinaliza sucesso visualmente
                     suggestionsBox.style.display = 'none';
 
-                    // Dispara evento 'change' para revalidar formulário (se necessário)
                     input.dispatchEvent(new Event('change'));
-                }, 50); // Atraso de 50ms para prevenir conflito de eventos
+                }, 50); 
                 
             } else {
                 console.warn("Falha: UID ou Nome não capturado do item da lista.");
@@ -5408,7 +5409,6 @@ function showMainMenu() {
 
     // 3. LÓGICA DE VALIDAÇÃO E OCULTAÇÃO NO BLUR (Perda de Foco)
     input.addEventListener('blur', () => {
-        // Atraso para permitir que o evento 'click' na lista seja executado antes
         setTimeout(() => {
             suggestionsBox.style.display = 'none';
             
@@ -5416,27 +5416,34 @@ function showMainMenu() {
             
             // Se o campo de texto tem conteúdo, mas o UID está vazio, o usuário digitou mas não selecionou.
             if (finalName.length > 0 && !uidInput.value) {
-                // Verifica se o nome digitado corresponde exatamente a algum nome completo da lista
-                const isNameValid = allTargetUsers.some(user => user.nome === finalName.toUpperCase());
+                // 🛑 CORREÇÃO: Verifica se o NOME COMPLETO digitado existe no array.
+                const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
                 
                 if (!isNameValid) {
                     // Nome digitado é inválido / incompleto / não selecionado. Limpa o texto visível.
-                    // Isso força o usuário a clicar ou a corrigir.
                     input.value = ''; 
                     input.style.borderColor = 'red';
-                    alert("Por favor, selecione um usuário válido na lista de sugestões.");
+                    
+                    // 🛑 Removendo o alert para não interromper o usuário, a borda vermelha e
+                    // a limpeza do campo já forçam o recomeço.
+                    // alert("Por favor, selecione um usuário válido na lista de sugestões."); 
+                    
                 } else {
-                    // O nome é válido (pode ter sido digitado e conferido), mas o UID ainda está vazio
-                    // (Isso é um cenário de falha rara que forçamos o clique para evitar)
-                    // Não fazemos nada aqui e deixamos o blur falhar/passar.
-                    input.style.borderColor = '#ccc';
+                    // Cenário raro: Nome completo foi digitado, mas o UID não foi setado no click.
+                    // Tentamos encontrar o UID por nome (Fallback lento, mas necessário para este cenário)
+                    const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
+                    if (validUser) {
+                        uidInput.value = validUser.id; // Corrige o UID no blur
+                        input.style.borderColor = '#1b8a3e';
+                    }
                 }
             } else if (finalName.length > 0 && uidInput.value) {
-                 // Preenchimento bem-sucedido via clique ou validação forçada
+                 // Preenchimento bem-sucedido via clique
                 input.style.borderColor = '#1b8a3e';
-            } else if (finalName.length === 0 && uidInput.value) {
-                // Caso o usuário apague o nome, mas o UID ainda esteja preenchido.
+            } else if (finalName.length === 0) {
+                // Campo vazio, garantir que o UID esteja vazio e resetar a cor
                 uidInput.value = '';
+                input.style.borderColor = '#ccc';
             }
             
         }, 150);
