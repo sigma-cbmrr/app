@@ -5319,109 +5319,83 @@ function showMainMenu() {
 }
 		
         function setupCautelaDestinatarioListener() {
+    const input = document.getElementById('cautela-destinatario');
     const suggestionsBox = document.getElementById('cautela-suggestions-box');
     const suggestionsList = document.getElementById('cautela-suggestions-list');
-    const uidInput = document.getElementById('cautela-destinatario-uid');
-    const input = document.getElementById('cautela-destinatario');
-    
-    let isClickingSuggestion = false; // Flag de controle para o evento blur/focusout
+    const uidInput = document.getElementById('cautela-destinatario-uid'); // Campo oculto do UID
 
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
-    if (input) {
-        input.addEventListener('input', () => {
-            const searchTerm = input.value.trim().toUpperCase();
-            suggestionsList.innerHTML = '';
-            uidInput.value = ''; 
+    input.addEventListener('input', () => {
+        const searchTerm = input.value.trim().toUpperCase();
+        suggestionsList.innerHTML = '';
+        uidInput.value = ''; // Sempre limpa o UID ao digitar
+        
+        if (searchTerm.length < 3) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        const filteredUsers = allTargetUsers.filter(user => 
+            user.nome.toUpperCase().includes(searchTerm)
+        );
+
+        if (filteredUsers.length > 0) {
+            let html = '';
+            filteredUsers.forEach(user => {
+                // 🛑 CORREÇÃO FINAL NA RENDERIZAÇÃO: Injeta Nome e UID como atributos simples
+                // Escapamos o nome apenas para o caso de ter aspas simples que quebrem a string HTML.
+                const safeName = user.nome.replace(/'/g, "&#39;"); 
+
+                html += `<li data-user-name="${safeName}" data-uid="${user.id}">${user.nome}</li>`;
+            });
             
-            if (searchTerm.length < 3) {
-                suggestionsBox.style.display = 'none';
-                return;
-            }
-
-            const filteredUsers = allTargetUsers.filter(user => 
-                user.nome.toUpperCase().includes(searchTerm)
-            );
-
-            if (filteredUsers.length > 0) {
-                let html = '';
-                filteredUsers.forEach(user => {
-                    const selectedUserObject = { name: user.nome, uid: user.id };
-                    const safeData = JSON.stringify(selectedUserObject).replace(/"/g, '&quot;'); 
-                    
-                    html += `<li data-user-data="${safeData}">${user.nome}</li>`;
-                });
-                
-                suggestionsList.innerHTML = html;
-                suggestionsBox.style.display = 'block';
-            } else {
-                suggestionsBox.style.display = 'none';
-            }
-        });
-    }
-
-    // 🛑 NOVO: Listener MOUSE DOWN (CRÍTICO) 🛑
-    // Esta função define a flag antes do blur ser disparado, indicando que o clique é intencional.
-    suggestionsBox.addEventListener('mousedown', () => {
-        isClickingSuggestion = true;
+            suggestionsList.innerHTML = html;
+            suggestionsBox.style.display = 'block';
+        } else {
+            suggestionsBox.style.display = 'none';
+        }
     });
     
-    // 2. LISTENER DE SELEÇÃO (Preenche o Input, Esconde a Lista e SALVA O UID)
+    // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
     suggestionsList.addEventListener('click', (event) => {
-        const listItem = event.target.closest('li'); 
+        // 🛑 LÓGICA FINAL DE CLIQUE: Usa o target real do evento 🛑
         
-        if (listItem) {
-            const dataAttribute = listItem.getAttribute('data-user-data');
-            
-            if (dataAttribute) {
-                try {
-                    const cleanData = dataAttribute.replace(/&quot;/g, '"');
-                    const selectedUser = JSON.parse(cleanData); 
+        // Garante que o target seja o LI pai, em vez de depender apenas do tagName
+        const listItem = event.target.closest('li'); 
 
-                    // 🛑 AÇÃO CRÍTICA: Preenche a caixa de texto
-                    input.value = selectedUser.name; 
-                    uidInput.value = selectedUser.uid; 
-                    suggestionsBox.style.display = 'none';
-                    
-                    input.dispatchEvent(new Event('change'));
-                    
-                    // Resetar a flag após a ação
-                    isClickingSuggestion = false;
+        if (listItem) { // Se encontramos o LI pai
+            const selectedName = listItem.getAttribute('data-user-name');
+            const selectedUid = listItem.getAttribute('data-uid'); // Captura o UID
 
-                } catch (e) {
-                    console.error("Erro ao analisar dados do militar selecionado:", e, dataAttribute);
-                }
+            // Verifica se o nome foi capturado (CRÍTICO)
+            if (selectedName) {
+                // 🛑 PREENCHIMENTO CRÍTICO: Usa a referência input (garantida no topo)
+                input.value = selectedName;
+                uidInput.value = selectedUid; // Injeta o UID no campo oculto
+                
+                suggestionsBox.style.display = 'none';
+
+                // Dispara evento
+                input.dispatchEvent(new Event('change'));
+            } else {
+                 console.warn("Erro ao ler atributo de nome.");
             }
         }
     });
 
-    // 3. Listener BLUR (Ajustado com a flag de controle)
-    if (input) {
-        input.addEventListener('blur', () => {
-            // Se a flag estiver ativa (clicando na sugestão), não esconde a caixa imediatamente.
-            if (isClickingSuggestion) {
-                // Se a flag está ativa, definimos um timeout breve para dar tempo ao click/value
-                setTimeout(() => {
-                    // Após um tempo, redefinimos a flag e escondemos a caixa
-                    isClickingSuggestion = false;
-                    suggestionsBox.style.display = 'none';
-                }, 100); 
-            } else {
-                // Comportamento normal: esconde após 150ms
-                setTimeout(() => {
-                    suggestionsBox.style.display = 'none';
-                }, 150);
-            }
-        });
-    }
+    // 3. Oculta a caixa quando o foco sai do input, mas com um pequeno atraso
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            suggestionsBox.style.display = 'none';
+        }, 150);
+    });
     
     // 4. Garante que a caixa reapareça ao focar
-    if (input) {
-        input.addEventListener('focus', () => {
-            if (input.value.length >= 3) {
-                 suggestionsBox.style.display = 'block';
-            }
-        });
-    }
+    input.addEventListener('focus', () => {
+        if (input.value.length >= 3) {
+             suggestionsBox.style.display = 'block';
+        }
+    });
 }
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
