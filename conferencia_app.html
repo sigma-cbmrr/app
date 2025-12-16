@@ -84,81 +84,91 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
 
     <script>
-        const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+    const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const LISTA_ID = urlParams.get('id'); 
-        const COLECAO_LISTAS = 'listas_conferencia';
-        let MODO_OPERACAO = 'recebimento'; // Novo: 'recebimento' (padrão) ou 'devolucao'
-        let DESTINATARIO_DEVOLUCAO = null; // Novo: O último conferente que irá receber de volta.
-        // 🛑 CRÍTICO: Deve ser 'cautelaId' para coincidir com o envio do iframe
-        const CAUTELA_ID = urlParams.get('cautelaId');
-        const modoParam = urlParams.get('modo');
-            if (modoParam === 'devolucao') {
-                MODO_OPERACAO = 'devolucao';
-                DESTINATARIO_DEVOLUCAO = urlParams.get('destinatarioDevolucao');
-            }
-        // 🛑 CRÍTICO: Deve estar definida
-        const COLECAO_CAUTELAS = 'cautelas_abertas'; 
-        let dadosConferencia = [];
-        let isCautela = !!CAUTELA_ID;
-        let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
-
-        function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
-        const userInfo = { postoGraduacao: getUrlParameter('posto_grad') || "ND", quadro: getUrlParameter('quadro_mil') || "ND", nomeGuerra: getUrlParameter('nome_guerra') || "ND" };
-
-        function formatarDataSimples(timestamp) {
-            if (!timestamp) return "";
-            const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-            return date.toLocaleDateString('pt-BR'); 
-        }
-
-        function updateHeaderInfo() { 
-            const el = document.getElementById('militar-info');
-            if(el) el.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`; 
-        }
-
-        function updateOverallStatus() { 
-            let total = 0, completed = 0; 
-            document.querySelectorAll('.setor').forEach(s => { 
-                total += parseInt(s.dataset.totalItems || 0); 
-                completed += parseInt(s.querySelector('.setor-status').dataset.completed || 0); 
-            }); 
-            const btn = document.getElementById('btn-finalizar'); 
-            if(btn) {
-                btn.textContent = `FINALIZAR CONFERÊNCIA (${completed}/${total} ITENS)`; 
-                let buttonPrefix = 'FINALIZAR CONFERÊNCIA';
-    // MODO_OPERACAO é global e foi definido no início do script
-    if (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao') {
-        buttonPrefix = 'FINALIZAR DEVOLUÇÃO';
-    }
+    const urlParams = new URLSearchParams(window.location.search);
+    const LISTA_ID = urlParams.get('id');
+    const COLECAO_LISTAS = 'listas_conferencia';
+    let MODO_OPERACAO = 'recebimento'; // Novo: 'recebimento' (padrão) ou 'devolucao'
+    let DESTINATARIO_DEVOLUCAO = null; // Novo: O último conferente que irá receber de volta.
+    // 🛑 CRÍTICO: Deve ser 'cautelaId' para coincidir com o envio do iframe
+    const CAUTELA_ID = urlParams.get('cautelaId');
+    const modoParam = urlParams.get('modo');
     
-    if(btn) {
-        // Altera a linha original para usar o prefixo condicional
-        // A contagem (completed/total) é mantida.
-        btn.textContent = `${buttonPrefix} (${completed}/${total} ITENS)`;
+    // 🛑 NOVO/CORRIGIDO: Captura do UID do usuário
+    const USER_UID = urlParams.get('user_uid');
 
-        if (total > 0 && completed >= total) {
-            btn.disabled = false;
-            // ... (estilo para verde) ...
-        } else {
-            btn.disabled = true;
-            // ... (estilo para vermelho) ...
-        }
+    if (modoParam === 'devolucao') {
+        MODO_OPERACAO = 'devolucao';
+        DESTINATARIO_DEVOLUCAO = urlParams.get('destinatarioDevolucao');
     }
-                if (total > 0 && completed >= total) {
-                    btn.disabled = false;
-                    btn.style.backgroundColor = '#1b8a3e'; 
-                    btn.style.cursor = 'pointer';
-                } else {
-                    btn.disabled = true;
-                    btn.style.backgroundColor = '#d90f23'; 
-                    btn.style.cursor = 'not-allowed';
-                }
+    // 🛑 CRÍTICO: Deve estar definida
+    const COLECAO_CAUTELAS = 'cautelas_abertas';
+    let dadosConferencia = [];
+    let isCautela = !!CAUTELA_ID;
+    let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
+
+    function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
+    
+    // 🛑 ATUALIZAÇÃO CRÍTICA: Adiciona o UID ao objeto userInfo
+    const userInfo = { 
+        postoGraduacao: getUrlParameter('posto_grad') || "ND", 
+        quadro: getUrlParameter('quadro_mil') || "ND", 
+        nomeGuerra: getUrlParameter('nome_guerra') || "ND",
+        uid: USER_UID || "ND" // Garante que o UID seja salvo no userInfo
+    };
+
+    function formatarDataSimples(timestamp) {
+        if (!timestamp) return "";
+        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        return date.toLocaleDateString('pt-BR');
+    }
+
+    function updateHeaderInfo() {
+        const el = document.getElementById('militar-info');
+        if(el) el.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`;
+    }
+
+    function updateOverallStatus() {
+        let total = 0, completed = 0;
+        document.querySelectorAll('.setor').forEach(s => {
+            total += parseInt(s.dataset.totalItems || 0);
+            completed += parseInt(s.querySelector('.setor-status').dataset.completed || 0);
+        });
+        const btn = document.getElementById('btn-finalizar');
+        
+        let buttonPrefix = 'FINALIZAR CONFERÊNCIA';
+        // MODO_OPERACAO é global e foi definido no início do script
+        if (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao') {
+            buttonPrefix = 'FINALIZAR DEVOLUÇÃO';
+        }
+        
+        if(btn) {
+            // Altera a linha original para usar o prefixo condicional
+            // A contagem (completed/total) é mantida.
+            btn.textContent = `${buttonPrefix} (${completed}/${total} ITENS)`;
+
+            if (total > 0 && completed >= total) {
+                btn.disabled = false;
+            } else {
+                btn.disabled = true;
             }
         }
+        
+        if(btn) {
+            if (total > 0 && completed >= total) {
+                btn.disabled = false;
+                btn.style.backgroundColor = '#1b8a3e';
+                btn.style.cursor = 'pointer';
+            } else {
+                btn.disabled = true;
+                btn.style.backgroundColor = '#d90f23';
+                btn.style.cursor = 'not-allowed';
+            }
+        }
+    }
 
         function updateSetorStatus(setorEl) { 
             const items = setorEl.querySelectorAll('.item-conferencia'); 
@@ -912,7 +922,10 @@
 async function finalizarConferencia() {
     const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
     const USER_DATA = userInfo;
-    const USER_ID = userInfo.uid || '';
+    
+    // 🛑 NOVO: UID do conferente (chave imutável)
+    const CONFERENTE_UID = userInfo.uid || ''; 
+
     if (isCautela) {
         // Se for uma cautela, chame a função específica de finalização de recebimento.
         await finalizarRecebimentoCautela();
@@ -981,7 +994,7 @@ async function finalizarConferencia() {
                         itemsCount++;
                         let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
                         if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
-                       
+                        
                         let finalObs = s.obs;
                         if (s.status === 'KEEP' && pend) finalObs = pend.obs;
                         if (s.status === 'S/A') finalObs = null;
@@ -1020,13 +1033,26 @@ async function finalizarConferencia() {
         // --- FIM DA FUNÇÃO PROCESS ---
 
         if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-        await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itemsCount, totalCaa: cA_count, itensCaa, itensRelatorio });
         
-        // 🛑 NOVO CÓDIGO CRÍTICO: Atualiza a custódia atual
+        // 🛑 ATUALIZAÇÃO CRÍTICA 1: Adiciona conferente_uid no resultados_conferencias
+        await db.collection('resultados_conferencias').add({ 
+            local: localNome, 
+            lista_id: LISTA_ID, 
+            conferente_uid: CONFERENTE_UID, // CHAVE IMUTÁVEL
+            conferente: conferente, // Nome Completo (para exibição histórica)
+            timestamp: firebase.firestore.Timestamp.now(), 
+            totalItensConferidos: itemsCount, 
+            totalCaa: cA_count, 
+            itensCaa, 
+            itensRelatorio 
+        });
+        
+        // 🛑 ATUALIZAÇÃO CRÍTICA 2: Adiciona conferente_uid no custodia_atual
         const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
         await custodiaRef.set({
             lista_id: LISTA_ID,
             local_nome: localNome,
+            conferente_uid: CONFERENTE_UID, // CHAVE IMUTÁVEL
             conferente_completo: conferente, // O militar logado (Dono Provisório)
             timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
         });
@@ -1036,8 +1062,10 @@ async function finalizarConferencia() {
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html"; }
 
-    } catch (e) { console.error(e);
-        alert("Erro: " + e.message); btn.disabled = false; }
+    } catch (e) { 
+        console.error(e);
+        alert("Erro: " + e.message); btn.disabled = false; 
+    }
 }
         async function finalizarRecebimentoCautela() {
     const btn = document.getElementById('btn-finalizar');
