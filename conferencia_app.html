@@ -881,7 +881,7 @@
                 subtituloElement.textContent = `Recebimento da Cautela ${CAUTELA_ID}`;
                 
                 btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO';
-                btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
+                btnFinalizar.onclick = () => (data);
                 btnFinalizar.classList.add('btn-action');
                 btnFinalizar.classList.remove('btn-delete', 'btn-sync');
             }
@@ -899,92 +899,94 @@
     }
 }
         function getCautelaTextForReport(itemOuTomb) {
-    const cautelasArray = itemOuTomb.cautelas || []; // Para item 'single' (quantidade)
-    const cautelaObj = itemOuTomb.cautela;         // Para item 'multi' (tombamento)
-    
-    // Função auxiliar para garantir que o ID seja sempre retornado, checando 'cautela_id' e 'id'
-    const cleanId = (obj) => (obj && (obj.cautela_id || obj.id)) || 'ID N/D';
+    if (!itemOuTomb) return "";
+    let textos = [];
 
-    if (cautelaObj) { // Caso: Item com Tombamento (Multi)
-        const cautelaId = cleanId(cautelaObj);
-        
-        // NOVO FORMATO: [CAUTELA ATIVA: ID_CAUTELA] Cautelado p/ [DESTINATARIO] em [DATA].
-        return `[CAUTELA ATIVA: ${cautelaId}] Cautelado p/ ${cautelaObj.destinatario} em ${cautelaObj.data}.`;
+    // 1. Processa Cautelas (Tombamento ou Quantidade)
+    if (itemOuTomb.cautela && typeof itemOuTomb.cautela === 'object') {
+        const c = itemOuTomb.cautela;
+        textos.push(`Cautela EMITIDA (${c.id}) para ${c.destinatario} em ${c.data}`);
+    } else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) {
+        itemOuTomb.cautelas.forEach(c => {
+            textos.push(`Cautela EMITIDA (${c.id}) ${c.quantidade}UN para ${c.destinatario}`);
+        });
     }
 
-    if (cautelasArray.length > 0) { // Caso: Item de Quantidade (Single)
-        const totalQtd = cautelasArray.reduce((sum, c) => sum + (c.quantidade || 0), 0);
-        
-        // Pega o ID da primeira cautela do array
-        const cautelaId = cleanId(cautelasArray[0]); 
-        
-        const info = cautelasArray.map(c => 
-            `${c.quantidade} un p/ ${c.destinatario}`
-        ).join(' | ');
-        
-        // NOVO FORMATO SOLICITADO: [CAUTELA ATIVA: ID_CAUTELA] 2 un cauteladas. PARA: 2 un p/ ST QPSBM LARA
-        return `[CAUTELA ATIVA: ${cautelaId}] ${totalQtd} un cauteladas. PARA: ${info}`;
+    // 2. Processa Pendências (C/A)
+    if (itemOuTomb.pendencia && typeof itemOuTomb.pendencia === 'object') {
+        const p = itemOuTomb.pendencia;
+        textos.push(`- Por ${p.quem} em ${p.data}: ${p.obs}`);
+    } else if (typeof itemOuTomb.pendencia === 'string' && itemOuTomb.pendencia.trim() !== "") {
+        textos.push(itemOuTomb.pendencia);
     }
-    return '';
+
+    return textos.join(' | ');
 }
         // A função completa fornecida no passo anterior, que deve substituir a sua:
 
 async function finalizarConferencia() {
     const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
-    const USER_DATA = userInfo;
-    
-    // 🛑 NOVO: UID do conferente (chave imutável)
     const CONFERENTE_UID = userInfo.uid || ''; 
 
     if (isCautela) {
-        // Se for uma cautela, chame a função específica de finalização de recebimento.
         await finalizarRecebimentoCautela();
-        return; // Sai da função normal de finalização
+        return;
     }
     
-    // LÓGICA EXISTENTE DE FINALIZAÇÃO DE CONFERÊNCIA NORMAL (Sem Cautela)
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
-    btn.textContent = "Salvando..."; btn.disabled = true;
+    btn.textContent = "Salvando..."; 
+    btn.disabled = true;
 
     try {
-        // --- Variáveis Globais Corretas para o App ---
         const p = userInfo;
         const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
         const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
+        const dataAtual = new Date().toLocaleString('pt-BR');
         const clean = (val) => val === undefined ? null : val;
+        
         let updated = false;
         let itensRelatorio = [];
-        let itensCaa = []; let itemsCount = 0; let cA_count = 0;
-        
-        // A Lógica de Pendência (atualizarListaDB) deve ser a sua versão mais recente.
+        let itensCaa = []; 
+        let itemsCount = 0; 
+        let cA_count = 0;
+
         const atualizarListaDB = (itemOuTomb, uid) => {
             const s = window.itemStatus[uid];
             if(!s) return;
             
-            if(s.status === 'C/A' || s.status === 'KEEP') { 
-                let old = itemOuTomb.pendencia || {};
-                
-                // Se a observação do rascunho for vazia (KEEP/CIENTE) E JÁ TINHA PENDÊNCIA, 
-                // a Pendência anterior é MANTIDA (NÃO CRIA NOVO CARIMBO).
-                if (s.obs.trim() === '' && itemOuTomb.pendencia) {
-                    // Não faz nada com itemOuTomb.pendencia.
-                } else {
-                    // Se for um novo C/A (ACRESCENTAR) ou se a Pendência não existia, atualiza.
-                    itemOuTomb.pendencia = { 
-                        obs: s.obs, 
-                        quem: conferente, 
-                        data: firebase.firestore.Timestamp.now(), 
-                        statusAdmin: clean(old.statusAdmin), 
-                        adminObs: clean(old.adminObs) 
-                    }; 
-                }
-                updated=true;
+            if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
 
+            if(s.status === 'C/A' || s.status === 'KEEP') { 
+                if (s.obs.trim() !== '') {
+                    const novoObjetoCA = {
+                        tipo: "C/A",
+                        obs: s.obs,
+                        quem: conferente,
+                        data: dataAtual,
+                        statusAdmin: clean(itemOuTomb.pendencia?.statusAdmin),
+                        adminObs: clean(itemOuTomb.pendencia?.adminObs)
+                    };
+
+                    itemOuTomb.pendencia = novoObjetoCA;
+                    
+                    itemOuTomb.historico_vida.push({
+                        evento: "ALTERACAO_DETECTADA",
+                        quem: conferente,
+                        data: dataAtual,
+                        detalhes: s.obs
+                    });
+                    updated = true;
+                }
             } else if(s.status === 'S/A' && itemOuTomb.pendencia) { 
-                // Se o conferente marcou S/A e havia Pendência (C/A), DELETA a Pendência (C/A).
+                itemOuTomb.historico_vida.push({
+                    evento: "SANEAMENTO_ALTERACAO",
+                    quem: conferente,
+                    data: dataAtual,
+                    detalhes: "Item conferido como S/A (Anteriormente apresentava alteração)."
+                });
                 delete itemOuTomb.pendencia; 
-                updated=true;
+                updated = true;
             }
         };
 
@@ -994,8 +996,7 @@ async function finalizarConferencia() {
                 else if(item.tombamentos) item.tombamentos.forEach(t => atualizarListaDB(t, `${item.id}-${t.tomb}`));
             });
         });
-        
-        // --- FUNÇÃO PROCESS (GERA RELATÓRIO E INJETA CAUTELA PARA PDF) ---
+
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
                 const process = (id, nome, pend, itemContext) => { 
@@ -1006,20 +1007,13 @@ async function finalizarConferencia() {
                         if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
                         
                         let finalObs = s.obs;
-                        if (s.status === 'KEEP' && pend) finalObs = pend.obs;
+                        if (s.status === 'KEEP' && pend) finalObs = typeof pend === 'object' ? pend.obs : pend;
                         if (s.status === 'S/A') finalObs = null;
                         
-                        // INJEÇÃO CRÍTICA DO CARIMBO DE CAUTELA PARA O RELATÓRIO (PDF) 
                         const cautelaReportText = getCautelaTextForReport(itemContext);
-                        
                         if (cautelaReportText) {
-                            if (finalObs) {
-                                finalObs = `${finalObs} | + CAUTELA: ${cautelaReportText}`;
-                            } else {
-                                finalObs = cautelaReportText; 
-                            }
+                            finalObs = finalObs ? `${finalObs} | + CAUTELA: ${cautelaReportText}` : cautelaReportText;
                         }
-                        // FIM DA INJEÇÃO 
                         
                         const dadosItem = { 
                             nomeCompleto: nome, 
@@ -1027,8 +1021,8 @@ async function finalizarConferencia() {
                             obs: finalObs, 
                             quantidade: item.quantidadeEsperada || 1, 
                             id: id,
-                            statusAdmin: pend ? clean(pend.statusAdmin) : null,
-                            adminObs: pend ? clean(pend.adminObs) : null,
+                            statusAdmin: pend && typeof pend === 'object' ? clean(pend.statusAdmin) : null,
+                            adminObs: pend && typeof pend === 'object' ? clean(pend.adminObs) : null,
                             setor: setor.nome
                         };
                         itensRelatorio.push(dadosItem);
@@ -1040,16 +1034,14 @@ async function finalizarConferencia() {
                 else process(item.id, item.nome, item.pendencia, item);
             });
         });
-        // --- FIM DA FUNÇÃO PROCESS ---
 
         if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         
-        // 🛑 ATUALIZAÇÃO CRÍTICA 1: Adiciona conferente_uid no resultados_conferencias
         await db.collection('resultados_conferencias').add({ 
             local: localNome, 
             lista_id: LISTA_ID, 
-            conferente_uid: CONFERENTE_UID, // CHAVE IMUTÁVEL
-            conferente: conferente, // Nome Completo (para exibição histórica)
+            conferente_uid: CONFERENTE_UID,
+            conferente: conferente, 
             timestamp: firebase.firestore.Timestamp.now(), 
             totalItensConferidos: itemsCount, 
             totalCaa: cA_count, 
@@ -1057,54 +1049,149 @@ async function finalizarConferencia() {
             itensRelatorio 
         });
         
-        // 🛑 ATUALIZAÇÃO CRÍTICA 2: Adiciona conferente_uid no custodia_atual
         const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
         await custodiaRef.set({
             lista_id: LISTA_ID,
             local_nome: localNome,
-            conferente_uid: CONFERENTE_UID, // CHAVE IMUTÁVEL
-            conferente_completo: conferente, // O militar logado (Dono Provisório)
+            conferente_uid: CONFERENTE_UID,
+            conferente_completo: conferente,
             timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
         });
-        // ------------------------------------
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        if (window.self === window.top) { alert("Salvo! Redirecionando..."); window.location.href = "operacional.html"; }
+        if (window.self === window.top) { alert("Conferência salva com sucesso!"); window.location.href = "operacional.html"; }
 
     } catch (e) { 
         console.error(e);
-        alert("Erro: " + e.message); btn.disabled = false; 
+        alert("Erro: " + e.message); 
+        btn.disabled = false; 
     }
 }
-        async function finalizarRecebimentoCautela() {
-    // ... (lógica de botões e auth inicial mantida)
-    const meuUid = firebase.auth().currentUser.uid;
+        async function finalizarRecebimentoCautela(cautela) {
+    const btn = document.getElementById('btn-finalizar');
+    btn.textContent = "PROCESSANDO...";
+    btn.disabled = true;
+
+    if (!isCautela || !CAUTELA_ID) {
+        alert("Erro: ID da cautela não encontrado.");
+        btn.disabled = false;
+        return;
+    }
+
+    const userAuth = firebase.auth().currentUser;
+    if (!userAuth) {
+        alert("Erro: Sessão não encontrada.");
+        btn.disabled = false;
+        return;
+    }
+
+    const meuUid = userAuth.uid;
     const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    const dataAtual = new Date().toLocaleString('pt-BR');
+    const listaId = cautela.local_origem_id;
 
     try {
-        await db.runTransaction(async (transaction) => {
-            const cautelaRef = db.collection('cautelas_abertas').doc(CAUTELA_ID);
-            const doc = await transaction.get(cautelaRef);
-            const cData = doc.data();
+        const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
 
-            // Validação: No status ABERTA, apenas o destinatário_original_uid pode assumir a posse
-            if (cData.status === 'ABERTA' && cData.destinatario_original_uid !== meuUid) {
-                throw new Error("Você não é o destinatário original desta cautela.");
+        await db.runTransaction(async (transaction) => {
+            const cautelaDoc = await transaction.get(cautelaRef);
+            if (!cautelaDoc.exists) throw new Error("Cautela não encontrada.");
+
+            const cData = cautelaDoc.data();
+            if (cData.destinatario_original_uid !== meuUid) {
+                throw new Error("Apenas o destinatário original pode assinar este recebimento.");
             }
 
-            transaction.update(cautelaRef, { 
+            const listaMestraDoc = await transaction.get(listaMestraRef);
+            if (!listaMestraDoc.exists) throw new Error("Lista Mestra não encontrada.");
+
+            let listaMestra = listaMestraDoc.data().list;
+            const itensConferidos = [];
+
+            cautela.itens.forEach(cItem => {
+                const statusSelect = document.getElementById(`status-${cItem.id}-${cItem.tombamento || 'single'}`);
+                const obsInput = document.getElementById(`obs-${cItem.id}-${cItem.tombamento || 'single'}`);
+                
+                const statusFinal = statusSelect ? statusSelect.value : 'S/A';
+                const obsFinal = obsInput ? obsInput.value.trim() : '';
+
+                itensConferidos.push({
+                    ...cItem,
+                    status_recebimento: statusFinal,
+                    obs_recebimento: obsFinal
+                });
+
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
+                        const idMestra = mItem.id_base || mItem.id;
+                        const idCautelaItem = cItem.id_base || cItem.id;
+
+                        if (idMestra === idCautelaItem) {
+                            const logHistorico = {
+                                evento: "CONFIRMAÇÃO_RECEBIMENTO",
+                                id_doc: CAUTELA_ID,
+                                quem: meuNomeCompleto,
+                                data: dataAtual,
+                                estado: statusFinal,
+                                detalhes: statusFinal === 'C/A' ? `Avaria detectada no recebimento: ${obsFinal}` : "Recebido em perfeito estado (S/A)."
+                            };
+
+                            if (!mItem.historico_vida) mItem.historico_vida = [];
+                            mItem.historico_vida.push(logHistorico);
+
+                            const objetoCautelaAtualizado = {
+                                id: CAUTELA_ID,
+                                emitente: cData.emitente,
+                                destinatario: meuNomeCompleto,
+                                data: dataAtual,
+                                status_item: statusFinal,
+                                obs_item: obsFinal
+                            };
+
+                            if (cItem.tombamento && mItem.tombamentos) {
+                                mItem.tombamentos = mItem.tombamentos.map(t => {
+                                    if (t.tomb === cItem.tombamento) {
+                                        t.cautela = objetoCautelaAtualizado;
+                                    }
+                                    return t;
+                                });
+                            } else if (!cItem.tombamento && mItem.cautelas) {
+                                mItem.cautelas = mItem.cautelas.map(c => {
+                                    if (c.id === CAUTELA_ID) {
+                                        return objetoCautelaAtualizado;
+                                    }
+                                    return c;
+                                });
+                            }
+                        }
+                        return mItem;
+                    })
+                }));
+            });
+
+            transaction.update(cautelaRef, {
                 status: 'RECEBIDA',
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
-                // AGORA O RECEBEDOR ASSUME A POSSE
-                destinatario_uid: meuUid, 
-                destinatario: meuNomeCompleto,
+                itens: itensConferidos,
                 militar_completo_receptor: meuNomeCompleto
             });
+
+            transaction.update(listaMestraRef, { list: listaMestra });
         });
-        alert("✅ Posse confirmada!");
+
+        alert(`✅ Recebimento confirmado!`);
+        limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-    } catch (e) { alert(e.message); }
+
+    } catch (error) {
+        console.error("Erro ao receber cautela:", error);
+        alert(`Erro: ${error.message}`);
+        btn.textContent = "FINALIZAR RECEBIMENTO";
+        btn.disabled = false;
+    }
 }
       async function finalizarDevolucaoCautela(cautela) {
     const btn = document.getElementById('btn-finalizar');
@@ -1177,7 +1264,10 @@ async function finalizarConferencia() {
         btn.disabled = false;
         return;
     }
+
     const meuUid = userAuth.uid;
+    const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    const dataAtual = new Date().toLocaleString('pt-BR');
     const listaId = cautela.local_origem_id;
 
     try {
@@ -1190,17 +1280,25 @@ async function finalizarConferencia() {
 
             const cData = cautelaDoc.data();
 
-            if (cData.status !== 'DEVOLUÇÃO' || cData.destinatario_uid !== meuUid) {
-                throw new Error("Você não é o recebedor autorizado para finalizar esta devolução.");
-            }
-
             const listaMestraDoc = await transaction.get(listaMestraRef);
             if (!listaMestraDoc.exists) throw new Error("Lista Mestra original não encontrada.");
 
             let listaMestra = listaMestraDoc.data().list;
+            const itensDevolvidos = [];
 
-            // Devolve os itens para o estoque (remove o bloqueio de cautela na lista mestra)
             cautela.itens.forEach(cItem => {
+                const statusSelect = document.getElementById(`status-${cItem.id}-${cItem.tombamento || 'single'}`);
+                const obsInput = document.getElementById(`obs-${cItem.id}-${cItem.tombamento || 'single'}`);
+                
+                const statusFinal = statusSelect ? statusSelect.value : 'S/A';
+                const obsFinal = obsInput ? obsInput.value.trim() : '';
+
+                itensDevolvidos.push({
+                    ...cItem,
+                    status_devolucao: statusFinal,
+                    obs_devolucao: obsFinal
+                });
+
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
@@ -1208,16 +1306,37 @@ async function finalizarConferencia() {
                         const idCautelaItem = cItem.id_base || cItem.id;
 
                         if (idMestra === idCautelaItem) {
-                            if (cItem.tombamento) {
-                                if (mItem.tombamentos) {
-                                    mItem.tombamentos = mItem.tombamentos.map(t => {
-                                        if (t.tomb === cItem.tombamento) {
-                                            delete t.cautela; 
-                                        }
-                                        return t;
-                                    });
-                                }
+                            const logHistorico = {
+                                evento: "RETORNO_DEVOLUCAO",
+                                id_doc: CAUTELA_ID,
+                                quem: meuNomeCompleto,
+                                data: dataAtual,
+                                estado_retorno: statusFinal,
+                                detalhes: statusFinal === 'C/A' ? `Item devolvido com alteração: ${obsFinal}` : "Item devolvido em perfeito estado (S/A)."
+                            };
+
+                            if (!mItem.historico_vida) mItem.historico_vida = [];
+                            mItem.historico_vida.push(logHistorico);
+
+                            if (statusFinal === 'C/A') {
+                                mItem.pendencia = {
+                                    tipo: "C/A",
+                                    obs: `[DEVOLUÇÃO ${CAUTELA_ID}] ${obsFinal}`,
+                                    quem: meuNomeCompleto,
+                                    data: dataAtual
+                                };
                             } else {
+                                delete mItem.pendencia;
+                            }
+
+                            if (cItem.tombamento && mItem.tombamentos) {
+                                mItem.tombamentos = mItem.tombamentos.map(t => {
+                                    if (t.tomb === cItem.tombamento) {
+                                        delete t.cautela;
+                                    }
+                                    return t;
+                                });
+                            } else if (!cItem.tombamento && mItem.cautelas) {
                                 mItem.cautelas = (mItem.cautelas || []).filter(c => 
                                     (c.id !== CAUTELA_ID && c.cautela_id !== CAUTELA_ID)
                                 );
@@ -1228,20 +1347,18 @@ async function finalizarConferencia() {
                 }));
             });
 
-            const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-
             transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA',
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
                 receptor_final_completo: meuNomeCompleto,
-                destinatario: meuNomeCompleto,
-                destinatario_uid: meuUid
+                destinatario_uid: meuUid,
+                itens: itensDevolvidos
             });
 
             transaction.update(listaMestraRef, { list: listaMestra });
         });
 
-        alert(`✅ Devolução finalizada com sucesso! Material reintegrado ao estoque.`);
+        alert(`✅ Devolução finalizada! Material reintegrado ao estoque e histórico atualizado.`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
