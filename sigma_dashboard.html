@@ -6866,10 +6866,10 @@ async function getLastConferente(localOrigem) {
         return "N/D (Erro de consulta)";
     }
 }
-            async function iniciarDevolucaoCautela(cautelaId, destinatario) {
+            async function iniciarDevolucaoCautela(cautelaId, destinatarioNome) {
     const btnDevolver = document.getElementById('btn-devolver-cautela');
     
-    // 1. Oculta o modal e o botão de devolução imediatamente para evitar cliques duplos.
+    // 1. Oculta a UI imediatamente
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     if (btnDevolver) btnDevolver.disabled = true;
 
@@ -6877,37 +6877,46 @@ async function getLastConferente(localOrigem) {
         const militarCompleto = currentUserData.nome_militar_completo;
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
 
-        // 🛑 CRÍTICO: Executa a Transação no Firebase para mudar o status
+        // 🛑 NOVO E CRÍTICO: Buscar o UID do destinatário da devolução antes da transação
+        // Sem o UID, o filtro 'destinatario_uid' do Dashboard do recebedor não encontrará a cautela.
+        const novoRecebedorUid = await findUidByName(destinatarioNome);
+
+        if (!novoRecebedorUid) {
+            throw new Error(`Não foi possível localizar o ID de sistema para: ${destinatarioNome}. Certifique-se que o militar está cadastrado.`);
+        }
+
+        // 🛑 TRANSACAO NO FIREBASE
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
 
             if (!cautelaDoc.exists || cautelaDoc.data().status !== 'RECEBIDA') {
-                throw new Error("Cautela não encontrada ou não está no status 'RECEBIDA'.");
+                throw new Error("Cautela não encontrada ou não está em posse confirmada.");
             }
             
-            // 1. Ação: Mudar o status da cautela para DEVOLUÇÃO.
+            // 2. Ação: Mudar o status para DEVOLUÇÃO e transferir a posse via UID
             transaction.update(cautelaRef, { 
-                status: 'DEVOLUÇÃO', // Novo status de trânsito
+                status: 'DEVOLUÇÃO', 
                 timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
                 
                 // Quem está enviando/revertendo (Usuário A)
                 reversor: currentUserData.nome_guerra, 
                 militar_completo_reversor: militarCompleto,
                 
-                // Quem é o novo destinatário/receptor da devolução (Dono Provisório)
-                destinatario: destinatario // 🛑 ATUALIZA o campo DESTINATARIO para ser o Dono Provisório
+                // 🛑 CORREÇÃO PRINCIPAL: Transfere a posse do UID para o novo recebedor
+                destinatario: destinatarioNome, // String histórica para o status DEVOLUÇÃO
+                destinatario_uid: novoRecebedorUid // ✅ UID IMUTÁVEL para o filtro do Dashboard dele
             });
-        }); // Fim da Transação
+        });
 
-        // 2. Feedback para o Usuário A e atualização da UI
-        alert(`✅ Cautela enviada para devolução a ${destinatario}. Ela aparecerá na lista 'Cautelas a Receber' dele.`);
+        alert(`✅ Cautela enviada para devolução a ${destinatarioNome}. Ela aparecerá no Dashboard dele.`);
         
-        // Recarrega a lista de Cautelas Ativas para remover o item que acabou de ser devolvido.
-        showCautelasDashboard('Cautelas Ativas'); 
+        // Recarrega as listas
+        if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
+        if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
         
     } catch (error) {
-        console.error("Erro CRÍTICO ao iniciar devolução:", error);
-        alert(`Erro ao iniciar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
+        console.error("Erro ao iniciar devolução:", error);
+        alert(`Erro ao iniciar devolução: ${error.message}`);
         if (btnDevolver) btnDevolver.disabled = false;
     }
 }
