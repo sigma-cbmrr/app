@@ -2701,28 +2701,25 @@ function renderOperacionalCards() {
 }
 // [NOVO] Atualiza a contagem do Card "Minhas Conferências"
 async function getCautelasAReceberCount() {
-    if (!currentUserData || !currentUserData.nome_militar_completo) return 0;
-    
-    const militarCompleto = currentUserData.nome_militar_completo;
+    if (!currentUserData) return 0;
+    const militarUid = firebase.auth().currentUser.uid;
 
     try {
-        // 1. Query ABERTAS (Fluxo normal)
-        const snapAberta = await db.collection('cautelas_abertas')
-            .where('destinatario', '==', militarCompleto)
+        // Busca onde o militar é o alvo original e a cautela ainda não foi aceita
+        const snap = await db.collection('cautelas_abertas')
+            .where('destinatario_original_uid', '==', militarUid)
             .where('status', '==', 'ABERTA')
             .get();
-            
-        // 2. Query DEVOLUÇÃO (Fluxo de retorno)
-        const snapDevolucao = await db.collection('cautelas_abertas')
-            .where('destinatario', '==', militarCompleto)
+
+        // Busca também onde ele é o recebedor de uma devolução (destinatario_uid dinâmico)
+        const snapDev = await db.collection('cautelas_abertas')
+            .where('destinatario_uid', '==', militarUid)
             .where('status', '==', 'DEVOLUÇÃO')
             .get();
-            
-        // Soma os resultados das duas consultas para o contador do card
-        return snapAberta.size + snapDevolucao.size;
-        
+
+        return snap.size + snapDev.size;
     } catch (e) {
-        console.error("Erro ao contar cautelas a receber:", e);
+        console.error(e);
         return 0;
     }
 }
@@ -7224,10 +7221,7 @@ async function queryCautelas(statusArray, role, user, field = null, type = 'pers
         // 🛑 LÓGICA CRÍTICA REESCRITA PARA USAR UID PARA POSSE 🛑
 
         if (field === 'destinatario') {
-            // Cautelas Ativas / A Receber: Filtra pelo UID (imutável)
-            query = query.where('destinatario_uid', '==', militarUid); // ⬅️ CORREÇÃO PRINCIPAL
-            // NOTA: Isso pressupõe que você tem (ou criará) um índice composto:
-            // [destinatario_uid asc, status asc, timestamp_emissao desc]
+            query = query.where('destinatario_original_uid', '==', militarUid);
             
         } else if (field === 'emitente') {
             // Cautelas Emitidas: Filtra pelo UID (imutável)
