@@ -702,9 +702,9 @@
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
     const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
     
+    // 1. Validação Inicial
     if (!ID_ALVO) { 
-        const msg = document.getElementById('loading-message');
-        if (msg) msg.innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>";
+        console.error("ID não encontrado para carregamento.");
         return; 
     }
         
@@ -712,72 +712,78 @@
     if (loadingMsg) loadingMsg.innerHTML = "Conectando...";
 
     try {
+        // 2. Busca de Dados no Firebase
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
-        if (!doc.exists) throw new Error("Documento não encontrado.");
+        if (!doc.exists) throw new Error("Documento não encontrado no banco de dados.");
         
         const data = doc.data();
+        
+        // 3. Adaptação dos Dados (JSON)
         dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
         
-        const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "DESCONHECIDO");
-        const postoLocal = isCautela ? `Destinatário: ${data.destinatario}` : (data.posto || "Geral");
+        // 4. Definição das Informações de Cabeçalho
+        const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista de Conferência");
+        const postoLocal = isCautela ? `Destinatário: ${data.destinatario || data.destinatario_original_nome}` : (data.posto || "Geral");
         
         infoLocal = { nome: nomeLocal, posto: postoLocal };
         
+        // 5. Atualização Segura da Interface (Apenas se os elementos existirem)
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
             infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
         }
 
-        document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
+        document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.nome}`;
 
-        // Só executa ajustes de interface se houver elementos de Cautela e for modo Cautela
+        // 6. Lógica Específica de Cautela (Blindada)
         if (isCautela) {
-            const h1Element = document.querySelector('.container h1');
-            const subtituloElement = document.querySelector('.container .subtitulo');
+            const h1Element = document.querySelector('h1');
+            const subtituloElement = document.querySelector('.subtitulo');
             const btnFinalizar = document.getElementById('btn-finalizar');
 
-            if (h1Element && subtituloElement && btnFinalizar) {
+            if (h1Element) {
+                if (MODO_OPERACAO === 'devolucao_final') h1Element.textContent = 'RECEBIMENTO DE DEVOLUÇÃO';
+                else if (MODO_OPERACAO === 'devolucao') h1Element.textContent = 'DEVOLUÇÃO (TRANSIÇÃO)';
+                else h1Element.textContent = 'RECEBIMENTO DE CAUTELA';
+            }
+
+            if (subtituloElement) {
                 if (MODO_OPERACAO === 'devolucao_final') {
-                    h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO DE DEVOLUÇÃO';
                     const reversor = data.militar_completo_reversor || 'Militar Anterior';
-                    subtituloElement.innerHTML = `Recebendo a Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> do Militar: <br> <strong>${reversor}</strong>`;
+                    subtituloElement.innerHTML = `Recebendo Cautela <strong>${CAUTELA_ID}</strong> de: <br> ${reversor}`;
+                } else {
+                    subtituloElement.textContent = `Processando Cautela ${CAUTELA_ID}`;
+                }
+            }
+
+            if (btnFinalizar) {
+                if (MODO_OPERACAO === 'devolucao_final') {
                     btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO DA DEVOLUÇÃO';
                     btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
-                    btnFinalizar.classList.add('btn-sync'); 
-                    btnFinalizar.classList.remove('btn-action', 'btn-delete');
-                } else if (MODO_OPERACAO === 'devolucao') {
-                    h1Element.textContent = 'CONFERÊNCIA DE DEVOLUÇÃO (TRANSIÇÃO)';
-                    subtituloElement.innerHTML = `Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> para: <br> <strong>${DESTINATARIO_DEVOLUCAO}</strong>`;
-                    btnFinalizar.textContent = 'FINALIZAR DEVOLUÇÃO E CONCLUIR';
-                    btnFinalizar.onclick = () => finalizarDevolucaoCautela(data);
-                    btnFinalizar.classList.add('btn-delete');
-                    btnFinalizar.classList.remove('btn-action');
                 } else {
-                    h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO';
-                    subtituloElement.textContent = `Recebimento da Cautela ${CAUTELA_ID}`;
-                    btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO';
                     btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
-                    btnFinalizar.classList.add('btn-action');
-                    btnFinalizar.classList.remove('btn-delete', 'btn-sync');
                 }
             }
         }
         
-        if (loadingMsg) loadingMsg.innerHTML = "Renderizando...";
+        // 7. Renderização e Funções de Suporte
+        if (loadingMsg) loadingMsg.innerHTML = "Renderizando itens...";
         
-        // Funções de inicialização de UI
         renderizarConferencia(); 
-        if (typeof updateHeaderInfo === "function") updateHeaderInfo(); 
-        if (typeof updateOverallStatus === "function") updateOverallStatus(); 
-        if (typeof restaurarRascunho === "function") restaurarRascunho();
 
+        // Verificação de existência das funções de apoio antes de chamar
+        if (typeof updateHeaderInfo === "function") try { updateHeaderInfo(); } catch(e) {}
+        if (typeof updateOverallStatus === "function") try { updateOverallStatus(); } catch(e) {}
+        if (typeof restaurarRascunho === "function") try { restaurarRascunho(); } catch(e) {}
+
+        // 8. Finalização do Estado de Carregamento
         if (loadingMsg) loadingMsg.style.display = 'none'; 
         const mainContent = document.getElementById('main-content');
         if (mainContent) mainContent.style.display = 'block';
 
     } catch (e) { 
-        console.error("Erro no carregamento:", e);
-        if (loadingMsg) loadingMsg.innerHTML = "Erro: " + e.message;
+        console.error("Erro Crítico no Carregamento:", e);
+        if (loadingMsg) loadingMsg.innerHTML = "<span style='color:red'>Erro ao carregar dados. Verifique o console.</span>";
     }
 }
         function getCautelaTextForReport(itemOuTomb) {
