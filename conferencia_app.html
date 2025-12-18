@@ -1069,34 +1069,43 @@ async function finalizarConferencia() {
 }
         async function finalizarRecebimentoCautela() {
     const btn = document.getElementById('btn-finalizar');
-    btn.textContent = "Confirmando posse...";
+    btn.textContent = "Validando...";
     btn.disabled = true;
 
-    // 🛑 BUSCA O UID DIRETO DO AUTH (Mais seguro que a URL)
-    const userAuth = firebase.auth().currentUser;
-    if (!userAuth) {
-        alert("Erro: Usuário não autenticado.");
-        btn.disabled = false;
-        return;
-    }
-    const meuUid = userAuth.uid;
-
     try {
+        // 1. Força a verificação do usuário logado no momento exato
+        const userAuth = firebase.auth().currentUser;
+        if (!userAuth) {
+            throw new Error("Sessão expirada ou usuário não autenticado no Firebase.");
+        }
+        const meuUidLogado = userAuth.uid;
+
         await db.runTransaction(async (transaction) => {
             const cautelaRef = db.collection('cautelas_abertas').doc(CAUTELA_ID);
             const cautelaDoc = await transaction.get(cautelaRef);
             
             if (!cautelaDoc.exists) {
-                throw new Error("Cautela não encontrada.");
+                throw new Error("Documento da cautela não encontrado no banco de dados.");
             }
 
             const cData = cautelaDoc.data();
+            const uidNoBanco = cData.destinatario_uid;
+            const statusNoBanco = cData.status;
 
-            // 🛑 VALIDAÇÃO POR UID
-            // Se o destinatario_uid gravado na emissão não for igual ao UID de quem está logado, bloqueia.
-            if (cData.status !== 'ABERTA' || cData.destinatario_uid !== meuUid) {
-                console.error("Divergência de UID:", { noBanco: cData.destinatario_uid, logado: meuUid });
-                throw new Error("Cautela não disponível para seu usuário ou já processada.");
+            // 🛑 LOG DE DIAGNÓSTICO (Aparecerá no console F12)
+            console.log("--- DEBUG DE RECEBIMENTO ---");
+            console.log("Status no Banco:", statusNoBanco);
+            console.log("UID Gravado na Cautela:", uidNoBanco);
+            console.log("UID do Militar Logado:", meuUidLogado);
+            console.log("----------------------------");
+
+            // 2. VALIDAÇÃO FLEXÍVEL (Se os UIDs forem diferentes, vamos avisar exatamente quais são)
+            if (uidNoBanco !== meuUidLogado) {
+                throw new Error(`Este material está destinado ao UID (...${uidNoBanco.slice(-5)}), mas você está logado com (...${meuUidLogado.slice(-5)}).`);
+            }
+
+            if (statusNoBanco !== 'ABERTA') {
+                throw new Error(`A cautela já foi processada (Status atual: ${statusNoBanco}).`);
             }
 
             const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
@@ -1110,13 +1119,12 @@ async function finalizarConferencia() {
             });
         });
 
-        alert(`✅ Cautela ${CAUTELA_ID} confirmada e status atualizado para "RECEBIDA".`);
-        limparRascunho();
+        alert(`✅ Cautela confirmada com sucesso!`);
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        console.error("Erro ao confirmar recebimento:", error);
-        alert(`Erro ao confirmar recebimento: ${error.message}`);
+        console.error("Erro detalhado:", error);
+        alert(`Erro ao confirmar: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
