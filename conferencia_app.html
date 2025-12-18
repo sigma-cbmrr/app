@@ -1176,66 +1176,58 @@ async function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
+
     if (!isCautela || !CAUTELA_ID) {
         alert("Erro: ID da cautela não encontrado.");
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
         return;
     }
-    
-    // Objeto do militar logado, que é o Dono Provisório (Receptor Final)
+
+    const CONFERENTE_UID = userInfo.uid;
     const militarReceptor = {
         postoGraduacao: userInfo.postoGraduacao,
         quadro: userInfo.quadro,
         nomeGuerra: userInfo.nomeGuerra,
     };
-    // O ID da Lista Mestra está salvo na própria cautela
+
     const listaId = cautela.local_origem_id;
+
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
         const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
-        
+
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-            
+
             if (!cautelaDoc.exists) {
-                // Se o documento não existe, lançamos o erro original
                 throw new Error("Cautela não encontrada.");
             }
 
-            // Lê o status, usando '' se for null/undefined
-            const currentStatus = cautelaDoc.data().status || '';
-            
-            if (currentStatus !== 'DEVOLUÇÃO') {
-                // 🛑 CORREÇÃO NO LANÇAMENTO DO ERRO: Mensagem mais clara
-                throw new Error(`Status incorreto: Cautela ID ${CAUTELA_ID} está em ${currentStatus}, mas esperava 'DEVOLUÇÃO'.`);
+            const cData = cautelaDoc.data();
+            const currentStatus = cData.status || '';
+
+            if (currentStatus !== 'DEVOLUÇÃO' || cData.destinatario_uid !== CONFERENTE_UID) {
+                throw new Error(`Cautela não encontrada ou já processada por outro usuário.`);
             }
-            
+
             const listaMestraDoc = await transaction.get(listaMestraRef);
 
             if (!listaMestraDoc.exists) {
                 throw new Error("Lista Mestra de Conferência (Origem) não encontrada!");
             }
-            
+
             let listaMestra = listaMestraDoc.data().list;
-            
-            // 🛑 LÓGICA DE CARIMBO (REMOÇÃO DE CARIMBO) 🛑
+
             cautela.itens.forEach(cItem => {
-                
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
-                        // Verifica se é o item correto (single ou multi)
                         if (mItem.id === cItem.id_base) {
-                            
                             if (cItem.tipo === 'single') {
-                                // Remover o carimbo da cautela do array (filtro seguro)
                                 mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
-
                             } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                // Item Tombado: Remove o carimbo de cautela do tombamento específico
                                 mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                    // Verifica o ID da cautela no carimbo antes de deletar
                                     if (tomb.tomb === cItem.tombamento && tomb.cautela && tomb.cautela.id === CAUTELA_ID) {
                                         delete tomb.cautela;
                                     }
@@ -1247,27 +1239,29 @@ async function finalizarConferencia() {
                     })
                 }));
             });
-            // FIM DA LÓGICA DE CARIMBO
 
-            // 3. Ação: Mudar o status da cautela para CONCLUIDA (Vai para o Histórico)
-            transaction.update(cautelaRef, { 
-                status: 'CONCLUÍDA', // Status final
+            const meuNomeCompleto = `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`;
+
+            transaction.update(cautelaRef, {
+                status: 'CONCLUÍDA',
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
-                receptor_final_completo: `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`,
-                destinatario: cautela.destinatario_original,
-                destinatario_uid: cautela.destinatario_uid,
+                receptor_final_completo: meuNomeCompleto,
+                destinatario: meuNomeCompleto
             });
-            // 4. Ação: Atualizar a Lista Mestra com o estoque somado/descarimbado
-            transaction.update(listaMestraRef, { list: listaMestra });
-        }); // Fim da Transação
+
+            transaction.update(listaMestraRef, {
+                list: listaMestra
+            });
+        });
 
         alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada. Status: CONCLUÍDA.`);
         limparRascunho();
-        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        
+        window.parent.postMessage({
+            type: 'SIGMA_FINISHED'
+        }, '*');
+
     } catch (error) {
         console.error("Erro CRÍTICO ao finalizar devolução e restaurar estoque:", error);
-        // Exibe o erro específico que acabamos de lançar, se for o caso
         alert(`Erro ao finalizar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
