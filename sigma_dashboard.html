@@ -7402,7 +7402,61 @@ async function findUidByName(nomeCompleto) {
         return null;
     }
 }
+		
+       async function limparDadosListaMestra(idDaLista) {
+    if (!idDaLista) {
+        alert("Erro: Nenhuma lista selecionada para limpeza.");
+        return;
+    }
+
+    if (!confirm("⚠️ RESET TOTAL: Isso apagará TODOS os históricos, cautelas e pendências da lista [" + idDaLista + "]. Confirma?")) {
+        return;
+    }
+
+    try {
+        const listaRef = db.collection('listas_conferencia').doc(idDaLista);
         
+        await db.runTransaction(async (transaction) => {
+            const doc = await transaction.get(listaRef);
+            if (!doc.exists) throw new Error("Lista não encontrada.");
+
+            let listaMestra = doc.data().list;
+
+            const listaLimpa = listaMestra.map(setor => ({
+                ...setor,
+                itens: setor.itens.map(item => {
+                    // Limpeza de itens Single
+                    delete item.pendencia;
+                    delete item.cautelas;
+                    delete item.cautela; // Por garantia
+                    delete item.historico_vida;
+
+                    // Limpeza de itens Multi (Tombamentos)
+                    if (item.tombamentos && Array.isArray(item.tombamentos)) {
+                        item.tombamentos = item.tombamentos.map(t => {
+                            delete t.pendencia;
+                            delete t.cautela;
+                            delete t.historico_vida;
+                            return t;
+                        });
+                    }
+                    return item;
+                })
+            }));
+
+            transaction.update(listaRef, { list: listaLimpa });
+        });
+
+        alert("✅ Lista limpa com sucesso!");
+        // Se o iframe estiver aberto, recarrega ele
+        const iframe = document.getElementById('iframe-conferencia'); // Use o ID real do seu iframe
+        if(iframe) iframe.contentWindow.location.reload();
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao limpar lista: " + e.message);
+    }
+} 
     </script>
 </body>
 </html>
