@@ -1070,50 +1070,43 @@ async function finalizarConferencia() {
         async function finalizarRecebimentoCautela() {
     const btn = document.getElementById('btn-finalizar');
     btn.textContent = "Confirmando posse...";
-    
-    // Coleta o status final de cada item conferido (ainda necessário para o futuro relatório C/A)
-    const itensConferidos = Object.entries(window.itemStatus)
-        .filter(([id, status]) => status.status !== 'pending')
-        .map(([id, status]) => ({ id: id, status: status.status }));
+    btn.disabled = true;
 
-    if (itensConferidos.length === 0) {
-        alert("Nenhum item foi conferido. A cautela não será finalizada.");
-        btn.textContent = "FINALIZAR CONFERÊNCIA";
-        btn.disabled = false;
-        return;
-    }
+    const meuUid = userInfo.uid;
 
     try {
         await db.runTransaction(async (transaction) => {
             const cautelaRef = db.collection('cautelas_abertas').doc(CAUTELA_ID);
             const cautelaDoc = await transaction.get(cautelaRef);
             
-            if (!cautelaDoc.exists || cautelaDoc.data().status !== 'ABERTA') {
-                throw new Error("Cautela não encontrada ou já processada.");
+            if (!cautelaDoc.exists) {
+                throw new Error("Cautela não encontrada.");
             }
-            
-            // 🛑 CRÍTICO: Não precisamos da Lista Mestra aqui, pois não há alteração de inventário.
-            // Apenas atualizamos o status e o documento da cautela.
 
-            // 1. Ação: Mudar o status da cautela para indicar que foi RECEBIDA.
+            const cData = cautelaDoc.data();
+
+            if (cData.status !== 'ABERTA' || cData.destinatario_uid !== meuUid) {
+                throw new Error("Cautela não disponível para seu usuário ou já processada.");
+            }
+
+            const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+
             transaction.update(cautelaRef, { 
-                status: 'RECEBIDA', // Status intermediário
+                status: 'RECEBIDA',
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
-                receptor: userInfo.nomeGuerra, // Nome de guerra do militar que recebeu
-                militar_completo_receptor: `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`, // Nome completo para futuras buscas
+                receptor: userInfo.nomeGuerra,
+                destinatario: meuNomeCompleto,
+                militar_completo_receptor: meuNomeCompleto
             });
-            
-            // Nota: Se houver itens C/A, eles DEVEM ser registrados em um relatório à parte (melhoria futura).
-
-        }); // Fim da Transação
+        });
 
         alert(`✅ Cautela ${CAUTELA_ID} confirmada e status atualizado para "RECEBIDA".`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        console.error("Erro CRÍTICO ao confirmar recebimento:", error);
-        alert(`Erro ao confirmar recebimento. Nenhum dado foi alterado. Erro: ${error.message}`);
+        console.error("Erro ao confirmar recebimento:", error);
+        alert(`Erro ao confirmar recebimento: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
@@ -1184,13 +1177,7 @@ async function finalizarConferencia() {
         return;
     }
 
-    const CONFERENTE_UID = userInfo.uid;
-    const militarReceptor = {
-        postoGraduacao: userInfo.postoGraduacao,
-        quadro: userInfo.quadro,
-        nomeGuerra: userInfo.nomeGuerra,
-    };
-
+    const meuUid = userInfo.uid;
     const listaId = cautela.local_origem_id;
 
     try {
@@ -1199,22 +1186,20 @@ async function finalizarConferencia() {
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-
+            
             if (!cautelaDoc.exists) {
                 throw new Error("Cautela não encontrada.");
             }
 
             const cData = cautelaDoc.data();
-            const currentStatus = cData.status || '';
 
-            if (currentStatus !== 'DEVOLUÇÃO' || cData.destinatario_uid !== CONFERENTE_UID) {
-                throw new Error(`Cautela não encontrada ou já processada por outro usuário.`);
+            if (cData.status !== 'DEVOLUÇÃO' || cData.destinatario_uid !== meuUid) {
+                throw new Error("Devolução não encontrada para seu usuário ou já processada.");
             }
 
             const listaMestraDoc = await transaction.get(listaMestraRef);
-
             if (!listaMestraDoc.exists) {
-                throw new Error("Lista Mestra de Conferência (Origem) não encontrada!");
+                throw new Error("Lista Mestra de Origem não encontrada!");
             }
 
             let listaMestra = listaMestraDoc.data().list;
@@ -1240,29 +1225,25 @@ async function finalizarConferencia() {
                 }));
             });
 
-            const meuNomeCompleto = `${militarReceptor.postoGraduacao} ${militarReceptor.quadro} ${militarReceptor.nomeGuerra}`;
+            const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
 
-            transaction.update(cautelaRef, {
+            transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA',
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
                 receptor_final_completo: meuNomeCompleto,
                 destinatario: meuNomeCompleto
             });
 
-            transaction.update(listaMestraRef, {
-                list: listaMestra
-            });
+            transaction.update(listaMestraRef, { list: listaMestra });
         });
 
         alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada. Status: CONCLUÍDA.`);
         limparRascunho();
-        window.parent.postMessage({
-            type: 'SIGMA_FINISHED'
-        }, '*');
-
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        
     } catch (error) {
-        console.error("Erro CRÍTICO ao finalizar devolução e restaurar estoque:", error);
-        alert(`Erro ao finalizar devolução. Nenhum dado foi alterado. Erro: ${error.message}`);
+        console.error("Erro CRÍTICO ao confirmar devolução:", error);
+        alert(`Erro ao confirmar devolução: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
