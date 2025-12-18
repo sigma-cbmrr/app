@@ -329,74 +329,108 @@
 };
 
         function renderizarConferencia() {
-    const container = document.getElementById('conferencia-itens');
-    container.innerHTML = '';
+    const mainContent = document.getElementById('main-content');
+    const btnFinalizar = document.getElementById('btn-finalizar');
+    
+    // Remove qualquer container de itens antigo para evitar duplicidade
+    const antigoContainer = document.getElementById('conferencia-itens-container');
+    if (antigoContainer) antigoContainer.remove();
+
+    // Cria o container dinamicamente
+    const container = document.createElement('div');
+    container.id = 'conferencia-itens-container';
 
     dadosConferencia.forEach(setor => {
         const setorDiv = document.createElement('div');
-        setorDiv.className = 'setor-container';
-        setorDiv.innerHTML = `<h3>${setor.nome}</h3>`;
+        setorDiv.className = 'setor'; // Mantendo sua classe original de CSS
+        setorDiv.dataset.id = setor.id || setor.nome;
+        
+        // Criando o Header do Setor conforme seu padrão visual
+        setorDiv.innerHTML = `
+            <div class="setor-header" onclick="toggleSetor(this)">
+                <div class="setor-info">
+                    <span class="arrow">►</span>
+                    <span>${setor.nome.toUpperCase()}</span>
+                </div>
+                <div class="setor-status" data-completed="0">0/0</div>
+            </div>
+            <div class="setor-content"></div>
+        `;
+
+        const contentDiv = setorDiv.querySelector('.setor-content');
 
         setor.itens.forEach(item => {
             const itemDiv = document.createElement('div');
             itemDiv.className = 'item-conferencia';
+            itemDiv.dataset.id = item.id;
+            itemDiv.dataset.type = item.tipo;
 
             if (item.tipo === 'multi' && item.tombamentos) {
-                itemDiv.innerHTML = `<strong>${item.nome}</strong>`;
+                itemDiv.innerHTML = `<div class="item-label"><strong>${item.nome}</strong></div>`;
+                
                 item.tombamentos.forEach(t => {
                     const statusId = `${item.id}-${t.tomb}`;
                     const pendenciaTexto = getCautelaTextForReport(t);
                     const temCautela = !!t.cautela;
 
                     const tombDiv = document.createElement('div');
-                    tombDiv.className = 'tombamento-item';
+                    tombDiv.className = 'tombamento-container';
+                    tombDiv.dataset.tomb = t.tomb;
                     tombDiv.innerHTML = `
-                        <div class="tomb-info">
-                            <span>Tomb: ${t.tomb}</span>
-                            ${pendenciaTexto ? `<br><small class="pendencia-text">${pendenciaTexto}</small>` : ''}
+                        <div class="tombamento-controls">
+                            <span>Tomb: <strong>${t.tomb}</strong></span>
+                            <div class="tombamento-options">
+                                ${temCautela ? '<span style="font-size:1.2em">🔒</span>' : `
+                                    <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button>
+                                    <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>
+                                `}
+                            </div>
                         </div>
-                        <div class="tomb-actions">
-                            ${temCautela ? '<span class="lock-icon">🔒</span>' : `
-                            <select id="status-${statusId}" onchange="updateItemStatus('${statusId}', this.value)">
-                                <option value="pending">Pendente</option>
-                                <option value="S/A" ${window.itemStatus[statusId]?.status === 'S/A' ? 'selected' : ''}>S/A</option>
-                                <option value="C/A" ${window.itemStatus[statusId]?.status === 'C/A' ? 'selected' : ''}>C/A</option>
-                                ${t.pendencia ? `<option value="KEEP" ${window.itemStatus[statusId]?.status === 'KEEP' ? 'selected' : ''}>Manter C/A</option>` : ''}
-                            </select>
-                            <input type="text" id="obs-${statusId}" placeholder="Obs C/A" 
-                                   style="display: ${window.itemStatus[statusId]?.status === 'C/A' ? 'block' : 'none'}"
-                                   value="${window.itemStatus[statusId]?.obs || ''}"
-                                   oninput="updateItemObs('${statusId}', this.value)">
-                            `}
+                        ${pendenciaTexto ? `<div class="pendencia-alert-box" data-status-type="${temCautela ? 'cautela' : 'ca'}">${pendenciaTexto}</div>` : ''}
+                        <div class="tombamento-obs-container">
+                            <label>Descreva a Alteração:</label>
+                            <textarea id="obs-${statusId}"></textarea>
+                            <button class="btn-salvar-alteracao" onclick="salvarTombamento(this)">Confirmar Alteração</button>
                         </div>
+                        <div class="tombamento-descricao-salva"></div>
                     `;
                     itemDiv.appendChild(tombDiv);
                 });
             } else {
                 const pendenciaTexto = getCautelaTextForReport(item);
+                const temCautela = item.cautelas && item.cautelas.length > 0;
+
                 itemDiv.innerHTML = `
-                    <div class="item-info">
-                        <strong>${item.nome}</strong>
-                        ${pendenciaTexto ? `<br><small class="pendencia-text">${pendenciaTexto}</small>` : ''}
+                    <div class="item-header">
+                        <div class="item-label">
+                            <span class="status-icon"></span>
+                            <strong>${item.nome}</strong>
+                        </div>
+                        <div class="item-quantidade">QTD ESPERADA: ${item.quantidadeEsperada || 1}</div>
                     </div>
-                    <div class="item-actions">
-                        <select id="status-${item.id}-single" onchange="updateItemStatus('${item.id}', this.value)">
-                            <option value="pending">Pendente</option>
-                            <option value="S/A" ${window.itemStatus[item.id]?.status === 'S/A' ? 'selected' : ''}>S/A</option>
-                            <option value="C/A" ${window.itemStatus[item.id]?.status === 'C/A' ? 'selected' : ''}>C/A</option>
-                            ${item.pendencia ? `<option value="KEEP" ${window.itemStatus[item.id]?.status === 'KEEP' ? 'selected' : ''}>Manter C/A</option>` : ''}
-                        </select>
-                        <input type="text" id="obs-${item.id}-single" placeholder="Obs C/A"
-                               style="display: ${window.itemStatus[item.id]?.status === 'C/A' ? 'block' : 'none'}"
-                               value="${window.itemStatus[item.id]?.obs || ''}"
-                               oninput="updateItemObs('${item.id}', this.value)">
+                    ${pendenciaTexto ? `<div class="pendencia-alert-box" data-status-type="${temCautela ? 'cautela' : 'ca'}">${pendenciaTexto}</div>` : ''}
+                    <div class="item-options">
+                        <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A (ÍNTEGRO)</button>
+                        <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A (ALTERAÇÃO)</button>
                     </div>
+                    <div class="alteracao-container">
+                        <label>Relate a alteração encontrada:</label>
+                        <textarea placeholder="Ex: Lanterna trincada, bateria fraca..."></textarea>
+                        <button class="btn-salvar-alteracao" onclick="salvarItem(this)">Confirmar Alteração</button>
+                    </div>
+                    <div class="descricao-salva"></div>
                 `;
             }
-            setorDiv.appendChild(itemDiv);
+            contentDiv.appendChild(itemDiv);
         });
         container.appendChild(setorDiv);
     });
+
+    // Insere o container antes do botão de finalizar dentro do main-content
+    mainContent.insertBefore(container, btnFinalizar);
+    
+    // Atualiza contadores iniciais
+    document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s));
 }
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia');
