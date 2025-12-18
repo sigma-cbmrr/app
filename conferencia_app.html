@@ -382,13 +382,14 @@
         }
         
         // Lógica para Pendência C/A (Usa o padrão visual personalizado que criamos)
+        // A função gerarHtmlVisual agora garante que a hora não seja exibida
         const htmlFormatado = gerarHtmlVisual(pendenciaObj);
         
         // Prepara dados para o botão 'Acrescentar'
         const dadosHistorico = JSON.stringify({ 
             obs: (typeof pendenciaObj === 'object') ? pendenciaObj.obs : pendenciaObj, 
             autor: (typeof pendenciaObj === 'object') ? pendenciaObj.quem : '', 
-            data: (typeof pendenciaObj === 'object') ? pendenciaObj.data : '' 
+            data: (typeof pendenciaObj === 'object') ? (pendenciaObj.data ? pendenciaObj.data.split(',')[0] : '') : '' 
         }); 
         const safeHistorico = encodeURIComponent(dadosHistorico);
 
@@ -422,7 +423,6 @@
                     let isCautelado = !!tomb.cautela;
                     let tombBtnHtml = '';
 
-                    // Lógica de botões conforme o modo
                     if (isCautela) {
                         tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
                     } else if (isCautelado) {
@@ -431,7 +431,6 @@
                         tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
                     }
 
-                    // Carimbo de Cautela (se houver e não estiver no modo cautela)
                     let alertaCautelaHtml = '';
                     if (isCautelado && !isCautela) {
                         alertaCautelaHtml = montarPendenciaHtml(uid, {
@@ -448,7 +447,6 @@
                         ${montarPendenciaHtml(uid, tomb.pendencia)}
                         <p class="tombamento-descricao-salva"></p>
                         <div class="tombamento-obs-container">
-                            <div class="historico-fixo" style="display:none;"></div>
                             <label>Descreva a alteração:</label>
                             <textarea placeholder="Detalhe o problema..."></textarea>
                             <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button>
@@ -465,7 +463,6 @@
                               </div>`;
 
             } else {
-                // Modo Single
                 let hasCautela = (item.cautelas && item.cautelas.length > 0);
                 let singleBtnHtml = isCautela ? 
                     `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` :
@@ -483,7 +480,6 @@
                     ${montarPendenciaHtml(item.id, item.pendencia)}
                     <p class="descricao-salva"></p>
                     <div class="alteracao-container">
-                        <div class="historico-fixo" style="display:none;"></div>
                         <label>Descreva a alteração:</label>
                         <textarea placeholder="Detalhe o problema..."></textarea>
                         <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
@@ -508,7 +504,6 @@
         </div>`;
     });
 
-    // 3. Inserção final no DOM
     const btnFinalizar = mainContent.querySelector('#btn-finalizar');
     if (btnFinalizar) {
         btnFinalizar.insertAdjacentHTML('beforebegin', htmlSetores);
@@ -516,6 +511,37 @@
     
     updateOverallStatus();
 }
+
+// ATUALIZAÇÃO DA CONSTANTE PARA REMOVER A HORA EM QUALQUER CIRCUNSTÂNCIA
+const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
+    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
+    
+    if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
+        const militar = pendencia.quem || autorAtual || 'Militar';
+        // Garante que se houver vírgula ou espaço (data e hora), pegamos apenas a data
+        let dataFull = pendencia.data || dataAtual || '';
+        const dataApenas = dataFull.includes(',') ? dataFull.split(',')[0] : dataFull.split(' ')[0];
+        const observacao = pendencia.obs || '';
+
+        html += `
+            <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left;">
+                <span style="margin-right: 8px;">⚠️</span>
+                <b>Por </b>
+                <span style="color: #d90f23; font-weight: bold;">${militar}</span>
+                <span> em <b>${dataApenas}</b>:</span>
+                <i style="margin-left: 5px; color: #333; font-weight: normal;">${observacao}</i>
+            </li>`;
+    } 
+    else if (typeof pendencia === 'string' && pendencia.trim() !== '' && pendencia !== '-') {
+        const linhas = gerarLinhasFormatadas(pendencia, autorAtual, dataAtual, adminStatus, adminObs);
+        linhas.forEach(l => {
+            html += `<li class="linha-obs"><span style="margin-right: 8px;">⚠️</span>${l}</li>`;
+        });
+    }
+
+    html += '</ul>';
+    return html;
+};
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia');
             const setor = btn.closest('.setor'); 
