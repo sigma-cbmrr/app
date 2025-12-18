@@ -3669,59 +3669,55 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 };
 
 // Função wrapper apenas para manter a consistência com o app (não usada no PDF)
-const gerarHtmlVisual = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    const linhas = gerarLinhasFormatadas(textoBruto, autorAtual, dataAtual, adminStatus, adminObs);
-    let html = '<ul class="lista-pendencias">';
-    
-    linhas.forEach(l => { 
-        if (l.includes('(Admin):')) { 
-            // Formato Gestor (Existente)
-            const [carimboStatus, obsText] = l.split(':');
-            const statusText = carimboStatus.match(/\[(.*?)\]/)[1];
-            
-            let icon = '';
-            let statusColor = '#f57c00';
-            
-            switch(statusText.toUpperCase().trim()) {
-                case 'SOLUCIONADO':
-                case 'REMOVER':
-                    icon = '✅️';
-                    statusColor = '#1b8a3e';
-                    break;
-                case 'CAUTELADO':
-                    icon = '🔃';
-                    statusColor = '#0d47a1'; 
-                    break;
-                case 'EM SOLUÇÃO':
-                default:
-                    icon = '⚠️';
-                    break;
+const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
+    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0;">';
+
+    // Se for objeto JSON (Novo Padrão)
+    if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
+        html += `
+            <li style="margin-bottom: 5px; text-align: left;">
+                <i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 8px;"></i>
+                <i style="font-weight: bold;">Por </i>
+                <span style="color: #d90f23; font-weight: bold;">${pendencia.quem}</span>
+                <span> em ${pendencia.data}:</span>
+                <i style="margin-left: 5px;">${pendencia.obs}</i>
+            </li>`;
+    } 
+    // Se for string, processa a lógica de Admin e Cautela que você já tinha
+    else if (typeof pendencia === 'string' && pendencia !== '-' && pendencia.trim() !== '') {
+        const linhas = gerarLinhasFormatadas(pendencia, autorAtual, dataAtual, adminStatus, adminObs);
+        linhas.forEach(l => {
+            if (l.includes('(Admin):')) {
+                const [carimboStatus, obsText] = l.split(':');
+                const statusMatch = carimboStatus.match(/\[(.*?)\]/);
+                const statusText = statusMatch ? statusMatch[1] : 'PENDENTE';
+                
+                let icon = '⚠️';
+                let statusColor = '#f57c00';
+                
+                if (['SOLUCIONADO', 'REMOVER'].includes(statusText.toUpperCase().trim())) {
+                    icon = '✅️'; statusColor = '#1b8a3e';
+                } else if (statusText.toUpperCase().trim() === 'CAUTELADO') {
+                    icon = '🔃'; statusColor = '#0d47a1';
+                }
+
+                html += `<li>
+                            <span style="color: #d90f23;"><b>Gestor</b></span>:
+                            <span style="color: ${statusColor}; font-style: italic;">${icon} ${statusText}</span>
+                            : ${obsText ? obsText.trim() : ''}
+                        </li>`;
+            } else if (l.includes('[CAUTELA]:')) {
+                const cautelaText = l.replace('[CAUTELA]:', '').trim();
+                html += `<li style="background-color: #fff8e1; border-left: 3px solid #f57c00; padding: 5px 8px; margin: 5px 0;">
+                            <span style="font-weight: bold; color: #f57c00;"><i class="fas fa-hand-holding-box"></i> Cautela Ativa: </span>
+                            ${cautelaText}
+                         </li>`;
+            } else {
+                html += `<li class="linha-obs"><i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 8px;"></i>${l}</li>`;
             }
-            
-            html += `<li>
-                        <span style="color: #d90f23;"><b>Gestor</b></span>:
-                        <span style="color: ${statusColor}; font-style: italic;">
-                            ${icon} ${statusText}
-                        </span>
-                        : ${obsText.trim()}
-                    </li>`;
-        } else if (l.includes('[CAUTELA]:')) { // NOVO: TRATAMENTO DE CAUTELA
-            const cautelaText = l.replace('[CAUTELA]:', '').trim();
-            // Estilo visual chamativo para a cautela (como se fosse um Alerta/Nota)
-            html += `<li style="background-color: #fff8e1; border-left: 3px solid #f57c00; padding: 5px 0 5px 8px; margin: 5px 0;">
-                        <span style="font-weight: bold; color: #f57c00;">
-                            <i class="fas fa-hand-holding-box"></i> Cautela Ativa: 
-                        </span>
-                        ${cautelaText}
-                    </li>`;
-        } else { 
-            // Formato Conferente (Existente)
-            const [carimbo, ...resto] = l.split(':');
-            const carimboBold = carimbo.replace('Por:', '**Por**');
-            html += `<li class="linha-obs">• ${carimboBold}:${resto.join(':')}</li>`;
-        } 
-    });
-    
+        });
+    }
+
     html += '</ul>';
     return html;
 };
