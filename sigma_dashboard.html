@@ -5944,31 +5944,17 @@ function getSelectedCautelaItemsData() {
 async function iniciarCautelaProcesso() {
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     const destinatarioNome = document.getElementById('cautela-destinatario').value.trim();
-    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value; // UID vindo do autocomplete
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
     const localOrigem = document.getElementById('cautela-local-origem').value;
     const observacoes = document.getElementById('cautela-obs').value.trim();
 
-    // 🛑 VALIDAÇÃO DE SEGURANÇA: Se o Autocomplete não preencheu o ID, tentamos buscar manualmente
-    let finalUid = destinatarioUid;
-    if (!finalUid) {
-        finalUid = await findUidByName(destinatarioNome);
-    }
-
-    if (!finalUid) {
-        alert("Erro: O sistema não conseguiu validar o ID único do destinatário. Por favor, selecione o nome novamente na lista de sugestões.");
-        return;
-    }
-
-    if (!localOrigem) {
-        alert("Erro: Selecione o local de origem.");
+    if (!destinatarioUid || !destinatarioNome) {
+        alert("Erro: Selecione um destinatário válido na lista.");
         return;
     }
 
     const itensSelecionados = getSelectedCautelaItemsData();
-    if (itensSelecionados.length === 0) {
-        alert("Erro: Selecione ao menos um item.");
-        return;
-    }
+    if (itensSelecionados.length === 0) return alert("Selecione ao menos um item.");
 
     btnIniciar.disabled = true;
     btnIniciar.textContent = "GRAVANDO...";
@@ -5993,12 +5979,11 @@ async function iniciarCautelaProcesso() {
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             emitente: currentUserData.nome_militar_completo,
             emitente_uid: emitenteUid,
-            destinatario_original: destinatarioNome,
-            destinatario_original_uid: finalUid, // 🛑 UID CORRETO
+            destinatario_original: destinatarioNome, // Registro visual
+            destinatario_original_uid: destinatarioUid, // Registro imutável
             destinatario: destinatarioNome,
-            destinatario_uid: finalUid,          // 🛑 UID CORRETO
-            recebedor: destinatarioNome,
-            recebedor_uid: finalUid,             // 🛑 UID CORRETO
+            destinatario_uid: destinatarioUid,
+            recebedor_uid: null, // Vazio na emissão conforme nova lógica
             local_origem: localOrigem,
             local_origem_id: localOrigemId,
             itens: itensSelecionados,
@@ -6016,16 +6001,15 @@ async function iniciarCautelaProcesso() {
             });
         }
 
-        alert(`✅ Cautela emitida com sucesso!\nID Destinatário vinculado: ${finalUid}`);
+        alert(`✅ Cautela enviada com sucesso!`);
         showMainMenu();
-
     } catch (error) {
-        console.error("Erro na emissão:", error);
+        console.error(error);
         alert("Erro ao emitir: " + error.message);
         btnIniciar.disabled = false;
-        btnIniciar.textContent = "Tentar Novamente";
     }
 }
+		
 function findItemInList(lista, itemIdBase) {
     for (const setor of lista) {
         for (const item of setor.itens) {
@@ -6742,41 +6726,33 @@ async function getLastConferente(localOrigem) {
         const militarCompleto = currentUserData.nome_militar_completo;
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
 
-        // Busca o UID do recebedor (Dono Provisório) antes de enviar
+        // Busca o UID do recebedor (Último Conferente)
         const novoRecebedorUid = await findUidByName(destinatarioNome);
 
         if (!novoRecebedorUid) {
-            throw new Error(`Não foi possível localizar o ID de sistema para: ${destinatarioNome}. Certifique-se que o militar está cadastrado.`);
+            throw new Error(`Não foi possível localizar o ID de sistema para: ${destinatarioNome}.`);
         }
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-
             if (!cautelaDoc.exists || cautelaDoc.data().status !== 'RECEBIDA') {
-                throw new Error("Cautela não encontrada ou não está em posse confirmada.");
+                throw new Error("Cautela não está pronta para devolução.");
             }
             
             transaction.update(cautelaRef, { 
                 status: 'DEVOLUÇÃO', 
                 timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
-                
-                // Quem está devolvendo
                 reversor: currentUserData.nome_guerra, 
                 militar_completo_reversor: militarCompleto,
-                
-                // Dados do NOVO papel: Recebedor da devolução
-                recebedor: destinatarioNome, 
-                recebedor_uid: novoRecebedorUid 
+                recebedor_uid: novoRecebedorUid, // 🛑 Aqui o UID do Gestor entra no jogo
+                recebedor_nome_estatico: destinatarioNome 
             });
         });
 
-        alert(`✅ Cautela enviada para devolução a ${destinatarioNome}.`);
+        alert(`✅ Cautela enviada para conferência de ${destinatarioNome}.`);
         if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
-        if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
-        
     } catch (error) {
-        console.error("Erro ao iniciar devolução:", error);
-        alert(`Erro ao iniciar devolução: ${error.message}`);
+        alert(`Erro: ${error.message}`);
         if (btnDevolver) btnDevolver.disabled = false;
     }
 }
