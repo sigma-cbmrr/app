@@ -867,7 +867,7 @@
                 subtituloElement.innerHTML = `Recebendo a Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> do Militar: <br> <strong>${reversor}</strong>`;
                 
                 btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO DA DEVOLUÇÃO';
-                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data); // Chamada à nova função
+                btnFinalizar.onclick = () => (data); // Chamada à nova função
                 
                 btnFinalizar.classList.add('btn-sync'); 
                 btnFinalizar.classList.remove('btn-action', 'btn-delete');
@@ -1204,35 +1204,29 @@ async function finalizarConferencia() {
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
 
-    if (!isCautela || !CAUTELA_ID) {
-        alert("Erro: ID da cautela não encontrado.");
-        btn.disabled = false;
-        return;
-    }
-
-    const meuUid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : userInfo.uid;
-    const listaId = cautela.local_origem_id;
+    const userAuth = firebase.auth().currentUser;
+    if (!userAuth) return alert("Erro: Usuário não autenticado.");
+    const meuUid = userAuth.uid;
 
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautela.local_origem_id);
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-            if (!cautelaDoc.exists) throw new Error("Cautela não encontrada.");
+            if (!cautelaDoc.exists) throw new Error("Cautela inexistente.");
 
             const cData = cautelaDoc.data();
 
-            // Validação pelo novo campo de papel: recebedor_uid
+            // 🛑 VALIDAÇÃO DE SEGURANÇA POR UID
             if (cData.status !== 'DEVOLUÇÃO' || cData.recebedor_uid !== meuUid) {
-                throw new Error("Esta devolução não está direcionada ao seu UID ou já foi processada.");
+                throw new Error("Seu UID não coincide com o recebedor designado para esta devolução.");
             }
 
             const listaMestraDoc = await transaction.get(listaMestraRef);
-            if (!listaMestraDoc.exists) throw new Error("Lista Mestra de Origem não encontrada!");
-
             let listaMestra = listaMestraDoc.data().list;
 
+            // Remoção dos carimbos (desbloqueio do material)
             cautela.itens.forEach(cItem => {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
@@ -1259,20 +1253,20 @@ async function finalizarConferencia() {
             transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA',
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
-                recebedor: meuNomeCompleto,
-                receptor_final_completo: meuNomeCompleto
+                receptor_final_completo: meuNomeCompleto,
+                destinatario: meuNomeCompleto // Sobrescreve o nome para o histórico final
             });
 
             transaction.update(listaMestraRef, { list: listaMestra });
         });
 
-        alert(`✅ Cautela ${CAUTELA_ID} finalizada com sucesso.`);
+        alert(`✅ Cautela finalizada e estoque restaurado!`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        console.error("Erro CRÍTICO:", error);
-        alert(`Erro: ${error.message}`);
+        console.error(error);
+        alert(`Erro Crítico: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
