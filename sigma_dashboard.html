@@ -6485,7 +6485,7 @@ async function showCautelaDetails(cautelaId) {
                 
                 modalStatusElement.innerHTML = `Status: ${currentStatus}<br><span style="font-size:0.8em; color:#0d47a1;">Devolução p/: <strong>${ultimoConferente}</strong></span>`;
 
-                btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente); 
+                btnDevolver.onclick = () => (cautelaId, ultimoConferente); 
             }
         
         // D. Cautelas EM DEVOLUÇÃO (QUEM ENVIOU - Usuário A que ainda rastreia)
@@ -6868,8 +6868,6 @@ async function getLastConferente(localOrigem) {
 }
             async function iniciarDevolucaoCautela(cautelaId, destinatarioNome) {
     const btnDevolver = document.getElementById('btn-devolver-cautela');
-    
-    // 1. Oculta a UI imediatamente
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     if (btnDevolver) btnDevolver.disabled = true;
 
@@ -6877,15 +6875,13 @@ async function getLastConferente(localOrigem) {
         const militarCompleto = currentUserData.nome_militar_completo;
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
 
-        // 🛑 NOVO E CRÍTICO: Buscar o UID do destinatário da devolução antes da transação
-        // Sem o UID, o filtro 'destinatario_uid' do Dashboard do recebedor não encontrará a cautela.
+        // Busca o UID do recebedor (Dono Provisório) antes de enviar
         const novoRecebedorUid = await findUidByName(destinatarioNome);
 
         if (!novoRecebedorUid) {
             throw new Error(`Não foi possível localizar o ID de sistema para: ${destinatarioNome}. Certifique-se que o militar está cadastrado.`);
         }
 
-        // 🛑 TRANSACAO NO FIREBASE
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
 
@@ -6893,24 +6889,21 @@ async function getLastConferente(localOrigem) {
                 throw new Error("Cautela não encontrada ou não está em posse confirmada.");
             }
             
-            // 2. Ação: Mudar o status para DEVOLUÇÃO e transferir a posse via UID
             transaction.update(cautelaRef, { 
                 status: 'DEVOLUÇÃO', 
                 timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
                 
-                // Quem está enviando/revertendo (Usuário A)
+                // Quem está devolvendo
                 reversor: currentUserData.nome_guerra, 
                 militar_completo_reversor: militarCompleto,
                 
-                // 🛑 CORREÇÃO PRINCIPAL: Transfere a posse do UID para o novo recebedor
-                destinatario: destinatarioNome, // String histórica para o status DEVOLUÇÃO
-                destinatario_uid: novoRecebedorUid // ✅ UID IMUTÁVEL para o filtro do Dashboard dele
+                // Dados do NOVO papel: Recebedor da devolução
+                recebedor: destinatarioNome, 
+                recebedor_uid: novoRecebedorUid 
             });
         });
 
-        alert(`✅ Cautela enviada para devolução a ${destinatarioNome}. Ela aparecerá no Dashboard dele.`);
-        
-        // Recarrega as listas
+        alert(`✅ Cautela enviada para devolução a ${destinatarioNome}.`);
         if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
         if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
         
