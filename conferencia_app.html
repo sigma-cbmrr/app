@@ -1072,7 +1072,14 @@ async function finalizarConferencia() {
     btn.textContent = "Confirmando posse...";
     btn.disabled = true;
 
-    const meuUid = userInfo.uid;
+    // 🛑 BUSCA O UID DIRETO DO AUTH (Mais seguro que a URL)
+    const userAuth = firebase.auth().currentUser;
+    if (!userAuth) {
+        alert("Erro: Usuário não autenticado.");
+        btn.disabled = false;
+        return;
+    }
+    const meuUid = userAuth.uid;
 
     try {
         await db.runTransaction(async (transaction) => {
@@ -1085,7 +1092,10 @@ async function finalizarConferencia() {
 
             const cData = cautelaDoc.data();
 
+            // 🛑 VALIDAÇÃO POR UID
+            // Se o destinatario_uid gravado na emissão não for igual ao UID de quem está logado, bloqueia.
             if (cData.status !== 'ABERTA' || cData.destinatario_uid !== meuUid) {
+                console.error("Divergência de UID:", { noBanco: cData.destinatario_uid, logado: meuUid });
                 throw new Error("Cautela não disponível para seu usuário ou já processada.");
             }
 
