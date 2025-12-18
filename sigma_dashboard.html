@@ -5944,46 +5944,108 @@ function getSelectedCautelaItemsData() {
 // A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
 
 async function iniciarCautelaProcesso() {
-    const btnIniciar = document.getElementById('btn-iniciar-cautela');
-    const destinatarioNome = document.getElementById('cautela-destinatario').value.trim();
-    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
-    const localOrigem = document.getElementById('cautela-local-origem').value;
-    const observacoes = document.getElementById('cautela-obs').value.trim();
+    const localId = document.getElementById('cautela-local-origem').value;
+    const destinatarioUid = document.getElementById('cautela-militar-uid').value;
+    const destinatarioNome = document.getElementById('cautela-militar-nome').value;
+    const obsEmissao = document.getElementById('cautela-observacoes').value;
 
-    if (!destinatarioUid) return alert("Selecione um destinatário válido.");
+    if (!localId || !destinatarioUid || cautelaItensSelecionados.length === 0) {
+        alert("Por favor, selecione o local, o militar e pelo menos um item.");
+        return;
+    }
+
+    const btn = document.getElementById('btn-confirmar-cautela');
+    btn.disabled = true;
+    btn.textContent = "Processando...";
 
     try {
+        const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteUid = firebase.auth().currentUser.uid;
-        const cautelaId = `CAUTELA-${gerarNovoId()}`;
+        const emitenteNome = `${currentUserData.posto_grad} ${currentUserData.quadro_mil} ${currentUserData.nome_guerra}`;
+        const dataAtual = new Date().toLocaleString('pt-BR');
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
 
         const novaCautela = {
             cautela_id: cautelaId,
-            status: 'ABERTA',
-            timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             emitente_uid: emitenteUid,
-            emitente_nome_estatico: currentUserData.nome_militar_completo,
-            
-            // O ALVO ORIGINAL
-            destinatario_original_uid: destinatarioUid, 
+            emitente: emitenteNome,
+            destinatario_original_uid: destinatarioUid,
             destinatario_original_nome: destinatarioNome,
-
-            // O RECEBEDOR ATUAL (Fica vazio na emissão conforme sua regra)
-            destinatario_uid: null, 
-            destinatario: null, 
-
-            local_origem: localOrigem,
-            local_origem_id: await getListaIdFromLocalName(localOrigem),
-            itens: getSelectedCautelaItemsData(),
-            observacoes_emissao: observacoes
+            destinatario_uid: null,
+            destinatario: null,
+            local_origem_id: localId,
+            local_origem: document.getElementById('cautela-local-origem').options[document.getElementById('cautela-local-origem').selectedIndex].text,
+            status: 'ABERTA',
+            timestamp_emissao: timestamp,
+            observacoes_emissao: obsEmissao,
+            itens: cautelaItensSelecionados
         };
 
-        await db.collection('cautelas_abertas').doc(cautelaId).set(novaCautela);
-        if (typeof carimbarListaMestra === 'function') await carimbarListaMestra(novaCautela);
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
+        const listaRef = db.collection('listas_conferencia').doc(localId);
 
-        alert(`✅ Cautela ${cautelaId} emitida! Aguardando recebimento.`);
-        showMainMenu();
-    } catch (error) {
-        alert("Erro: " + error.message);
+        await db.runTransaction(async (transaction) => {
+            const listaDoc = await transaction.get(listaRef);
+            if (!listaDoc.exists) throw new Error("Lista de origem não encontrada.");
+
+            let listaMestra = listaDoc.data().list;
+
+            cautelaItensSelecionados.forEach(cItem => {
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
+                        if (mItem.id === (cItem.id_base || cItem.id)) {
+                            
+                            const objetoCautela = {
+                                id: cautelaId,
+                                emitente: emitenteNome,
+                                destinatario: destinatarioNome,
+                                data: dataAtual,
+                                quantidade: cItem.quantidade || 1
+                            };
+
+                            const logHistorico = {
+                                evento: "SAÍDA_CAUTELA",
+                                id_doc: cautelaId,
+                                quem: emitenteNome,
+                                data: dataAtual,
+                                detalhes: `Cautelado ${cItem.quantidade || 1}un para ${destinatarioNome}`
+                            };
+
+                            if (!mItem.historico_vida) mItem.historico_vida = [];
+                            mItem.historico_vida.push(logHistorico);
+
+                            if (cItem.tombamento) {
+                                mItem.tombamentos = (mItem.tombamentos || []).map(t => {
+                                    if (t.tomb === cItem.tombamento) {
+                                        t.cautela = objetoCautela;
+                                    }
+                                    return t;
+                                });
+                            } else {
+                                if (!mItem.cautelas) mItem.cautelas = [];
+                                mItem.cautelas.push(objetoCautela);
+                            }
+                        }
+                        return mItem;
+                    })
+                }));
+            });
+
+            transaction.set(cautelaRef, novaCautela);
+            transaction.update(listaRef, { list: listaMestra });
+        });
+
+        alert(`✅ Cautela ${cautelaId} emitida com sucesso!`);
+        fecharModal('modal-nova-cautela');
+        location.reload();
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao emitir cautela: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Confirmar Emissão";
     }
 }
 		
