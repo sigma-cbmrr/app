@@ -2705,21 +2705,26 @@ async function getCautelasAReceberCount() {
     const militarUid = firebase.auth().currentUser.uid;
 
     try {
-        // Busca onde o militar é o alvo original e a cautela ainda não foi aceita
-        const snap = await db.collection('cautelas_abertas')
+        // Cautelas NOVAS (Alvo Original)
+        const snapNovas = await db.collection('cautelas_abertas')
             .where('destinatario_original_uid', '==', militarUid)
             .where('status', '==', 'ABERTA')
             .get();
 
-        // Busca também onde ele é o recebedor de uma devolução (destinatario_uid dinâmico)
-        const snapDev = await db.collection('cautelas_abertas')
+        // DEVOLUÇÕES para conferir (Destinatário Atual)
+        const snapDevolucoes = await db.collection('cautelas_abertas')
             .where('destinatario_uid', '==', militarUid)
             .where('status', '==', 'DEVOLUÇÃO')
             .get();
 
-        return snap.size + snapDev.size;
+        // Usamos um Set para garantir que se uma cautela cair em ambos, conte apenas uma vez
+        const totalIds = new Set();
+        snapNovas.forEach(doc => totalIds.add(doc.id));
+        snapDevolucoes.forEach(doc => totalIds.add(doc.id));
+
+        return totalIds.size;
     } catch (e) {
-        console.error(e);
+        console.error("Erro ao contar cautelas:", e);
         return 0;
     }
 }
