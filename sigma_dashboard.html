@@ -5944,28 +5944,34 @@ function getSelectedCautelaItemsData() {
 async function iniciarCautelaProcesso() {
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     const destinatarioNome = document.getElementById('cautela-destinatario').value.trim();
-    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value; // UID vindo do autocomplete
     const localOrigem = document.getElementById('cautela-local-origem').value;
     const observacoes = document.getElementById('cautela-obs').value.trim();
 
-    if (!destinatarioUid || !destinatarioNome) {
-        alert("Erro: Por favor, selecione um destinatário válido da lista de sugestões.");
+    // 🛑 VALIDAÇÃO DE SEGURANÇA: Se o Autocomplete não preencheu o ID, tentamos buscar manualmente
+    let finalUid = destinatarioUid;
+    if (!finalUid) {
+        finalUid = await findUidByName(destinatarioNome);
+    }
+
+    if (!finalUid) {
+        alert("Erro: O sistema não conseguiu validar o ID único do destinatário. Por favor, selecione o nome novamente na lista de sugestões.");
         return;
     }
 
     if (!localOrigem) {
-        alert("Erro: Selecione o local de origem dos materiais.");
+        alert("Erro: Selecione o local de origem.");
         return;
     }
 
     const itensSelecionados = getSelectedCautelaItemsData();
     if (itensSelecionados.length === 0) {
-        alert("Erro: Selecione ao menos um item para cautelar.");
+        alert("Erro: Selecione ao menos um item.");
         return;
     }
 
     btnIniciar.disabled = true;
-    btnIniciar.textContent = "PROCESSANDO...";
+    btnIniciar.textContent = "GRAVANDO...";
 
     try {
         const emitenteUid = firebase.auth().currentUser.uid;
@@ -5988,21 +5994,18 @@ async function iniciarCautelaProcesso() {
             emitente: currentUserData.nome_militar_completo,
             emitente_uid: emitenteUid,
             destinatario_original: destinatarioNome,
-            destinatario_original_uid: destinatarioUid,
+            destinatario_original_uid: finalUid, // 🛑 UID CORRETO
             destinatario: destinatarioNome,
-            destinatario_uid: destinatarioUid,
+            destinatario_uid: finalUid,          // 🛑 UID CORRETO
             recebedor: destinatarioNome,
-            recebedor_uid: destinatarioUid,
+            recebedor_uid: finalUid,             // 🛑 UID CORRETO
             local_origem: localOrigem,
             local_origem_id: localOrigemId,
             itens: itensSelecionados,
             observacoes_emissao: observacoes
         };
 
-        const batch = db.batch();
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
-        batch.set(cautelaRef, novaCautela);
-        await batch.commit();
+        await db.collection('cautelas_abertas').doc(cautelaId).set(novaCautela);
 
         if (typeof carimbarListaMestra === 'function') {
             await carimbarListaMestra({
@@ -6013,23 +6016,16 @@ async function iniciarCautelaProcesso() {
             });
         }
 
-        alert(`✅ Cautela ${cautelaId} enviada com sucesso para ${destinatarioNome}!`);
+        alert(`✅ Cautela emitida com sucesso!\nID Destinatário vinculado: ${finalUid}`);
         showMainMenu();
-        if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
 
     } catch (error) {
-        console.error("Erro na emissão da cautela:", error);
+        console.error("Erro na emissão:", error);
         alert("Erro ao emitir: " + error.message);
         btnIniciar.disabled = false;
         btnIniciar.textContent = "Tentar Novamente";
     }
-} /**
- * Função robusta para encontrar o objeto item (mItem) na lista mestra
- * dado seu ID base.
- * @param {Array} lista - O array listaMestra.
- * @param {string} itemIdBase - O ID base do item (Ex: 'setorID-64012364').
- * @returns {object|null} O objeto mItem ou null.
- */
+}
 function findItemInList(lista, itemIdBase) {
     for (const setor of lista) {
         for (const item of setor.itens) {
@@ -7525,19 +7521,25 @@ async function getUserInfoByUid(uid) {
 async function findUidByName(nomeCompleto) {
     if (!nomeCompleto) return null;
     
-    // NOTA: Esta consulta requer um índice composto no Firestore (nome_militar_completo, limit)
     try {
+        // Busca exata pelo nome de exibição
         const snap = await db.collection('usuarios')
-            .where('nome_militar_completo', '==', nomeCompleto)
-            .limit(1)
+            .where('nome_militar_completo', '==', nomeCompleto.trim())
             .get();
             
-        if (!snap.empty) {
-            return snap.docs[0].id; // Retorna o ID do documento (que é o UID)
+        if (snap.empty) {
+            console.warn(`Nenhum militar encontrado com o nome exato: ${nomeCompleto}`);
+            return null;
         }
-        return null;
+
+        if (snap.size > 1) {
+            alert(`⚠️ Atenção: Foram encontrados ${snap.size} cadastros para "${nomeCompleto}". Verifique se há nomes duplicados no banco de dados.`);
+        }
+
+        // Retorna o UID do primeiro documento encontrado
+        return snap.docs[0].id; 
     } catch (e) {
-        console.error("Erro no fallback de UID por nome:", e);
+        console.error("Erro ao buscar UID por nome:", e);
         return null;
     }
 }
