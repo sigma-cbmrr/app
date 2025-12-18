@@ -657,54 +657,46 @@
                 document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s)); updateOverallStatus();
             } catch (e) { console.error("Erro restore", e); }
         }
-       function adaptarCautelaParaRender(cautelaData) {
+      function adaptarCautelaParaRender(cautelaData) {
     if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
 
-    // Cria um setor único chamado "ITENS DA CAUTELA"
     const setorCautela = {
         id: cautelaData.cautela_id,
         nome: "ITENS CAUTELADOS",
         itens: cautelaData.itens.map(cItem => {
             
-            // --- INÍCIO DA CORREÇÃO DE TOMBAMENTO ---
-            let tipo = cItem.tipo || 'single';
+            let tipo = cItem.tombamento ? 'multi' : 'single';
             let tombamentos = null;
 
-            if (cItem.tombamento && cItem.tombamento.trim() !== '') {
-                // Se o item tem 'tombamento', ele é MULTI
-                tipo = 'multi';
-                
-                // CRIA A ESTRUTURA DE TOMBAMENTO ESPERADA PELO RENDERER
+            if (tipo === 'multi') {
                 tombamentos = [{
                     tomb: cItem.tombamento,
-                    id_completo: cItem.id_completo || `${cItem.id_base}-${cItem.tombamento}`,
-                    // O item da cautela é o que carrega o carimbo de cautela no tombamento
-                    cautela: {
-                        destinatario: cautelaData.destinatario,
-                        data: formatarDataSimples(cautelaData.timestamp_emissao),
+                    id_completo: cItem.id_completo || `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
+                    // O item da cautela já carrega seu próprio estado (JSON) se houver
+                    cautela: cItem.cautela || {
                         id: cautelaData.cautela_id,
-                        // Adicione qualquer outra informação do carimbo aqui
-                    }
-                    // Não há pendencia C/A inicial ao receber, mas a cautela é a pendência.
+                        destinatario: cautelaData.destinatario || cautelaData.destinatario_original_nome,
+                        data: cautelaData.timestamp_emissao ? new Date(cautelaData.timestamp_emissao.seconds * 1000).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')
+                    },
+                    pendencia: cItem.pendencia || null
                 }];
-                // A quantidade esperada deve ser 1 para o item tombado no array de tombamentos
                 cItem.quantidade = 1; 
             }
-            // --- FIM DA CORREÇÃO DE TOMBAMENTO ---
 
-            // Mapeia os dados da cautela para o formato esperado de um item de conferência
             return {
-                id: cItem.id_base || cItem.id, // ID base do item (sem o tombamento)
+                id: cItem.id_base || cItem.id,
                 nome: cItem.nome,
                 quantidadeEsperada: cItem.quantidade || 1,
                 tipo: tipo,
-                tombamentos: tombamentos, // Usa o array recém-criado (ou null)
-                // A cautela é tratada como um item novo, então não há 'pendencia' inicial.
+                tombamentos: tombamentos,
+                // Preserva o carimbo JSON para itens de quantidade (Single)
+                cautelas: cItem.cautelas || [],
+                pendencia: cItem.pendencia || null
             };
         })
     };
 
-    return [setorCautela]; // Retorna a lista encapsulada em um array de setores.
+    return [setorCautela];
 }
         async function carregarDadosRemotos() {
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
