@@ -6692,7 +6692,7 @@ async function getLastConferente(localOrigem) {
         return "N/D (Erro de consulta)";
     }
 }
-            async function iniciarDevolucaoCautela(cautelaId, destinatarioNome) {
+            async function iniciarDevolucaoCautela(cautelaId, ultimoConferenteNome) {
     const btnDevolver = document.getElementById('btn-devolver-cautela');
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     if (btnDevolver) btnDevolver.disabled = true;
@@ -6701,32 +6701,40 @@ async function getLastConferente(localOrigem) {
         const militarCompleto = currentUserData.nome_militar_completo;
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
 
-        // Busca o UID do recebedor (Último Conferente)
-        const novoRecebedorUid = await findUidByName(destinatarioNome);
+        // Busca o UID do Usuário C (o novo recebedor)
+        const ucUid = await findUidByName(ultimoConferenteNome);
 
-        if (!novoRecebedorUid) {
-            throw new Error(`Não foi possível localizar o ID de sistema para: ${destinatarioNome}.`);
+        if (!ucUid) {
+            throw new Error(`Não foi possível localizar o ID de sistema para: ${ultimoConferenteNome}.`);
         }
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
             if (!cautelaDoc.exists || cautelaDoc.data().status !== 'RECEBIDA') {
-                throw new Error("Cautela não está pronta para devolução.");
+                throw new Error("A cautela não está em sua posse confirmada para ser devolvida.");
             }
             
             transaction.update(cautelaRef, { 
                 status: 'DEVOLUÇÃO', 
                 timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
-                reversor: currentUserData.nome_guerra, 
+                
+                // Quem está devolvendo (Usuário B)
+                reversor_uid: firebase.auth().currentUser.uid,
                 militar_completo_reversor: militarCompleto,
-                recebedor_uid: novoRecebedorUid, // 🛑 Aqui o UID do Gestor entra no jogo
-                recebedor_nome_estatico: destinatarioNome 
+                
+                // 🛑 A POSSE DIGITAL PULA PARA O USUÁRIO C 🛑
+                // Atualizamos o 'destinatario_uid' para que o Dashboard do Usuário C mostre o card
+                destinatario_uid: ucUid, 
+                destinatario: ultimoConferenteNome 
             });
         });
 
-        alert(`✅ Cautela enviada para conferência de ${destinatarioNome}.`);
+        alert(`✅ Cautela enviada para conferência de ${ultimoConferenteNome}.`);
         if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
+        if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
+
     } catch (error) {
+        console.error("Erro ao iniciar devolução:", error);
         alert(`Erro: ${error.message}`);
         if (btnDevolver) btnDevolver.disabled = false;
     }
