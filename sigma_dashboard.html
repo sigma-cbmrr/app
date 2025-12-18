@@ -6227,7 +6227,7 @@ async function showCautelaDetails(cautelaId) {
     const btnDevolver = document.getElementById('btn-devolver-cautela');
     const btnConfirmarDevolucao = document.getElementById('btn-confirmar-devolucao');
     
-    // Reset da UI
+    // Reset da UI e abertura do Modal
     document.getElementById('modal-cautela-id').textContent = cautelaId;
     document.getElementById('modal-status').textContent = 'Carregando...';
     modal.style.display = 'flex';
@@ -6235,32 +6235,16 @@ async function showCautelaDetails(cautelaId) {
     if (btnDevolver) btnDevolver.style.display = 'none';
     if (btnConfirmarDevolucao) btnConfirmarDevolucao.style.display = 'none';
 
-    const modalDestOriginal = document.getElementById('modal-destinatario-original');
-    const modalDestAtual = document.getElementById('modal-destinatario-atual');
-    const modalEmitente = document.getElementById('modal-emitente');
-
-    if (modalDestOriginal) modalDestOriginal.textContent = 'Buscando...';
-    if (modalDestAtual) modalDestAtual.textContent = 'Buscando...';
-    if (modalEmitente) modalEmitente.textContent = 'Buscando...';
-    
-    document.getElementById('modal-local-origem').textContent = '';
-    document.getElementById('modal-data-emissao').textContent = '';
-    document.getElementById('modal-obs-emissao').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    document.getElementById('modal-itens-cautela').innerHTML = '<li style="text-align:center;">Carregando itens...</li>';
-
     try {
         const docRef = db.collection('cautelas_abertas').doc(cautelaId);
         const doc = await docRef.get();
-        
-        if (!doc.exists) {
-            alert(`Erro: Cautela ID ${cautelaId} não encontrada.`);
-            modal.style.display = 'none';
-            return;
-        }
+        if (!doc.exists) return alert("Erro: Cautela não encontrada.");
 
         let cautela = doc.data(); 
         const currentStatus = cautela.status || 'N/D';
+        const meuUid = firebase.auth().currentUser.uid; // Usamos o UID para todas as comparações
 
+        // --- RESOLUÇÃO DE NOMES PARA EXIBIÇÃO NO MODAL ---
         const getUpdatedName = async (uid, fallbackName) => {
              if (uid) {
                 const userData = await getUserInfoByUid(uid);
@@ -6269,73 +6253,65 @@ async function showCautelaDetails(cautelaId) {
             return fallbackName || 'N/D';
         };
 
-        // Resolução de Nomes
-        const emitenteDisplay = currentStatus === 'ABERTA' ? await getUpdatedName(cautela.emitente_uid, cautela.emitente) : cautela.emitente;
-        const destOriginalDisplay = (currentStatus === 'ABERTA' && cautela.destinatario_original_uid) ? await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original) : (cautela.destinatario_original || 'N/D');
-        const destinatarioAtualDisplay = currentStatus === 'CONCLUÍDA' ? (cautela.destinatario || 'N/D') : await getUpdatedName(cautela.destinatario_uid, cautela.destinatario);
+        const emitenteDisplay = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
+        const destOriginalDisplay = await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original_nome);
+        const destinatarioAtualDisplay = cautela.destinatario_uid ? await getUpdatedName(cautela.destinatario_uid, cautela.destinatario) : "Aguardando Recebimento";
 
-        const dataEmissao = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
-
-        if (modalEmitente) modalEmitente.textContent = emitenteDisplay;
-        if (modalDestOriginal) modalDestOriginal.textContent = destOriginalDisplay;
-        if (modalDestAtual) modalDestAtual.textContent = destinatarioAtualDisplay;
-
+        document.getElementById('modal-emitente').textContent = emitenteDisplay;
+        document.getElementById('modal-destinatario-original').textContent = destOriginalDisplay;
+        document.getElementById('modal-destinatario-atual').textContent = destinatarioAtualDisplay;
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
-        document.getElementById('modal-data-emissao').textContent = dataEmissao;
-        document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação no momento da emissão.';
-        
+        document.getElementById('modal-data-emissao').textContent = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
+        document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação.';
+        document.getElementById('modal-status').textContent = `Status: ${currentStatus}`;
+
+        // Renderização da lista de itens (Mantida)
         const itensList = document.getElementById('modal-itens-cautela');
         itensList.innerHTML = '';
-        
-        if (cautela.itens && cautela.itens.length > 0) {
+        if (cautela.itens) {
             cautela.itens.forEach((item, idx) => {
                 const li = document.createElement('li');
-                const nomeItem = item.nome || 'Item sem nome';
-                const qtdOuTomb = item.tombamento ? `(Tombamento: <strong>${item.tombamento}</strong>)` : `(Quantidade: <strong>${item.quantidade}</strong>)`;
-                
-                li.innerHTML = `<span style="font-weight: 500;">${idx + 1}. ${nomeItem}</span> <span style="font-size: 0.9em; color: #555;">${qtdOuTomb}</span>`;
-                li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 5px; border-bottom: 1px solid #eee;";
-                if (idx % 2 !== 0) li.style.backgroundColor = '#f9f9f9';
+                li.style.cssText = "display:flex; justify-content:space-between; padding:5px; border-bottom:1px solid #eee;";
+                li.innerHTML = `<span>${idx + 1}. ${item.nome}</span> <span>${item.tombamento ? 'TB: ' + item.tombamento : 'QTD: ' + item.quantidade}</span>`;
                 itensList.appendChild(li);
             });
-        } else {
-            itensList.innerHTML = '<li style="text-align:center; color:red;">Nenhum item encontrado nesta cautela.</li>';
         }
 
-        const militarCompleto = currentUserData.nome_militar_completo;
-        const modalStatusElement = document.getElementById('modal-status');
-        
-        // Lógica de Controle de Botões
-        if (destinatarioAtualDisplay === militarCompleto && currentStatus === 'ABERTA') {
+        // --- LÓGICA DE EXIBIÇÃO DE BOTÕES BASEADA EM UID ---
+
+        // 1. Botão RECEBER (Quando a cautela acabou de ser emitida)
+        // Se status é ABERTA e eu sou o DESTINATÁRIO ORIGINAL
+        if (currentStatus === 'ABERTA' && cautela.destinatario_original_uid === meuUid) {
             if (btnReceber) {
                 btnReceber.style.display = 'block';
-                btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
+                btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId);
             }
-            modalStatusElement.textContent = `Status: ${currentStatus}`;
-        } else if (destinatarioAtualDisplay === militarCompleto && currentStatus === 'DEVOLUÇÃO') {
-            if (btnConfirmarDevolucao) {
-                btnConfirmarDevolucao.style.display = 'block';
-                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, destinatarioAtualDisplay);
-            }
-            modalStatusElement.innerHTML = `Status: <span style="color:#d39e00; font-weight:bold;">DEVOLUÇÃO</span>`;
-        } else if (destinatarioAtualDisplay === militarCompleto && currentStatus === 'RECEBIDA') {
+        } 
+        
+        // 2. Botão DEVOLVER (Quando eu já aceitei e o material está comigo)
+        // Se status é RECEBIDA e eu sou o DETENTOR ATUAL
+        else if (currentStatus === 'RECEBIDA' && cautela.destinatario_uid === meuUid) {
             const ultimoConferente = await getLastConferente(cautela.local_origem);
             if (btnDevolver) {
                 btnDevolver.style.display = 'block';
-                // CORREÇÃO APLICADA AQUI: Chamada da função de devolução restaurada
-                btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente); 
+                btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente);
             }
-            modalStatusElement.innerHTML = `Status: ${currentStatus}<br><span style="font-size:0.8em; color:#0d47a1;">Devolver para: <strong>${ultimoConferente}</strong></span>`;
-        } else {
-            modalStatusElement.textContent = `Status: ${currentStatus}`;
         }
-        
+
+        // 3. Botão CONFIRMAR DEVOLUÇÃO (Quando alguém me devolveu o material)
+        // Se status é DEVOLUÇÃO e eu sou o NOVO DESTINATÁRIO (Usuário C)
+        else if (currentStatus === 'DEVOLUÇÃO' && cautela.destinatario_uid === meuUid) {
+            if (btnConfirmarDevolucao) {
+                btnConfirmarDevolucao.style.display = 'block';
+                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, currentUserData.nome_militar_completo);
+            }
+        }
+
     } catch (e) {
-        console.error("Erro ao carregar detalhes:", e);
+        console.error("Erro no modal de detalhes:", e);
         document.getElementById('modal-status').textContent = `Status: ERRO`;
     }
 }
-
 function iniciarRecebimentoCautela(cautelaId) {
     // 1. Fecha o modal de detalhes
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
