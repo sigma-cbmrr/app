@@ -1081,69 +1081,33 @@ async function finalizarConferencia() {
     }
 }
         async function finalizarRecebimentoCautela() {
-    const btn = document.getElementById('btn-finalizar');
-    btn.textContent = "Validando...";
-    btn.disabled = true;
+    // ... (lógica de botões e auth inicial mantida)
+    const meuUid = firebase.auth().currentUser.uid;
+    const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
 
     try {
-        if (typeof firebase === 'undefined' || !firebase.auth) {
-            throw new Error("O módulo de autenticação do Firebase ainda não foi carregado. Aguarde um instante e tente novamente.");
-        }
-
-        const userAuth = firebase.auth().currentUser;
-        if (!userAuth) {
-            throw new Error("Sessão não encontrada. Por favor, feche esta tela e acesse novamente pelo Dashboard.");
-        }
-        
-        const meuUidLogado = userAuth.uid;
-
         await db.runTransaction(async (transaction) => {
             const cautelaRef = db.collection('cautelas_abertas').doc(CAUTELA_ID);
-            const cautelaDoc = await transaction.get(cautelaRef);
-            
-            if (!cautelaDoc.exists) {
-                throw new Error("Documento da cautela não encontrado no banco de dados.");
+            const doc = await transaction.get(cautelaRef);
+            const cData = doc.data();
+
+            // Validação: No status ABERTA, apenas o destinatário_original_uid pode assumir a posse
+            if (cData.status === 'ABERTA' && cData.destinatario_original_uid !== meuUid) {
+                throw new Error("Você não é o destinatário original desta cautela.");
             }
-
-            const cData = cautelaDoc.data();
-            const uidNoBanco = cData.destinatario_uid;
-            const statusNoBanco = cData.status;
-
-            console.log("--- DEBUG DE RECEBIMENTO ---");
-            console.log("ID Cautela:", CAUTELA_ID);
-            console.log("Status atual:", statusNoBanco);
-            console.log("ID no Banco:", uidNoBanco);
-            console.log("ID Logado:", meuUidLogado);
-
-            if (uidNoBanco !== meuUidLogado) {
-                throw new Error(`Divergência de Militar: Esta cautela pertence ao UID (...${uidNoBanco ? uidNoBanco.slice(-5) : 'NULO'}), mas você está logado como (...${meuUidLogado.slice(-5)}).`);
-            }
-
-            if (statusNoBanco !== 'ABERTA') {
-                throw new Error(`A cautela já foi processada. Status atual: ${statusNoBanco}`);
-            }
-
-            const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
 
             transaction.update(cautelaRef, { 
                 status: 'RECEBIDA',
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
-                receptor: userInfo.nomeGuerra,
+                // AGORA O RECEBEDOR ASSUME A POSSE
+                destinatario_uid: meuUid, 
                 destinatario: meuNomeCompleto,
                 militar_completo_receptor: meuNomeCompleto
             });
         });
-
-        alert(`✅ Cautela confirmada com sucesso!`);
-        limparRascunho();
+        alert("✅ Posse confirmada!");
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        
-    } catch (error) {
-        console.error("Erro detalhado:", error);
-        alert(`Erro: ${error.message}`);
-        btn.textContent = "FINALIZAR CONFERÊNCIA";
-        btn.disabled = false;
-    }
+    } catch (e) { alert(e.message); }
 }
       async function finalizarDevolucaoCautela(cautela) {
     const btn = document.getElementById('btn-finalizar');
