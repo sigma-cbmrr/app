@@ -81,43 +81,56 @@
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
 
-    <script>
-    const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
+<script>
+    const firebaseConfig = { 
+        apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", 
+        authDomain: "sigma-cbmrr.firebaseapp.com", 
+        projectId: "sigma-cbmrr", 
+        storageBucket: "sigma-cbmrr.firebasestorage.app", 
+        messagingSenderId: "378026276038", 
+        appId: "1:378026276038:web:620dd6ff57501b1a8313c7" 
+    };
+
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
+    const auth = firebase.auth();
 
     const urlParams = new URLSearchParams(window.location.search);
     const LISTA_ID = urlParams.get('id');
     const COLECAO_LISTAS = 'listas_conferencia';
-    let MODO_OPERACAO = 'recebimento'; // Novo: 'recebimento' (padrão) ou 'devolucao'
-    let DESTINATARIO_DEVOLUCAO = null; // Novo: O último conferente que irá receber de volta.
-    // 🛑 CRÍTICO: Deve ser 'cautelaId' para coincidir com o envio do iframe
+    const COLECAO_CAUTELAS = 'cautelas_abertas';
+    
+    let MODO_OPERACAO = 'recebimento'; 
+    let DESTINATARIO_DEVOLUCAO = null; 
+    
     const CAUTELA_ID = urlParams.get('cautelaId');
     const modoParam = urlParams.get('modo');
-    
-    // 🛑 NOVO/CORRIGIDO: Captura do UID do usuário
     const USER_UID = urlParams.get('user_uid');
 
     if (modoParam === 'devolucao') {
         MODO_OPERACAO = 'devolucao';
         DESTINATARIO_DEVOLUCAO = urlParams.get('destinatarioDevolucao');
+    } else if (modoParam === 'devolucao_final') {
+        MODO_OPERACAO = 'devolucao_final';
     }
-    // 🛑 CRÍTICO: Deve estar definida
-    const COLECAO_CAUTELAS = 'cautelas_abertas';
+
     let dadosConferencia = [];
     let isCautela = !!CAUTELA_ID;
-    let infoLocal = { nome: '', posto: '' }; window.itemStatus = {};
+    let infoLocal = { nome: '', posto: '' }; 
+    window.itemStatus = {};
 
-    function getUrlParameter(n) { return (new URLSearchParams(window.location.search)).get(n) || ''; }
+    function getUrlParameter(n) { 
+        return (new URLSearchParams(window.location.search)).get(n) || ''; 
+    }
     
-    // 🛑 ATUALIZAÇÃO CRÍTICA: Adiciona o UID ao objeto userInfo
     const userInfo = { 
         postoGraduacao: getUrlParameter('posto_grad') || "ND", 
         quadro: getUrlParameter('quadro_mil') || "ND", 
         nomeGuerra: getUrlParameter('nome_guerra') || "ND",
-        uid: USER_UID || "ND" // Garante que o UID seja salvo no userInfo
+        uid: USER_UID || "ND"
     };
 
     function formatarDataSimples(timestamp) {
@@ -1073,10 +1086,14 @@ async function finalizarConferencia() {
     btn.disabled = true;
 
     try {
-        // 1. Força a verificação do usuário logado no momento exato
+        // Verifica se o Firebase Auth foi carregado corretamente
+        if (typeof firebase.auth !== 'function') {
+            throw new Error("Erro de carregamento: Módulo de Autenticação não encontrado no Iframe.");
+        }
+
         const userAuth = firebase.auth().currentUser;
         if (!userAuth) {
-            throw new Error("Sessão expirada ou usuário não autenticado no Firebase.");
+            throw new Error("Sessão expirada ou usuário não autenticado. Por favor, faça login novamente.");
         }
         const meuUidLogado = userAuth.uid;
 
@@ -1085,27 +1102,25 @@ async function finalizarConferencia() {
             const cautelaDoc = await transaction.get(cautelaRef);
             
             if (!cautelaDoc.exists) {
-                throw new Error("Documento da cautela não encontrado no banco de dados.");
+                throw new Error("Documento da cautela não encontrado.");
             }
 
             const cData = cautelaDoc.data();
             const uidNoBanco = cData.destinatario_uid;
             const statusNoBanco = cData.status;
 
-            // 🛑 LOG DE DIAGNÓSTICO (Aparecerá no console F12)
             console.log("--- DEBUG DE RECEBIMENTO ---");
             console.log("Status no Banco:", statusNoBanco);
             console.log("UID Gravado na Cautela:", uidNoBanco);
             console.log("UID do Militar Logado:", meuUidLogado);
-            console.log("----------------------------");
 
-            // 2. VALIDAÇÃO FLEXÍVEL (Se os UIDs forem diferentes, vamos avisar exatamente quais são)
+            // Validação de Identidade
             if (uidNoBanco !== meuUidLogado) {
-                throw new Error(`Este material está destinado ao UID (...${uidNoBanco.slice(-5)}), mas você está logado com (...${meuUidLogado.slice(-5)}).`);
+                throw new Error(`Divergência de Identidade!\nA cautela está vinculada ao UID: (...${uidNoBanco ? uidNoBanco.slice(-5) : 'NULL'})\nSua sessão atual é do UID: (...${meuUidLogado.slice(-5)})`);
             }
 
             if (statusNoBanco !== 'ABERTA') {
-                throw new Error(`A cautela já foi processada (Status atual: ${statusNoBanco}).`);
+                throw new Error(`Esta cautela não pode ser recebida pois seu status é: ${statusNoBanco}`);
             }
 
             const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
@@ -1120,11 +1135,12 @@ async function finalizarConferencia() {
         });
 
         alert(`✅ Cautela confirmada com sucesso!`);
+        limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
         console.error("Erro detalhado:", error);
-        alert(`Erro ao confirmar: ${error.message}`);
+        alert(`Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
