@@ -7174,7 +7174,6 @@ function formatarTelefone(input) {
 async function queryCautelas(statusArray, role, user, field = null, type = 'personal') {
     let query = db.collection('cautelas_abertas');
 
-    // 1. Filtro por Status
     if (type === 'personal' || role === 'admin') {
         if (statusArray.length > 0) {
             query = query.where('status', 'in', statusArray);
@@ -7183,61 +7182,61 @@ async function queryCautelas(statusArray, role, user, field = null, type = 'pers
         }
     }
 
-    // 2. Filtros Específicos por Perfil/Tipo
     const militarCompleto = user.nome_militar_completo;
-    const militarUid = firebase.auth().currentUser.uid; // 🛑 NOVO: UID do militar logado
+    const militarUid = firebase.auth().currentUser.uid;
 
     if (role === 'gestor' && type === 'unit') {
-        // Lógica de monitoramento Gerencial (mantida com base em local_origem_id)
         const unitListIds = await getUnitListIds();
         if (unitListIds.length > 0 && unitListIds.length <= 10) {
             query = query.where('local_origem_id', 'in', unitListIds);
         } else {
             return [];
         }
-
     } else if (type === 'personal') {
-        // 🛑 LÓGICA CRÍTICA REESCRITA PARA USAR UID PARA POSSE 🛑
-
         if (field === 'destinatario') {
-            query = query.where('destinatario_original_uid', '==', militarUid);
-            
+            const [snapOriginal, snapAtual] = await Promise.all([
+                db.collection('cautelas_abertas')
+                    .where('destinatario_original_uid', '==', militarUid)
+                    .where('status', 'in', statusArray)
+                    .get(),
+                db.collection('cautelas_abertas')
+                    .where('destinatario_uid', '==', militarUid)
+                    .where('status', 'in', statusArray)
+                    .get()
+            ]);
+
+            let mapResult = new Map();
+            snapOriginal.forEach(doc => mapResult.set(doc.id, { id: doc.id, ...doc.data() }));
+            snapAtual.forEach(doc => mapResult.set(doc.id, { id: doc.id, ...doc.data() }));
+
+            return Array.from(mapResult.values()).sort((a, b) => 
+                (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0)
+            );
+
         } else if (field === 'emitente') {
-            // Cautelas Emitidas: Filtra pelo UID (imutável)
-            query = query.where('emitente_uid', '==', militarUid); 
-
+            query = query.where('emitente_uid', '==', militarUid);
         } else if (field === 'receptor_final_completo') {
-            // Cautelas Históricas Recebidas (Devolução Final)
-            query = query.where('receptor_final_completo', '==', militarCompleto); 
-
+            query = query.where('receptor_final_completo', '==', militarCompleto);
         } else if (field === 'destinatario_original') {
-            // Cautelas Históricas Pessoais (Destinatário Original)
             query = query.where('destinatario_original', '==', militarCompleto);
-        
         } else if (field === 'militar_completo_reversor') {
-            // Cautelas em trânsito (rastreio de quem enviou)
             query = query.where('militar_completo_reversor', '==', militarCompleto);
         }
     }
-    
-    // 3. Execução e Ordenação
+
     try {
         const snapshot = await query.orderBy('timestamp_emissao', 'desc').get();
         let cautelas = [];
         snapshot.forEach(doc => {
             const cautela = { id: doc.id, ...doc.data() };
-            
-            // Filtro na Memória para Gestor Monitoramento (Unit)
             if (role === 'gestor' && type === 'unit' && !statusArray.includes(cautela.status)) {
-                return; // Ignora se o status não estiver na lista (necessário por causa do duplo 'in')
+                return;
             }
-
             cautelas.push(cautela);
         });
         return cautelas;
-        
     } catch (error) {
-        console.error("Erro na consulta de cautelas. Verifique se o índice está criado no Firestore (destinatario_uid, status, timestamp_emissao):", error);
+        console.error("Erro na consulta de cautelas:", error);
         throw error;
     }
 }
