@@ -5941,127 +5941,56 @@ function getSelectedCautelaItemsData() {
         // Localização: Aproximadamente linha 1197
 // A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
 
-async function iniciarCautelaProcesso() {
-    const btnIniciar = document.getElementById('btn-iniciar-cautela');
-    btnIniciar.disabled = true;
-    btnIniciar.textContent = 'Processando Transação...';
-
-    const destinatarioNomeCompleto = document.getElementById('cautela-destinatario').value.trim();
-    // NOVO: Captura o UID/Doc ID do destinatário
-    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value.trim(); 
-
-    const localOrigem = document.getElementById('cautela-local-origem').value;
-    const obsRaw = document.getElementById('cautela-obs').value.trim();
-    const itensParaCautela = getSelectedCautelaItemsData();
-    const listaId = await getListaIdFromLocalName(localOrigem);
-    
-    // NOVO: Captura o UID do emitente (você)
+async function iniciarCautelaProcesso(cautelaData) {
     const emitenteUid = firebase.auth().currentUser.uid;
-    const emitenteNomeCompleto = currentUserData.nome_militar_completo; // Nome atual do emitente
-
-    if (!destinatarioUid || itensParaCautela.length === 0 || !listaId) {
-        alert('Falha na validação dos dados. Selecione um destinatário válido e itens.');
-        updateCautelaItemCount(); 
-        return;
-    }
-
+    const destinatarioNome = cautelaData.destinatario;
+    
     try {
-        await db.runTransaction(async (transaction) => {
-            
-            // 1. FASE DE LEITURA
-            const configRef = db.collection('config_geral').doc('contadores');
-            const listaMestraRef = db.collection('listas_conferencia').doc(listaId);
-            
-            const configDoc = await transaction.get(configRef);
-            const listaMestraDoc = await transaction.get(listaMestraRef);
-            
-            if (!configDoc.exists) throw new Error("Documento de contadores não encontrado!");
-            if (!listaMestraDoc.exists) throw new Error("Lista Mestra de Conferência não encontrada!");
-            
-            // 2. FASE DE PROCESSAMENTO
-            let novoContador = (configDoc.data().cautela_seq || 0) + 1;
-            const cautelaIdSequencial = `CAUTELA-${String(novoContador).padStart(6, '0')}`;
-            
-            let listaMestra = JSON.parse(JSON.stringify(listaMestraDoc.data().list));
-            
-            const totalItensMovimentados = itensParaCautela.reduce((sum, item) => {
-                return sum + item.quantidade;
-            }, 0);
-            const dataEmissao = new Date().toISOString().split('T')[0];
-            
-            // LÓGICA DE CARIMBO (Mantida)
-            for (const cItem of itensParaCautela) {
-                
-                if (cItem.tipo === 'single') {
-                    let mItem = findItemInList(listaMestra, cItem.id_base);
-                    
-                    if (mItem) {
-                        mItem.cautelas = mItem.cautelas || [];
-                        mItem.cautelas.push({
-                            id: cautelaIdSequencial,
-                            destinatario: destinatarioNomeCompleto, // MANTÉM NOME NO CARIMBO
-                            quantidade: cItem.quantidade,
-                            data: dataEmissao
-                        });
-                    }
-                }
-                
-                else if (cItem.tipo === 'multi') {
-                    let mItem = findItemByTombamento(listaMestra, cItem.tombamento);
-                    if (mItem && mItem.tombamentos) {
-                        const tombIndex = mItem.tombamentos.findIndex(tomb => tomb.tomb === cItem.tombamento);
-                        if (tombIndex > -1) {
-                            if (mItem.tombamentos[tombIndex].cautela) {
-                                throw new Error(`O tombamento ${cItem.tombamento} do item ${mItem.nome} já está cautelado.`);
-                            }
-                            
-                            mItem.tombamentos[tombIndex] = {
-                                ...mItem.tombamentos[tombIndex], 
-                                cautela: { 
-                                    id: cautelaIdSequencial,
-                                    destinatario: destinatarioNomeCompleto, // MANTÉM NOME NO CARIMBO
-                                    data: dataEmissao
-                                }
-                            };
-                        }
-                    }
-                }
-            }
-            
-            // Dados da Cautela Ativa (Documento a ser criado)
-            const cautelaData = {
-                cautela_id: cautelaIdSequencial,
-                // 🛑 CORREÇÃO CRÍTICA 1: Salva o ID e o Nome ATUAL do Emitente
-                emitente_uid: emitenteUid,
-                emitente: emitenteNomeCompleto, 
+        const destinatarioUid = await findUidByName(destinatarioNome);
 
-                // 🛑 CORREÇÃO CRÍTICA 2: Salva o ID e o Nome ATUAL do Destinatário
-                destinatario_uid: destinatarioUid,
-                destinatario: destinatarioNomeCompleto, 
-                destinatario_original: destinatarioNomeCompleto, 
-                
-                local_origem: localOrigem,
-                local_origem_id: listaId,
-                observacoes_emissao: obsRaw,
-                timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
-                status: 'ABERTA', 
-                itens: itensParaCautela,
-            };
-            // 3. FASE DE ESCRITA
-            transaction.update(configRef, { cautela_seq: novoContador });
-            transaction.set(db.collection('cautelas_abertas').doc(cautelaIdSequencial), cautelaData);
-            transaction.update(listaMestraRef, { list: listaMestra });
-            
-            alert(`✅ Cautela ${cautelaIdSequencial} emitida com sucesso! Total de ${totalItensMovimentados} itens movimentados para ${destinatarioNomeCompleto}.`);
-        }); 
+        if (!destinatarioUid) {
+            throw new Error(`Militar ${destinatarioNome} não encontrado no sistema para vincular o ID.`);
+        }
 
-        // A transação foi bem-sucedida.
-        showMainMenu(); 
+        const novaCautela = {
+            cautela_id: cautelaData.id,
+            status: 'ABERTA',
+            timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
+            
+            emitente: currentUserData.nome_militar_completo,
+            emitente_uid: emitenteUid,
+            
+            destinatario_original: destinatarioNome,
+            destinatario_original_uid: destinatarioUid,
+            
+            destinatario: destinatarioNome, 
+            destinatario_uid: destinatarioUid, 
+            
+            recebedor: destinatarioNome, 
+            recebedor_uid: destinatarioUid,
+
+            local_origem: cautelaData.local_origem,
+            local_origem_id: cautelaData.local_origem_id,
+            itens: cautelaData.itens,
+            observacoes_emissao: cautelaData.observacoes || ""
+        };
+
+        const batch = db.batch();
         
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaData.id);
+        batch.set(cautelaRef, novaCautela);
+
+        await batch.commit();
+
+        if (typeof carimbarListaMestra === 'function') {
+            await carimbarListaMestra(cautelaData);
+        }
+
+        return true;
     } catch (error) {
-        console.error("Erro CRÍTICO no processo de Cautela:", error);
-        alert(`Erro ao emitir cautela. Nenhum dado foi alterado. Erro: ${error.message}`);
-        updateCautelaItemCount();
+        console.error("Erro na emissão da cautela:", error);
+        alert("Erro ao emitir: " + error.message);
+        return false;
     }
 }        /**
  * Função robusta para encontrar o objeto item (mItem) na lista mestra
