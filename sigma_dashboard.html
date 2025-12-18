@@ -5942,18 +5942,31 @@ function getSelectedCautelaItemsData() {
 // A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
 
 async function iniciarCautelaProcesso(cautelaData) {
+    // 🛑 Tratamento de Erro de entrada:
+    if (!cautelaData) {
+        console.error("Erro: O objeto cautelaData não foi fornecido.");
+        alert("Erro técnico: Dados da cautela não foram processados corretamente.");
+        return false;
+    }
+
     const emitenteUid = firebase.auth().currentUser.uid;
-    const destinatarioNome = cautelaData.destinatario;
+    // Verifica se existe a propriedade destinatario
+    const destinatarioNome = cautelaData.destinatario || ""; 
+    
+    if (!destinatarioNome) {
+        alert("Erro: Nome do destinatário não definido.");
+        return false;
+    }
     
     try {
         const destinatarioUid = await findUidByName(destinatarioNome);
 
         if (!destinatarioUid) {
-            throw new Error(`Militar ${destinatarioNome} não encontrado no sistema para vincular o ID.`);
+            throw new Error(`Militar ${destinatarioNome} não encontrado no sistema.`);
         }
 
         const novaCautela = {
-            cautela_id: cautelaData.id,
+            cautela_id: cautelaData.id || `CAUTELA-${Date.now()}`,
             status: 'ABERTA',
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             
@@ -5969,21 +5982,20 @@ async function iniciarCautelaProcesso(cautelaData) {
             recebedor: destinatarioNome, 
             recebedor_uid: destinatarioUid,
 
-            local_origem: cautelaData.local_origem,
-            local_origem_id: cautelaData.local_origem_id,
-            itens: cautelaData.itens,
+            local_origem: cautelaData.local_origem || "N/D",
+            local_origem_id: cautelaData.local_origem_id || "",
+            itens: cautelaData.itens || [],
             observacoes_emissao: cautelaData.observacoes || ""
         };
 
         const batch = db.batch();
-        
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaData.id);
+        const cautelaRef = db.collection('cautelas_abertas').doc(novaCautela.cautela_id);
         batch.set(cautelaRef, novaCautela);
 
         await batch.commit();
 
         if (typeof carimbarListaMestra === 'function') {
-            await carimbarListaMestra(cautelaData);
+            await carimbarListaMestra(novaCautela);
         }
 
         return true;
@@ -5992,7 +6004,7 @@ async function iniciarCautelaProcesso(cautelaData) {
         alert("Erro ao emitir: " + error.message);
         return false;
     }
-}        /**
+}     /**
  * Função robusta para encontrar o objeto item (mItem) na lista mestra
  * dado seu ID base.
  * @param {Array} lista - O array listaMestra.
