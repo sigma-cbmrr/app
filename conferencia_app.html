@@ -330,107 +330,127 @@
 
         function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
-    const btnFinalizar = document.getElementById('btn-finalizar');
     
-    // Remove qualquer container de itens antigo para evitar duplicidade
-    const antigoContainer = document.getElementById('conferencia-itens-container');
-    if (antigoContainer) antigoContainer.remove();
+    // Limpa setores antigos para não duplicar na tela
+    const antigos = mainContent.querySelectorAll('.setor'); 
+    antigos.forEach(el => el.remove());
 
-    // Cria o container dinamicamente
-    const container = document.createElement('div');
-    container.id = 'conferencia-itens-container';
+    let htmlSetores = ''; 
+    const setorIds = []; 
+    dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
+    window.setorIds = setorIds;
 
-    dadosConferencia.forEach(setor => {
-        const setorDiv = document.createElement('div');
-        setorDiv.className = 'setor'; // Mantendo sua classe original de CSS
-        setorDiv.dataset.id = setor.id || setor.nome;
+    dadosConferencia.forEach((setor, index) => {
+        const isFirstSetor = (index === 0); 
+        let htmlItens = ''; 
+        let totalItensNoSetor = 0;
         
-        // Criando o Header do Setor conforme seu padrão visual
-        setorDiv.innerHTML = `
-            <div class="setor-header" onclick="toggleSetor(this)">
-                <div class="setor-info">
-                    <span class="arrow">►</span>
-                    <span>${setor.nome.toUpperCase()}</span>
-                </div>
-                <div class="setor-status" data-completed="0">0/0</div>
-            </div>
-            <div class="setor-content"></div>
-        `;
-
-        const contentDiv = setorDiv.querySelector('.setor-content');
-
         setor.itens.forEach(item => {
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'item-conferencia';
-            itemDiv.dataset.id = item.id;
-            itemDiv.dataset.type = item.tipo;
-
             if (item.tipo === 'multi' && item.tombamentos) {
-                itemDiv.innerHTML = `<div class="item-label"><strong>${item.nome}</strong></div>`;
-                
-                item.tombamentos.forEach(t => {
-                    const statusId = `${item.id}-${t.tomb}`;
-                    const pendenciaTexto = getCautelaTextForReport(t);
-                    const temCautela = !!t.cautela;
+                let htmlTombamentos = '';
+                item.tombamentos.forEach(tomb => {
+                    const uid = `${item.id}-${tomb.tomb}`; 
+                    const pendenciaTexto = getCautelaTextForReport(tomb);
+                    const temCautela = !!tomb.cautela; 
 
-                    const tombDiv = document.createElement('div');
-                    tombDiv.className = 'tombamento-container';
-                    tombDiv.dataset.tomb = t.tomb;
-                    tombDiv.innerHTML = `
+                    let tombBtnHtml = '';
+                    // Lógica de Botões Original preservada
+                    if (isCautela) {
+                        tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
+                    } else if (temCautela) {
+                        tombBtnHtml = `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>`;
+                    } else {
+                        tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
+                    }
+
+                    htmlTombamentos += `
+                    <div class="tombamento-container" data-tomb="${tomb.tomb}" data-item-id="${item.id}">
                         <div class="tombamento-controls">
-                            <span>Tomb: <strong>${t.tomb}</strong></span>
-                            <div class="tombamento-options">
-                                ${temCautela ? '<span style="font-size:1.2em">🔒</span>' : `
-                                    <button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button>
-                                    <button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>
-                                `}
-                            </div>
+                            <span>Tomb.: ${tomb.tomb} ${temCautela ? '🔒' : ''}</span>
+                            <div class="tombamento-options">${tombBtnHtml}</div>
                         </div>
                         ${pendenciaTexto ? `<div class="pendencia-alert-box" data-status-type="${temCautela ? 'cautela' : 'ca'}">${pendenciaTexto}</div>` : ''}
+                        <p class="tombamento-descricao-salva"></p>
                         <div class="tombamento-obs-container">
-                            <label>Descreva a Alteração:</label>
-                            <textarea id="obs-${statusId}"></textarea>
-                            <button class="btn-salvar-alteracao" onclick="salvarTombamento(this)">Confirmar Alteração</button>
+                            <label>Descreva a alteração:</label>
+                            <textarea placeholder="Detalhe a alteração."></textarea>
+                            <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR OBSERVAÇÃO</button>
                         </div>
-                        <div class="tombamento-descricao-salva"></div>
-                    `;
-                    itemDiv.appendChild(tombDiv);
+                    </div>`;
+                    
+                    totalItensNoSetor++;
+                    window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
+
+                htmlItens += `
+                <div class="item-conferencia item-has-tombamentos" data-type="multi" data-id="${item.id}">
+                    <div class="item-header">
+                        <span class="status-icon"></span>
+                        <span class="item-label">${item.nome}</span>
+                        <span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span>
+                    </div>
+                    ${htmlTombamentos}
+                </div>`;
+
             } else {
+                // Modo Single (Quantidade)
                 const pendenciaTexto = getCautelaTextForReport(item);
                 const temCautela = item.cautelas && item.cautelas.length > 0;
 
-                itemDiv.innerHTML = `
+                let singleBtnHtml = '';
+                if (isCautela) {
+                    singleBtnHtml = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`;
+                } else if (temCautela) {
+                    singleBtnHtml = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>`;
+                } else {
+                    singleBtnHtml = `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`;
+                }
+
+                htmlItens += `
+                <div class="item-conferencia ${temCautela ? 'status-existing-alert' : ''}" data-type="single" data-id="${item.id}">
                     <div class="item-header">
-                        <div class="item-label">
-                            <span class="status-icon"></span>
-                            <strong>${item.nome}</strong>
-                        </div>
-                        <div class="item-quantidade">QTD ESPERADA: ${item.quantidadeEsperada || 1}</div>
+                        <span class="status-icon"></span>
+                        <span class="item-label">${item.nome} ${temCautela ? '🔒' : ''}</span>
+                        <span class="item-quantidade">QTD: ${item.quantidadeEsperada}</span>
                     </div>
+                    <div class="item-options">${singleBtnHtml}</div>
                     ${pendenciaTexto ? `<div class="pendencia-alert-box" data-status-type="${temCautela ? 'cautela' : 'ca'}">${pendenciaTexto}</div>` : ''}
-                    <div class="item-options">
-                        <button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A (ÍNTEGRO)</button>
-                        <button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A (ALTERAÇÃO)</button>
-                    </div>
+                    <p class="descricao-salva"></p>
                     <div class="alteracao-container">
-                        <label>Relate a alteração encontrada:</label>
-                        <textarea placeholder="Ex: Lanterna trincada, bateria fraca..."></textarea>
-                        <button class="btn-salvar-alteracao" onclick="salvarItem(this)">Confirmar Alteração</button>
+                        <label>Descreva a alteração:</label>
+                        <textarea data-id="${item.id}" placeholder="Descreva a alteração."></textarea>
+                        <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
                     </div>
-                    <div class="descricao-salva"></div>
-                `;
+                </div>`;
+                
+                totalItensNoSetor++; 
+                window.itemStatus[item.id] = { status: 'pending', obs: '' };
             }
-            contentDiv.appendChild(itemDiv);
         });
-        container.appendChild(setorDiv);
+
+        const expandedClass = isFirstSetor ? 'expanded' : ''; 
+        const arrowChar = isFirstSetor ? '▼' : '►';
+        
+        htmlSetores += `
+        <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
+            <div class="setor-header" onclick="toggleSetor(this)">
+                <div class="setor-info">
+                    <span>${setor.nome}</span>
+                    <div class="setor-status" data-completed="0">0/${totalItensNoSetor}</div>
+                </div>
+                <span class="arrow">${arrowChar}</span>
+            </div>
+            <div class="setor-content ${expandedClass}">${htmlItens}</div>
+        </div>`;
     });
 
-    // Insere o container antes do botão de finalizar dentro do main-content
-    mainContent.insertBefore(container, btnFinalizar);
+    // Inserção Original: Antes do botão finalizar
+    const btnFinalizar = mainContent.querySelector('#btn-finalizar');
+    if (btnFinalizar) {
+        btnFinalizar.insertAdjacentHTML('beforebegin', htmlSetores);
+    }
     
-    // Atualiza contadores iniciais
-    document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s));
+    updateOverallStatus();
 }
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia');
