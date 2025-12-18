@@ -1168,29 +1168,40 @@ async function finalizarConferencia() {
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
 
+    if (!isCautela || !CAUTELA_ID) {
+        alert("Erro: ID da cautela não encontrado.");
+        btn.disabled = false;
+        return;
+    }
+
     const userAuth = firebase.auth().currentUser;
-    if (!userAuth) return alert("Erro: Usuário não autenticado.");
+    if (!userAuth) {
+        alert("Erro: Sessão não encontrada. Faça login novamente.");
+        btn.disabled = false;
+        return;
+    }
     const meuUid = userAuth.uid;
+    const listaId = cautela.local_origem_id;
 
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautela.local_origem_id);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-            if (!cautelaDoc.exists) throw new Error("Cautela inexistente.");
+            if (!cautelaDoc.exists) throw new Error("Cautela não encontrada.");
 
             const cData = cautelaDoc.data();
 
-            // 🛑 VALIDAÇÃO DE SEGURANÇA POR UID
-            if (cData.status !== 'DEVOLUÇÃO' || cData.recebedor_uid !== meuUid) {
-                throw new Error("Seu UID não coincide com o recebedor designado para esta devolução.");
+            if (cData.status !== 'DEVOLUÇÃO' || cData.destinatario_uid !== meuUid) {
+                throw new Error("Você não é o recebedor autorizado para finalizar esta devolução.");
             }
 
             const listaMestraDoc = await transaction.get(listaMestraRef);
+            if (!listaMestraDoc.exists) throw new Error("Lista Mestra original não encontrada.");
+
             let listaMestra = listaMestraDoc.data().list;
 
-            // Remoção dos carimbos (desbloqueio do material)
             cautela.itens.forEach(cItem => {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
@@ -1218,19 +1229,20 @@ async function finalizarConferencia() {
                 status: 'CONCLUÍDA',
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
                 receptor_final_completo: meuNomeCompleto,
-                destinatario: meuNomeCompleto // Sobrescreve o nome para o histórico final
+                destinatario: meuNomeCompleto,
+                destinatario_uid: meuUid
             });
 
             transaction.update(listaMestraRef, { list: listaMestra });
         });
 
-        alert(`✅ Cautela finalizada e estoque restaurado!`);
+        alert(`✅ Devolução finalizada com sucesso! O material retornou ao estoque.`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        console.error(error);
-        alert(`Erro Crítico: ${error.message}`);
+        console.error("Erro ao finalizar devolução:", error);
+        alert(`Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
     }
