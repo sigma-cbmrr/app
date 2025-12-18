@@ -5941,70 +5941,89 @@ function getSelectedCautelaItemsData() {
         // Localização: Aproximadamente linha 1197
 // A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
 
-async function iniciarCautelaProcesso(cautelaData) {
-    // 🛑 Tratamento de Erro de entrada:
-    if (!cautelaData) {
-        console.error("Erro: O objeto cautelaData não foi fornecido.");
-        alert("Erro técnico: Dados da cautela não foram processados corretamente.");
-        return false;
+async function iniciarCautelaProcesso() {
+    const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    const destinatarioNome = document.getElementById('cautela-destinatario').value.trim();
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
+    const localOrigem = document.getElementById('cautela-local-origem').value;
+    const observacoes = document.getElementById('cautela-obs').value.trim();
+
+    if (!destinatarioUid || !destinatarioNome) {
+        alert("Erro: Por favor, selecione um destinatário válido da lista de sugestões.");
+        return;
     }
 
-    const emitenteUid = firebase.auth().currentUser.uid;
-    // Verifica se existe a propriedade destinatario
-    const destinatarioNome = cautelaData.destinatario || ""; 
-    
-    if (!destinatarioNome) {
-        alert("Erro: Nome do destinatário não definido.");
-        return false;
+    if (!localOrigem) {
+        alert("Erro: Selecione o local de origem dos materiais.");
+        return;
     }
-    
+
+    const itensSelecionados = getSelectedCautelaItemsData();
+    if (itensSelecionados.length === 0) {
+        alert("Erro: Selecione ao menos um item para cautelar.");
+        return;
+    }
+
+    btnIniciar.disabled = true;
+    btnIniciar.textContent = "PROCESSANDO...";
+
     try {
-        const destinatarioUid = await findUidByName(destinatarioNome);
+        const emitenteUid = firebase.auth().currentUser.uid;
+        const cautelaId = `CAUTELA-${gerarNovoId()}`;
 
-        if (!destinatarioUid) {
-            throw new Error(`Militar ${destinatarioNome} não encontrado no sistema.`);
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const rotas = rotasDoc.data() || {};
+        let localOrigemId = null;
+        for (const [id, info] of Object.entries(rotas)) {
+            if (`${info.posto} - ${info.nome}` === localOrigem) {
+                localOrigemId = id;
+                break;
+            }
         }
 
         const novaCautela = {
-            cautela_id: cautelaData.id || `CAUTELA-${Date.now()}`,
+            cautela_id: cautelaId,
             status: 'ABERTA',
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
-            
             emitente: currentUserData.nome_militar_completo,
             emitente_uid: emitenteUid,
-            
             destinatario_original: destinatarioNome,
             destinatario_original_uid: destinatarioUid,
-            
-            destinatario: destinatarioNome, 
-            destinatario_uid: destinatarioUid, 
-            
-            recebedor: destinatarioNome, 
+            destinatario: destinatarioNome,
+            destinatario_uid: destinatarioUid,
+            recebedor: destinatarioNome,
             recebedor_uid: destinatarioUid,
-
-            local_origem: cautelaData.local_origem || "N/D",
-            local_origem_id: cautelaData.local_origem_id || "",
-            itens: cautelaData.itens || [],
-            observacoes_emissao: cautelaData.observacoes || ""
+            local_origem: localOrigem,
+            local_origem_id: localOrigemId,
+            itens: itensSelecionados,
+            observacoes_emissao: observacoes
         };
 
         const batch = db.batch();
-        const cautelaRef = db.collection('cautelas_abertas').doc(novaCautela.cautela_id);
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         batch.set(cautelaRef, novaCautela);
-
         await batch.commit();
 
         if (typeof carimbarListaMestra === 'function') {
-            await carimbarListaMestra(novaCautela);
+            await carimbarListaMestra({
+                id: cautelaId,
+                destinatario: destinatarioNome,
+                local_origem_id: localOrigemId,
+                itens: itensSelecionados
+            });
         }
 
-        return true;
+        alert(`✅ Cautela ${cautelaId} enviada com sucesso para ${destinatarioNome}!`);
+        showMainMenu();
+        if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
+
     } catch (error) {
         console.error("Erro na emissão da cautela:", error);
         alert("Erro ao emitir: " + error.message);
-        return false;
+        btnIniciar.disabled = false;
+        btnIniciar.textContent = "Tentar Novamente";
     }
-}     /**
+} /**
  * Função robusta para encontrar o objeto item (mItem) na lista mestra
  * dado seu ID base.
  * @param {Array} lista - O array listaMestra.
