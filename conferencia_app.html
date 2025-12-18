@@ -1176,7 +1176,6 @@ async function finalizarConferencia() {
         return;
     }
 
-    // Pega o UID do militar logado no momento (O Gestor/Recebedor)
     const meuUid = firebase.auth().currentUser ? firebase.auth().currentUser.uid : userInfo.uid;
     const listaId = cautela.local_origem_id;
 
@@ -1186,16 +1185,11 @@ async function finalizarConferencia() {
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-            
             if (!cautelaDoc.exists) throw new Error("Cautela não encontrada.");
 
             const cData = cautelaDoc.data();
-            
-            /**
-             * VALIDAÇÃO NOVA:
-             * Agora verificamos se o UID de quem está com o app aberto 
-             * coincide com o 'recebedor_uid' gravado na fase de devolução.
-             */
+
+            // Validação pelo novo campo de papel: recebedor_uid
             if (cData.status !== 'DEVOLUÇÃO' || cData.recebedor_uid !== meuUid) {
                 throw new Error("Esta devolução não está direcionada ao seu UID ou já foi processada.");
             }
@@ -1205,7 +1199,6 @@ async function finalizarConferencia() {
 
             let listaMestra = listaMestraDoc.data().list;
 
-            // Lógica de retirada de carimbos da Lista Mestra
             cautela.itens.forEach(cItem => {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
@@ -1229,34 +1222,22 @@ async function finalizarConferencia() {
 
             const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
 
-            /**
-             * ATUALIZAÇÃO FINAL:
-             * Aqui mantemos o histórico e encerramos o ciclo.
-             */
             transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA',
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
-                
-                // O campo 'recebedor' (string) agora guarda o nome final
                 recebedor: meuNomeCompleto,
-                
-                // Gravamos quem foi o receptor final para auditoria
-                receptor_final_completo: meuNomeCompleto,
-                
-                // Opcional: Você pode manter o recebedor_uid ou limpá-lo, 
-                // já que o status CONCLUÍDA encerra a exibição no dashboard.
-                posse_atual_uid: null 
+                receptor_final_completo: meuNomeCompleto
             });
 
             transaction.update(listaMestraRef, { list: listaMestra });
         });
 
-        alert(`✅ Devolução da Cautela ${CAUTELA_ID} confirmada com sucesso.`);
+        alert(`✅ Cautela ${CAUTELA_ID} finalizada com sucesso.`);
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
         
     } catch (error) {
-        console.error("Erro CRÍTICO ao confirmar recebimento:", error);
+        console.error("Erro CRÍTICO:", error);
         alert(`Erro: ${error.message}`);
         btn.textContent = "ERRO AO FINALIZAR";
         btn.disabled = false;
