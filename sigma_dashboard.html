@@ -5948,65 +5948,40 @@ async function iniciarCautelaProcesso() {
     const localOrigem = document.getElementById('cautela-local-origem').value;
     const observacoes = document.getElementById('cautela-obs').value.trim();
 
-    if (!destinatarioUid || !destinatarioNome) {
-        alert("Erro: Selecione um destinatário válido na lista.");
-        return;
-    }
-
-    const itensSelecionados = getSelectedCautelaItemsData();
-    if (itensSelecionados.length === 0) return alert("Selecione ao menos um item.");
-
-    btnIniciar.disabled = true;
-    btnIniciar.textContent = "GRAVANDO...";
+    if (!destinatarioUid) return alert("Selecione um destinatário válido.");
 
     try {
         const emitenteUid = firebase.auth().currentUser.uid;
         const cautelaId = `CAUTELA-${gerarNovoId()}`;
 
-        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-        const rotas = rotasDoc.data() || {};
-        let localOrigemId = null;
-        for (const [id, info] of Object.entries(rotas)) {
-            if (`${info.posto} - ${info.nome}` === localOrigem) {
-                localOrigemId = id;
-                break;
-            }
-        }
-
         const novaCautela = {
             cautela_id: cautelaId,
             status: 'ABERTA',
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
-            emitente: currentUserData.nome_militar_completo,
             emitente_uid: emitenteUid,
-            destinatario_original: destinatarioNome, // Registro visual
-            destinatario_original_uid: destinatarioUid, // Registro imutável
-            destinatario: destinatarioNome,
-            destinatario_uid: destinatarioUid,
-            recebedor_uid: null, // Vazio na emissão conforme nova lógica
+            emitente_nome_estatico: currentUserData.nome_militar_completo,
+            
+            // O ALVO ORIGINAL
+            destinatario_original_uid: destinatarioUid, 
+            destinatario_original_nome: destinatarioNome,
+
+            // O RECEBEDOR ATUAL (Fica vazio na emissão conforme sua regra)
+            destinatario_uid: null, 
+            destinatario: null, 
+
             local_origem: localOrigem,
-            local_origem_id: localOrigemId,
-            itens: itensSelecionados,
+            local_origem_id: await getListaIdFromLocalName(localOrigem),
+            itens: getSelectedCautelaItemsData(),
             observacoes_emissao: observacoes
         };
 
         await db.collection('cautelas_abertas').doc(cautelaId).set(novaCautela);
+        if (typeof carimbarListaMestra === 'function') await carimbarListaMestra(novaCautela);
 
-        if (typeof carimbarListaMestra === 'function') {
-            await carimbarListaMestra({
-                id: cautelaId,
-                destinatario: destinatarioNome,
-                local_origem_id: localOrigemId,
-                itens: itensSelecionados
-            });
-        }
-
-        alert(`✅ Cautela enviada com sucesso!`);
+        alert(`✅ Cautela ${cautelaId} emitida! Aguardando recebimento.`);
         showMainMenu();
     } catch (error) {
-        console.error(error);
-        alert("Erro ao emitir: " + error.message);
-        btnIniciar.disabled = false;
+        alert("Erro: " + error.message);
     }
 }
 		
