@@ -827,12 +827,13 @@
     return [setorCautela]; // Retorna a lista encapsulada em um array de setores.
 }
         async function carregarDadosRemotos() {
-    // Se for uma cautela, o ID base é o CAUTELA_ID. Caso contrário, é o LISTA_ID.
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
     const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
     
-    if (!ID_ALVO) { document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>";
-        return; }
+    if (!ID_ALVO) { 
+        document.getElementById('loading-message').innerHTML = "<span style='color:red'>Erro: ID não encontrado.</span>";
+        return; 
+    }
         
     document.getElementById('loading-message').innerHTML = "Conectando...";
     try {
@@ -840,11 +841,8 @@
         if (!doc.exists) throw new Error("Documento não encontrado.");
         
         const data = doc.data();
-        
-        // Estrutura de dados: 
         dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
         
-        // Informações do Local/Título:
         const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "DESCONHECIDO");
         const postoLocal = isCautela ? `Destinatário: ${data.destinatario}` : (data.posto || "Geral");
         
@@ -853,29 +851,24 @@
         document.getElementById('local-posto-info').innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
         document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.posto} ${infoLocal.nome}`;
 
-        if (isCautela) { // Apenas executa para cautelas
+        if (isCautela) {
             const h1Element = document.querySelector('.container h1');
             const subtituloElement = document.querySelector('.container .subtitulo');
             const btnFinalizar = document.getElementById('btn-finalizar');
 
-            // 🛑 Lógica do NOVO modo: CONFERÊNCIA DE RECEBIMENTO DE DEVOLUÇÃO (Dono Provisório)
             if (MODO_OPERACAO === 'devolucao_final') {
                 h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO DE DEVOLUÇÃO';
-                
-                // Exibe o militar que enviou (reversor), que está no campo 'reversor' da cautela (data)
                 const reversor = data.militar_completo_reversor || 'Militar Anterior';
                 subtituloElement.innerHTML = `Recebendo a Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> do Militar: <br> <strong>${reversor}</strong>`;
                 
                 btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO DA DEVOLUÇÃO';
-                btnFinalizar.onclick = () => (data); // Chamada à nova função
+                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
                 
                 btnFinalizar.classList.add('btn-sync'); 
                 btnFinalizar.classList.remove('btn-action', 'btn-delete');
                 
-            // Lógica do modo DEVOLUÇÃO (Antigo fluxo Usuário A, que agora não deveria ser conferido)
             } else if (MODO_OPERACAO === 'devolucao') {
                 h1Element.textContent = 'CONFERÊNCIA DE DEVOLUÇÃO (TRANSIÇÃO)';
-                
                 subtituloElement.innerHTML = `Devolução da Cautela <span style="font-weight: bold;">${CAUTELA_ID}</span> para: <br> <strong>${DESTINATARIO_DEVOLUCAO}</strong>`;
                 
                 btnFinalizar.textContent = 'FINALIZAR DEVOLUÇÃO E CONCLUIR';
@@ -884,7 +877,6 @@
                 btnFinalizar.classList.remove('btn-action');
                 
             } else {
-                // Lógica de Recebimento (padrão)
                 h1Element.textContent = 'CONFERÊNCIA DE RECEBIMENTO';
                 subtituloElement.textContent = `Recebimento da Cautela ${CAUTELA_ID}`;
                 
@@ -896,9 +888,14 @@
         }
         
         document.getElementById('loading-message').innerHTML = "Renderizando...";
-        renderizarConferencia(); updateHeaderInfo(); updateOverallStatus(); restaurarRascunho();
-        document.getElementById('loading-message').style.display='none'; document.getElementById('main-content').style.display='block';
-    } catch (e) { document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
+        renderizarConferencia(); 
+        updateHeaderInfo(); 
+        updateOverallStatus(); 
+        restaurarRascunho();
+        document.getElementById('loading-message').style.display='none'; 
+        document.getElementById('main-content').style.display='block';
+    } catch (e) { 
+        document.getElementById('loading-message').innerHTML = "Erro: " + e.message;
     }
 }
         function getCautelaTextForReport(itemOuTomb) {
@@ -1206,16 +1203,23 @@ async function finalizarConferencia() {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
-                        if (mItem.id === (cItem.id_base || cItem.id)) {
-                            if (cItem.tipo === 'single') {
-                                mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
-                            } else if (cItem.tipo === 'multi' && mItem.tombamentos) {
-                                mItem.tombamentos = mItem.tombamentos.map(tomb => {
-                                    if (tomb.tomb === cItem.tombamento && tomb.cautela && (tomb.cautela.id === CAUTELA_ID || tomb.cautela.cautela_id === CAUTELA_ID)) {
-                                        delete tomb.cautela;
-                                    }
-                                    return tomb;
-                                });
+                        const idMestra = mItem.id_base || mItem.id;
+                        const idCautelaItem = cItem.id_base || cItem.id;
+
+                        if (idMestra === idCautelaItem) {
+                            if (cItem.tombamento) {
+                                if (mItem.tombamentos) {
+                                    mItem.tombamentos = mItem.tombamentos.map(t => {
+                                        if (t.tomb === cItem.tombamento) {
+                                            delete t.cautela;
+                                        }
+                                        return t;
+                                    });
+                                }
+                            } else {
+                                mItem.cautelas = (mItem.cautelas || []).filter(c => 
+                                    (c.id !== CAUTELA_ID && c.cautela_id !== CAUTELA_ID)
+                                );
                             }
                         }
                         return mItem;
@@ -1243,7 +1247,7 @@ async function finalizarConferencia() {
     } catch (error) {
         console.error("Erro ao finalizar devolução:", error);
         alert(`Erro: ${error.message}`);
-        btn.textContent = "ERRO AO FINALIZAR";
+        btn.textContent = "FINALIZAR RECEBIMENTO DA DEVOLUÇÃO";
         btn.disabled = false;
     }
 }
