@@ -283,8 +283,7 @@
             }
         }
 
-        // --- 1. FUNÇÃO PARA LER DADOS ANTIGOS (LEGADOS) ---
-const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+       const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
     const linhas = [];
     if (adminStatus) linhas.push(`[${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
     const separator = ' | + NOVA: ';
@@ -307,7 +306,7 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
     return linhas;
 };
 
-// --- 2. FUNÇÃO VISUAL ÚNICA (PERSONALIZADA, SEM HORAS E COM ÍCONE) ---
+// --- 2. FUNÇÃO VISUAL ÚNICA (PERSONALIZADA E SEM HORAS VIA REGEX) ---
 const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
     let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
     
@@ -315,7 +314,7 @@ const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs
         const militar = pendencia.quem || autorAtual || 'Militar';
         let dataFull = pendencia.data || dataAtual || '';
         
-        // Limpeza rigorosa da hora: mantém apenas o formato 00/00/0000
+        // REGEX: Captura apenas DD/MM/AAAA e ignora o resto
         const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
         const dataApenas = matchData ? matchData[0] : dataFull;
 
@@ -339,10 +338,9 @@ const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs
     return html;
 };
 
-        function renderizarConferencia() {
+// --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
+function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
-    
-    // 1. Limpeza de setores antigos
     const antigos = mainContent.querySelectorAll('.setor'); 
     antigos.forEach(el => el.remove());
 
@@ -351,185 +349,61 @@ const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs
     dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
-    // --- Função Auxiliar Interna para Montar o HTML da Pendência/Cautela ---
     const montarPendenciaHtml = (uid, pendenciaObj) => {
         if (!pendenciaObj) return '';
-        
-        // Lógica para Cautela Ativa (Estilo Laranja)
         if (pendenciaObj.status === "CAUTELA_ATV") {
-            return `<div class="pendencia-alert-box status-cautela" 
-                        style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left;"
-                        data-status-type="cautela"> 
-                            <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;">
-                                <i class="fas fa-boxes"></i> ${pendenciaObj.quem}
-                            </div>
-                            <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap;"> 
-                                <i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i>${pendenciaObj.obs}
-                            </p>
-                        </div>`;
+            return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left;" data-status-type="cautela"><div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;"><i class="fas fa-boxes"></i> ${pendenciaObj.quem}</div><p style="margin: 0; font-size: 0.9em; white-space: pre-wrap;"><i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i>${pendenciaObj.obs}</p></div>`;
         }
         
-        // Lógica para Pendência C/A (Usa o padrão visual personalizado que criamos)
-        // A função gerarHtmlVisual agora garante que a hora não seja exibida
         const htmlFormatado = gerarHtmlVisual(pendenciaObj);
         
-        // Prepara dados para o botão 'Acrescentar'
+        // Limpa a data para o JSON do botão acrescentar também
+        let dLimpa = (typeof pendenciaObj === 'object' && pendenciaObj.data) ? (pendenciaObj.data.match(/\d{2}\/\d{2}\/\d{4}/)?.[0] || pendenciaObj.data) : '';
+        
         const dadosHistorico = JSON.stringify({ 
             obs: (typeof pendenciaObj === 'object') ? pendenciaObj.obs : pendenciaObj, 
             autor: (typeof pendenciaObj === 'object') ? pendenciaObj.quem : '', 
-            data: (typeof pendenciaObj === 'object') ? (pendenciaObj.data ? pendenciaObj.data.split(',')[0] : '') : '' 
+            data: dLimpa 
         }); 
         const safeHistorico = encodeURIComponent(dadosHistorico);
 
         if (pendenciaObj.isReadOnly) {
-            return `<div class="pendencia-alert-box" style="border-left: 3px solid #d32f2f; margin-top: 10px;">
-                        <div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>
-                        ${htmlFormatado}
-                    </div>`;
+            return `<div class="pendencia-alert-box" style="border-left: 3px solid #d32f2f; margin-top: 10px;"><div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>${htmlFormatado}</div>`;
         } else {
-            return `<div class="pendencia-alert-box">
-                        ${htmlFormatado}
-                        <div class="pendencia-actions">
-                            <button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button>
-                            <button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button>
-                        </div>
-                    </div>`;
+            return `<div class="pendencia-alert-box">${htmlFormatado}<div class="pendencia-actions"><button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button><button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
         }
     };
 
-    // 2. Construção do HTML
     dadosConferencia.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
-        let htmlItens = ''; 
-        let totalItensNoSetor = 0;
-        
+        let htmlItens = ''; let totalItensNoSetor = 0;
         setor.itens.forEach(item => {
             if (item.tipo === 'multi' && item.tombamentos) {
                 let htmlTombamentos = '';
                 item.tombamentos.forEach(tomb => {
                     const uid = `${item.id}-${tomb.tomb}`; 
                     let isCautelado = !!tomb.cautela;
-                    let tombBtnHtml = '';
-
-                    if (isCautela) {
-                        tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
-                    } else if (isCautelado) {
-                        tombBtnHtml = `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>`;
-                    } else {
-                        tombBtnHtml = `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`;
-                    }
-
-                    let alertaCautelaHtml = '';
-                    if (isCautelado && !isCautela) {
-                        alertaCautelaHtml = montarPendenciaHtml(uid, {
-                            obs: `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}`,
-                            quem: "Sistema/Cautela",
-                            status: "CAUTELA_ATV"
-                        });
-                    }
-
-                    htmlTombamentos += `
-                    <div class="tombamento-container" data-tomb="${tomb.tomb}">
-                        <div class="tombamento-controls"><span>Tomb.: ${tomb.tomb} ${isCautelado ? '🔒' : ''}</span><div class="tombamento-options">${tombBtnHtml}</div></div>
-                        ${alertaCautelaHtml}
-                        ${montarPendenciaHtml(uid, tomb.pendencia)}
-                        <p class="tombamento-descricao-salva"></p>
-                        <div class="tombamento-obs-container">
-                            <label>Descreva a alteração:</label>
-                            <textarea placeholder="Detalhe o problema..."></textarea>
-                            <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button>
-                        </div>
-                    </div>`;
-                    
-                    totalItensNoSetor++;
-                    window.itemStatus[uid] = { status: 'pending', obs: '' };
+                    let tombBtnHtml = isCautela ? `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>` : (isCautelado ? `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>` : `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`);
+                    let alertaCautelaHtml = (isCautelado && !isCautela) ? montarPendenciaHtml(uid, {obs: `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}`, quem: "Sistema/Cautela", status: "CAUTELA_ATV"}) : '';
+                    htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb} ${isCautelado ? '🔒' : ''}</span><div class="tombamento-options">${tombBtnHtml}</div></div>${alertaCautelaHtml}${montarPendenciaHtml(uid, tomb.pendencia)}<p class="tombamento-descricao-salva"></p><div class="tombamento-obs-container"><label>Descreva a alteração:</label><textarea placeholder="Detalhe..."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button></div></div>`;
+                    totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
-
-                htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}">
-                                <div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>
-                                ${htmlTombamentos}
-                              </div>`;
-
+                htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } else {
                 let hasCautela = (item.cautelas && item.cautelas.length > 0);
-                let singleBtnHtml = isCautela ? 
-                    `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` :
-                    (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : 
-                                 `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
-
-                htmlItens += `
-                <div class="item-conferencia" data-type="single" data-id="${item.id}">
-                    <div class="item-header">
-                        <span class="status-icon"></span>
-                        <span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span>
-                        <span class="item-quantidade">QTD: ${item.quantidadeEsperada || 1}</span>
-                    </div>
-                    <div class="item-options">${singleBtnHtml}</div>
-                    ${montarPendenciaHtml(item.id, item.pendencia)}
-                    <p class="descricao-salva"></p>
-                    <div class="alteracao-container">
-                        <label>Descreva a alteração:</label>
-                        <textarea placeholder="Detalhe o problema..."></textarea>
-                        <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
-                    </div>
-                </div>`;
-                
-                totalItensNoSetor++; 
-                window.itemStatus[item.id] = { status: 'pending', obs: '' };
+                let singleBtnHtml = isCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
+                htmlItens += `<div class="item-conferencia" data-type="single" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada || 1}</span></div><div class="item-options">${singleBtnHtml}</div>${montarPendenciaHtml(item.id, item.pendencia)}<p class="descricao-salva"></p><div class="alteracao-container"><label>Descreva a alteração:</label><textarea placeholder="Detalhe..."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
+                totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
             }
         });
-
-        const expandedClass = isFirstSetor ? 'expanded' : ''; 
-        const arrowChar = isFirstSetor ? '▼' : '►';
-        
-        htmlSetores += `
-        <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
-            <div class="setor-header" onclick="toggleSetor(this)">
-                <div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${totalItensNoSetor}</div></div>
-                <span class="arrow">${arrowChar}</span>
-            </div>
-            <div class="setor-content ${expandedClass}">${htmlItens}</div>
-        </div>`;
+        const exp = isFirstSetor ? 'expanded' : ''; const arr = isFirstSetor ? '▼' : '►';
+        htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${totalItensNoSetor}</div></div><span class="arrow">${arr}</span></div><div class="setor-content ${exp}">${htmlItens}</div></div>`;
     });
 
-    const btnFinalizar = mainContent.querySelector('#btn-finalizar');
-    if (btnFinalizar) {
-        btnFinalizar.insertAdjacentHTML('beforebegin', htmlSetores);
-    }
-    
+    const btnFin = mainContent.querySelector('#btn-finalizar');
+    if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
     updateOverallStatus();
 }
-
-// ATUALIZAÇÃO DA CONSTANTE PARA REMOVER A HORA EM QUALQUER CIRCUNSTÂNCIA
-const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
-    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
-    
-    if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
-        const militar = pendencia.quem || autorAtual || 'Militar';
-        // Garante que se houver vírgula ou espaço (data e hora), pegamos apenas a data
-        let dataFull = pendencia.data || dataAtual || '';
-        const dataApenas = dataFull.includes(',') ? dataFull.split(',')[0] : dataFull.split(' ')[0];
-        const observacao = pendencia.obs || '';
-
-        html += `
-            <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left;">
-                <span style="margin-right: 8px;">⚠️</span>
-                <b>Por </b>
-                <span style="color: #d90f23; font-weight: bold;">${militar}</span>
-                <span> em <b>${dataApenas}</b>:</span>
-                <i style="margin-left: 5px; color: #333; font-weight: normal;">${observacao}</i>
-            </li>`;
-    } 
-    else if (typeof pendencia === 'string' && pendencia.trim() !== '' && pendencia !== '-') {
-        const linhas = gerarLinhasFormatadas(pendencia, autorAtual, dataAtual, adminStatus, adminObs);
-        linhas.forEach(l => {
-            html += `<li class="linha-obs"><span style="margin-right: 8px;">⚠️</span>${l}</li>`;
-        });
-    }
-
-    html += '</ul>';
-    return html;
-};
         function setItemStatus(btn, status) { 
             const item = btn.closest('.item-conferencia');
             const setor = btn.closest('.setor'); 
