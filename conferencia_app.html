@@ -953,27 +953,24 @@ async function finalizarConferencia() {
         let itensRelatorio = [];
         let itensCaa = []; 
 
-        // 1. Loop Principal de Processamento
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
                 
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    if (!s) return; // Se não foi mexido, ignora
+                    if (!s) return; 
 
-                    // Inicializa Histórico se não existir
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
                     
-                    let finalStatus = (s.status === 'KEEP' || s.status === 'C/A') ? 'C/A' : 'S/A';
+                    let finalStatus = (s.status === 'KEEP' || s.status === 'C/A' || s.status === 'PENDING_CA') ? 'C/A' : 'S/A';
                     let listaPendenciasAtivas = [];
 
-                    // --- LÓGICA DE PENDÊNCIAS (DNA DO ITEM) ---
+                    // --- LÓGICA DE PENDÊNCIAS ---
                     if (finalStatus === 'C/A') {
-                        // Busca o que já existia no banco ANTES desta conferência
+                        // 1. Recupera o que já existia (Histórico)
                         if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
-                            // Conversão de legado (antigo)
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -981,36 +978,41 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // SÓ ADICIONA SE FOR UM NOVO C/A (Não adiciona se for KEEP)
-                        if (s.status === 'C/A' && s.obs.trim() !== '') {
+                        // 2. 🛡️ CORREÇÃO DO ERRO: Verifica se existe observação nova para adicionar
+                        // Usamos (s.obs || "") para evitar o erro de undefined no trim()
+                        const obsLimpa = (s.obs || "").trim();
+
+                        if (s.status === 'C/A' && obsLimpa !== '') {
                             const novaPendencia = {
                                 quem: conferente,
                                 data: dataSomenteDia,
-                                obs: s.obs.trim()
+                                obs: obsLimpa
                             };
                             listaPendenciasAtivas.push(novaPendencia);
                             
-                            // Registra no Histórico de Vida (Permanente)
                             itemOuTomb.historico_vida.push({
                                 evento: "ALTERACAO_DETECTADA",
                                 quem: conferente,
                                 data: dataAtualCompleta,
-                                detalhes: s.obs.trim()
+                                detalhes: obsLimpa
                             });
                             
-                            // Atualiza a "pendencia" do item para a Lista Mestra
                             itemOuTomb.pendencia = {
                                 tipo: "C/A",
                                 pendencias_ca: listaPendenciasAtivas
                             };
                             updated = true;
-                        } else if (s.status === 'KEEP') {
-                            // Se apenas manteve, a pendencia do item continua como estava
-                            // Não adicionamos nada novo à listaPendenciasAtivas
+                        } 
+                        else if (s.status === 'KEEP') {
+                            // Se apenas manteve, a pendência do item permanece a mesma da listaPendenciasAtivas (já carregada acima)
+                            itemOuTomb.pendencia = {
+                                tipo: "C/A",
+                                pendencias_ca: listaPendenciasAtivas
+                            };
                             updated = true; 
                         }
-                    } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                        // Saneamento
+                    } 
+                    else if (s.status === 'S/A' && itemOuTomb.pendencia) {
                         itemOuTomb.historico_vida.push({
                             evento: "SANEAMENTO_ALTERACAO",
                             quem: conferente,
@@ -1021,13 +1023,13 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
-                    // --- MONTAGEM DO DADO PARA O RELATÓRIO DE RESULTADOS ---
+                    // --- DADOS PARA O RELATÓRIO ---
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
-                        pendencias_ca: listaPendenciasAtivas, 
-                        quantidade: item.quantidadeEsperada || 1, 
+                        pendencias_ca: listaPendenciasAtivas, // Garante que a lista vá para o PDF
+                        quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
                         setor: setor.nome
                     };
 
@@ -1043,7 +1045,6 @@ async function finalizarConferencia() {
             });
         });
 
-        // 2. Persistência no Firebase
         if(updated) {
             await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         }
@@ -1077,6 +1078,7 @@ async function finalizarConferencia() {
         console.error(e);
         alert("Erro ao finalizar: " + e.message); 
         btn.disabled = false; 
+        btn.textContent = "Finalizar Conferência";
     }
 }
         async function finalizarRecebimentoCautela(cautela) {
