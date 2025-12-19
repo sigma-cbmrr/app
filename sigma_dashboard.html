@@ -4036,7 +4036,8 @@ const activeLink = document.getElementById(`link-${v}`);
 
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
-        async function salvarGestaoCa() {
+        // --- SUBSTITUA A FUNÇÃO salvarGestaoCa POR ESTA ---
+async function salvarGestaoCa() {
     const docId = document.getElementById('gestao-doc-id').value;
     const itemId = document.getElementById('gestao-item-id-lista').value;
     const status = document.getElementById('gestao-status').value;
@@ -4047,20 +4048,17 @@ const activeLink = document.getElementById(`link-${v}`);
     try {
         const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
         const snap = await ref.get();
-        const resData = snap.data();
-        const items = resData.itensCaa || [];
+        if(!snap.exists) return alert("Conferência não encontrada.");
+        
+        const items = snap.data().itensCaa || [];
         const targetIndex = items.findIndex(i => i.id === itemId);
-
         if (targetIndex === -1) return alert("Item não encontrado.");
 
-        // Atualiza no relatório
         items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status);
         items[targetIndex].adminObs = obsRaw;
-
         await ref.update({ itensCaa: items });
 
-        // Atualiza na Lista Mestra
-        const listId = resData.lista_id;
+        const listId = snap.data().lista_id;
         const listRef = db.collection(COLECAO_LISTAS).doc(listId);
         const listSnap = await listRef.get();
 
@@ -4071,16 +4069,13 @@ const activeLink = document.getElementById(`link-${v}`);
             listaMestra = listaMestra.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(mItem => {
-                    // Busca por ID base ou tombamento
-                    const mId = mItem.id;
-                    const matches = (mId === itemId || (mItem.tombamentos && mItem.tombamentos.some(t => `${mId}-${t.tomb}` === itemId)));
-                    
+                   const matches = (mItem.id === itemId || (mItem.tombamentos && mItem.tombamentos.some(t => `${mItem.id}-${t.tomb}` === itemId)));
                     if (matches) {
                         if (isSolved) {
                             delete mItem.pendencia;
-                            delete mItem.pendencias_ca; // 🛡️ LIMPEZA CRÍTICA PARA O APP
-                        } else {
-                            if(mItem.pendencia) mItem.pendencia.obs += ` | GESTOR: ${obsRaw}`;
+                            delete mItem.pendencias_ca; // 🛡️ LIMPEZA PARA O APP PARAR DE MOSTRAR O CARIMBO
+                        } else if(mItem.pendencia) {
+                            mItem.pendencia.obs += ` | GESTOR: ${obsRaw}`;
                         }
                     }
                     return mItem;
@@ -4088,13 +4083,10 @@ const activeLink = document.getElementById(`link-${v}`);
             }));
             await listRef.update({ list: listaMestra });
         }
-
-        alert("Gestão salva!");
+        alert("Gestão salva com sucesso!");
         fecharModalGestao();
         loadCaaData();
-    } catch (e) {
-        alert("Erro: " + e.message);
-    }
+    } catch (e) { alert("Erro ao salvar gestão: " + e.message); }
 }
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
         function abrirEditor(id, nome, unidadeLista) { 
@@ -5806,21 +5798,41 @@ async function iniciarCautelaProcesso() {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
-                        if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
+                        // Compara ID base ou ID absoluto
+                        if (mItem.id === (cItem.id_base || cItem.id)) {
+                            
+                            const carimboSaida = {
+                                id: cautelaId,
+                                emitente: emitenteNome,
+                                destinatario: destinatarioNome,
+                                data: dataAtual,
+                                quantidade: cItem.quantidade || 1
+                            };
+
                             if (!mItem.historico_vida) mItem.historico_vida = [];
                             mItem.historico_vida.push({
                                 evento: "SAÍDA_CAUTELA",
                                 id_doc: cautelaId,
                                 quem: emitenteNome,
                                 data: dataAtual,
-                                detalhes: `Material saiu para cautela de ${destinatarioNome}`
+                                detalhes: `Material saiu p/ cautela de ${destinatarioNome}`
                             });
+
+                            // 🛡️ SELEÇÃO CIRÚRGICA DE TOMBAMENTO
+                            if (cItem.tipo === 'multi' && cItem.tombamento) {
+                                mItem.tombamentos = (mItem.tombamentos || []).map(t => {
+                                    if (t.tomb === cItem.tombamento) t.cautela = carimboSaida;
+                                    return t;
+                                });
+                            } else {
+                                if (!mItem.cautelas) mItem.cautelas = [];
+                                mItem.cautelas.push(carimboSaida);
+                            }
                         }
                         return mItem;
                     })
                 }));
             });
-
             transaction.set(db.collection('cautelas_abertas').doc(cautelaId), novaCautela);
             transaction.update(listaRef, { list: listaMestra });
         });
@@ -6143,13 +6155,10 @@ async function showCautelaDetails(cautelaId) {
             }
         } 
         else if (currentStatus === 'RECEBIDA' && cautela.destinatario_uid === meuUid) {
-            const ultimoConferente = await getLastConferente(cautela.local_origem);
-            if (modalDestAtualElement) {
-                modalDestAtualElement.innerHTML = `<span style="color: #800020; font-weight: bold;">${ultimoConferente}</span> (Conferente do Local)`;
-            }
             if (btnDevolver) {
+                // Busca o nome do conferente atual do local para onde o material deve voltar
+                const ultimoConferente = await getLastConferente(cautela.local_origem);
                 btnDevolver.style.display = 'block';
-                modalStatusElement.innerHTML = `Status: ${currentStatus}<br><span style="font-size:0.85em; color:#d90f23; font-weight:bold;">Devolver p/: ${ultimoConferente}</span>`;
                 btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente);
             }
         }
@@ -6159,7 +6168,6 @@ async function showCautelaDetails(cautelaId) {
                 btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, currentUserData.nome_militar_completo);
             }
         }
-
     } catch (e) {
         console.error("Erro no modal de detalhes:", e);
         document.getElementById('modal-status').textContent = `Status: ERRO`;
@@ -6168,58 +6176,42 @@ async function showCautelaDetails(cautelaId) {
 		
 function iniciarRecebimentoCautela(cautelaId) {
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
-    
-    const userUid = firebase.auth().currentUser.uid; // 🛡️ UID Adicionado
+    const userUid = firebase.auth().currentUser.uid;
     const pGradEncoded = encodeURIComponent(currentUserData.posto || 'ND');
     const quadroEncoded = encodeURIComponent(currentUserData.quadro || 'ND');
     const nomeGuerraEncoded = encodeURIComponent(currentUserData.nome_guerra || 'ND');
 
-    // URL atualizada com user_uid
+    // 🛡️ URL Completa para Recebimento Inicial (A->B)
     const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&user_uid=${userUid}`;
 
     const container = document.getElementById('app-runner-container');
     const iframe = document.getElementById('app-iframe');
-    
-    if (!container || !iframe) return alert("Erro de UI: Container não encontrado.");
-    
-    iframe.src = url;  
-    container.style.display = 'block';
-    
-    // Oculta dashboard para foco
-    const contentArea = document.getElementById('content-area');
-    if (contentArea) contentArea.style.display = 'none'; 
-    const sidebar = document.getElementById('main-sidebar');
-    if (sidebar) sidebar.style.display = 'none';
-
-    window.removeEventListener('message', handleIframeMessage); 
-    window.addEventListener('message', handleIframeMessage); 
+    if (container && iframe) {
+        iframe.src = url;  
+        container.style.display = 'block';
+        document.querySelector('.content').style.display = 'none'; // Esconde conteúdo para focar no app
+    }
 }
-        function iniciarConferenciaDevolucao(cautelaId, destinatario) {
+
+function iniciarConferenciaDevolucao(cautelaId, destinatarioNome) {
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
-    
-    const userUid = firebase.auth().currentUser.uid; // 🛡️ UID Adicionado
+    const userUid = firebase.auth().currentUser.uid;
     const pGradEncoded = encodeURIComponent(currentUserData.posto || 'ND');
     const quadroEncoded = encodeURIComponent(currentUserData.quadro || 'ND');
     const nomeGuerraEncoded = encodeURIComponent(currentUserData.nome_guerra || 'ND');
 
-    // URL com modo devolucao_final e user_uid
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&modo=devolucao_final&destinatarioDevolucao=${encodeURIComponent(destinatario)}&user_uid=${userUid}`;
+    // 🛡️ URL Completa para Devolução Final (B->C) - Inclui modo e UID do Dono do Local
+    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&modo=devolucao_final&destinatarioDevolucao=${encodeURIComponent(destinatarioNome)}&user_uid=${userUid}`;
 
     const container = document.getElementById('app-runner-container');
     const iframe = document.getElementById('app-iframe');
-    
-    if (!container || !iframe) return alert("Erro de UI.");
-    
-    iframe.src = url;  
-    container.style.display = 'block';
-    
-    if (document.getElementById('content-area')) document.getElementById('content-area').style.display = 'none'; 
-    if (document.getElementById('main-sidebar')) document.getElementById('main-sidebar').style.display = 'none';
-
-    window.removeEventListener('message', handleIframeMessage); 
-    window.addEventListener('message', handleIframeMessage); 
+    if (container && iframe) {
+        iframe.src = url;  
+        container.style.display = 'block';
+        document.querySelector('.content').style.display = 'none';
+    }
 }
-
+		window.addEventListener('message', handleIframeMessage); 
 // Localização: Linha ~1594
 function handleIframeMessage(event) {
     // Garante que a mensagem veio do seu domínio (Importante por segurança)
@@ -6502,7 +6494,7 @@ async function getLastConferente(localOrigem) {
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
 
         // Busca o UID do Usuário C (o novo recebedor)
-        const ucUid = await findUidByName(ultimoConferenteNome);
+        const ucUid = await findUidByName(ultimoConferenteNome.trim());
 
         if (!ucUid) {
             throw new Error(`Não foi possível localizar o ID de sistema para: ${ultimoConferenteNome}.`);
