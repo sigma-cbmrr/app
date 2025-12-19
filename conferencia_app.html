@@ -628,7 +628,7 @@ function renderizarConferencia() {
 
     if(obsDigitada.length < 3) return alert("Descreva a alteração em detalhes.");
 
-    // 🛡️ LÓGICA DE RECUPERAÇÃO DE HISTÓRICO
+    // 🛡️ RECUPERAÇÃO DE HISTÓRICO PARA ACUMULAR
     let listaAcumulada = [];
     const histFixo = containerEdit.querySelector('.historico-fixo');
     const metaData = histFixo ? histFixo.dataset.meta : null;
@@ -636,24 +636,33 @@ function renderizarConferencia() {
     if (metaData && metaData !== "undefined") {
         try {
             const passado = JSON.parse(decodeURIComponent(metaData));
-            // Se já era uma lista, copia. Se era objeto antigo, converte.
-            if (passado.pendencias_ca) listaAcumulada = [...passado.pendencias_ca];
-            else if (passado.quem) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+            if (passado.pendencias_ca) {
+                listaAcumulada = [...passado.pendencias_ca];
+            } else if (passado.obs) {
+                // Converte dado antigo para o novo padrão de lista
+                listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+            }
         } catch (e) { console.error("Erro ao decodificar meta:", e); }
     }
 
-    // Adiciona a nova entrada à lista
-    listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
+    // Adiciona a nova entrada à lista acumulada
+    listaAcumulada.push({
+        quem: conferente,
+        data: dataAtual,
+        obs: obsDigitada
+    });
 
+    // 🛡️ MONTAGEM DO OBJETO PARA O RASCUNHO GLOBAL
     const novoObjeto = {
         status: 'C/A',
-        pendencias_ca: listaAcumulada // Salva a lista completa
+        obs: obsDigitada, // Mantemos para compatibilidade de rascunho
+        pendencias_ca: listaAcumulada // CRÍTICO: Para a finalizarConferencia ler
     };
 
     window.itemStatus[uid] = novoObjeto; 
     containerEdit.style.display = 'none'; 
-    const d = item.querySelector('.descricao-salva'); 
     
+    const d = item.querySelector('.descricao-salva'); 
     d.innerHTML = gerarHtmlVisualApp(novoObjeto); 
     d.style.display = 'block'; 
     
@@ -673,7 +682,7 @@ function renderizarConferencia() {
 
     if(obsDigitada.length < 3) return alert("Digite a alteração.");
 
-    // 🛡️ LÓGICA DE RECUPERAÇÃO DE HISTÓRICO
+    // 🛡️ RECUPERAÇÃO DE HISTÓRICO PARA ACUMULAR
     let listaAcumulada = [];
     const histFixo = containerEdit.querySelector('.historico-fixo');
     const metaData = histFixo ? histFixo.dataset.meta : null;
@@ -681,23 +690,31 @@ function renderizarConferencia() {
     if (metaData && metaData !== "undefined") {
         try {
             const passado = JSON.parse(decodeURIComponent(metaData));
-            if (passado.pendencias_ca) listaAcumulada = [...passado.pendencias_ca];
-            else if (passado.quem) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+            if (passado.pendencias_ca) {
+                listaAcumulada = [...passado.pendencias_ca];
+            } else if (passado.obs) {
+                listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+            }
         } catch (e) { console.error("Erro ao decodificar meta:", e); }
     }
 
-    // Adiciona a nova entrada à lista
-    listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
+    // Adiciona a nova entrada
+    listaAcumulada.push({
+        quem: conferente,
+        data: dataAtual,
+        obs: obsDigitada
+    });
 
     const novoObjeto = {
         status: 'C/A',
+        obs: obsDigitada,
         pendencias_ca: listaAcumulada
     };
 
     window.itemStatus[uid] = novoObjeto; 
     containerEdit.style.display = 'none'; 
-    const d = tomb.querySelector('.tombamento-descricao-salva');
     
+    const d = tomb.querySelector('.tombamento-descricao-salva');
     d.innerHTML = gerarHtmlVisualApp(novoObjeto);
     d.style.display = 'block'; 
 
@@ -909,6 +926,11 @@ async function finalizarConferencia() {
     const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
     const CONFERENTE_UID = userInfo.uid || ''; 
 
+    if (isCautela) {
+        await finalizarRecebimentoCautela();
+        return;
+    }
+    
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
     btn.textContent = "Salvando..."; 
@@ -927,9 +949,11 @@ async function finalizarConferencia() {
 
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
+                
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    // Se o item não foi tocado ou já foi salvo, processamos o estado atual dele
+                    
+                    // 1. Ignora itens não conferidos
                     if (!s || s.status === 'pending') return; 
 
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
@@ -938,10 +962,16 @@ async function finalizarConferencia() {
                     let listaPendenciasAtivas = [];
 
                     if (finalStatus === 'C/A') {
-                        // 1. CARREGAR HISTÓRICO: Pega o que já está salvo no Objeto (incluindo o que acabou de ser salvo pelo botão 'Salvar')
-                        if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
+                        // 2. PRIORIDADE: Recupera a lista que foi montada no 'salvarItem' ou 'salvarTombamento'
+                        if (s.pendencias_ca && Array.isArray(s.pendencias_ca)) {
+                            listaPendenciasAtivas = [...s.pendencias_ca];
+                        } 
+                        // 3. SEGUNDA OPÇÃO: Recupera o que já existia no Banco de Dados (DNA do Item)
+                        else if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
-                        } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
+                        } 
+                        // 4. FALLBACK: Converte formato antigo se houver
+                        else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -949,45 +979,60 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 2. VERIFICAR RASCUNHO: Se houver algo digitado mas não salvo no botão individual
-                        const obsLimpa = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
-                        const ultimaObs = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
+                        // 5. TRATAMENTO DE RASCUNHO (Se digitou mas não clicou em salvar individualmente)
+                        const obsDigitada = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
+                        const ultimaObsNaLista = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
 
-                        if (obsLimpa !== '' && obsLimpa !== ultimaObs) {
-                            listaPendenciasAtivas.push({ quem: conferente, data: dataSomenteDia, obs: obsLimpa });
-                            itemOuTomb.historico_vida.push({ evento: "ALTERACAO_DETECTADA", quem: conferente, data: dataAtualCompleta, detalhes: obsLimpa });
+                        if (obsDigitada !== '' && obsDigitada !== ultimaObsNaLista) {
+                            listaPendenciasAtivas.push({
+                                quem: conferente,
+                                data: dataSomenteDia,
+                                obs: obsDigitada
+                            });
+                            
+                            itemOuTomb.historico_vida.push({
+                                evento: "ALTERACAO_DETECTADA",
+                                quem: conferente,
+                                data: dataAtualCompleta,
+                                detalhes: obsDigitada
+                            });
                         }
 
-                        // 🛡️ 3. A CHAVE DO SUCESSO: Gerar o texto para o PDF a partir da lista
-                        // Se a lista tiver itens, o 'obs' raiz NUNCA será vazio.
+                        // 🛡️ 6. FIXAÇÃO DOS DADOS (Evita 'obs' vazio no Firebase/PDF)
+                        // Criamos uma string única unindo todas as observações da lista
                         const textoJoin = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
 
                         itemOuTomb.pendencia = {
                             tipo: "C/A",
                             pendencias_ca: listaPendenciasAtivas,
-                            obs: textoJoin || obsLimpa, // Persiste o texto aqui para o PDF
+                            obs: textoJoin, // <--- Este campo preenche o Firebase e o PDF
                             quem: listaPendenciasAtivas[0]?.quem || conferente,
                             data: listaPendenciasAtivas[0]?.data || dataSomenteDia
                         };
                         updated = true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                        itemOuTomb.historico_vida.push({ evento: "SANEAMENTO_ALTERACAO", quem: conferente, data: dataAtualCompleta, detalhes: "S/A" });
+                        // Saneamento de pendência
+                        itemOuTomb.historico_vida.push({
+                            evento: "SANEAMENTO_ALTERACAO",
+                            quem: conferente,
+                            data: dataAtualCompleta,
+                            detalhes: "Item conferido como S/A."
+                        });
                         delete itemOuTomb.pendencia;
                         updated = true;
                     }
 
-                    // 4. MONTAR RELATÓRIO: Passar os campos explicitamente para o Relatório de Resultados
+                    // 7. MONTAGEM PARA COLEÇÃO 'resultados_conferencias'
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
                         pendencias_ca: listaPendenciasAtivas, 
-                        obs: itemOuTomb.pendencia?.obs || '', // 👈 O PDF lê isso
+                        obs: itemOuTomb.pendencia?.obs || '', // 👈 Garantido que não seja vazio
                         quem: itemOuTomb.pendencia?.quem || '', 
                         data: itemOuTomb.pendencia?.data || '',
-                        // Onde estava itemOuTomb.quantidade, mude para:
-                        quantidade: itemOuTomb.quantidade || item.quantidadeEsperada || 1,
+                        quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
                         setor: setor.nome
                     };
 
@@ -995,6 +1040,7 @@ async function finalizarConferencia() {
                     if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
                 };
 
+                // Direcionamento por tipo de item
                 if (item.tipo === 'multi' && item.tombamentos) {
                     item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
                 } else {
@@ -1003,13 +1049,21 @@ async function finalizarConferencia() {
             });
         });
 
-        if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        // 8. Gravação Final
+        if(updated) {
+            await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        }
         
         await db.collection('resultados_conferencias').add({ 
-            local: localNome, lista_id: LISTA_ID, conferente_uid: CONFERENTE_UID,
-            conferente: conferente, timestamp: firebase.firestore.Timestamp.now(), 
-            totalItensConferidos: itensRelatorio.length, totalCaa: itensCaa.length, 
-            itensCaa, itensRelatorio 
+            local: localNome, 
+            lista_id: LISTA_ID, 
+            conferente_uid: CONFERENTE_UID,
+            conferente: conferente, 
+            timestamp: firebase.firestore.Timestamp.now(), 
+            totalItensConferidos: itensRelatorio.length, 
+            totalCaa: itensCaa.length, 
+            itensCaa, 
+            itensRelatorio 
         });
         
         const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
@@ -1020,10 +1074,16 @@ async function finalizarConferencia() {
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        if (window.self === window.top) { alert("Sucesso!"); window.location.href = "operacional.html"; }
+        if (window.self === window.top) { 
+            alert("Conferência finalizada com sucesso!"); 
+            window.location.href = "operacional.html"; 
+        }
 
     } catch (e) { 
-        console.error(e); alert("Erro: " + e.message); btn.disabled = false; 
+        console.error("Erro na finalização:", e);
+        alert("Erro ao finalizar: " + e.message); 
+        btn.disabled = false; 
+        btn.textContent = "Finalizar Conferência";
     }
 }
         async function finalizarRecebimentoCautela(cautela) {
