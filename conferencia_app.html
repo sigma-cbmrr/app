@@ -813,110 +813,105 @@ async function finalizarConferencia() {
         const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
         const dataAtualCompleta = new Date().toLocaleString('pt-BR');
         const dataSomenteDia = dataAtualCompleta.split(',')[0];
-        const clean = (val) => val === undefined ? null : val;
         
         let updated = false;
         let itensRelatorio = [];
         let itensCaa = []; 
 
-        // 1. Atualização da Lista Mestra (Persistência no Item)
-        const atualizarListaDB = (itemOuTomb, uid) => {
-            const s = window.itemStatus[uid];
-            if(!s) return;
-            if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
-
-            if(s.status === 'C/A') { 
-                if (s.obs && s.obs.trim() !== '') {
-                    itemOuTomb.pendencia = {
-                        tipo: "C/A",
-                        obs: s.obs.trim(),
-                        quem: conferente,
-                        data: dataAtualCompleta
-                    };
-                    itemOuTomb.historico_vida.push({
-                        evento: "ALTERACAO_DETECTADA",
-                        quem: conferente,
-                        data: dataAtualCompleta,
-                        detalhes: s.obs.trim()
-                    });
-                    updated = true;
-                }
-            } else if(s.status === 'S/A' && itemOuTomb.pendencia) { 
-                itemOuTomb.historico_vida.push({
-                    evento: "SANEAMENTO_ALTERACAO",
-                    quem: conferente,
-                    data: dataAtualCompleta,
-                    detalhes: "Item conferido como S/A."
-                });
-                delete itemOuTomb.pendencia; 
-                updated = true;
-            }
-        };
-
+        // 1. Loop Principal de Processamento
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
-                if(item.tipo === 'single') atualizarListaDB(item, item.id);
-                else if(item.tombamentos) item.tombamentos.forEach(t => atualizarListaDB(t, `${item.id}-${t.tomb}`));
-            });
-        });
-
-        // 2. Montagem do Relatório Estruturado (Resultados)
-        dadosConferencia.forEach(setor => {
-            setor.itens.forEach(item => {
-                const process = (id, nome, pendExistente, itemContext) => { 
+                
+                const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    if (s && (s.status === 'C/A' || s.status === 'KEEP' || s.status === 'S/A')) {
-                        let finalStatus = (s.status === 'KEEP' || s.status === 'C/A') ? 'C/A' : 'S/A';
-                        
-                        // 🛡️ AJUSTE CIRÚRGICO: A lista deve ser criada NOVINHA para cada item
-                        let listaPendenciasAtivas = [];
+                    if (!s) return; // Se não foi mexido, ignora
 
-                        if (finalStatus === 'C/A') {
-                            // Carrega pendências que já existiam no banco para ESTE item
-                            if (pendExistente && pendExistente.pendencias_ca) {
-                                listaPendenciasAtivas = [...pendExistente.pendencias_ca];
-                            } else if (pendExistente && pendExistente.quem) {
-                                listaPendenciasAtivas.push({
-                                    quem: pendExistente.quem,
-                                    data: pendExistente.data,
-                                    obs: pendExistente.obs
-                                });
-                            }
+                    // Inicializa Histórico se não existir
+                    if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
+                    
+                    let finalStatus = (s.status === 'KEEP' || s.status === 'C/A') ? 'C/A' : 'S/A';
+                    let listaPendenciasAtivas = [];
 
-                            // Adiciona a nova alteração detectada por você para ESTE item
-                            if (s.status === 'C/A' && s.obs.trim() !== '') {
-                                listaPendenciasAtivas.push({
-                                    quem: conferente,
-                                    data: dataSomenteDia,
-                                    obs: s.obs.trim()
-                                });
-                            }
+                    // --- LÓGICA DE PENDÊNCIAS (DNA DO ITEM) ---
+                    if (finalStatus === 'C/A') {
+                        // Busca o que já existia no banco ANTES desta conferência
+                        if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
+                            listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
+                        } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
+                            // Conversão de legado (antigo)
+                            listaPendenciasAtivas.push({
+                                quem: itemOuTomb.pendencia.quem,
+                                data: itemOuTomb.pendencia.data,
+                                obs: itemOuTomb.pendencia.obs
+                            });
                         }
 
-                        const dadosItem = { 
-                            id: id,
-                            nomeCompleto: nome, 
-                            status: finalStatus, 
-                            pendencias_ca: listaPendenciasAtivas, 
-                            quantidade: item.quantidadeEsperada || 1, 
-                            setor: setor.nome
-                        };
-
-                        itensRelatorio.push(dadosItem);
-                        if (finalStatus === 'C/A') itensCaa.push(dadosItem);
+                        // SÓ ADICIONA SE FOR UM NOVO C/A (Não adiciona se for KEEP)
+                        if (s.status === 'C/A' && s.obs.trim() !== '') {
+                            const novaPendencia = {
+                                quem: conferente,
+                                data: dataSomenteDia,
+                                obs: s.obs.trim()
+                            };
+                            listaPendenciasAtivas.push(novaPendencia);
+                            
+                            // Registra no Histórico de Vida (Permanente)
+                            itemOuTomb.historico_vida.push({
+                                evento: "ALTERACAO_DETECTADA",
+                                quem: conferente,
+                                data: dataAtualCompleta,
+                                detalhes: s.obs.trim()
+                            });
+                            
+                            // Atualiza a "pendencia" do item para a Lista Mestra
+                            itemOuTomb.pendencia = {
+                                tipo: "C/A",
+                                pendencias_ca: listaPendenciasAtivas
+                            };
+                            updated = true;
+                        } else if (s.status === 'KEEP') {
+                            // Se apenas manteve, a pendencia do item continua como estava
+                            // Não adicionamos nada novo à listaPendenciasAtivas
+                            updated = true; 
+                        }
+                    } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
+                        // Saneamento
+                        itemOuTomb.historico_vida.push({
+                            evento: "SANEAMENTO_ALTERACAO",
+                            quem: conferente,
+                            data: dataAtualCompleta,
+                            detalhes: "Item conferido como S/A."
+                        });
+                        delete itemOuTomb.pendencia;
+                        updated = true;
                     }
+
+                    // --- MONTAGEM DO DADO PARA O RELATÓRIO DE RESULTADOS ---
+                    const dadosParaRelatorio = { 
+                        id: id,
+                        nomeCompleto: nome, 
+                        status: finalStatus, 
+                        pendencias_ca: listaPendenciasAtivas, 
+                        quantidade: item.quantidadeEsperada || 1, 
+                        setor: setor.nome
+                    };
+
+                    itensRelatorio.push(dadosParaRelatorio);
+                    if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
                 };
 
                 if (item.tipo === 'multi' && item.tombamentos) {
-                    item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia, t));
+                    item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
                 } else {
-                    process(item.id, item.nome, item.pendencia, item);
+                    processarItemUnico(item, item.id, item.nome);
                 }
             });
         });
 
-        // 3. Persistência Final
-        if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        // 2. Persistência no Firebase
+        if(updated) {
+            await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        }
         
         await db.collection('resultados_conferencias').add({ 
             local: localNome, 
@@ -938,11 +933,14 @@ async function finalizarConferencia() {
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        if (window.self === window.top) { alert("Conferência salva com sucesso!"); window.location.href = "operacional.html"; }
+        if (window.self === window.top) { 
+            alert("Conferência finalizada com sucesso!"); 
+            window.location.href = "operacional.html"; 
+        }
 
     } catch (e) { 
         console.error(e);
-        alert("Erro: " + e.message); 
+        alert("Erro ao finalizar: " + e.message); 
         btn.disabled = false; 
     }
 }
