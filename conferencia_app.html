@@ -958,8 +958,7 @@ async function finalizarConferencia() {
                 
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    
-                    // 🛡️ CORREÇÃO 1: Se o item não foi conferido (status pending ou nulo), ignora
+                    // Se o item não foi tocado nesta sessão, ignoramos o processamento de atualização
                     if (!s || s.status === 'pending') return; 
 
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
@@ -967,9 +966,8 @@ async function finalizarConferencia() {
                     let finalStatus = (s.status === 'KEEP' || s.status === 'C/A' || s.status === 'PENDING_CA') ? 'C/A' : 'S/A';
                     let listaPendenciasAtivas = [];
 
-                    // --- LÓGICA DE PENDÊNCIAS ---
                     if (finalStatus === 'C/A') {
-                        // Recupera histórico existente
+                        // 1. Recupera o que já existia no banco
                         if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
@@ -980,10 +978,13 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 🛡️ CORREÇÃO 2: Proteção total contra undefined no obs
                         const obsLimpa = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
+                        
+                        // 🛡️ BLOQUEIO DE DUPLICIDADE:
+                        // Só adicionamos a s.obs se ela já não for a ÚLTIMA coisa na lista (evita duplicar o que o salvarItem já fez)
+                        const ultimaObsNaLista = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
 
-                        if ((s.status === 'C/A' || s.status === 'PENDING_CA') && obsLimpa !== '') {
+                        if ((s.status === 'C/A' || s.status === 'PENDING_CA') && obsLimpa !== '' && obsLimpa !== ultimaObsNaLista) {
                             const novaPendencia = {
                                 quem: conferente,
                                 data: dataSomenteDia,
@@ -997,23 +998,19 @@ async function finalizarConferencia() {
                                 data: dataAtualCompleta,
                                 detalhes: obsLimpa
                             });
-                            
-                            itemOuTomb.pendencia = {
-                                tipo: "C/A",
-                                pendencias_ca: listaPendenciasAtivas
-                            };
-                            updated = true;
-                        } 
-                        else if (s.status === 'KEEP') {
-                            // Mantém o que já existia na lista mestra
-                            itemOuTomb.pendencia = {
-                                tipo: "C/A",
-                                pendencias_ca: listaPendenciasAtivas
-                            };
-                            updated = true; 
                         }
-                    } 
-                    else if (s.status === 'S/A' && itemOuTomb.pendencia) {
+
+                        // 🛡️ SALVAMENTO ESTRUTURADO: Salva a lista E os campos raiz para o PDF
+                        itemOuTomb.pendencia = {
+                            tipo: "C/A",
+                            pendencias_ca: listaPendenciasAtivas,
+                            obs: listaPendenciasAtivas.map(p => p.obs).join(' | '), // Texto corrido para compatibilidade
+                            quem: listaPendenciasAtivas[0]?.quem || conferente,
+                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia
+                        };
+                        updated = true;
+
+                    } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
                         itemOuTomb.historico_vida.push({
                             evento: "SANEAMENTO_ALTERACAO",
                             quem: conferente,
@@ -1024,12 +1021,14 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
-                    // --- DADOS PARA O RELATÓRIO DE RESULTADOS ---
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
                         pendencias_ca: listaPendenciasAtivas, 
+                        obs: itemOuTomb.pendencia?.obs || '', 
+                        quem: itemOuTomb.pendencia?.quem || '', 
+                        data: itemOuTomb.pendencia?.data || '',
                         quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
                         setor: setor.nome
                     };
@@ -1046,7 +1045,6 @@ async function finalizarConferencia() {
             });
         });
 
-        // 2. Persistência
         if(updated) {
             await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         }
