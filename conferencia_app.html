@@ -47,8 +47,7 @@
         
         .texto-admin { font-weight: bold; color: #0d47a1; }
         .linha-obs { color: #333; font-weight: 500; }
-        .linha-obs i {display: block; padding-left: 20px; color: #444; font-style: italic; border-left: 2px solid #ddd; margin-top: 3px; }
-
+        
         .pendencia-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; border-top: 1px dotted #ccc; padding-top: 5px; }
         .btn-manter { background-color: #e0e0e0; border: 1px solid #ccc; color: #333; font-size: 0.8em; padding: 5px 10px; cursor: pointer; border-radius: 4px; } 
         .btn-acrescentar { background-color: #e0e0e0; border: 1px solid #ccc; color: #333; font-size: 0.8em; padding: 5px 10px; cursor: pointer; border-radius: 4px; }
@@ -65,6 +64,8 @@
         
         #btn-finalizar { background-color: #d90f23; color: white; font-weight: bold; border: none; padding: 15px 10px; border-radius: 6px; width: 100%; cursor: pointer; transition: background-color 0.3s ease; margin-top: 30px; font-size: 1.1em; box-shadow: 0 4px 8px rgba(217, 15, 35, 0.4); }
         #btn-finalizar:disabled { background-color: #999; cursor: not-allowed; box-shadow: none; }
+        .linha-obs i {display: block; padding-left: 20px; color: #444; font-style: italic; border-left: 2px solid #ddd; margin-top: 3px;
+}
         .draft-badge { background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba; padding: 10px; margin-bottom: 15px; border-radius: 6px; font-size: 0.9em; text-align: center; display: none; }
     </style>
 </head>
@@ -155,12 +156,24 @@
         const btn = document.getElementById('btn-finalizar');
         
         let buttonPrefix = 'FINALIZAR CONFERÊNCIA';
+        // MODO_OPERACAO é global e foi definido no início do script
         if (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao') {
             buttonPrefix = 'FINALIZAR DEVOLUÇÃO';
         }
         
         if(btn) {
+            // Altera a linha original para usar o prefixo condicional
+            // A contagem (completed/total) é mantida.
             btn.textContent = `${buttonPrefix} (${completed}/${total} ITENS)`;
+
+            if (total > 0 && completed >= total) {
+                btn.disabled = false;
+            } else {
+                btn.disabled = true;
+            }
+        }
+        
+        if(btn) {
             if (total > 0 && completed >= total) {
                 btn.disabled = false;
                 btn.style.backgroundColor = '#1b8a3e';
@@ -173,486 +186,1095 @@
         }
     }
 
-    function updateSetorStatus(setorEl) { 
-        const items = setorEl.querySelectorAll('.item-conferencia'); 
-        let completed = 0, total = 0; 
-        items.forEach(item => { 
-            if (item.dataset.type === 'single') { 
-                total++; const s = window.itemStatus[item.dataset.id]?.status; 
-                if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-            } else { 
-                const tombs = item.querySelectorAll('.tombamento-container'); 
-                tombs.forEach(t => { 
-                    total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
+        function updateSetorStatus(setorEl) { 
+            const items = setorEl.querySelectorAll('.item-conferencia'); 
+            let completed = 0, total = 0; 
+            items.forEach(item => { 
+                if (item.dataset.type === 'single') { 
+                    total++; const s = window.itemStatus[item.dataset.id]?.status; 
                     if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-                }); 
-            } 
-        }); 
-        setorEl.dataset.totalItems = total; 
-        const st = setorEl.querySelector('.setor-status'); 
-        st.dataset.completed = completed; 
-        if (completed === total && total > 0) { st.textContent = 'OK'; st.classList.add('ok'); } 
-        else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
-    }
-
-    function updateItemMainStatusDisplay(item) { 
-        if (item.dataset.type === 'single') return; 
-        const tombs = item.querySelectorAll('.tombamento-container'); let conf = 0, alt = 0; 
-        tombs.forEach(t => { 
-            const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
-            if (s === 'S/A' || s === 'C/A' || s === 'KEEP') { conf++; if (s === 'C/A' || s === 'KEEP') alt++; } 
-        }); 
-        const icon = item.querySelector('.status-icon'); item.className = 'item-conferencia item-has-tombamentos'; icon.className = 'status-icon'; 
-        if (conf === tombs.length) { 
-            if (alt > 0) { icon.classList.add('alert'); item.classList.add('status-alert'); } 
-            else { icon.classList.add('ok'); item.classList.add('status-ok'); } 
-        } 
-    }
-
-    function toggleSetor(header) { 
-        const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); 
-        if (content.classList.contains('expanded')) { content.classList.remove('expanded'); arrow.textContent = '►'; } 
-        else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►';}); content.classList.add('expanded'); arrow.textContent = '▼'; } 
-    }
-
-    function checkSetorCompletion(currentSetor, currentItemId) { 
-        const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); 
-        if (comp >= total) { autoAdvanceSetor(currentSetor.dataset.id); } else { focusNextItem(currentItemId); }
-    }
-
-    function focusNextItem(currentItemId) { 
-        const allItems = Array.from(document.querySelectorAll('.item-conferencia')); 
-        let baseId = currentItemId.split('-')[0]; 
-        const idx = allItems.findIndex(i => i.dataset.id === baseId); 
-        for (let i = idx; i < allItems.length; i++) { 
-            const item = allItems[i]; if (!item) continue; const id = item.dataset.id; 
-            if (item.dataset.type === 'single') { 
-                const st = window.itemStatus[id]; 
-                if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { 
-                    item.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-                    if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; 
+                } else { 
+                    const tombs = item.querySelectorAll('.tombamento-container'); 
+                    tombs.forEach(t => { 
+                        total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
+                        if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
+                    }); 
                 } 
-            } 
-            if (item.dataset.type === 'multi') { 
-                const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { 
-                    const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; 
-                }); 
-                if (pendingTomb) { 
-                    pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-                    const uid = `${id}-${pendingTomb.dataset.tomb}`; 
-                    if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; 
-                } 
-            } 
-        } 
-    }
-
-    function autoAdvanceSetor(sid) { 
-        const s = document.querySelector(`.setor[data-id="${sid}"]`); 
-        if (s) toggleSetor(s.querySelector('.setor-header')); 
-        const idx = window.setorIds.indexOf(sid); const nextId = window.setorIds[idx + 1]; 
-        if (nextId) { 
-            const next = document.querySelector(`.setor[data-id="${nextId}"]`); 
-            if (next) { const h = next.querySelector('.setor-header'); toggleSetor(h); next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } 
-        } 
-    }
-
-    function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
-    function salvarRascunho() { try { localStorage.setItem(getStorageKey(), JSON.stringify({ timestamp: Date.now(), status: window.itemStatus })); } catch (e) {} }
-    function limparRascunho() {
-        localStorage.removeItem('sigma_active_conf');
-        const listId = CAUTELA_ID || LISTA_ID;
-        const userId = (userInfo && userInfo.nomeGuerra) ? userInfo.nomeGuerra.toUpperCase() : null;
-        if (listId && userId) {
-            const draftKey = `sigma_draft_${userId}_${listId}`; 
-            localStorage.removeItem(draftKey);
+            }); 
+            setorEl.dataset.totalItems = total; 
+            const st = setorEl.querySelector('.setor-status'); 
+            st.dataset.completed = completed; 
+            if (completed === total && total > 0) { st.textContent = 'OK'; st.classList.add('ok'); } 
+            else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
         }
-    }
 
-    const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
-        let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
-        const lista = (pendencia && pendencia.pendencias_ca) ? pendencia.pendencias_ca : (Array.isArray(pendencia) ? pendencia : null);
-        if (lista && Array.isArray(lista) && lista.length > 0) {
-            lista.forEach(p => {
-                const matchData = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
-                const dataApenas = matchData ? matchData[0] : (p.data || '');
-                html += `<li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem; border-bottom: 1px dashed #eee; padding-bottom: 4px;">
-                            <span style="margin-right: 8px;">⚠️</span><b>Por </b><span style="color: #d90f23; font-weight: bold;">${p.quem}</span><span> em <b>${dataApenas}</b>:</span>
-                            <i style="margin-left: 5px; color: #333; font-weight: normal; display: block; padding-left: 25px;">${p.obs}</i></li>`;
-            });
-        } else if (pendencia && pendencia.obs && typeof pendencia.obs === 'string') {
-            const militar = pendencia.quem || autorAtual || 'Militar';
-            const dataFull = pendencia.data || dataAtual || '';
+        function updateItemMainStatusDisplay(item) { 
+            if (item.dataset.type === 'single') return; 
+            const tombs = item.querySelectorAll('.tombamento-container'); let conf = 0, alt = 0; 
+            tombs.forEach(t => { 
+                const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
+                if (s === 'S/A' || s === 'C/A' || s === 'KEEP') { conf++; if (s === 'C/A' || s === 'KEEP') alt++; } 
+            }); 
+            const icon = item.querySelector('.status-icon'); item.className = 'item-conferencia item-has-tombamentos'; icon.className = 'status-icon'; 
+            if (conf === tombs.length) { 
+                if (alt > 0) { icon.classList.add('alert'); item.classList.add('status-alert'); } 
+                else { icon.classList.add('ok'); item.classList.add('status-ok'); } 
+            } 
+        }
+
+        function toggleSetor(header) { 
+            const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); 
+            if (content.classList.contains('expanded')) { content.classList.remove('expanded'); arrow.textContent = '►'; } 
+            else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►';}); content.classList.add('expanded'); arrow.textContent = '▼'; } 
+        }
+
+        function checkSetorCompletion(currentSetor, currentItemId) { 
+            const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); 
+            if (comp >= total) { autoAdvanceSetor(currentSetor.dataset.id); } else { focusNextItem(currentItemId); }
+        }
+
+        function focusNextItem(currentItemId) { 
+            const allItems = Array.from(document.querySelectorAll('.item-conferencia')); 
+            let baseId = currentItemId.split('-')[0]; 
+            const idx = allItems.findIndex(i => i.dataset.id === baseId); 
+            for (let i = idx; i < allItems.length; i++) { 
+                const item = allItems[i]; if (!item) continue; const id = item.dataset.id; 
+                if (item.dataset.type === 'single') { 
+                    const st = window.itemStatus[id]; 
+                    if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { 
+                        item.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+                        if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; 
+                    } 
+                } 
+                if (item.dataset.type === 'multi') { 
+                    const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { 
+                        const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; 
+                    }); 
+                    if (pendingTomb) { 
+                        pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+                        const uid = `${id}-${pendingTomb.dataset.tomb}`; 
+                        if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; 
+                    } 
+                } 
+            } 
+        }
+
+        function autoAdvanceSetor(sid) { 
+            const s = document.querySelector(`.setor[data-id="${sid}"]`); 
+            if (s) toggleSetor(s.querySelector('.setor-header')); 
+            const idx = window.setorIds.indexOf(sid); const nextId = window.setorIds[idx + 1]; 
+            if (nextId) { 
+                const next = document.querySelector(`.setor[data-id="${nextId}"]`); 
+                if (next) { const h = next.querySelector('.setor-header'); toggleSetor(h); next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } 
+            } 
+        }
+        function isElementInViewport(el) { const rect = el.getBoundingClientRect(); return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth)); }
+        function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
+        function salvarRascunho() { try { localStorage.setItem(getStorageKey(), JSON.stringify({ timestamp: Date.now(), status: window.itemStatus })); } catch (e) {} }
+        function limparRascunho() {
+            localStorage.removeItem('sigma_active_conf');
+            const listId = CAUTELA_ID || LISTA_ID; // Pega o ID da lista ou cautela
+            const userId = (userInfo && userInfo.nomeGuerra) 
+            ? userInfo.nomeGuerra.toUpperCase() 
+            : null;
+
+            if (listId && userId) {
+                // Esta chave DEVE ser a mesma usada na função salvarRascunho()
+                const draftKey = `sigma_draft_${userId}_${listId}`; 
+                localStorage.removeItem(draftKey);
+                console.log(`Rascunho local (${draftKey}) limpo com sucesso.`);
+            }
+        }
+
+       // --- 1. FUNÇÃO PARA LER DADOS ANTIGOS (LEGADOS) ---
+const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
+    const linhas = [];
+    if (adminStatus) linhas.push(`[${adminStatus.toUpperCase()}] (Admin): ${adminObs}`);
+    const separator = ' | + NOVA: ';
+    if (typeof textoBruto !== 'string') return [];
+    
+    if (textoBruto.includes(separator)) {
+        const partes = textoBruto.split(separator);
+        partes.forEach(p => {
+            p = p.trim();
+            const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; const match = p.match(regex);
+            if (match) linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+            else linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+        });
+    } else {
+        const p = textoBruto.trim();
+        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; const match = p.match(regex);
+        if (match) linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
+        else linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
+    }
+    return linhas;
+};
+
+// --- 2. FUNÇÃO VISUAL ÚNICA (SEM HORAS VIA REGEX) ---
+const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
+    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
+    
+    // 1. EXTRAÇÃO SEGURA DA LISTA
+    // Tenta pegar o array de pendências acumuladas (Nova Estrutura)
+    const lista = (pendencia && pendencia.pendencias_ca) ? pendencia.pendencias_ca : 
+                  (Array.isArray(pendencia) ? pendencia : null);
+
+    // 🛡️ 2. REGRA DE PRIORIDADE (MATA O FANTASMA)
+    // Se a lista existir e tiver itens, usamos APENAS ela e ignoramos o campo 'obs'
+    if (lista && Array.isArray(lista) && lista.length > 0) {
+        lista.forEach(p => {
+            const militar = p.quem || 'Militar';
+            const dataFull = p.data || '';
+            
+            // Extrai apenas a data (DD/MM/AAAA) usando regex
             const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
             const dataApenas = matchData ? matchData[0] : dataFull;
-            html += `<li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem;">
-                        <span style="margin-right: 8px;">⚠️</span><b>Por </b><span style="color: #d90f23; font-weight: bold;">${militar}</span><span> em <b>${dataApenas}</b>:</span>
-                        <i style="margin-left: 5px; color: #333; font-weight: normal;">${pendencia.obs}</i></li>`;
+
+            html += `
+                <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem; border-bottom: 1px dashed #eee; padding-bottom: 4px;">
+                    <span style="margin-right: 8px;">⚠️</span>
+                    <b>Por </b>
+                    <span style="color: #d90f23; font-weight: bold;">${militar}</span>
+                    <span> em <b>${dataApenas}</b>:</span>
+                    <i style="margin-left: 5px; color: #333; font-weight: normal; display: block; padding-left: 25px;">${p.obs}</i>
+                </li>`;
+        });
+    } 
+    // 3. FALLBACK PARA DADOS ANTIGOS (Só entra aqui se NÃO houver lista)
+    else if (pendencia && pendencia.obs && typeof pendencia.obs === 'string') {
+        const militar = pendencia.quem || autorAtual || 'Militar';
+        const dataFull = pendencia.data || dataAtual || '';
+        const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
+        const dataApenas = matchData ? matchData[0] : dataFull;
+
+        html += `
+            <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem;">
+                <span style="margin-right: 8px;">⚠️</span>
+                <b>Por </b>
+                <span style="color: #d90f23; font-weight: bold;">${militar}</span>
+                <span> em <b>${dataApenas}</b>:</span>
+                <i style="margin-left: 5px; color: #333; font-weight: normal;">${pendencia.obs}</i>
+            </li>`;
+    }
+
+    html += '</ul>';
+    return html;
+};
+    
+// --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
+function renderizarConferencia() {
+    const mainContent = document.getElementById('main-content');
+    // Limpa setores antigos para evitar duplicidade na tela
+    const antigos = mainContent.querySelectorAll('.setor'); 
+    antigos.forEach(el => el.remove());
+
+    let htmlSetores = ''; 
+    const setorIds = []; 
+    dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
+    window.setorIds = setorIds;
+
+    // --- Sub-função interna para montar o Alerta de Pendência ---
+    const montarPendenciaHtml = (uid, pendenciaObj) => {
+        if (!pendenciaObj) return '';
+        
+        // Trata Cautela Ativa (Visual Laranja/Diferenciado)
+        if (pendenciaObj.status === "CAUTELA_ATV") {
+            return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left;" data-status-type="cautela">
+                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;"><i class="fas fa-boxes"></i> ${pendenciaObj.quem}</div>
+                        <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap;"><i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i>${pendenciaObj.obs}</p>
+                    </div>`;
         }
-        html += '</ul>'; return html;
+        
+        // Gera o visual dos carimbos (Por Fulano em Data...)
+        const htmlFormatado = gerarHtmlVisualApp(pendenciaObj);
+        
+        // 🛡️ PERSISTÊNCIA: Codifica o objeto completo para o botão 'Acrescentar'
+        const safeHistorico = encodeURIComponent(JSON.stringify(pendenciaObj));
+
+        if (pendenciaObj.isReadOnly) {
+            return `<div class="pendencia-alert-box" style="border-left: 3px solid #d32f2f; margin-top: 10px;">
+                        <div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>
+                        ${htmlFormatado}
+                    </div>`;
+        } else {
+            return `<div class="pendencia-alert-box">
+                        ${htmlFormatado}
+                        <div class="pendencia-actions">
+                            <button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button>
+                            <button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button>
+                        </div>
+                    </div>`;
+        }
     };
 
-    function renderizarConferencia() {
-        const mainContent = document.getElementById('main-content');
-        const antigos = mainContent.querySelectorAll('.setor'); 
-        antigos.forEach(el => el.remove());
-        let htmlSetores = ''; const setorIds = []; 
-        dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
-        window.setorIds = setorIds;
+    // --- Loop Principal por Setores ---
+    dadosConferencia.forEach((setor, index) => {
+        const isFirstSetor = (index === 0); 
+        let htmlItens = ''; 
+        let totalItensNoSetor = 0;
+        
+        setor.itens.forEach(item => {
+            // CASO A: ITENS COM TOMBAMENTO (MULTI)
+            if (item.tipo === 'multi' && item.tombamentos) {
+                let htmlTombamentos = '';
+                item.tombamentos.forEach(tomb => {
+                    const uid = `${item.id}-${tomb.tomb}`; 
+                    let isCautelado = !!tomb.cautela;
+                    
+                    let tombBtnHtml = isCautela ? 
+                        `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>` : 
+                        (isCautelado ? `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>` : `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`);
+                    
+                    let alertaCautelaHtml = (isCautelado && !isCautela) ? montarPendenciaHtml(uid, {obs: `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}`, quem: "Sistema/Cautela", status: "CAUTELA_ATV"}) : '';
+                    
+                    htmlTombamentos += `
+                        <div class="tombamento-container" data-tomb="${tomb.tomb}">
+                            <div class="tombamento-controls">
+                                <span>Tomb.: ${tomb.tomb} ${isCautelado ? '🔒' : ''}</span>
+                                <div class="tombamento-options">${tombBtnHtml}</div>
+                            </div>
+                            ${alertaCautelaHtml}
+                            ${montarPendenciaHtml(uid, tomb.pendencia)}
+                            <p class="tombamento-descricao-salva"></p>
+                            <div class="tombamento-obs-container">
+                                <div class="historico-fixo" style="display:none"></div>
 
-        const montarPendenciaHtml = (uid, pendenciaObj) => {
-            if (!pendenciaObj) return '';
-            if (pendenciaObj.status === "CAUTELA_ATV") {
-                return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left;" data-status-type="cautela">
-                            <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;"><i class="fas fa-boxes"></i> ${pendenciaObj.quem}</div>
-                            <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap;"><i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i>${pendenciaObj.obs}</p></div>`;
-            }
-            const htmlFormatado = gerarHtmlVisualApp(pendenciaObj);
-            const safeHistorico = encodeURIComponent(JSON.stringify(pendenciaObj));
-            if (pendenciaObj.isReadOnly) {
-                return `<div class="pendencia-alert-box" style="border-left: 3px solid #d32f2f; margin-top: 10px;">
-                            <div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>${htmlFormatado}</div>`;
-            } else {
-                return `<div class="pendencia-alert-box">${htmlFormatado}<div class="pendencia-actions">
-                            <button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button>
-                            <button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button></div></div>`;
-            }
-        };
-
-        dadosConferencia.forEach((setor, index) => {
-            const isFirstSetor = (index === 0); let htmlItens = ''; let totalItensNoSetor = 0;
-            setor.itens.forEach(item => {
-                if (item.tipo === 'multi' && item.tombamentos) {
-                    let htmlTombamentos = '';
-                    item.tombamentos.forEach(tomb => {
-                        const uid = `${item.id}-${tomb.tomb}`; let isCautelado = !!tomb.cautela;
-                        let tombBtnHtml = isCautela ? `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>` : 
-                            (isCautelado ? `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>` : `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`);
-                        let alertaCautelaHtml = (isCautelado && !isCautela) ? montarPendenciaHtml(uid, {obs: `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}`, quem: "Sistema/Cautela", status: "CAUTELA_ATV"}) : '';
-                        htmlTombamentos += `<div class="tombamento-container" data-tomb="${tomb.tomb}"><div class="tombamento-controls"><span>Tomb.: ${tomb.tomb} ${isCautelado ? '🔒' : ''}</span><div class="tombamento-options">${tombBtnHtml}</div></div>${alertaCautelaHtml}${montarPendenciaHtml(uid, tomb.pendencia)}<p class="tombamento-descricao-salva"></p>
-                                            <div class="tombamento-obs-container"><div class="historico-fixo" style="display:none"></div><label>Descreva a NOVA alteração:</label><textarea placeholder="Detalhe..."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button></div></div>`;
-                        totalItensNoSetor++; window.itemStatus[uid] = { status: 'pending', obs: '' };
-                    });
-                    htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
-                } else {
-                    let hasCautela = (item.cautelas && item.cautelas.length > 0);
-                    let singleBtnHtml = isCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : 
-                        (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
-                    htmlItens += `<div class="item-conferencia" data-type="single" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span><span class="item-quantidade">QTD: ${item.quantidadeEsperada || 1}</span></div><div class="item-options">${singleBtnHtml}</div>${montarPendenciaHtml(item.id, item.pendencia)}<p class="descricao-salva"></p>
-                                    <div class="alteracao-container"><div class="historico-fixo" style="display:none"></div><label>Descreva a NOVA alteração:</label><textarea placeholder="Detalhe..."></textarea><button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button></div></div>`;
-                    totalItensNoSetor++; window.itemStatus[item.id] = { status: 'pending', obs: '' };
-                }
-            });
-            const exp = isFirstSetor ? 'expanded' : ''; const arr = isFirstSetor ? '▼' : '►';
-            htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${totalItensNoSetor}</div></div><span class="arrow">${arr}</span></div><div class="setor-content ${exp}">${htmlItens}</div></div>`;
-        });
-        const btnFin = document.getElementById('btn-finalizar');
-        if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
-        updateOverallStatus();
-    }
-
-    function setItemStatus(btn, status) { 
-        const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); const uid = item.dataset.id;
-        item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
-        item.querySelector('.descricao-salva').style.display='none'; item.querySelector('.alteracao-container').style.display='none';
-        const pb = item.querySelector('.pendencia-alert-box'); 
-        if (pb && pb.getAttribute('data-status-type') !== 'cautela') pb.style.display='none';
-        if (status === 'cautela_ciente') {
-            item.className = 'item-conferencia status-alert'; item.querySelector('.status-icon').className = 'status-icon alert';
-            window.itemStatus[uid] = { status: 'KEEP', obs: '' }; if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-        } else if(status==='ok'){
-            item.className='item-conferencia status-ok'; item.querySelector('.status-icon').className='status-icon ok';
-            window.itemStatus[uid]={status:'S/A',obs:''}; if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
-        } else { 
-            item.className='item-conferencia status-alert'; item.querySelector('.status-icon').className='status-icon alert'; 
-            item.querySelector('.alteracao-container').style.display='block'; window.itemStatus[uid]={status:'PENDING_CA',obs:''};
-            item.querySelector('textarea').focus(); if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-        } 
-        salvarRascunho(); if(setor) updateSetorStatus(setor); updateOverallStatus(); 
-        if((status==='ok' || status==='cautela_ciente') && setor) checkSetorCompletion(setor, uid);
-    }
-
-    function setTombamentoStatus(btn, status) { 
-        const tomb = btn.closest('.tombamento-container'); const item = btn.closest('.item-conferencia'); const setor = btn.closest('.setor'); 
-        const uid = `${item.dataset.id}-${tomb.dataset.tomb}`;
-        tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
-        tomb.querySelector('.tombamento-obs-container').style.display='none'; tomb.querySelector('.tombamento-descricao-salva').style.display='none';
-        const pb = tomb.querySelector('.pendencia-alert-box'); if (pb && pb.getAttribute('data-status-type') !== 'cautela') pb.style.display='none';
-        if (status === 'cautela_ciente') {
-            window.itemStatus[uid] = { status: 'KEEP', obs: '' }; if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-            updateItemMainStatusDisplay(item);
-        } else if(status==='ok'){
-            window.itemStatus[uid]={status:'S/A',obs:''}; if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
-            updateItemMainStatusDisplay(item);
-        } else { 
-            tomb.querySelector('.tombamento-obs-container').style.display='block'; window.itemStatus[uid]={status:'PENDING_CA',obs:''}; 
-            tomb.querySelector('textarea').focus(); if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-            updateItemMainStatusDisplay(item);
-        } 
-        salvarRascunho(); updateSetorStatus(setor); updateOverallStatus(); 
-        if(status==='ok' || status==='cautela_ciente') checkSetorCompletion(setor, item.dataset.id);
-    }
-
-    function manterPendencia(btn, uid) { 
-        const box = btn.closest('.pendencia-alert-box');
-        if(box) { 
-            box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept');
-            box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
-            window.itemStatus[uid]={status:'KEEP',obs:''}; salvarRascunho(); 
-            const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); 
-            const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); 
-            const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); 
-            if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item);
-            const setor=c.closest('.setor'); updateSetorStatus(setor); updateOverallStatus(); checkSetorCompletion(setor, item.dataset.id); 
-        } 
-    }
-
-    function acrescentarPendencia(btn, uid, encodedData) { 
-        const box = btn.closest('.pendencia-alert-box'); const container = box.closest('.tombamento-container') || box.closest('.item-conferencia'); 
-        box.style.display = 'none'; 
-        if (container) { 
-            const edit = container.querySelector('.tombamento-obs-container') || container.querySelector('.alteracao-container'); edit.style.display = 'block'; 
-            const hist = edit.querySelector('.historico-fixo'); if (hist) hist.dataset.meta = encodedData; 
-            const textarea = edit.querySelector('textarea'); textarea.value = ''; textarea.focus(); 
-            window.itemStatus[uid] = { status: 'PENDING_CA', meta_origem: encodedData }; salvarRascunho(); 
-        } 
-    }
-
-    function salvarItem(btn) { 
-        const item = btn.closest('.item-conferencia'); const containerEdit = item.querySelector('.alteracao-container');
-        const obsDigitada = containerEdit.querySelector('textarea').value.trim(); const dataAtual = new Date().toLocaleDateString('pt-BR');
-        const conferente = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; const uid = item.dataset.id;
-        if(obsDigitada.length < 3) return alert("Descreva a alteração.");
-        let listaAcumulada = []; const histFixo = containerEdit.querySelector('.historico-fixo'); const metaData = histFixo ? histFixo.dataset.meta : null;
-        if (metaData && metaData !== "undefined" && metaData !== "") {
-            try { const passado = JSON.parse(decodeURIComponent(metaData)); if (passado.pendencias_ca) listaAcumulada = [...passado.pendencias_ca];
-            else if (passado.obs) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs }); } catch (e) {}
-        } 
-        if (listaAcumulada.length === 0) {
-            const itemOriginal = dadosConferencia.flatMap(s => s.itens).find(i => i.id === uid);
-            if (itemOriginal && itemOriginal.pendencia) {
-                if (itemOriginal.pendencia.pendencias_ca) listaAcumulada = [...itemOriginal.pendencia.pendencias_ca];
-                else if (itemOriginal.pendencia.obs) listaAcumulada.push({ quem: itemOriginal.pendencia.quem, data: itemOriginal.pendencia.data, obs: itemOriginal.pendencia.obs });
-            }
-        }
-        listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
-        const novoObjeto = { status: 'C/A', pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | ') };
-        window.itemStatus[uid] = novoObjeto; containerEdit.style.display = 'none'; 
-        const d = item.querySelector('.descricao-salva'); d.innerHTML = gerarHtmlVisualApp(novoObjeto); d.style.display = 'block'; 
-        salvarRascunho(); updateSetorStatus(btn.closest('.setor')); updateOverallStatus(); 
-    }
-
-    function salvarTombamento(btn) { 
-        const tomb = btn.closest('.tombamento-container'); const item = btn.closest('.item-conferencia'); const containerEdit = tomb.querySelector('.tombamento-obs-container');
-        const obsDigitada = containerEdit.querySelector('textarea').value.trim(); const dataAtual = new Date().toLocaleDateString('pt-BR');
-        const conferente = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`; const uid = `${item.dataset.id}-${tomb.dataset.tomb}`;
-        if(obsDigitada.length < 3) return alert("Descreva a alteração.");
-        let listaAcumulada = []; const histFixo = containerEdit.querySelector('.historico-fixo'); const metaData = histFixo ? histFixo.dataset.meta : null;
-        if (metaData && metaData !== "undefined" && metaData !== "") {
-            try { const passado = JSON.parse(decodeURIComponent(metaData)); if (passado.pendencias_ca && Array.isArray(passado.pendencias_ca)) listaAcumulada = [...passado.pendencias_ca];
-            else if (passado.obs) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs }); } catch (e) {}
-        } 
-        if (listaAcumulada.length === 0) {
-            const itemPai = dadosConferencia.flatMap(s => s.itens).find(i => i.id === item.dataset.id);
-            if (itemPai && itemPai.tombamentos) {
-                const tombOriginal = itemPai.tombamentos.find(t => t.tomb === tomb.dataset.tomb);
-                if (tombOriginal && tombOriginal.pendencia) {
-                    if (tombOriginal.pendencia.pendencias_ca) listaAcumulada = [...tombOriginal.pendencia.pendencias_ca];
-                    else if (tombOriginal.pendencia.obs) listaAcumulada.push({ quem: tombOriginal.pendencia.quem, data: tombOriginal.pendencia.data, obs: tombOriginal.pendencia.obs });
-                }
-            }
-        }
-        listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
-        const novoObjeto = { status: 'C/A', obs: listaAcumulada.map(p => p.obs).join(' | '), pendencias_ca: listaAcumulada };
-        window.itemStatus[uid] = novoObjeto; containerEdit.style.display = 'none'; 
-        const d = tomb.querySelector('.tombamento-descricao-salva'); if (d) { d.innerHTML = gerarHtmlVisualApp(novoObjeto); d.style.display = 'block'; }
-        salvarRascunho(); updateItemMainStatusDisplay(item); updateSetorStatus(btn.closest('.setor')); updateOverallStatus();
-    }
-
-    async function finalizarConferencia() {
-        const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
-        const CONFERENTE_UID = userInfo.uid || ''; 
-        if (isCautela) {
-            if (MODO_OPERACAO === 'devolucao_final') { await finalizarRecebimentoDevolucao(); }
-            else { await finalizarRecebimentoCautela(); } return;
-        }
-        const btn = document.getElementById('btn-finalizar'); if (btn.disabled) return;
-        btn.textContent = "Salvando..."; btn.disabled = true;
-        try {
-            const p = userInfo; const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`; const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
-            const dataAtualCompleta = new Date().toLocaleString('pt-BR'); const dataSomenteDia = dataAtualCompleta.split(',')[0];
-            let updated = false; let itensRelatorio = []; let itensCaa = []; 
-            dadosConferencia.forEach(setor => {
-                setor.itens.forEach(item => {
-                    const processarItemUnico = (itemOuTomb, id, nome) => {
-                        const s = window.itemStatus[id]; if (!s || s.status === 'pending') return; 
-                        if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
-                        let finalStatus = (s.status === 'KEEP' || s.status === 'C/A' || s.status === 'PENDING_CA') ? 'C/A' : 'S/A';
-                        let listaPendenciasAtivas = [];
-                        if (finalStatus === 'C/A') {
-                            if (s.pendencias_ca && Array.isArray(s.pendencias_ca)) { listaPendenciasAtivas = [...s.pendencias_ca]; } 
-                            else if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) { listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca]; } 
-                            else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) { listaPendenciasAtivas.push({ quem: itemOuTomb.pendencia.quem, data: itemOuTomb.pendencia.data, obs: itemOuTomb.pendencia.obs }); }
-                            let obsRascunho = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
-                            const textoAcumuladoNaLista = listaPendenciasAtivas.map(p => p.obs).join(' | ');
-                            if (obsRascunho === textoAcumuladoNaLista || (listaPendenciasAtivas.length > 0 && obsRascunho === listaPendenciasAtivas[listaPendenciasAtivas.length -1].obs)) { obsRascunho = ""; }
-                            if (obsRascunho !== "") {
-                                listaPendenciasAtivas.push({ quem: conferente, data: dataSomenteDia, obs: obsRascunho });
-                                itemOuTomb.historico_vida.push({ evento: "ALTERACAO_DETECTADA", quem: conferente, data: dataAtualCompleta, detalhes: obsRascunho });
-                            }
-                            const textoJoinFinal = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
-                            itemOuTomb.pendencia = { tipo: "C/A", pendencias_ca: listaPendenciasAtivas, obs: textoJoinFinal, quem: listaPendenciasAtivas[0]?.quem || conferente, data: listaPendenciasAtivas[0]?.data || dataSomenteDia };
-                            updated = true;
-                        } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                            itemOuTomb.historico_vida.push({ evento: "SANEAMENTO_ALTERACAO", quem: conferente, data: dataAtualCompleta, detalhes: "Item conferido como S/A." });
-                            delete itemOuTomb.pendencia; updated = true;
-                        }
-                        const dadosParaRelatorio = { id: id, nomeCompleto: nome, status: finalStatus, pendencias_ca: listaPendenciasAtivas, obs: itemOuTomb.pendencia?.obs || '', quem: itemOuTomb.pendencia?.quem || '', data: itemOuTomb.pendencia?.data || '', quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), setor: setor.nome };
-                        itensRelatorio.push(dadosParaRelatorio); if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
-                    };
-                    if (item.tipo === 'multi' && item.tombamentos) { item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`)); }
-                    else { processarItemUnico(item, item.id, item.nome); }
+                                <label>Descreva a NOVA alteração:</label>
+                                <textarea placeholder="Detalhe a alteração aqui..."></textarea>
+                                <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button>
+                            </div>
+                        </div>`;
+                    totalItensNoSetor++; 
+                    window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
-            });
-            if(updated) { await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia }); }
-            await db.collection('resultados_conferencias').add({ local: localNome, lista_id: LISTA_ID, conferente_uid: CONFERENTE_UID, conferente: conferente, timestamp: firebase.firestore.Timestamp.now(), totalItensConferidos: itensRelatorio.length, totalCaa: itensCaa.length, itensCaa, itensRelatorio });
-            const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
-            await custodiaRef.set({ lista_id: LISTA_ID, local_nome: localNome, conferente_uid: CONFERENTE_UID, conferente_completo: conferente, timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp() });
-            limparRascunho(); window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-            if (window.self === window.top) { alert("Conferência finalizada!"); window.location.href = "operacional.html"; }
-        } catch (e) { alert("Erro ao finalizar: " + e.message); btn.disabled = false; btn.textContent = "Finalizar Conferência"; }
+                htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
+            
+            } 
+            // CASO B: ITENS ÚNICOS (SINGLE)
+            else {
+                let hasCautela = (item.cautelas && item.cautelas.length > 0);
+                let singleBtnHtml = isCautela ? 
+                    `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : 
+                    (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
+                
+                htmlItens += `
+                    <div class="item-conferencia" data-type="single" data-id="${item.id}">
+                        <div class="item-header">
+                            <span class="status-icon"></span>
+                            <span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span>
+                            <span class="item-quantidade">QTD: ${item.quantidadeEsperada || 1}</span>
+                        </div>
+                        <div class="item-options">${singleBtnHtml}</div>
+                        ${montarPendenciaHtml(item.id, item.pendencia)}
+                        <p class="descricao-salva"></p>
+                        <div class="alteracao-container">
+                            <div class="historico-fixo" style="display:none"></div>
+
+                            <label>Descreva a NOVA alteração:</label>
+                            <textarea placeholder="Detalhe a alteração aqui..."></textarea>
+                            <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
+                        </div>
+                    </div>`;
+                totalItensNoSetor++; 
+                window.itemStatus[item.id] = { status: 'pending', obs: '' };
+            }
+        });
+        
+        const exp = isFirstSetor ? 'expanded' : ''; 
+        const arr = isFirstSetor ? '▼' : '►';
+        htmlSetores += `
+            <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
+                <div class="setor-header" onclick="toggleSetor(this)">
+                    <div class="setor-info">
+                        <span>${setor.nome}</span>
+                        <div class="setor-status">0/${totalItensNoSetor}</div>
+                    </div>
+                    <span class="arrow">${arr}</span>
+                </div>
+                <div class="setor-content ${exp}">${htmlItens}</div>
+            </div>`;
+    });
+
+    const btnFin = document.getElementById('btn-finalizar');
+    if (btnFin) {
+        // Insere todos os setores antes do botão finalizar
+        btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
+    }
+    
+    // Atualiza contadores e rascunhos após montar a tela
+    updateOverallStatus();
+}
+        function setItemStatus(btn, status) { 
+    const item = btn.closest('.item-conferencia');
+    const setor = btn.closest('.setor'); 
+    const uid = item.dataset.id;
+    
+    item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
+    btn.classList.add('active'); 
+    item.querySelector('.descricao-salva').style.display='none'; 
+    item.querySelector('.alteracao-container').style.display='none';
+    const pb = item.querySelector('.pendencia-alert-box'); 
+    
+    if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
+        pb.style.display='none';
+    }
+    
+    if (status === 'cautela_ciente') {
+        item.className = 'item-conferencia status-alert';
+        item.querySelector('.status-icon').className = 'status-icon alert';
+        // 🛡️ Mantém KEEP para a finalizarConferencia preservar o texto
+        window.itemStatus[uid] = { status: 'KEEP', obs: '' }; 
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
+    }
+    else if(status==='ok'){
+        item.className='item-conferencia status-ok';
+        item.querySelector('.status-icon').className='status-icon ok';
+        window.itemStatus[uid]={status:'S/A',obs:''};
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
+    } 
+    else { 
+        item.className='item-conferencia status-alert';
+        item.querySelector('.status-icon').className='status-icon alert'; 
+        item.querySelector('.alteracao-container').style.display='block';
+        window.itemStatus[uid]={status:'PENDING_CA',obs:''};
+        item.querySelector('textarea').focus();
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
+    } 
+    
+    salvarRascunho();
+    if(setor) updateSetorStatus(setor); 
+    updateOverallStatus(); 
+    if((status==='ok' || status==='cautela_ciente') && setor) checkSetorCompletion(setor, uid);
+}
+        
+        function setTombamentoStatus(btn, status) { 
+    const tomb = btn.closest('.tombamento-container');
+    const item = btn.closest('.item-conferencia'); 
+    const setor = btn.closest('.setor'); 
+    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`; 
+    
+    tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
+    btn.classList.add('active'); 
+    tomb.querySelector('.tombamento-obs-container').style.display='none'; 
+    tomb.querySelector('.tombamento-descricao-salva').style.display='none'; 
+    
+    const pb = tomb.querySelector('.pendencia-alert-box');
+    if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
+        pb.style.display='none';
     }
 
-    async function finalizarRecebimentoCautela(cautelaData) {
-    const btn = document.getElementById('btn-finalizar'); 
-    btn.textContent = "PROCESSANDO..."; 
+    if (status === 'cautela_ciente') {
+        // 🛡️ CORREÇÃO: Alterado para 'KEEP' para preservar histórico no Firebase/PDF
+        window.itemStatus[uid] = { status: 'KEEP', obs: '' };
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
+        updateItemMainStatusDisplay(item);
+    }
+    else if(status==='ok'){
+        window.itemStatus[uid]={status:'S/A',obs:''};
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
+        updateItemMainStatusDisplay(item);
+    } 
+    else { 
+        tomb.querySelector('.tombamento-obs-container').style.display='block';
+        window.itemStatus[uid]={status:'PENDING_CA',obs:''}; 
+        tomb.querySelector('textarea').focus();
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
+        updateItemMainStatusDisplay(item);
+    } 
+    
+    salvarRascunho();
+    updateSetorStatus(setor); 
+    updateOverallStatus(); 
+    if(status==='ok' || status==='cautela_ciente') checkSetorCompletion(setor, item.dataset.id);
+}
+    
+        function manterPendencia(btn, uid) { 
+            const box = btn.closest('.pendencia-alert-box');
+            if(box) { 
+                box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept');
+                box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
+                // Define status KEEP e obs VAZIA para não poluir o histórico (nova lógica)
+                window.itemStatus[uid]={status:'KEEP',obs:''}; salvarRascunho(); // <<< ALTERAÇÃO APLICADA
+                const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); 
+                const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); 
+                const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); 
+                if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item);
+                const setor=c.closest('.setor'); updateSetorStatus(setor); updateOverallStatus(); checkSetorCompletion(setor, item.dataset.id); 
+            } 
+        }
+
+        function acrescentarPendencia(btn, uid, encodedData) { 
+    const box = btn.closest('.pendencia-alert-box'); 
+    const container = box.closest('.tombamento-container') || box.closest('.item-conferencia'); 
+    box.style.display = 'none'; 
+    
+    if (container) { 
+        const edit = container.querySelector('.tombamento-obs-container') || container.querySelector('.alteracao-container'); 
+        edit.style.display = 'block'; 
+        
+        const hist = edit.querySelector('.historico-fixo'); 
+        if (hist) {
+            hist.dataset.meta = encodedData; // Injeta o passado aqui
+        }
+        
+        const textarea = edit.querySelector('textarea');
+        textarea.value = ''; 
+        textarea.focus(); 
+        
+        // 🛡️ AQUI: Não resetamos o status para vazio se já houver algo.
+        // Apenas marcamos que uma edição está pendente.
+        window.itemStatus[uid] = { status: 'PENDING_CA', meta_origem: encodedData }; 
+        salvarRascunho(); 
+    } 
+}
+
+        function salvarItem(btn) { 
+    const item = btn.closest('.item-conferencia');
+    const containerEdit = item.querySelector('.alteracao-container');
+    const obsDigitada = containerEdit.querySelector('textarea').value.trim(); 
+    const dataAtual = new Date().toLocaleDateString('pt-BR');
+    const conferente = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    const uid = item.dataset.id;
+
+    if(obsDigitada.length < 3) return alert("Descreva a alteração em detalhes.");
+
+    // 🛡️ RECUPERAÇÃO DO PASSADO (Sem sobrescrever)
+    let listaAcumulada = [];
+    
+    // Tentativa A: Pelo "cofre" meta (usado no botão acrescentar)
+    const histFixo = containerEdit.querySelector('.historico-fixo');
+    const metaData = histFixo ? histFixo.dataset.meta : null;
+
+    if (metaData && metaData !== "undefined" && metaData !== "") {
+        try {
+            const passado = JSON.parse(decodeURIComponent(metaData));
+            if (passado.pendencias_ca) listaAcumulada = [...passado.pendencias_ca];
+            else if (passado.obs) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+        } catch (e) { console.error("Erro meta:", e); }
+    } 
+    
+    // Tentativa B: Se a lista ainda estiver vazia, busca direto no objeto original carregado
+    if (listaAcumulada.length === 0) {
+        const itemOriginal = dadosConferencia.flatMap(s => s.itens).find(i => i.id === uid);
+        if (itemOriginal && itemOriginal.pendencia) {
+            if (itemOriginal.pendencia.pendencias_ca) listaAcumulada = [...itemOriginal.pendencia.pendencias_ca];
+            else if (itemOriginal.pendencia.obs) listaAcumulada.push({ 
+                quem: itemOriginal.pendencia.quem, data: itemOuTomb.pendencia.data, obs: itemOuTomb.pendencia.obs 
+            });
+        }
+    }
+
+    // Adiciona a nova entrada
+    listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
+
+    const novoObjeto = {
+        status: 'C/A',
+        pendencias_ca: listaAcumulada,
+        obs: listaAcumulada.map(p => p.obs).join(' | ') // Garante o texto para o PDF
+    };
+
+    window.itemStatus[uid] = novoObjeto; 
+    containerEdit.style.display = 'none'; 
+    const d = item.querySelector('.descricao-salva'); 
+    d.innerHTML = gerarHtmlVisualApp(novoObjeto); 
+    d.style.display = 'block'; 
+    
+    salvarRascunho(); 
+    updateSetorStatus(btn.closest('.setor')); 
+    updateOverallStatus(); 
+}
+    
+       function salvarTombamento(btn) { 
+    const tomb = btn.closest('.tombamento-container'); 
+    const item = btn.closest('.item-conferencia');
+    const containerEdit = tomb.querySelector('.tombamento-obs-container');
+    const obsDigitada = containerEdit.querySelector('textarea').value.trim(); 
+    const dataAtual = new Date().toLocaleDateString('pt-BR');
+    const p = userInfo;
+    const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`;
+
+    if(obsDigitada.length < 3) return alert("Por favor, descreva a alteração.");
+
+    // 🛡️ LÓGICA DE PRESERVAÇÃO DO HISTÓRICO (ACUMULADOR)
+    let listaAcumulada = [];
+    
+    // Tentativa A: Resgatar o passado pelo metadado injetado no botão "Acrescentar"
+    const histFixo = containerEdit.querySelector('.historico-fixo');
+    const metaData = histFixo ? histFixo.dataset.meta : null;
+
+    if (metaData && metaData !== "undefined" && metaData !== "") {
+        try {
+            const passado = JSON.parse(decodeURIComponent(metaData));
+            if (passado.pendencias_ca && Array.isArray(passado.pendencias_ca)) {
+                listaAcumulada = [...passado.pendencias_ca];
+            } else if (passado.obs) {
+                // Caso o dado antigo ainda esteja no formato de string simples
+                listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+            }
+        } catch (e) { 
+            console.error("Erro ao decodificar meta no tombamento:", e); 
+        }
+    } 
+    
+    // Tentativa B: Fallback de segurança (Busca direta no objeto global carregado)
+    if (listaAcumulada.length === 0) {
+        const itemPai = dadosConferencia.flatMap(s => s.itens).find(i => i.id === item.dataset.id);
+        if (itemPai && itemPai.tombamentos) {
+            const tombOriginal = itemPai.tombamentos.find(t => t.tomb === tomb.dataset.tomb);
+            if (tombOriginal && tombOriginal.pendencia) {
+                if (tombOriginal.pendencia.pendencias_ca) {
+                    listaAcumulada = [...tombOriginal.pendencia.pendencias_ca];
+                } else if (tombOriginal.pendencia.obs) {
+                    listaAcumulada.push({ 
+                        quem: tombOriginal.pendencia.quem, 
+                        data: tombOriginal.pendencia.data, 
+                        obs: tombOriginal.pendencia.obs 
+                    });
+                }
+            }
+        }
+    }
+
+    // ➕ Adiciona a nova observação ao final da lista recuperada
+    listaAcumulada.push({
+        quem: conferente,
+        data: dataAtual,
+        obs: obsDigitada
+    });
+
+    // 📦 Montagem do objeto final para o Firebase/PDF
+    // Unimos todas as observações com o separador " | " para o campo de texto simples
+    const textoUnido = listaAcumulada.map(p => p.obs).filter(o => o).join(' | ');
+
+    const novoObjeto = {
+        status: 'C/A',
+        obs: textoUnido,              // Texto "achatado" para o PDF
+        pendencias_ca: listaAcumulada // Lista estruturada para carimbos individuais
+    };
+
+    // Atualiza o estado global da aplicação
+    window.itemStatus[uid] = novoObjeto; 
+    
+    // Interface Visual
+    containerEdit.style.display = 'none'; 
+    const d = tomb.querySelector('.tombamento-descricao-salva');
+    if (d) {
+        d.innerHTML = gerarHtmlVisualApp(novoObjeto); // Gera os carimbos na tela
+        d.style.display = 'block'; 
+    }
+
+    // Persistência local e atualização de status
+    salvarRascunho(); 
+    updateItemMainStatusDisplay(item); 
+    updateSetorStatus(btn.closest('.setor')); 
+    updateOverallStatus();
+}
+
+        function restaurarRascunho() {
+            const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
+            try {
+                const parsed = JSON.parse(saved); window.itemStatus = parsed.status; 
+                document.getElementById('draft-message').style.display = 'block';
+                Object.keys(window.itemStatus).forEach(uid => {
+                    const st = window.itemStatus[uid]; let container, isTombamento=false;
+                    container = document.querySelector(`.item-conferencia[data-id="${uid}"]`);
+                    if (!container) {
+                        const allTombs = document.querySelectorAll('.tombamento-container');
+                        for (let t of allTombs) { if (`${t.closest('.item-conferencia').dataset.id}-${t.dataset.tomb}` === uid) { container = t; isTombamento = true; break; } }
+                    }
+                    if (container) {
+                        const btnSA=container.querySelector('.sa-ok'), btnCA=container.querySelector('.ca-alert');
+                        if(btnSA)btnSA.classList.remove('active'); if(btnCA)btnCA.classList.remove('active');
+                        const descEl = container.querySelector('.descricao-salva') || container.querySelector('.tombamento-descricao-salva');
+                        
+                        if (st.status === 'S/A') { if(btnSA)btnSA.classList.add('active'); if(!isTombamento) container.querySelector('.status-icon').className='status-icon ok'; }
+                        else if (st.status === 'C/A' || st.status === 'KEEP') { 
+                            if(btnCA)btnCA.classList.add('active'); 
+                            if(!isTombamento) container.querySelector('.status-icon').className='status-icon alert'; 
+                            if(descEl && st.status === 'C/A') {
+                                const conf=`${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+                                const now=formatarDataSimples(new Date());
+                                descEl.innerHTML = gerarHtmlVisualApp(st.pendencias_ca ? st : st.obs, conf, now, null, null); 
+                                descEl.style.display='block';
+                                const pendBox = container.querySelector('.pendencia-alert-box'); if(pendBox) pendBox.style.display = 'none';
+                            } else if(st.status === 'KEEP') {
+                                const pendBox = container.querySelector('.pendencia-alert-box');
+                                if(pendBox) {
+                                    pendBox.classList.add('kept'); pendBox.querySelector('.pendencia-actions').style.display='none';
+                                    if(!pendBox.innerHTML.includes('✔ Mantido')) pendBox.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>');
+                                }
+                            }
+                        }
+                        else if (st.status === 'PENDING_CA') {
+                            const edit = container.querySelector('.tombamento-obs-container')||container.querySelector('.alteracao-container');
+                            if(edit) edit.style.display='block';
+                            if(btnCA) btnCA.classList.add('active');
+                        }
+                        if(isTombamento) updateItemMainStatusDisplay(container.closest('.item-conferencia'));
+                    }
+                });
+                document.querySelectorAll('.setor').forEach(s => updateSetorStatus(s)); updateOverallStatus();
+            } catch (e) { console.error("Erro restore", e); }
+        }
+      function adaptarCautelaParaRender(cautelaData) {
+    if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
+
+    const setorCautela = {
+        id: cautelaData.cautela_id,
+        nome: "ITENS CAUTELADOS",
+        itens: cautelaData.itens.map(cItem => {
+            
+            let tipo = cItem.tombamento ? 'multi' : 'single';
+            let tombamentos = null;
+
+            if (tipo === 'multi') {
+                tombamentos = [{
+                    tomb: cItem.tombamento,
+                    id_completo: cItem.id_completo || `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
+                    // O item da cautela já carrega seu próprio estado (JSON) se houver
+                    cautela: cItem.cautela || {
+                        id: cautelaData.cautela_id,
+                        destinatario: cautelaData.destinatario || cautelaData.destinatario_original_nome,
+                        data: cautelaData.timestamp_emissao ? new Date(cautelaData.timestamp_emissao.seconds * 1000).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')
+                    },
+                    pendencia: cItem.pendencia || null
+                }];
+                cItem.quantidade = 1; 
+            }
+
+            return {
+                id: cItem.id_base || cItem.id,
+                nome: cItem.nome,
+                quantidadeEsperada: cItem.quantidade || 1,
+                tipo: tipo,
+                tombamentos: tombamentos,
+                // Preserva o carimbo JSON para itens de quantidade (Single)
+                cautelas: cItem.cautelas || [],
+                pendencia: cItem.pendencia || null
+            };
+        })
+    };
+
+    return [setorCautela];
+}
+        async function carregarDadosRemotos() {
+    const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
+    const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
+    
+    // 1. Validação Inicial
+    if (!ID_ALVO) { 
+        console.error("ID não encontrado para carregamento.");
+        return; 
+    }
+        
+    const loadingMsg = document.getElementById('loading-message');
+    if (loadingMsg) loadingMsg.innerHTML = "Conectando...";
+
+    try {
+        // 2. Busca de Dados no Firebase
+        const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
+        if (!doc.exists) throw new Error("Documento não encontrado no banco de dados.");
+        
+        const data = doc.data();
+        
+        // 3. Adaptação dos Dados (JSON)
+        dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
+        
+        // 4. Definição das Informações de Cabeçalho
+        const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista de Conferência");
+        const postoLocal = isCautela ? `Destinatário: ${data.destinatario || data.destinatario_original_nome}` : (data.posto || "Geral");
+        
+        infoLocal = { nome: nomeLocal, posto: postoLocal };
+        
+        // 5. Atualização Segura da Interface (Apenas se os elementos existirem)
+        const infoElement = document.getElementById('local-posto-info');
+        if (infoElement) {
+            infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
+        }
+
+        document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.nome}`;
+
+        // 6. Lógica Específica de Cautela (Blindada)
+        if (isCautela) {
+            const h1Element = document.querySelector('h1');
+            const subtituloElement = document.querySelector('.subtitulo');
+            const btnFinalizar = document.getElementById('btn-finalizar');
+
+            if (h1Element) {
+                if (MODO_OPERACAO === 'devolucao_final') h1Element.textContent = 'RECEBIMENTO DE DEVOLUÇÃO';
+                else if (MODO_OPERACAO === 'devolucao') h1Element.textContent = 'DEVOLUÇÃO (TRANSIÇÃO)';
+                else h1Element.textContent = 'RECEBIMENTO DE CAUTELA';
+            }
+
+            if (subtituloElement) {
+                if (MODO_OPERACAO === 'devolucao_final') {
+                    const reversor = data.militar_completo_reversor || 'Militar Anterior';
+                    subtituloElement.innerHTML = `Recebendo Cautela <strong>${CAUTELA_ID}</strong> de: <br> ${reversor}`;
+                } else {
+                    subtituloElement.textContent = `Processando Cautela ${CAUTELA_ID}`;
+                }
+            }
+
+            if (btnFinalizar) {
+                if (MODO_OPERACAO === 'devolucao_final') {
+                    btnFinalizar.textContent = 'FINALIZAR RECEBIMENTO DA DEVOLUÇÃO';
+                    btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
+                } else {
+                    btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
+                }
+            }
+        }
+        
+        // 7. Renderização e Funções de Suporte
+        if (loadingMsg) loadingMsg.innerHTML = "Renderizando itens...";
+        
+        renderizarConferencia(); 
+
+        // Verificação de existência das funções de apoio antes de chamar
+        if (typeof updateHeaderInfo === "function") try { updateHeaderInfo(); } catch(e) {}
+        if (typeof updateOverallStatus === "function") try { updateOverallStatus(); } catch(e) {}
+        if (typeof restaurarRascunho === "function") try { restaurarRascunho(); } catch(e) {}
+
+        // 8. Finalização do Estado de Carregamento
+        if (loadingMsg) loadingMsg.style.display = 'none'; 
+        const mainContent = document.getElementById('main-content');
+        if (mainContent) mainContent.style.display = 'block';
+
+    } catch (e) { 
+        console.error("Erro Crítico no Carregamento:", e);
+        if (loadingMsg) loadingMsg.innerHTML = "<span style='color:red'>Erro ao carregar dados. Verifique o console.</span>";
+    }
+}
+        function getCautelaTextForReport(itemOuTomb) {
+    if (!itemOuTomb) return "";
+    let textos = [];
+
+    if (itemOuTomb.cautela && typeof itemOuTomb.cautela === 'object') {
+        const c = itemOuTomb.cautela;
+        textos.push(`Cautela EMITIDA (${c.id}) para ${c.destinatario} em ${c.data}`);
+    } else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) {
+        itemOuTomb.cautelas.forEach(c => {
+            textos.push(`Cautela EMITIDA (${c.id}) ${c.quantidade}UN para ${c.destinatario}`);
+        });
+    }
+
+    if (itemOuTomb.pendencia && typeof itemOuTomb.pendencia === 'object') {
+        const p = itemOuTomb.pendencia;
+        textos.push(`- Por ${p.quem} em ${p.data}: ${p.obs}`);
+    } else if (typeof itemOuTomb.pendencia === 'string' && itemOuTomb.pendencia.trim() !== "") {
+        textos.push(itemOuTomb.pendencia);
+    }
+
+    return textos.join(' | ');
+}
+        // A função completa fornecida no passo anterior, que deve substituir a sua:
+
+async function finalizarConferencia() {
+    const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
+    const CONFERENTE_UID = userInfo.uid || ''; 
+
+    if (isCautela) {
+        await finalizarRecebimentoCautela();
+        return;
+    }
+    
+    const btn = document.getElementById('btn-finalizar');
+    if (btn.disabled) return;
+    btn.textContent = "Salvando..."; 
+    btn.disabled = true;
+
+    try {
+        const p = userInfo;
+        const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
+        const dataAtualCompleta = new Date().toLocaleString('pt-BR');
+        const dataSomenteDia = dataAtualCompleta.split(',')[0];
+        
+        let updated = false;
+        let itensRelatorio = [];
+        let itensCaa = []; 
+
+        dadosConferencia.forEach(setor => {
+            setor.itens.forEach(item => {
+                
+                const processarItemUnico = (itemOuTomb, id, nome) => {
+                    const s = window.itemStatus[id];
+                    
+                    // 1. Ignora itens não conferidos
+                    if (!s || s.status === 'pending') return; 
+
+                    if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
+                    
+                    let finalStatus = (s.status === 'KEEP' || s.status === 'C/A' || s.status === 'PENDING_CA') ? 'C/A' : 'S/A';
+                    let listaPendenciasAtivas = [];
+
+                    if (finalStatus === 'C/A') {
+                        // 2. RECUPERAÇÃO DO HISTÓRICO ACUMULADO
+                        if (s.pendencias_ca && Array.isArray(s.pendencias_ca)) {
+                            // Se o usuário usou o botão "Salvar", a lista já está pronta aqui
+                            listaPendenciasAtivas = [...s.pendencias_ca];
+                        } 
+                        else if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
+                            // Senão, pega o que já existia no banco
+                            listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
+                        } 
+                        else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
+                            // Fallback para conversão de formato antigo
+                            listaPendenciasAtivas.push({
+                                quem: itemOuTomb.pendencia.quem,
+                                data: itemOuTomb.pendencia.data,
+                                obs: itemOuTomb.pendencia.obs
+                            });
+                        }
+
+                        // 🛡️ 3. TRAVA ANTIDUPLICIDADE (FIM DO CARIMBO FANTASMA)
+                        // Pegamos o texto que está no rascunho da tela (textarea)
+                        let obsRascunho = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
+                        
+                        // Criamos uma string com a junção de todas as obs da lista para comparar
+                        const textoAcumuladoNaLista = listaPendenciasAtivas.map(p => p.obs).join(' | ');
+
+                        // Se o texto do rascunho for IDENTICO à lista ou à última obs, nós limpamos
+                        if (obsRascunho === textoAcumuladoNaLista || 
+                            (listaPendenciasAtivas.length > 0 && obsRascunho === listaPendenciasAtivas[listaPendenciasAtivas.length -1].obs)) {
+                            obsRascunho = ""; 
+                        }
+
+                        // Só adiciona um carimbo NOVO se houver algo real no rascunho
+                        if (obsRascunho !== "") {
+                            listaPendenciasAtivas.push({
+                                quem: conferente,
+                                data: dataSomenteDia,
+                                obs: obsRascunho
+                            });
+                            
+                            itemOuTomb.historico_vida.push({
+                                evento: "ALTERACAO_DETECTADA",
+                                quem: conferente,
+                                data: dataAtualCompleta,
+                                detalhes: obsRascunho
+                            });
+                        }
+
+                        // 4. GERAÇÃO DO CAMPO 'OBS' RAIZ (Apenas para compatibilidade/PDF)
+                        const textoJoinFinal = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
+
+                        itemOuTomb.pendencia = {
+                            tipo: "C/A",
+                            pendencias_ca: listaPendenciasAtivas, // Fonte da verdade
+                            obs: textoJoinFinal,                  // Texto unido
+                            quem: listaPendenciasAtivas[0]?.quem || conferente,
+                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia
+                        };
+                        updated = true;
+
+                    } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
+                        itemOuTomb.historico_vida.push({
+                            evento: "SANEAMENTO_ALTERACAO",
+                            quem: conferente,
+                            data: dataAtualCompleta,
+                            detalhes: "Item conferido como S/A."
+                        });
+                        delete itemOuTomb.pendencia;
+                        updated = true;
+                    }
+
+                    // 5. MONTAGEM PARA COLEÇÃO 'resultados_conferencias' (Dashboard)
+                    const dadosParaRelatorio = { 
+                        id: id,
+                        nomeCompleto: nome, 
+                        status: finalStatus, 
+                        pendencias_ca: listaPendenciasAtivas, 
+                        obs: itemOuTomb.pendencia?.obs || '', 
+                        quem: itemOuTomb.pendencia?.quem || '', 
+                        data: itemOuTomb.pendencia?.data || '',
+                        quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
+                        setor: setor.nome
+                    };
+
+                    itensRelatorio.push(dadosParaRelatorio);
+                    if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
+                };
+
+                if (item.tipo === 'multi' && item.tombamentos) {
+                    item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
+                } else {
+                    processarItemUnico(item, item.id, item.nome);
+                }
+            });
+        });
+
+        if(updated) {
+            await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
+        }
+        
+        await db.collection('resultados_conferencias').add({ 
+            local: localNome, 
+            lista_id: LISTA_ID, 
+            conferente_uid: CONFERENTE_UID,
+            conferente: conferente, 
+            timestamp: firebase.firestore.Timestamp.now(), 
+            totalItensConferidos: itensRelatorio.length, 
+            totalCaa: itensCaa.length, 
+            itensCaa, 
+            itensRelatorio 
+        });
+        
+        const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
+        await custodiaRef.set({
+            lista_id: LISTA_ID, local_nome: localNome, conferente_uid: CONFERENTE_UID,
+            conferente_completo: conferente, timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+
+        limparRascunho();
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        if (window.self === window.top) { 
+            alert("Conferência finalizada com sucesso!"); 
+            window.location.href = "operacional.html"; 
+        }
+
+    } catch (e) { 
+        console.error("Erro na finalização:", e);
+        alert("Erro ao finalizar: " + e.message); 
+        btn.disabled = false; 
+        btn.textContent = "Finalizar Conferência";
+    }
+}
+        async function finalizarRecebimentoCautela(cautela) {
+    const btn = document.getElementById('btn-finalizar');
+    btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
 
     const meuUid = firebase.auth().currentUser.uid;
     const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-    
-    // 📅 PADRONIZAÇÃO DE DATA DD/MM/AAAA
-    const dataAtualCompleta = new Date().toLocaleString('pt-BR', { timeZone: 'America/Boa_Vista' });
-    const dataSomenteDia = dataAtualCompleta.split(',')[0]; 
-    
-    const cautelaAtiva = cautelaData || { local_origem_id: urlParams.get('cautelaId') };
+    const dataAtual = new Date().toLocaleString('pt-BR');
+    const dataSomenteDia = dataAtual.split(',')[0];
+    const listaId = cautela.local_origem_id;
 
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautelaData.local_origem_id);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(listaId);
 
         await db.runTransaction(async (transaction) => {
-            const cDoc = await transaction.get(cautelaRef);
-            const lDoc = await transaction.get(listaMestraRef);
-            if (!cDoc.exists || !lDoc.exists) throw new Error("Documentos não encontrados.");
-            
-            const cData = cDoc.data(); 
-            let listaMestra = lDoc.data().list; 
+            const cautelaDoc = await transaction.get(cautelaRef);
+            const listaMestraDoc = await transaction.get(listaMestraRef);
+            if (!cautelaDoc.exists || !listaMestraDoc.exists) throw new Error("Documentos não encontrados.");
+
+            const cData = cautelaDoc.data();
+            let listaMestra = listaMestraDoc.data().list;
             const itensConferidos = [];
 
-            cautelaData.itens.forEach(cItem => {
+            cautela.itens.forEach(cItem => {
                 const uidNaTela = `${cItem.id}-${cItem.tombamento || 'single'}`;
                 const statusSelect = document.getElementById(`status-${uidNaTela}`);
                 const obsFinal = document.getElementById(`obs-${uidNaTela}`)?.value.trim() || '';
                 const statusFinal = statusSelect ? statusSelect.value : 'S/A';
+
                 itensConferidos.push({ ...cItem, status_recebimento: statusFinal, obs_recebimento: obsFinal });
 
                 listaMestra = listaMestra.map(setor => ({
-                    ...setor, itens: setor.itens.map(mItem => {
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
                         if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
-                            // 🛡️ HERANÇA DE DNA
+                            // 🛡️ HERANÇA DE HISTÓRICO (DNA)
                             let listaAcumulada = mItem.pendencia?.pendencias_ca ? [...mItem.pendencia.pendencias_ca] : [];
-                            if (listaAcumulada.length === 0 && mItem.pendencia?.obs) { 
-                                listaAcumulada.push({ quem: mItem.pendencia.quem || "Anterior", data: mItem.pendencia.data || "", obs: mItem.pendencia.obs }); 
+                            if (listaAcumulada.length === 0 && mItem.pendencia?.obs) {
+                                listaAcumulada.push({ quem: mItem.pendencia.quem || "Anterior", data: mItem.pendencia.data || "", obs: mItem.pendencia.obs });
                             }
 
-                            if (statusFinal === 'C/A' && obsFinal !== '') { 
-                                listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RECEBIMENTO] ${obsFinal}` }); 
+                            if (statusFinal === 'C/A' && obsFinal !== '') {
+                                listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RECEBIMENTO] ${obsFinal}` });
                             }
 
-                            if (listaAcumulada.length > 0) { 
-                                mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data }; 
+                            if (listaAcumulada.length > 0) {
+                                mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data };
                             }
 
-                            const carimboPosse = { id: CAUTELA_ID, emitente: cData.emitente, destinatario: meuNomeCompleto, data: dataSomenteDia, status_item: statusFinal, obs_item: obsFinal };
-                            if (cItem.tombamento) { 
-                                mItem.tombamentos = mItem.tombamentos.map(t => t.tomb === cItem.tombamento ? { ...t, cautela: carimboPosse } : t); 
-                            } else { 
-                                if (!mItem.cautelas) mItem.cautelas = []; 
-                                mItem.cautelas.push(carimboPosse); 
+                            // 🔒 CARIMBO DE POSSE (Cadeado)
+                            const carimboPosse = { id: CAUTELA_ID, emitente: cData.emitente, destinatario: meuNomeCompleto, data: dataAtual, status_item: statusFinal, obs_item: obsFinal };
+                            if (cItem.tombamento) {
+                                mItem.tombamentos = mItem.tombamentos.map(t => t.tomb === cItem.tombamento ? { ...t, cautela: carimboPosse } : t);
+                            } else {
+                                if (!mItem.cautelas) mItem.cautelas = [];
+                                mItem.cautelas.push(carimboPosse);
                             }
-                        } return mItem;
+                        }
+                        return mItem;
                     })
                 }));
             });
+
             transaction.update(cautelaRef, { status: 'RECEBIDA', timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(), itens: itensConferidos, militar_completo_receptor: meuNomeCompleto, destinatario: meuNomeCompleto, destinatario_uid: meuUid });
             transaction.update(listaMestraRef, { list: listaMestra });
         });
-        alert(`✅ Recebimento confirmado!`); 
-        limparRascunho(); 
+
+        alert(`✅ Recebimento confirmado!`);
+        limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
     } catch (e) { alert(`Erro: ${e.message}`); btn.disabled = false; }
 }
-    async function finalizarRecebimentoDevolucao(cautelaData) {
-    const btn = document.getElementById('btn-finalizar'); 
-    btn.textContent = "PROCESSANDO RETORNO..."; 
+      async function finalizarRecebimentoDevolucao(cautela) {
+    const btn = document.getElementById('btn-finalizar');
+    btn.textContent = "PROCESSANDO RETORNO...";
     btn.disabled = true;
 
     const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-    
-    // 📅 PADRONIZAÇÃO DE DATA DD/MM/AAAA (Igual à anterior)
-    const dataAtualCompleta = new Date().toLocaleString('pt-BR', { timeZone: 'America/Boa_Vista' });
-    const dataSomenteDia = dataAtualCompleta.split(',')[0]; 
+    const dataAtual = new Date().toLocaleString('pt-BR');
+    const dataSomenteDia = dataAtual.split(',')[0];
 
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautelaData.local_origem_id);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautela.local_origem_id);
 
         await db.runTransaction(async (transaction) => {
-            const cSnap = await transaction.get(cautelaRef); 
+            const cSnap = await transaction.get(cautelaRef);
             const lSnap = await transaction.get(listaMestraRef);
-            if (!cSnap.exists || !lSnap.exists) throw new Error("Documentos não encontrados.");
-
-            let listaMestra = lSnap.data().list; 
+            let listaMestra = lSnap.data().list;
             const itensDevolvidos = [];
 
-            cautelaData.itens.forEach(cItem => {
+            cautela.itens.forEach(cItem => {
                 const uidNaTela = `${cItem.id}-${cItem.tombamento || 'single'}`;
                 const obsFinal = document.getElementById(`obs-${uidNaTela}`)?.value.trim() || '';
                 const statusFinal = document.getElementById(`status-${uidNaTela}`)?.value || 'S/A';
+
                 itensDevolvidos.push({ ...cItem, status_devolucao: statusFinal, obs_devolucao: obsFinal });
 
                 listaMestra = listaMestra.map(setor => ({
-                    ...setor, itens: setor.itens.map(mItem => {
+                    ...setor,
+                    itens: setor.itens.map(mItem => {
                         if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
                             // 🛡️ LÓGICA ACUMULATIVA NO RETORNO
                             if (statusFinal === 'C/A') {
                                 let listaAcumulada = mItem.pendencia?.pendencias_ca ? [...mItem.pendencia.pendencias_ca] : [];
                                 listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RETORNO DEVOLUÇÃO] ${obsFinal}` });
                                 mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data };
-                            } else { 
-                                delete mItem.pendencia; 
+                            } else {
+                                delete mItem.pendencia; // Limpa avarias se voltou 100% S/A
                             }
-                            
-                            // 🔓 REMOÇÃO DO CADEADO
-                            if (cItem.tombamento) { 
-                                mItem.tombamentos = mItem.tombamentos.map(t => { if(t.tomb === cItem.tombamento) delete t.cautela; return t; }); 
-                            } else { 
-                                mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID); 
+
+                            // 🔓 REMOÇÃO DO CADEADO (Libera o item na viatura)
+                            if (cItem.tombamento) {
+                                mItem.tombamentos = mItem.tombamentos.map(t => { if(t.tomb === cItem.tombamento) delete t.cautela; return t; });
+                            } else {
+                                mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID);
                             }
-                        } return mItem;
+                        }
+                        return mItem;
                     })
                 }));
             });
+
             transaction.update(cautelaRef, { status: 'CONCLUÍDA', timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), receptor_final_completo: meuNomeCompleto, itens: itensDevolvidos });
             transaction.update(listaMestraRef, { list: listaMestra });
         });
-        alert(`✅ Devolução concluída! Material reintegrado.`); 
-        limparRascunho(); 
+
+        alert(`✅ Devolução concluída! Material reintegrado.`);
+        limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
     } catch (e) { alert(`Erro: ${e.message}`); btn.disabled = false; }
 }
-
-    window.onload = carregarDadosRemotos;
-</script>
+        window.onload = carregarDadosRemotos;
+    </script>
 </body>
 </html>
