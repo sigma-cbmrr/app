@@ -819,7 +819,7 @@ async function finalizarConferencia() {
         let itensRelatorio = [];
         let itensCaa = []; 
 
-        // 1. Atualização da Lista Mestra (Persistência e Histórico de Vida)
+        // 1. Atualização da Lista Mestra (Persistência no Item)
         const atualizarListaDB = (itemOuTomb, uid) => {
             const s = window.itemStatus[uid];
             if(!s) return;
@@ -827,7 +827,6 @@ async function finalizarConferencia() {
 
             if(s.status === 'C/A') { 
                 if (s.obs && s.obs.trim() !== '') {
-                    // Salva a pendência ATUAL no item para o próximo conferente ver
                     itemOuTomb.pendencia = {
                         tipo: "C/A",
                         obs: s.obs.trim(),
@@ -868,15 +867,15 @@ async function finalizarConferencia() {
                     const s = window.itemStatus[id];
                     if (s && (s.status === 'C/A' || s.status === 'KEEP' || s.status === 'S/A')) {
                         let finalStatus = (s.status === 'KEEP' || s.status === 'C/A') ? 'C/A' : 'S/A';
+                        
+                        // 🛡️ AJUSTE CIRÚRGICO: A lista deve ser criada NOVINHA para cada item
                         let listaPendenciasAtivas = [];
 
-                        // Se o status é de alteração, montamos a lista acumulativa
                         if (finalStatus === 'C/A') {
-                            // Carrega pendências que já vieram do banco (Manter/Acrescentar)
+                            // Carrega pendências que já existiam no banco para ESTE item
                             if (pendExistente && pendExistente.pendencias_ca) {
                                 listaPendenciasAtivas = [...pendExistente.pendencias_ca];
                             } else if (pendExistente && pendExistente.quem) {
-                                // Converte formato antigo para o novo padrão de lista
                                 listaPendenciasAtivas.push({
                                     quem: pendExistente.quem,
                                     data: pendExistente.data,
@@ -884,7 +883,7 @@ async function finalizarConferencia() {
                                 });
                             }
 
-                            // Se o conferente atual detectou algo NOVO (C/A), adiciona à lista
+                            // Adiciona a nova alteração detectada por você para ESTE item
                             if (s.status === 'C/A' && s.obs.trim() !== '') {
                                 listaPendenciasAtivas.push({
                                     quem: conferente,
@@ -898,7 +897,7 @@ async function finalizarConferencia() {
                             id: id,
                             nomeCompleto: nome, 
                             status: finalStatus, 
-                            pendencias_ca: listaPendenciasAtivas, // 🛡️ LISTA COM TODOS OS CARIMBOS
+                            pendencias_ca: listaPendenciasAtivas, 
                             quantidade: item.quantidadeEsperada || 1, 
                             setor: setor.nome
                         };
@@ -916,7 +915,7 @@ async function finalizarConferencia() {
             });
         });
 
-        // 3. Persistência
+        // 3. Persistência Final
         if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         
         await db.collection('resultados_conferencias').add({ 
