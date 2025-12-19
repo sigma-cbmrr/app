@@ -3315,7 +3315,7 @@ window.addEventListener('message', function(event) {
     const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
     const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
     
-    // CORREÇÃO: Adicionado o nome da função '' no onclick
+    // AQUI ESTÁ O SEGREDO: O nome 'reimprimirPDF' deve preceder o JSON.stringify
     return `<li class="history-item">
                 <div class="hist-info">
                     <strong>${data.local}</strong>
@@ -3323,7 +3323,7 @@ window.addEventListener('message', function(event) {
                 </div>
                 <div style="display:flex;align-items:center;">
                     <span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span>
-                    <button class="btn-reprint" onclick='(${JSON.stringify(data)})'>
+                    <button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'>
                         <i class="fas fa-file-pdf"></i>
                     </button>
                 </div>
@@ -3782,7 +3782,7 @@ function reimprimirPDF(data) {
         doc.setTextColor(50);
         let y = 46;
         const X_LABEL = MARGIN + 5; 
-        const X_VAL = MARGIN + 30;
+        const X_VAL = MARGIN + 35;
         
         const dataTimestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000) : new Date();
         const dataHoraStr = dataTimestamp.toLocaleString('pt-BR');
@@ -3821,28 +3821,25 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛑 CORREÇÃO DA OBSERVAÇÃO 🛑
+                // 🛑 LÓGICA DE OBSERVAÇÃO ATUALIZADA 🛑
                 let finalObs = '-';
 
-                // 1. Prioriza o formato de objeto JSON (Novo Padrão)
+                // 1. Prioriza o formato JSON estruturado (Extrai quem e data do item)
                 if (item.quem && item.data && item.obs) {
-                    // Extrai apenas a data via RegEx
                     const matchData = item.data.match(/\d{2}\/\d{2}\/\d{4}/);
                     const dLimpa = matchData ? matchData[0] : item.data;
                     finalObs = `Por ${item.quem} em ${dLimpa}: ${item.obs}`;
                 } 
-                // 2. Se for uma cautela real (posse de material)
+                // 2. Fallback para Cautelas reais (Material sob posse)
                 else if (item.cautela && typeof item.cautela === 'object' && item.cautela.id) {
-                    const c = item.cautela;
-                    finalObs = `[EM CAUTELA: ${c.id}] com ${c.destinatario}`;
+                    finalObs = `[EM CAUTELA: ${item.cautela.id}] com ${item.cautela.destinatario}`;
                 }
-                // 3. Fallback para String Legada (ou caso a obs não tenha quem/data)
+                // 3. Fallback para strings de texto puro
                 else if (item.obs && typeof item.obs === 'string' && item.obs !== '-') {
-                    // Limpa possíveis separadores antigos de strings sujas
-                    finalObs = item.obs.split(' | +')[0]; 
+                    finalObs = item.obs.split(' | +')[0].trim();
                 }
 
-                // 4. Resposta da Gestão (Se houver)
+                // 4. Resposta da Gestão/Admin
                 if (item.statusAdmin && item.adminObs) {
                     finalObs = `RESPOSTA DA GESTÃO: ${item.adminObs}\n${finalObs}`;
                 }
