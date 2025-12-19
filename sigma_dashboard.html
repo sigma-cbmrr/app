@@ -3315,21 +3315,23 @@ window.addEventListener('message', function(event) {
     const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
     const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
     
-    // AQUI ESTÁ O SEGREDO: O nome '' deve preceder o JSON.stringify
+    // Codificamos o objeto para evitar que aspas no texto (ex: observações) quebrem o HTML
+    const dataSegura = encodeURIComponent(JSON.stringify(data));
+
     return `<li class="history-item">
                 <div class="hist-info">
                     <strong>${data.local}</strong>
                     <small>${data.conferente} • ${dataHora}</small>
                 </div>
                 <div style="display:flex;align-items:center;">
-                    <span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span>
-                    <button class="btn-reprint" onclick='(${JSON.stringify(data)})'>
+                    <span class="hist-status ${temAlteracao ? 'status-alert' : 'status-ok'}">${temAlteracao ? 'C/A' : 'S/A'}</span>
+                    
+                    <button class="btn-reprint" onclick="reimprimirPDF(JSON.parse(decodeURIComponent('${dataSegura}')))">
                         <i class="fas fa-file-pdf"></i>
                     </button>
                 </div>
             </li>`;
 }
-
         // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
     const container = document.getElementById('units-cards-container');
@@ -3764,6 +3766,7 @@ function reimprimirPDF(data) {
 
         doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
         doc.setFontSize(10).setTextColor(50);
+        
         const dataTimestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000) : new Date();
         
         doc.setFont('helvetica','bold').text('Local:', MARGIN + 5, 46); 
@@ -3777,6 +3780,8 @@ function reimprimirPDF(data) {
 
         let tableBody = [];
         const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = [60, 60, 60];
+        
+        // Prioriza itensRelatorio para garantir a listagem completa
         let listaParaImprimir = data.itensRelatorio || data.itensCaa || [];
         
         if (listaParaImprimir.length > 0) {
@@ -3788,26 +3793,25 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛑 CAPTURA HÍBRIDA DE OBSERVAÇÃO 🛑
                 let finalObs = '-';
                 
+                // Validação defensiva para evitar erros de match() em valores nulos
+                const formatData = (d) => {
+                    if(!d) return '';
+                    const m = d.toString().match(/\d{2}\/\d{2}\/\d{4}/);
+                    return m ? m[0] : d;
+                };
+
                 if (item.pendencias_ca && Array.isArray(item.pendencias_ca) && item.pendencias_ca.length > 0) {
-                    // Caso 1: Nova estrutura com lista
-                    finalObs = item.pendencias_ca.map(p => {
-                        const d = p.data.match(/\d{2}\/\d{2}\/\d{4}/) ? p.data.match(/\d{2}\/\d{2}\/\d{4}/)[0] : p.data;
-                        return `- Por ${p.quem} em ${d}: ${p.obs}`;
-                    }).join('\n');
+                    finalObs = item.pendencias_ca.map(p => `- Por ${p.quem || 'Militar'} em ${formatData(p.data)}: ${p.obs || ''}`).join('\n');
                 } else if (item.quem && item.obs) {
-                    // Caso 2: Estrutura simples (quem/data/obs)
-                    const d = item.data ? (item.data.match(/\d{2}\/\d{2}\/\d{4}/)?.[0] || item.data) : '';
-                    finalObs = `Por ${item.quem} em ${d}: ${item.obs}`;
+                    finalObs = `Por ${item.quem} em ${formatData(item.data)}: ${item.obs}`;
                 } else if (item.obs) {
-                    // Caso 3: Apenas texto
                     finalObs = item.obs;
                 }
 
                 let bgStatus = (item.status === 'C/A') ? RED_FILL : GREEN_FILL;
-                const itemQuantidade = item.tombamento ? 1 : (item.quantidade || 1);
+                const itemQuantidade = item.quantidade || 1;
 
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
@@ -3836,11 +3840,12 @@ function reimprimirPDF(data) {
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
         }
         
-        const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataTimestamp.toISOString().split('T')[0]}.pdf`;
+        const dataIso = dataTimestamp.toISOString().split('T')[0];
+        const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataIso}.pdf`;
         doc.save(nomeArquivo);
         
     } catch(e) { 
-        console.error(e);
+        console.error("Erro no PDF:", e);
         alert("Erro ao gerar PDF: " + e.message);
     }
 }
