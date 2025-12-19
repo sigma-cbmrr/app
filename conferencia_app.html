@@ -819,7 +819,7 @@ async function finalizarConferencia() {
         let itensRelatorio = [];
         let itensCaa = []; 
 
-        // 1. Atualização da Lista Mestra (Persistência no histórico de vida)
+        // 1. Atualização da Lista Mestra (Persistência e Histórico de Vida)
         const atualizarListaDB = (itemOuTomb, uid) => {
             const s = window.itemStatus[uid];
             if(!s) return;
@@ -827,9 +827,10 @@ async function finalizarConferencia() {
 
             if(s.status === 'C/A') { 
                 if (s.obs && s.obs.trim() !== '') {
+                    // Salva a pendência ATUAL no item para o próximo conferente ver
                     itemOuTomb.pendencia = {
                         tipo: "C/A",
-                        obs: s.obs, // Salva o texto PURO
+                        obs: s.obs.trim(),
                         quem: conferente,
                         data: dataAtualCompleta
                     };
@@ -837,7 +838,7 @@ async function finalizarConferencia() {
                         evento: "ALTERACAO_DETECTADA",
                         quem: conferente,
                         data: dataAtualCompleta,
-                        detalhes: s.obs
+                        detalhes: s.obs.trim()
                     });
                     updated = true;
                 }
@@ -860,41 +861,44 @@ async function finalizarConferencia() {
             });
         });
 
-        // 2. Montagem do Relatório para a coleção 'resultados_conferencias'
+        // 2. Montagem do Relatório Estruturado (Resultados)
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
-                const process = (id, nome, pend, itemContext) => { 
+                const process = (id, nome, pendExistente, itemContext) => { 
                     const s = window.itemStatus[id];
                     if (s && (s.status === 'C/A' || s.status === 'KEEP' || s.status === 'S/A')) {
                         let finalStatus = (s.status === 'KEEP' || s.status === 'C/A') ? 'C/A' : 'S/A';
-                        
-                        let quemOrigem = "";
-                        let dataOrigem = "";
-                        let finalObs = "";
+                        let listaPendenciasAtivas = [];
 
-                        // 🛑 LÓGICA DE LIMPEZA TOTAL 🛑
-                        if (s.status === 'KEEP' && pend) {
-                            quemOrigem = pend.quem || "Anterior";
-                            dataOrigem = pend.data ? (pend.data.match(/\d{2}\/\d{2}\/\d{4}/)?.[0] || pend.data) : "";
-                            finalObs = pend.obs || "";
-                        } else {
-                            quemOrigem = conferente;
-                            dataOrigem = dataSomenteDia;
-                            finalObs = s.obs || ""; 
-                        }
+                        // Se o status é de alteração, montamos a lista acumulativa
+                        if (finalStatus === 'C/A') {
+                            // Carrega pendências que já vieram do banco (Manter/Acrescentar)
+                            if (pendExistente && pendExistente.pendencias_ca) {
+                                listaPendenciasAtivas = [...pendExistente.pendencias_ca];
+                            } else if (pendExistente && pendExistente.quem) {
+                                // Converte formato antigo para o novo padrão de lista
+                                listaPendenciasAtivas.push({
+                                    quem: pendExistente.quem,
+                                    data: pendExistente.data,
+                                    obs: pendExistente.obs
+                                });
+                            }
 
-                        // Garante que se o texto vier com o separador antigo, a gente limpa na marra aqui
-                        if (typeof finalObs === 'string' && finalObs.includes(' | Cautela:')) {
-                            finalObs = finalObs.split(' | Cautela:')[0].trim();
+                            // Se o conferente atual detectou algo NOVO (C/A), adiciona à lista
+                            if (s.status === 'C/A' && s.obs.trim() !== '') {
+                                listaPendenciasAtivas.push({
+                                    quem: conferente,
+                                    data: dataSomenteDia,
+                                    obs: s.obs.trim()
+                                });
+                            }
                         }
 
                         const dadosItem = { 
                             id: id,
                             nomeCompleto: nome, 
                             status: finalStatus, 
-                            obs: finalObs, // TEXTO PURO
-                            quem_ca_origem: quemOrigem,
-                            data_ca_origem: dataOrigem,
+                            pendencias_ca: listaPendenciasAtivas, // 🛡️ LISTA COM TODOS OS CARIMBOS
                             quantidade: item.quantidadeEsperada || 1, 
                             setor: setor.nome
                         };
@@ -912,7 +916,7 @@ async function finalizarConferencia() {
             });
         });
 
-        // 3. Gravação
+        // 3. Persistência
         if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         
         await db.collection('resultados_conferencias').add({ 
@@ -927,14 +931,15 @@ async function finalizarConferencia() {
             itensRelatorio 
         });
         
-        // ... (resto do código de custódia e finalização mantido)
         const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
         await custodiaRef.set({
             lista_id: LISTA_ID, local_nome: localNome, conferente_uid: CONFERENTE_UID,
             conferente_completo: conferente, timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
         });
+
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        if (window.self === window.top) { alert("Conferência salva com sucesso!"); window.location.href = "operacional.html"; }
 
     } catch (e) { 
         console.error(e);
