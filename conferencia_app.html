@@ -958,8 +958,6 @@ async function finalizarConferencia() {
                 
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    
-                    // 1. Se o item não foi tocado nesta sessão (S/A ou C/A), ignoramos
                     if (!s || s.status === 'pending') return; 
 
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
@@ -968,11 +966,10 @@ async function finalizarConferencia() {
                     let listaPendenciasAtivas = [];
 
                     if (finalStatus === 'C/A') {
-                        // 2. Recupera histórico existente do banco
+                        // 1. Recupera histórico existente
                         if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
-                            // Converte formato antigo (se houver) para a nova lista
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -980,14 +977,11 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 3. Blindagem contra erro de trim()
                         const obsLimpa = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
-                        
-                        // 4. BLOQUEIO DE DUPLICIDADE:
-                        // Só adicionamos a nova obs se ela já não for a última da lista (evita duplicar o que o salvarItem já fez)
                         const ultimaObsNaLista = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
 
-                        if ((s.status === 'C/A' || s.status === 'PENDING_CA') && obsLimpa !== '' && obsLimpa !== ultimaObsNaLista) {
+                        // 2. Adiciona nova observação se houver e não for duplicada
+                        if (obsLimpa !== '' && obsLimpa !== ultimaObsNaLista) {
                             listaPendenciasAtivas.push({
                                 quem: conferente,
                                 data: dataSomenteDia,
@@ -1002,20 +996,19 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 5. SALVAMENTO HÍBRIDO (Lista para o App e Campos Raiz para o PDF)
-                        const textoJoin = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
+                        // 3. Monta o texto corrido para o campo 'obs' (compatibilidade PDF/Firebase)
+                        const textoParaRelatorio = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
 
                         itemOuTomb.pendencia = {
                             tipo: "C/A",
                             pendencias_ca: listaPendenciasAtivas,
-                            obs: textoJoin, // PDF buscará aqui
-                            quem: listaPendenciasAtivas[0]?.quem || conferente, // PDF buscará aqui
-                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia // PDF buscará aqui
+                            obs: textoParaRelatorio, 
+                            quem: listaPendenciasAtivas[0]?.quem || conferente,
+                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia
                         };
                         updated = true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                        // Lógica de Saneamento
                         itemOuTomb.historico_vida.push({
                             evento: "SANEAMENTO_ALTERACAO",
                             quem: conferente,
@@ -1026,13 +1019,13 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
-                    // 6. Montagem dos dados para a coleção 'resultados_conferencias'
+                    // 4. Montagem do objeto que vai para 'resultados_conferencias'
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
                         pendencias_ca: listaPendenciasAtivas, 
-                        obs: itemOuTomb.pendencia?.obs || '', 
+                        obs: itemOuTomb.pendencia?.obs || '', // 🛡️ CRÍTICO: Repassa para o relatório
                         quem: itemOuTomb.pendencia?.quem || '', 
                         data: itemOuTomb.pendencia?.data || '',
                         quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
@@ -1043,7 +1036,6 @@ async function finalizarConferencia() {
                     if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
                 };
 
-                // Execução por tipo de item
                 if (item.tipo === 'multi' && item.tombamentos) {
                     item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
                 } else {
@@ -1052,7 +1044,6 @@ async function finalizarConferencia() {
             });
         });
 
-        // Gravação no Firestore
         if(updated) {
             await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         }
@@ -1077,7 +1068,6 @@ async function finalizarConferencia() {
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        
         if (window.self === window.top) { 
             alert("Conferência finalizada com sucesso!"); 
             window.location.href = "operacional.html"; 
