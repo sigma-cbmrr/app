@@ -3684,50 +3684,44 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 
 // Função wrapper apenas para manter a consistência com o app (não usada no PDF)
 const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
-    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0;">';
+    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 0;">';
 
-    // Se for objeto JSON (Novo Padrão)
-    if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
+    // 1. PRIORIDADE: Nova estrutura de lista acumulativa (Array pendencias_ca)
+    if (pendencia && pendencia.pendencias_ca && Array.isArray(pendencia.pendencias_ca)) {
+        pendencia.pendencias_ca.forEach(p => {
+            const dataMatch = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
+            const dataLimpa = dataMatch ? dataMatch[0] : (p.data || '');
+            
+            html += `
+                <li style="margin-bottom: 8px; border-bottom: 1px dashed #eee; padding-bottom: 4px;">
+                    <i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 5px;"></i>
+                    <b>Por ${p.quem}</b> em ${dataLimpa}:
+                    <br><i style="margin-left: 20px; color: #444;">${p.obs}</i>
+                </li>`;
+        });
+    } 
+    // 2. FALLBACK: Formato de objeto único (Legado recente)
+    else if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
         html += `
-            <li style="margin-bottom: 5px; text-align: left;">
-                <i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 8px;"></i>
-                <i style="font-weight: bold;">Por </i>
-                <span style="color: #d90f23; font-weight: bold;">${pendencia.quem}</span>
-                <span> em ${pendencia.data}:</span>
-                <i style="margin-left: 5px;">${pendencia.obs}</i>
+            <li style="margin-bottom: 5px;">
+                <i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 5px;"></i>
+                <b>Por ${pendencia.quem}</b> em ${pendencia.data}:
+                <br><i style="margin-left: 20px;">${pendencia.obs}</i>
             </li>`;
     } 
-    // Se for string, processa a lógica de Admin e Cautela que você já tinha
+    // 3. FALLBACK: Strings legadas e tratamento de Admin
     else if (typeof pendencia === 'string' && pendencia !== '-' && pendencia.trim() !== '') {
         const linhas = gerarLinhasFormatadas(pendencia, autorAtual, dataAtual, adminStatus, adminObs);
         linhas.forEach(l => {
+            // ... (Mantenha sua lógica de detecção de 'Admin' e 'Cautela' aqui dentro igual ao original)
             if (l.includes('(Admin):')) {
+                // Seu código original de renderização do Gestor...
                 const [carimboStatus, obsText] = l.split(':');
                 const statusMatch = carimboStatus.match(/\[(.*?)\]/);
                 const statusText = statusMatch ? statusMatch[1] : 'PENDENTE';
-                
-                let icon = '⚠️';
-                let statusColor = '#f57c00';
-                
-                if (['SOLUCIONADO', 'REMOVER'].includes(statusText.toUpperCase().trim())) {
-                    icon = '✅️'; statusColor = '#1b8a3e';
-                } else if (statusText.toUpperCase().trim() === 'CAUTELADO') {
-                    icon = '🔃'; statusColor = '#0d47a1';
-                }
-
-                html += `<li>
-                            <span style="color: #d90f23;"><b>Gestor</b></span>:
-                            <span style="color: ${statusColor}; font-style: italic;">${icon} ${statusText}</span>
-                            : ${obsText ? obsText.trim() : ''}
-                        </li>`;
-            } else if (l.includes('[CAUTELA]:')) {
-                const cautelaText = l.replace('[CAUTELA]:', '').trim();
-                html += `<li style="background-color: #fff8e1; border-left: 3px solid #f57c00; padding: 5px 8px; margin: 5px 0;">
-                            <span style="font-weight: bold; color: #f57c00;"><i class="fas fa-hand-holding-box"></i> Cautela Ativa: </span>
-                            ${cautelaText}
-                         </li>`;
+                html += `<li><span style="color: #d90f23;"><b>Gestor</b></span>: <i class="fas fa-check-circle"></i> ${statusText}: ${obsText || ''}</li>`;
             } else {
-                html += `<li class="linha-obs"><i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 8px;"></i>${l}</li>`;
+                html += `<li class="linha-obs"><i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 5px;"></i>${l}</li>`;
             }
         });
     }
@@ -3735,7 +3729,7 @@ const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs
     html += '</ul>';
     return html;
 };
-
+		
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
 function reimprimirPDF(data) {
     try {
