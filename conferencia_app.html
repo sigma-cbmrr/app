@@ -958,7 +958,9 @@ async function finalizarConferencia() {
                 
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    if (!s) return; 
+                    
+                    // 🛡️ CORREÇÃO 1: Se o item não foi conferido (status pending ou nulo), ignora
+                    if (!s || s.status === 'pending') return; 
 
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
                     
@@ -967,7 +969,7 @@ async function finalizarConferencia() {
 
                     // --- LÓGICA DE PENDÊNCIAS ---
                     if (finalStatus === 'C/A') {
-                        // 1. Recupera o que já existia (Histórico)
+                        // Recupera histórico existente
                         if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
@@ -978,11 +980,10 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 2. 🛡️ CORREÇÃO DO ERRO: Verifica se existe observação nova para adicionar
-                        // Usamos (s.obs || "") para evitar o erro de undefined no trim()
-                        const obsLimpa = (s.obs || "").trim();
+                        // 🛡️ CORREÇÃO 2: Proteção total contra undefined no obs
+                        const obsLimpa = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
 
-                        if (s.status === 'C/A' && obsLimpa !== '') {
+                        if ((s.status === 'C/A' || s.status === 'PENDING_CA') && obsLimpa !== '') {
                             const novaPendencia = {
                                 quem: conferente,
                                 data: dataSomenteDia,
@@ -1004,7 +1005,7 @@ async function finalizarConferencia() {
                             updated = true;
                         } 
                         else if (s.status === 'KEEP') {
-                            // Se apenas manteve, a pendência do item permanece a mesma da listaPendenciasAtivas (já carregada acima)
+                            // Mantém o que já existia na lista mestra
                             itemOuTomb.pendencia = {
                                 tipo: "C/A",
                                 pendencias_ca: listaPendenciasAtivas
@@ -1023,12 +1024,12 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
-                    // --- DADOS PARA O RELATÓRIO ---
+                    // --- DADOS PARA O RELATÓRIO DE RESULTADOS ---
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
-                        pendencias_ca: listaPendenciasAtivas, // Garante que a lista vá para o PDF
+                        pendencias_ca: listaPendenciasAtivas, 
                         quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
                         setor: setor.nome
                     };
@@ -1045,6 +1046,7 @@ async function finalizarConferencia() {
             });
         });
 
+        // 2. Persistência
         if(updated) {
             await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         }
