@@ -3311,12 +3311,24 @@ window.addEventListener('message', function(event) {
         ul.innerHTML='Erro ao carregar histórico.';
     }
 }
-        function criarItemHistoricoHTML(data) {
-            const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
-            const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
-            
-            return `<li class="history-item"><div class="hist-info"><strong>${data.local}</strong><small>${data.conferente} • ${dataHora}</small></div><div style="display:flex;align-items:center;"><span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span><button class="btn-reprint" onclick='(${JSON.stringify(data)})'><i class="fas fa-file-pdf"></i></button></div></li>`;
-        }
+       function criarItemHistoricoHTML(data) {
+    const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
+    const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
+    
+    // CORREÇÃO: Adicionado o nome da função 'reimprimirPDF' no onclick
+    return `<li class="history-item">
+                <div class="hist-info">
+                    <strong>${data.local}</strong>
+                    <small>${data.conferente} • ${dataHora}</small>
+                </div>
+                <div style="display:flex;align-items:center;">
+                    <span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span>
+                    <button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'>
+                        <i class="fas fa-file-pdf"></i>
+                    </button>
+                </div>
+            </li>`;
+}
 
         // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
@@ -3809,7 +3821,6 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛑 INÍCIO DA IMPLEMENTAÇÃO CIRÚRGICA DO CARIMBO EM JSON 🛑
                 let textoCautela = '';
                 let textoPendencia = '';
                 let finalObs = '';
@@ -3817,36 +3828,36 @@ function reimprimirPDF(data) {
                 // 1. Extração da Posse (Cautelas)
                 if (item.cautelas && Array.isArray(item.cautelas) && item.cautelas.length > 0) {
                     textoCautela = item.cautelas.map(c => `[EM CAUTELA: ${c.id}] ${c.quantidade}UN com ${c.destinatario}`).join(' | ');
-                } else if (item.cautela && typeof item.cautela === 'object' && item.cautela.id) {
-                    const c = item.cautela;
-                    textoCautela = `[EM CAUTELA: ${c.id}] com ${c.destinatario}`;
+                } else if (item.cautela && typeof item.cautela === 'object') {
+                    textoCautela = `[EM CAUTELA: ${item.cautela.id}] com ${item.cautela.destinatario}`;
                 }
 
-                // 2. Extração da Pendência (C/A) - Prioriza objeto JSON
+                // 2. Extração da Pendência (C/A) com limpeza de Hora via RegEx
                 if (item.obs && item.obs !== '-') {
-                    if (item.quem && item.data) {
-                        textoPendencia = `- Por ${item.quem} em ${item.data}: "${item.obs}"`;
+                    // Tenta extrair quem e data se for objeto JSON
+                    const q = item.quem || '';
+                    let d = item.data || '';
+                    const matchData = d.match(/\d{2}\/\d{2}\/\d{4}/);
+                    const dLimpa = matchData ? matchData[0] : d;
+
+                    if (q && dLimpa) {
+                        textoPendencia = `- Por ${q} em ${dLimpa}: "${item.obs}"`;
                     } else {
-                        textoPendencia = item.obs; // Mantém string legada se houver
+                        textoPendencia = item.obs;
                     }
                 }
 
-                // 3. Montagem Final (Evita Duplicidade)
+                // 3. Montagem Final
                 if (textoCautela && textoPendencia) {
                     finalObs = `${textoPendencia}\n${textoCautela}`;
-                } else if (textoCautela) {
-                    finalObs = textoCautela;
-                } else if (textoPendencia) {
-                    finalObs = textoPendencia;
                 } else {
-                    finalObs = '-';
+                    finalObs = textoPendencia || textoCautela || '-';
                 }
 
-                // 4. Tratamento de Admin (Se houver)
-                if (item.statusAdmin) {
+                // 4. Resposta da Gestão (Admin)
+                if (item.statusAdmin && item.adminObs) {
                     finalObs = `RESPOSTA DA GESTÃO: ${item.adminObs}\n${finalObs}`;
                 }
-                // 🛑 FIM DA IMPLEMENTAÇÃO CIRÚRGICA 🛑
 
                 let bgStatus = (item.status === 'C/A' || item.status === 'KEEP') ? RED_FILL : GREEN_FILL;
                 const itemQuantidade = item.tombamento ? 1 : (item.quantidade || 1);
