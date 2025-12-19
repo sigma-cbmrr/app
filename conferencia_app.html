@@ -811,7 +811,8 @@ async function finalizarConferencia() {
         const p = userInfo;
         const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
         const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
-        const dataAtual = new Date().toLocaleString('pt-BR');
+        const dataAtualCompleta = new Date().toLocaleString('pt-BR');
+        const dataSomenteDia = dataAtualCompleta.split(',')[0];
         const clean = (val) => val === undefined ? null : val;
         
         let updated = false;
@@ -827,12 +828,14 @@ async function finalizarConferencia() {
             if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
 
             if(s.status === 'C/A' || s.status === 'KEEP') { 
-                if (s.obs.trim() !== '') {
+                // Se for um novo lançamento (status 'C/A'), criamos o objeto. 
+                // Se for 'KEEP', mantemos o que já existe no banco (não sobrescrevemos a pendencia original aqui)
+                if (s.status === 'C/A' && s.obs.trim() !== '') {
                     const novoObjetoCA = {
                         tipo: "C/A",
                         obs: s.obs,
                         quem: conferente,
-                        data: dataAtual,
+                        data: dataAtualCompleta,
                         statusAdmin: clean(itemOuTomb.pendencia?.statusAdmin),
                         adminObs: clean(itemOuTomb.pendencia?.adminObs)
                     };
@@ -842,7 +845,7 @@ async function finalizarConferencia() {
                     itemOuTomb.historico_vida.push({
                         evento: "ALTERACAO_DETECTADA",
                         quem: conferente,
-                        data: dataAtual,
+                        data: dataAtualCompleta,
                         detalhes: s.obs
                     });
                     updated = true;
@@ -851,7 +854,7 @@ async function finalizarConferencia() {
                 itemOuTomb.historico_vida.push({
                     evento: "SANEAMENTO_ALTERACAO",
                     quem: conferente,
-                    data: dataAtual,
+                    data: dataAtualCompleta,
                     detalhes: "Item conferido como S/A (Anteriormente apresentava alteração)."
                 });
                 delete itemOuTomb.pendencia; 
@@ -859,6 +862,7 @@ async function finalizarConferencia() {
             }
         };
 
+        // 1. Atualiza a Lista Mestra (Persistência)
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
                 if(item.tipo === 'single') atualizarListaDB(item, item.id);
@@ -866,6 +870,7 @@ async function finalizarConferencia() {
             });
         });
 
+        // 2. Monta o Relatório para resultados_conferencias
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
                 const process = (id, nome, pend, itemContext) => { 
@@ -875,35 +880,55 @@ async function finalizarConferencia() {
                         let finalStatus = s.status === 'KEEP' ? 'C/A' : s.status;
                         if (s.status === 'C/A' || s.status === 'KEEP') cA_count++;
                         
-                        let finalObs = s.obs;
-                        if (s.status === 'KEEP' && pend) finalObs = typeof pend === 'object' ? pend.obs : pend;
-                        if (s.status === 'S/A') finalObs = null;
-                        
-                        const cautelaReportText = getCautelaTextForReport(itemContext);
+                        // --- LÓGICA DE DNA DA PENDÊNCIA (ESTRUTURADO) ---
+                        let quemOrigem = "";
+                        let dataOrigem = "";
+                        let finalObs = "";
+
+                        if (s.status === 'KEEP' && pend && typeof pend === 'object') {
+                            // MANTER: Preserva o DNA original do banco
+                            quemOrigem = pend.quem || "Anterior";
+                            dataOrigem = pend.data ? (pend.data.match(/\d{2}\/\d{2}\/\d{4}/)?.[0] || pend.data) : "";
+                            finalObs = pend.obs || "";
+                        } else {
+                            // NOVO C/A ou ALTERAÇÃO: O conferente atual assume a origem do fato
+                            quemOrigem = conferente;
+                            dataOrigem = dataSomenteDia;
+                            finalObs = s.obs;
+                        }
+
+                        // Tratamento opcional de texto de cautela (se você ainda usar essa função)
+                        const cautelaReportText = typeof getCautelaTextForReport === 'function' ? getCautelaTextForReport(itemContext) : "";
                         if (cautelaReportText) {
-                            finalObs = finalObs ? `${finalObs} | + CAUTELA: ${cautelaReportText}` : cautelaReportText;
+                            finalObs = finalObs ? `${finalObs} | Cautela: ${cautelaReportText}` : cautelaReportText;
                         }
                         
                         const dadosItem = { 
+                            id: id,
                             nomeCompleto: nome, 
                             status: finalStatus, 
                             obs: finalObs, 
+                            quem_ca_origem: quemOrigem,   // 🛡️ DNA: QUEM
+                            data_ca_origem: dataOrigem,   // 🛡️ DNA: QUANDO
                             quantidade: item.quantidadeEsperada || 1, 
-                            id: id,
+                            setor: setor.nome,
                             statusAdmin: pend && typeof pend === 'object' ? clean(pend.statusAdmin) : null,
-                            adminObs: pend && typeof pend === 'object' ? clean(pend.adminObs) : null,
-                            setor: setor.nome
+                            adminObs: pend && typeof pend === 'object' ? clean(pend.adminObs) : null
                         };
                         itensRelatorio.push(dadosItem);
                         if (finalStatus === 'C/A') itensCaa.push(dadosItem);
                     }
                 };
 
-                if (item.tipo === 'multi' && item.tombamentos) item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia, t));
-                else process(item.id, item.nome, item.pendencia, item);
+                if (item.tipo === 'multi' && item.tombamentos) {
+                    item.tombamentos.forEach(t => process(`${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`, t.pendencia, t));
+                } else {
+                    process(item.id, item.nome, item.pendencia, item);
+                }
             });
         });
 
+        // 3. Grava no Banco
         if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         
         await db.collection('resultados_conferencias').add({ 
