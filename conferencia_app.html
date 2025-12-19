@@ -313,25 +313,34 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
     let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
     
-    // 🛡️ LÓGICA EXCLUSIVA: Se tem Array, ignora a string 'obs'
+    // 1. EXTRAÇÃO SEGURA DA LISTA
+    // Tenta pegar o array de pendências acumuladas (Nova Estrutura)
     const lista = (pendencia && pendencia.pendencias_ca) ? pendencia.pendencias_ca : 
                   (Array.isArray(pendencia) ? pendencia : null);
 
+    // 🛡️ 2. REGRA DE PRIORIDADE (MATA O FANTASMA)
+    // Se a lista existir e tiver itens, usamos APENAS ela e ignoramos o campo 'obs'
     if (lista && Array.isArray(lista) && lista.length > 0) {
         lista.forEach(p => {
-            const matchData = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
-            const dataApenas = matchData ? matchData[0] : (p.data || '');
+            const militar = p.quem || 'Militar';
+            const dataFull = p.data || '';
+            
+            // Extrai apenas a data (DD/MM/AAAA) usando regex
+            const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
+            const dataApenas = matchData ? matchData[0] : dataFull;
 
             html += `
                 <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem; border-bottom: 1px dashed #eee; padding-bottom: 4px;">
                     <span style="margin-right: 8px;">⚠️</span>
-                    <b>Por </b><span style="color: #d90f23; font-weight: bold;">${p.quem}</span> em <b>${dataApenas}</b>:
-                    <i style="margin-left: 5px; color: #333; display: block; padding-left: 25px;">${p.obs}</i>
+                    <b>Por </b>
+                    <span style="color: #d90f23; font-weight: bold;">${militar}</span>
+                    <span> em <b>${dataApenas}</b>:</span>
+                    <i style="margin-left: 5px; color: #333; font-weight: normal; display: block; padding-left: 25px;">${p.obs}</i>
                 </li>`;
         });
     } 
-    // FALLBACK: Só entra aqui se NÃO existir a lista pendencias_ca
-    else if (pendencia && pendencia.obs) {
+    // 3. FALLBACK PARA DADOS ANTIGOS (Só entra aqui se NÃO houver lista)
+    else if (pendencia && pendencia.obs && typeof pendencia.obs === 'string') {
         const militar = pendencia.quem || autorAtual || 'Militar';
         const dataFull = pendencia.data || dataAtual || '';
         const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
@@ -340,8 +349,10 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
         html += `
             <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem;">
                 <span style="margin-right: 8px;">⚠️</span>
-                <b>Por </b><span style="color: #d90f23; font-weight: bold;">${militar}</span> em <b>${dataApenas}</b>:
-                <i style="margin-left: 5px; color: #333;">${pendencia.obs}</i>
+                <b>Por </b>
+                <span style="color: #d90f23; font-weight: bold;">${militar}</span>
+                <span> em <b>${dataApenas}</b>:</span>
+                <i style="margin-left: 5px; color: #333; font-weight: normal;">${pendencia.obs}</i>
             </li>`;
     }
 
@@ -998,16 +1009,17 @@ async function finalizarConferencia() {
                     let listaPendenciasAtivas = [];
 
                     if (finalStatus === 'C/A') {
-                        // 2. PRIORIDADE: Recupera a lista que foi montada no 'salvarItem' ou 'salvarTombamento'
+                        // 2. RECUPERAÇÃO DO HISTÓRICO ACUMULADO
                         if (s.pendencias_ca && Array.isArray(s.pendencias_ca)) {
+                            // Se o usuário usou o botão "Salvar", a lista já está pronta aqui
                             listaPendenciasAtivas = [...s.pendencias_ca];
                         } 
-                        // 3. SEGUNDA OPÇÃO: Recupera o que já existia no Banco de Dados (DNA do Item)
                         else if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
+                            // Senão, pega o que já existia no banco
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } 
-                        // 4. FALLBACK: Converte formato antigo se houver
                         else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
+                            // Fallback para conversão de formato antigo
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -1015,40 +1027,48 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 5. TRATAMENTO DE RASCUNHO (Se digitou mas não clicou em salvar individualmente)
-                        const obsDigitada = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
-                        const ultimaObsNaLista = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
+                        // 🛡️ 3. TRAVA ANTIDUPLICIDADE (FIM DO CARIMBO FANTASMA)
+                        // Pegamos o texto que está no rascunho da tela (textarea)
+                        let obsRascunho = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
+                        
+                        // Criamos uma string com a junção de todas as obs da lista para comparar
+                        const textoAcumuladoNaLista = listaPendenciasAtivas.map(p => p.obs).join(' | ');
 
-                        if (obsDigitada !== '' && obsDigitada !== ultimaObsNaLista) {
+                        // Se o texto do rascunho for IDENTICO à lista ou à última obs, nós limpamos
+                        if (obsRascunho === textoAcumuladoNaLista || 
+                            (listaPendenciasAtivas.length > 0 && obsRascunho === listaPendenciasAtivas[listaPendenciasAtivas.length -1].obs)) {
+                            obsRascunho = ""; 
+                        }
+
+                        // Só adiciona um carimbo NOVO se houver algo real no rascunho
+                        if (obsRascunho !== "") {
                             listaPendenciasAtivas.push({
                                 quem: conferente,
                                 data: dataSomenteDia,
-                                obs: obsDigitada
+                                obs: obsRascunho
                             });
                             
                             itemOuTomb.historico_vida.push({
                                 evento: "ALTERACAO_DETECTADA",
                                 quem: conferente,
                                 data: dataAtualCompleta,
-                                detalhes: obsDigitada
+                                detalhes: obsRascunho
                             });
                         }
 
-                        // 🛡️ 6. FIXAÇÃO DOS DADOS (Evita 'obs' vazio no Firebase/PDF)
-                        // Criamos uma string única unindo todas as observações da lista
-                        const textoJoin = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
+                        // 4. GERAÇÃO DO CAMPO 'OBS' RAIZ (Apenas para compatibilidade/PDF)
+                        const textoJoinFinal = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
 
                         itemOuTomb.pendencia = {
                             tipo: "C/A",
-                            pendencias_ca: listaPendenciasAtivas,
-                            obs: textoJoin, // <--- Este campo preenche o Firebase e o PDF
+                            pendencias_ca: listaPendenciasAtivas, // Fonte da verdade
+                            obs: textoJoinFinal,                  // Texto unido
                             quem: listaPendenciasAtivas[0]?.quem || conferente,
                             data: listaPendenciasAtivas[0]?.data || dataSomenteDia
                         };
                         updated = true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                        // Saneamento de pendência
                         itemOuTomb.historico_vida.push({
                             evento: "SANEAMENTO_ALTERACAO",
                             quem: conferente,
@@ -1059,13 +1079,13 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
-                    // 7. MONTAGEM PARA COLEÇÃO 'resultados_conferencias'
+                    // 5. MONTAGEM PARA COLEÇÃO 'resultados_conferencias' (Dashboard)
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
                         pendencias_ca: listaPendenciasAtivas, 
-                        obs: itemOuTomb.pendencia?.obs || '', // 👈 Garantido que não seja vazio
+                        obs: itemOuTomb.pendencia?.obs || '', 
                         quem: itemOuTomb.pendencia?.quem || '', 
                         data: itemOuTomb.pendencia?.data || '',
                         quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
@@ -1076,7 +1096,6 @@ async function finalizarConferencia() {
                     if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
                 };
 
-                // Direcionamento por tipo de item
                 if (item.tipo === 'multi' && item.tombamentos) {
                     item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
                 } else {
@@ -1085,7 +1104,6 @@ async function finalizarConferencia() {
             });
         });
 
-        // 8. Gravação Final
         if(updated) {
             await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         }
