@@ -523,90 +523,134 @@
     }
 
     async function finalizarRecebimentoCautela(cautelaData) {
-        const btn = document.getElementById('btn-finalizar'); btn.textContent = "PROCESSANDO..."; btn.disabled = true;
-        const meuUid = firebase.auth().currentUser.uid;
-        const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-        const dataAtual = new Date().toLocaleString('pt-BR');
-        const dataSomenteDia = dataAtual.split(',')[0];
-        const cautelaAtiva = cautelaData || { local_origem_id: urlParams.get('cautelaId') }; // Fallback p/ o param do trans
+    const btn = document.getElementById('btn-finalizar'); 
+    btn.textContent = "PROCESSANDO..."; 
+    btn.disabled = true;
 
-        try {
-            const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-            const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautelaData.local_origem_id);
+    const meuUid = firebase.auth().currentUser.uid;
+    const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    
+    // 📅 PADRONIZAÇÃO DE DATA DD/MM/AAAA
+    const dataAtualCompleta = new Date().toLocaleString('pt-BR', { timeZone: 'America/Boa_Vista' });
+    const dataSomenteDia = dataAtualCompleta.split(',')[0]; 
+    
+    const cautelaAtiva = cautelaData || { local_origem_id: urlParams.get('cautelaId') };
 
-            await db.runTransaction(async (transaction) => {
-                const cDoc = await transaction.get(cautelaRef);
-                const lDoc = await transaction.get(listaMestraRef);
-                if (!cDoc.exists || !lDoc.exists) throw new Error("Documentos não encontrados.");
-                const cData = cDoc.data(); let listaMestra = lDoc.data().list; const itensConferidos = [];
+    try {
+        const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautelaData.local_origem_id);
 
-                cautelaData.itens.forEach(cItem => {
-                    const uidNaTela = `${cItem.id}-${cItem.tombamento || 'single'}`;
-                    const statusSelect = document.getElementById(`status-${uidNaTela}`);
-                    const obsFinal = document.getElementById(`obs-${uidNaTela}`)?.value.trim() || '';
-                    const statusFinal = statusSelect ? statusSelect.value : 'S/A';
-                    itensConferidos.push({ ...cItem, status_recebimento: statusFinal, obs_recebimento: obsFinal });
+        await db.runTransaction(async (transaction) => {
+            const cDoc = await transaction.get(cautelaRef);
+            const lDoc = await transaction.get(listaMestraRef);
+            if (!cDoc.exists || !lDoc.exists) throw new Error("Documentos não encontrados.");
+            
+            const cData = cDoc.data(); 
+            let listaMestra = lDoc.data().list; 
+            const itensConferidos = [];
 
-                    listaMestra = listaMestra.map(setor => ({
-                        ...setor, itens: setor.itens.map(mItem => {
-                            if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
-                                let listaAcumulada = mItem.pendencia?.pendencias_ca ? [...mItem.pendencia.pendencias_ca] : [];
-                                if (listaAcumulada.length === 0 && mItem.pendencia?.obs) { listaAcumulada.push({ quem: mItem.pendencia.quem || "Anterior", data: mItem.pendencia.data || "", obs: mItem.pendencia.obs }); }
-                                if (statusFinal === 'C/A' && obsFinal !== '') { listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RECEBIMENTO] ${obsFinal}` }); }
-                                if (listaAcumulada.length > 0) { mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data }; }
-                                const carimboPosse = { id: CAUTELA_ID, emitente: cData.emitente, destinatario: meuNomeCompleto, data: dataAtual, status_item: statusFinal, obs_item: obsFinal };
-                                if (cItem.tombamento) { mItem.tombamentos = mItem.tombamentos.map(t => t.tomb === cItem.tombamento ? { ...t, cautela: carimboPosse } : t); }
-                                else { if (!mItem.cautelas) mItem.cautelas = []; mItem.cautelas.push(carimboPosse); }
-                            } return mItem;
-                        })
-                    }));
-                });
-                transaction.update(cautelaRef, { status: 'RECEBIDA', timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(), itens: itensConferidos, militar_completo_receptor: meuNomeCompleto, destinatario: meuNomeCompleto, destinatario_uid: meuUid });
-                transaction.update(listaMestraRef, { list: listaMestra });
+            cautelaData.itens.forEach(cItem => {
+                const uidNaTela = `${cItem.id}-${cItem.tombamento || 'single'}`;
+                const statusSelect = document.getElementById(`status-${uidNaTela}`);
+                const obsFinal = document.getElementById(`obs-${uidNaTela}`)?.value.trim() || '';
+                const statusFinal = statusSelect ? statusSelect.value : 'S/A';
+                itensConferidos.push({ ...cItem, status_recebimento: statusFinal, obs_recebimento: obsFinal });
+
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor, itens: setor.itens.map(mItem => {
+                        if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
+                            // 🛡️ HERANÇA DE DNA
+                            let listaAcumulada = mItem.pendencia?.pendencias_ca ? [...mItem.pendencia.pendencias_ca] : [];
+                            if (listaAcumulada.length === 0 && mItem.pendencia?.obs) { 
+                                listaAcumulada.push({ quem: mItem.pendencia.quem || "Anterior", data: mItem.pendencia.data || "", obs: mItem.pendencia.obs }); 
+                            }
+
+                            if (statusFinal === 'C/A' && obsFinal !== '') { 
+                                listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RECEBIMENTO] ${obsFinal}` }); 
+                            }
+
+                            if (listaAcumulada.length > 0) { 
+                                mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data }; 
+                            }
+
+                            const carimboPosse = { id: CAUTELA_ID, emitente: cData.emitente, destinatario: meuNomeCompleto, data: dataSomenteDia, status_item: statusFinal, obs_item: obsFinal };
+                            if (cItem.tombamento) { 
+                                mItem.tombamentos = mItem.tombamentos.map(t => t.tomb === cItem.tombamento ? { ...t, cautela: carimboPosse } : t); 
+                            } else { 
+                                if (!mItem.cautelas) mItem.cautelas = []; 
+                                mItem.cautelas.push(carimboPosse); 
+                            }
+                        } return mItem;
+                    })
+                }));
             });
-            alert(`✅ Recebimento confirmado!`); limparRascunho(); window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        } catch (e) { alert(`Erro: ${e.message}`); btn.disabled = false; }
-    }
-
+            transaction.update(cautelaRef, { status: 'RECEBIDA', timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(), itens: itensConferidos, militar_completo_receptor: meuNomeCompleto, destinatario: meuNomeCompleto, destinatario_uid: meuUid });
+            transaction.update(listaMestraRef, { list: listaMestra });
+        });
+        alert(`✅ Recebimento confirmado!`); 
+        limparRascunho(); 
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+    } catch (e) { alert(`Erro: ${e.message}`); btn.disabled = false; }
+}
     async function finalizarRecebimentoDevolucao(cautelaData) {
-        const btn = document.getElementById('btn-finalizar'); btn.textContent = "PROCESSANDO RETORNO..."; btn.disabled = true;
-        const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-        const dataSomenteDia = new Date().toLocaleDateString('pt-BR');
+    const btn = document.getElementById('btn-finalizar'); 
+    btn.textContent = "PROCESSANDO RETORNO..."; 
+    btn.disabled = true;
 
-        try {
-            const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
-            const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautelaData.local_origem_id);
+    const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    
+    // 📅 PADRONIZAÇÃO DE DATA DD/MM/AAAA (Igual à anterior)
+    const dataAtualCompleta = new Date().toLocaleString('pt-BR', { timeZone: 'America/Boa_Vista' });
+    const dataSomenteDia = dataAtualCompleta.split(',')[0]; 
 
-            await db.runTransaction(async (transaction) => {
-                const cSnap = await transaction.get(cautelaRef); const lSnap = await transaction.get(listaMestraRef);
-                let listaMestra = lSnap.data().list; const itensDevolvidos = [];
+    try {
+        const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
+        const listaMestraRef = db.collection(COLECAO_LISTAS).doc(cautelaData.local_origem_id);
 
-                cautelaData.itens.forEach(cItem => {
-                    const uidNaTela = `${cItem.id}-${cItem.tombamento || 'single'}`;
-                    const obsFinal = document.getElementById(`obs-${uidNaTela}`)?.value.trim() || '';
-                    const statusFinal = document.getElementById(`status-${uidNaTela}`)?.value || 'S/A';
-                    itensDevolvidos.push({ ...cItem, status_devolucao: statusFinal, obs_devolucao: obsFinal });
+        await db.runTransaction(async (transaction) => {
+            const cSnap = await transaction.get(cautelaRef); 
+            const lSnap = await transaction.get(listaMestraRef);
+            if (!cSnap.exists || !lSnap.exists) throw new Error("Documentos não encontrados.");
 
-                    listaMestra = listaMestra.map(setor => ({
-                        ...setor, itens: setor.itens.map(mItem => {
-                            if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
-                                if (statusFinal === 'C/A') {
-                                    let listaAcumulada = mItem.pendencia?.pendencias_ca ? [...mItem.pendencia.pendencias_ca] : [];
-                                    listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RETORNO DEVOLUÇÃO] ${obsFinal}` });
-                                    mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data };
-                                } else { delete mItem.pendencia; }
-                                if (cItem.tombamento) { mItem.tombamentos = mItem.tombamentos.map(t => { if(t.tomb === cItem.tombamento) delete t.cautela; return t; }); }
-                                else { mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID); }
-                            } return mItem;
-                        })
-                    }));
-                });
-                transaction.update(cautelaRef, { status: 'CONCLUÍDA', timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), receptor_final_completo: meuNomeCompleto, itens: itensDevolvidos });
-                transaction.update(listaMestraRef, { list: listaMestra });
+            let listaMestra = lSnap.data().list; 
+            const itensDevolvidos = [];
+
+            cautelaData.itens.forEach(cItem => {
+                const uidNaTela = `${cItem.id}-${cItem.tombamento || 'single'}`;
+                const obsFinal = document.getElementById(`obs-${uidNaTela}`)?.value.trim() || '';
+                const statusFinal = document.getElementById(`status-${uidNaTela}`)?.value || 'S/A';
+                itensDevolvidos.push({ ...cItem, status_devolucao: statusFinal, obs_devolucao: obsFinal });
+
+                listaMestra = listaMestra.map(setor => ({
+                    ...setor, itens: setor.itens.map(mItem => {
+                        if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
+                            // 🛡️ LÓGICA ACUMULATIVA NO RETORNO
+                            if (statusFinal === 'C/A') {
+                                let listaAcumulada = mItem.pendencia?.pendencias_ca ? [...mItem.pendencia.pendencias_ca] : [];
+                                listaAcumulada.push({ quem: meuNomeCompleto, data: dataSomenteDia, obs: `[RETORNO DEVOLUÇÃO] ${obsFinal}` });
+                                mItem.pendencia = { tipo: "C/A", pendencias_ca: listaAcumulada, obs: listaAcumulada.map(p => p.obs).join(' | '), quem: listaAcumulada[0].quem, data: listaAcumulada[0].data };
+                            } else { 
+                                delete mItem.pendencia; 
+                            }
+                            
+                            // 🔓 REMOÇÃO DO CADEADO
+                            if (cItem.tombamento) { 
+                                mItem.tombamentos = mItem.tombamentos.map(t => { if(t.tomb === cItem.tombamento) delete t.cautela; return t; }); 
+                            } else { 
+                                mItem.cautelas = (mItem.cautelas || []).filter(c => c.id !== CAUTELA_ID); 
+                            }
+                        } return mItem;
+                    })
+                }));
             });
-            alert(`✅ Devolução concluída!`); limparRascunho(); window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        } catch (e) { alert(`Erro: ${e.message}`); btn.disabled = false; }
-    }
+            transaction.update(cautelaRef, { status: 'CONCLUÍDA', timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(), receptor_final_completo: meuNomeCompleto, itens: itensDevolvidos });
+            transaction.update(listaMestraRef, { list: listaMestra });
+        });
+        alert(`✅ Devolução concluída! Material reintegrado.`); 
+        limparRascunho(); 
+        window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+    } catch (e) { alert(`Erro: ${e.message}`); btn.disabled = false; }
+}
 
     window.onload = carregarDadosRemotos;
 </script>
