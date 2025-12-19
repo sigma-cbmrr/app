@@ -3959,15 +3959,13 @@ const activeLink = document.getElementById(`link-${v}`);
         function mostrarTabela(data) {
     const wrapper = document.getElementById('ca-table-wrapper');
     const tbody = document.getElementById('ca-list-body');
-    if (!wrapper || !tbody) return;
-
     document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; 
     tbody.innerHTML = '';
     
     const items = data.items || [];
     const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
     
-    if (itemsToShow.length === 0) { 
+    if (itemsToShow.length === 0) {
         wrapper.querySelector('table').style.display = 'none';
         document.getElementById('no-issues-msg').style.display = 'block';
     } else {
@@ -3976,55 +3974,32 @@ const activeLink = document.getElementById(`link-${v}`);
         
         itemsToShow.forEach(i => {
             const tr = tbody.insertRow();
+            let obsHtml = '';
             
-            // 🛡️ LÓGICA DE VISUALIZAÇÃO BLINDADA (EVITA DUPLICIDADE NO DASHBOARD)
-            let obsHtmlFormatada = '';
-            
-            // 1. Tenta extrair a lista acumulada (Prioridade Máxima)
-            const listaAcumulada = (i.pendencias_ca && Array.isArray(i.pendencias_ca)) ? i.pendencias_ca : null;
-
-            if (listaAcumulada && listaAcumulada.length > 0) {
-                obsHtmlFormatada = '<ul style="list-style:none; padding:0; margin:0;">';
-                listaAcumulada.forEach(p => {
-                    const dMatch = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
-                    const dLimpa = dMatch ? dMatch[0] : (p.data || '');
-                    
-                    obsHtmlFormatada += `
-                        <li style="margin-bottom:8px; border-bottom:1px dashed #eee; padding-bottom:4px; font-size:0.9em; text-align:left;">
-                            <i class="fas fa-exclamation-triangle" style="color:#d90f23; margin-right:5px;"></i>
-                            <b>Por ${p.quem}</b> em ${dLimpa}:
-                            <br><i style="margin-left:18px; color:#444;">${p.obs}</i>
-                        </li>`;
+            // 🛡️ PRIORIDADE AO DNA (ARRAY)
+            if (i.pendencias_ca && Array.isArray(i.pendencias_ca)) {
+                obsHtml = '<ul style="list-style:none; padding:0; margin:0;">';
+                i.pendencias_ca.forEach(p => {
+                    obsHtml += `<li style="border-bottom:1px dashed #eee; margin-bottom:5px;">
+                        <b>${p.quem}</b> (${p.data}): <br><i>${p.obs}</i></li>`;
                 });
-                obsHtmlFormatada += '</ul>';
-            } 
-            // 2. Fallback para formato antigo ou texto puro (Apenas se a lista não existir)
-            else if (i.obs) {
-                // Caso contenha dados de Admin, usa a função auxiliar que você já tinha
-                if (i.obs.includes('(Admin):') || i.obs.includes('| + NOVA:')) {
-                    obsHtmlFormatada = gerarHtmlVisual(i.obs, data.conferente, data.date, i.statusAdmin, i.adminObs);
-                } else {
-                    obsHtmlFormatada = `<div style="text-align:left;"><i class="fas fa-exclamation-triangle" style="color:#d90f23;"></i> ${i.obs}</div>`;
-                }
+                obsHtml += '</ul>';
+            } else {
+                obsHtml = i.obs || '-';
             }
 
             const statusAdmin = i.statusAdmin || 'Pendente';
-            const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(/\s/g, '-');
-            const itemComDocId = { ...i, docId: data.docId }; 
-            
             tr.innerHTML = `
                 <td><strong>${i.nomeCompleto}</strong></td>
-                <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
-                <td style="max-width: 400px;">${obsHtmlFormatada}</td>
+                <td><span class="status-badge badge-${statusAdmin.toLowerCase()}">${statusAdmin}</span></td>
+                <td>${obsHtml}</td>
                 <td><small>${data.conferente}<br>${data.date}</small></td>
+                <td><button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify({ ...i, docId: data.docId })})'>Gerenciar</button></td>
             `;
-            
-            const tdAcao = tr.insertCell(); 
-            tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
         });
     }
     wrapper.style.display = 'block';
-    wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    wrapper.scrollIntoView({ behavior: 'smooth' });
 }
         function fecharTabela(){ 
             document.getElementById('ca-table-wrapper').style.display='none';
@@ -4061,142 +4036,64 @@ const activeLink = document.getElementById(`link-${v}`);
 
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
-        async function salvarGestaoCa(){
-    // [1] RECUPERAÇÃO DE DADOS DO MODAL
+        async function salvarGestaoCa() {
     const docId = document.getElementById('gestao-doc-id').value;
     const itemId = document.getElementById('gestao-item-id-lista').value;
     const status = document.getElementById('gestao-status').value;
     const obsRaw = document.getElementById('gestao-obs').value.trim();
-    const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
-    
-    // [2] VALIDAÇÃO BÁSICA
+
     if(!obsRaw) return alert("Digite uma observação.");
 
     try {
-        // [3] RECUPERAÇÃO DE METADADOS DO GESTOR E DATA/HORA
-        const nomeGestor = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
-        const dataHoraStr = new Date().toLocaleString('pt-BR');
-        
-        // Texto que será carimbado na linha do HISTÓRICO (item.obs)
-        const carimboTextoHistorico = `[AÇÃO GESTOR: ${status.toUpperCase()}] ${obsRaw}` + 
-                                    (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
-
-        // A linha completa a ser adicionada no histórico linear (formato padronizado)
-        const novaLinhaObs = `"${carimboTextoHistorico}" (Por: ${nomeGestor} em ${dataHoraStr})`;
-        
-        // Texto para exibição no campo adminObs (apenas o raw)
-        const obsFinalDisplay = obsRaw; 
-
-
-        // [4] BUSCA DO DOCUMENTO PAI NO FIREBASE
         const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
         const snap = await ref.get();
-        if(!snap.exists) return alert("Erro: Conferência não encontrada.");
-        
         const resData = snap.data();
         const items = resData.itensCaa || [];
-        
-        // [5] BUSCA INTELIGENTE DO ITEM (Pelo ID)
-        let targetIndex = -1;
-        targetIndex = items.findIndex(i => i.id === itemId);
-        
-        if (targetIndex === -1) {
-            const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
-            targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
-        }
+        const targetIndex = items.findIndex(i => i.id === itemId);
 
-        if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
-        
-        // [6] ATUALIZAÇÃO DOS CAMPOS DO ITEM
-        const itemParaAtualizar = items[targetIndex];
+        if (targetIndex === -1) return alert("Item não encontrado.");
 
-        // *** CORREÇÃO CRUCIAL 1: Atualiza o campo de histórico linear (item.obs) no resultados_conferencias ***
-        let obsAtualizada = itemParaAtualizar.obs || '';
-        if (obsAtualizada.trim() !== '') {
-            obsAtualizada += ' | + NOVA: ';
-        }
-        obsAtualizada += novaLinhaObs;
-        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR
+        // Atualiza no relatório
+        items[targetIndex].statusAdmin = (status === 'Remover' ? 'Solucionado' : status);
+        items[targetIndex].adminObs = obsRaw;
 
-        // Atualiza campos específicos do Administrador (para uso no Dashboard)
-        itemParaAtualizar.statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
-        itemParaAtualizar.adminObs = obsFinalDisplay; 
-        
-        
-        // [7] SALVA AS MUDANÇAS NO FIREBASE
         await ref.update({ itensCaa: items });
-        
-        
-        // [8] ATUALIZAÇÃO NA LISTA MESTRE (LÓGICA DO ESTOQUE E PERSISTÊNCIA DO CARIMBO)
-        
-        const listaId = resData.lista_id;
-        if(listaId) {
-            const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
-            const listSnap = await listRef.get();
-            let updated = false;
 
-            if(listSnap.exists) {
-                let listaData = listSnap.data().list;
-                
-                const updateItemInMasterList = (item, isTombamento = false) => {
-                    const isSolved = (status === 'Remover' || status === 'Solucionado');
-                    const isManaged = (status === 'Em solução' || status === 'Cautelado');
+        // Atualiza na Lista Mestra
+        const listId = resData.lista_id;
+        const listRef = db.collection(COLECAO_LISTAS).doc(listId);
+        const listSnap = await listRef.get();
+
+        if (listSnap.exists) {
+            let listaMestra = listSnap.data().list;
+            const isSolved = (status === 'Remover' || status === 'Solucionado');
+
+            listaMestra = listaMestra.map(setor => ({
+                ...setor,
+                itens: setor.itens.map(mItem => {
+                    // Busca por ID base ou tombamento
+                    const mId = mItem.id;
+                    const matches = (mId === itemId || (mItem.tombamentos && mItem.tombamentos.some(t => `${mId}-${t.tomb}` === itemId)));
                     
-                    if (isSolved) {
-                        // LÓGICA DE SOLUÇÃO (Remove do estoque ou deleta pendência)
-                        if (status === 'Remover') {
-                            if (!isTombamento) item.quantidadeEsperada -= qtdRemover;
-                            else item.tombamentos.splice(item.tombamentos.findIndex(t => t.tomb === itemId.split('-')[1]), 1);
-                            
-                            if (item.quantidadeEsperada <= 0 || isTombamento) { 
-                                // O Splicing do tombamento foi feito na linha acima. 
-                                // O splicing do item completo precisa de lógica mais complexa, mas vamos manter o delete pendencia aqui.
-                            }
-                        }
-                        
-                        // Atualiza o histórico na lista Mestra antes de deletar a pendência
-                        if(item.pendencia && item.pendencia.obs) item.pendencia.obs = obsAtualizada;
-                        delete item.pendencia;
-                        updated = true;
-                        
-                    } else if (isManaged) {
-                        // LÓGICA DE GESTÃO (ATUALIZA APENAS O CAMPO OBS PARA PERSISTÊNCIA)
-                        if (item.pendencia) {
-                            item.pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
-                            // item.pendencia.statusAdmin e adminObs NÃO SÃO SALVOS AQUI.
-                            updated = true;
+                    if (matches) {
+                        if (isSolved) {
+                            delete mItem.pendencia;
+                            delete mItem.pendencias_ca; // 🛡️ LIMPEZA CRÍTICA PARA O APP
+                        } else {
+                            if(mItem.pendencia) mItem.pendencia.obs += ` | GESTOR: ${obsRaw}`;
                         }
                     }
-                    return updated;
-                };
-
-                for(let s of listaData) {
-                    for(let i = s.itens.length - 1; i >= 0; i--) {
-                        const item = s.itens[i];
-                        if(item.tipo === 'single' && item.id === itemId) {
-                            updateItemInMasterList(item);
-                        }
-                        else if(item.tipo === 'multi' && item.tombamentos) {
-                            const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
-                            if(tIndex > -1) {
-                                updateItemInMasterList(item.tombamentos[tIndex], true);
-                            }
-                        }
-                    }
-                }
-                
-                if(updated) await listRef.update({ list: listaData });
-            }
+                    return mItem;
+                })
+            }));
+            await listRef.update({ list: listaMestra });
         }
 
-        // [9] FINALIZAÇÃO
-        alert("Salvo com sucesso!");
+        alert("Gestão salva!");
         fecharModalGestao();
-        fecharTabela();
-        loadCaaData(); 
-    } catch(e) { 
-        console.error(e); 
-        alert("Erro ao salvar: " + e.message);
+        loadCaaData();
+    } catch (e) {
+        alert("Erro: " + e.message);
     }
 }
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
@@ -5863,25 +5760,24 @@ function getSelectedCautelaItemsData() {
 
 async function iniciarCautelaProcesso() {
     const localId = document.getElementById('cautela-local-origem').value;
-    const destinatarioUid = document.getElementById('cautela-militar-uid').value;
-    const destinatarioNome = document.getElementById('cautela-militar-nome').value;
-    const obsEmissao = document.getElementById('cautela-observacoes').value;
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value; // Usando o UID do Autocomplete
+    const destinatarioNome = document.getElementById('cautela-destinatario').value;
+    const obsEmissao = document.getElementById('cautela-obs').value;
+    const cautelaItensSelecionados = getSelectedCautelaItemsData();
 
     if (!localId || !destinatarioUid || cautelaItensSelecionados.length === 0) {
-        alert("Por favor, selecione o local, o militar e pelo menos um item.");
-        return;
+        return alert("Selecione o local, o militar e os itens.");
     }
 
-    const btn = document.getElementById('btn-confirmar-cautela');
+    const btn = document.getElementById('btn-iniciar-cautela');
     btn.disabled = true;
     btn.textContent = "Processando...";
 
     try {
         const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteUid = firebase.auth().currentUser.uid;
-        const emitenteNome = `${currentUserData.posto_grad} ${currentUserData.quadro_mil} ${currentUserData.nome_guerra}`;
+        const emitenteNome = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
         const dataAtual = new Date().toLocaleString('pt-BR');
-        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
 
         const novaCautela = {
             cautela_id: cautelaId,
@@ -5889,22 +5785,20 @@ async function iniciarCautelaProcesso() {
             emitente: emitenteNome,
             destinatario_original_uid: destinatarioUid,
             destinatario_original_nome: destinatarioNome,
-            destinatario_uid: null,
-            destinatario: null,
+            destinatario_uid: null, // Será preenchido no recebimento
             local_origem_id: localId,
-            local_origem: document.getElementById('cautela-local-origem').options[document.getElementById('cautela-local-origem').selectedIndex].text,
+            local_origem: document.getElementById('cautela-local-origem').value,
             status: 'ABERTA',
-            timestamp_emissao: timestamp,
+            timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             observacoes_emissao: obsEmissao,
             itens: cautelaItensSelecionados
         };
 
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
-        const listaRef = db.collection('listas_conferencia').doc(localId);
+        const listaRef = db.collection(COLECAO_LISTAS).doc(localId);
 
         await db.runTransaction(async (transaction) => {
             const listaDoc = await transaction.get(listaRef);
-            if (!listaDoc.exists) throw new Error("Lista de origem não encontrada.");
+            if (!listaDoc.exists) throw new Error("Lista não encontrada.");
 
             let listaMestra = listaDoc.data().list;
 
@@ -5912,58 +5806,30 @@ async function iniciarCautelaProcesso() {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
-                        if (mItem.id === (cItem.id_base || cItem.id)) {
-                            
-                            const objetoCautela = {
-                                id: cautelaId,
-                                emitente: emitenteNome,
-                                destinatario: destinatarioNome,
-                                data: dataAtual,
-                                quantidade: cItem.quantidade || 1
-                            };
-
-                            const logHistorico = {
+                        if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
+                            if (!mItem.historico_vida) mItem.historico_vida = [];
+                            mItem.historico_vida.push({
                                 evento: "SAÍDA_CAUTELA",
                                 id_doc: cautelaId,
                                 quem: emitenteNome,
                                 data: dataAtual,
-                                detalhes: `Cautelado ${cItem.quantidade || 1}un para ${destinatarioNome}`
-                            };
-
-                            if (!mItem.historico_vida) mItem.historico_vida = [];
-                            mItem.historico_vida.push(logHistorico);
-
-                            if (cItem.tombamento) {
-                                mItem.tombamentos = (mItem.tombamentos || []).map(t => {
-                                    if (t.tomb === cItem.tombamento) {
-                                        t.cautela = objetoCautela;
-                                    }
-                                    return t;
-                                });
-                            } else {
-                                if (!mItem.cautelas) mItem.cautelas = [];
-                                mItem.cautelas.push(objetoCautela);
-                            }
+                                detalhes: `Material saiu para cautela de ${destinatarioNome}`
+                            });
                         }
                         return mItem;
                     })
                 }));
             });
 
-            transaction.set(cautelaRef, novaCautela);
+            transaction.set(db.collection('cautelas_abertas').doc(cautelaId), novaCautela);
             transaction.update(listaRef, { list: listaMestra });
         });
 
-        alert(`✅ Cautela ${cautelaId} emitida com sucesso!`);
-        fecharModal('modal-nova-cautela');
-        location.reload();
-
+        alert(`✅ Cautela ${cautelaId} gerada! Aguardando aceite do destinatário.`);
+        showMainMenu();
     } catch (e) {
-        console.error(e);
-        alert("Erro ao emitir cautela: " + e.message);
-    } finally {
+        alert("Erro: " + e.message);
         btn.disabled = false;
-        btn.textContent = "Confirmar Emissão";
     }
 }
 		
@@ -6301,82 +6167,55 @@ async function showCautelaDetails(cautelaId) {
 }
 		
 function iniciarRecebimentoCautela(cautelaId) {
-    // 1. Fecha o modal de detalhes
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     
-    // 2. Coleta e codifica os dados do militar
-    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
-    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
-    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
+    const userUid = firebase.auth().currentUser.uid; // 🛡️ UID Adicionado
+    const pGradEncoded = encodeURIComponent(currentUserData.posto || 'ND');
+    const quadroEncoded = encodeURIComponent(currentUserData.quadro || 'ND');
+    const nomeGuerraEncoded = encodeURIComponent(currentUserData.nome_guerra || 'ND');
 
-    // 3. Constrói a URL para a cautela. (Usa 'cautelaId')
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}`;
+    // URL atualizada com user_uid
+    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&user_uid=${userUid}`;
 
-    // 4. 🛑 LÓGICA DE ABERTURA DO IFRAME (REPLICADA DA CONFERÊNCIA NORMAL) 🛑
     const container = document.getElementById('app-runner-container');
     const iframe = document.getElementById('app-iframe');
     
-    if (!container || !iframe) {
-        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
-        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
-        return;
-    }
+    if (!container || !iframe) return alert("Erro de UI: Container não encontrado.");
     
     iframe.src = url;  
     container.style.display = 'block';
     
-    // 5. Oculta a área principal do dashboard (content-area) e a sidebar para dar foco total ao app
+    // Oculta dashboard para foco
     const contentArea = document.getElementById('content-area');
-    if (contentArea) {
-        contentArea.style.display = 'none'; 
-    }
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.style.display = 'none'; 
-    }
+    if (contentArea) contentArea.style.display = 'none'; 
+    const sidebar = document.getElementById('main-sidebar');
+    if (sidebar) sidebar.style.display = 'none';
 
-    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
     window.removeEventListener('message', handleIframeMessage); 
     window.addEventListener('message', handleIframeMessage); 
 }
         function iniciarConferenciaDevolucao(cautelaId, destinatario) {
-    // 1. Fecha o modal de detalhes
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     
-    // 2. Coleta e codifica os dados do militar
-    // 🛑 CORREÇÃO AQUI: Alterando de 'posto_graduacao' para 'posto' (ou similar)
-    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
-    
-    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
-    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
+    const userUid = firebase.auth().currentUser.uid; // 🛡️ UID Adicionado
+    const pGradEncoded = encodeURIComponent(currentUserData.posto || 'ND');
+    const quadroEncoded = encodeURIComponent(currentUserData.quadro || 'ND');
+    const nomeGuerraEncoded = encodeURIComponent(currentUserData.nome_guerra || 'ND');
 
-    // 3. Constrói a URL CRÍTICA com o modo de devolução final
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&modo=devolucao_final&destinatarioDevolucao=${encodeURIComponent(destinatario)}`;
+    // URL com modo devolucao_final e user_uid
+    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&modo=devolucao_final&destinatarioDevolucao=${encodeURIComponent(destinatario)}&user_uid=${userUid}`;
 
-    // 4. LÓGICA DE ABERTURA DO IFRAME (INLINE)
     const container = document.getElementById('app-runner-container');
     const iframe = document.getElementById('app-iframe');
     
-    if (!container || !iframe) {
-        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
-        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
-        return;
-    }
+    if (!container || !iframe) return alert("Erro de UI.");
     
     iframe.src = url;  
     container.style.display = 'block';
     
-    // 5. Oculta a área principal do dashboard (content-area) e a sidebar
-    const contentArea = document.getElementById('content-area');
-    if (contentArea) {
-        contentArea.style.display = 'none'; 
-    }
-    const sidebar = document.getElementById('sidebar'); 
-    if (sidebar) {
-        sidebar.style.display = 'none'; 
-    }
+    if (document.getElementById('content-area')) document.getElementById('content-area').style.display = 'none'; 
+    if (document.getElementById('main-sidebar')) document.getElementById('main-sidebar').style.display = 'none';
 
-    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
     window.removeEventListener('message', handleIframeMessage); 
     window.addEventListener('message', handleIframeMessage); 
 }
