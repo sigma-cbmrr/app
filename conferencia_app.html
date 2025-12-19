@@ -364,6 +364,7 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual, adminStatus, admin
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
+    // Limpa setores antigos para evitar duplicidade na tela
     const antigos = mainContent.querySelectorAll('.setor'); 
     antigos.forEach(el => el.remove());
 
@@ -372,10 +373,11 @@ function renderizarConferencia() {
     dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
+    // --- Sub-função interna para montar o Alerta de Pendência ---
     const montarPendenciaHtml = (uid, pendenciaObj) => {
         if (!pendenciaObj) return '';
         
-        // Trata Cautela Ativa (Visual Diferenciado)
+        // Trata Cautela Ativa (Visual Laranja/Diferenciado)
         if (pendenciaObj.status === "CAUTELA_ATV") {
             return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left;" data-status-type="cautela">
                         <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;"><i class="fas fa-boxes"></i> ${pendenciaObj.quem}</div>
@@ -383,10 +385,10 @@ function renderizarConferencia() {
                     </div>`;
         }
         
+        // Gera o visual dos carimbos (Por Fulano em Data...)
         const htmlFormatado = gerarHtmlVisualApp(pendenciaObj);
         
-        // 🛡️ CORREÇÃO CIRÚRGICA: Stringify do objeto completo para não perder a lista 'pendencias_ca'
-        // Enviamos o objeto inteiro codificado para que o botão 'Acrescentar' saiba o que já existia
+        // 🛡️ PERSISTÊNCIA: Codifica o objeto completo para o botão 'Acrescentar'
         const safeHistorico = encodeURIComponent(JSON.stringify(pendenciaObj));
 
         if (pendenciaObj.isReadOnly) {
@@ -395,7 +397,6 @@ function renderizarConferencia() {
                         ${htmlFormatado}
                     </div>`;
         } else {
-            // O botão acrescentar agora recebe o objeto completo via safeHistorico
             return `<div class="pendencia-alert-box">
                         ${htmlFormatado}
                         <div class="pendencia-actions">
@@ -406,12 +407,14 @@ function renderizarConferencia() {
         }
     };
 
+    // --- Loop Principal por Setores ---
     dadosConferencia.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
         let htmlItens = ''; 
         let totalItensNoSetor = 0;
         
         setor.itens.forEach(item => {
+            // CASO A: ITENS COM TOMBAMENTO (MULTI)
             if (item.tipo === 'multi' && item.tombamentos) {
                 let htmlTombamentos = '';
                 item.tombamentos.forEach(tomb => {
@@ -434,8 +437,10 @@ function renderizarConferencia() {
                             ${montarPendenciaHtml(uid, tomb.pendencia)}
                             <p class="tombamento-descricao-salva"></p>
                             <div class="tombamento-obs-container">
-                                <label>Descreva a alteração:</label>
-                                <textarea placeholder="Detalhe..."></textarea>
+                                <div class="historico-fixo" style="display:none"></div>
+
+                                <label>Descreva a NOVA alteração:</label>
+                                <textarea placeholder="Detalhe a alteração aqui..."></textarea>
                                 <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button>
                             </div>
                         </div>`;
@@ -443,7 +448,10 @@ function renderizarConferencia() {
                     window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
                 htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
-            } else {
+            
+            } 
+            // CASO B: ITENS ÚNICOS (SINGLE)
+            else {
                 let hasCautela = (item.cautelas && item.cautelas.length > 0);
                 let singleBtnHtml = isCautela ? 
                     `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : 
@@ -460,8 +468,10 @@ function renderizarConferencia() {
                         ${montarPendenciaHtml(item.id, item.pendencia)}
                         <p class="descricao-salva"></p>
                         <div class="alteracao-container">
-                            <label>Descreva a alteração:</label>
-                            <textarea placeholder="Detalhe..."></textarea>
+                            <div class="historico-fixo" style="display:none"></div>
+
+                            <label>Descreva a NOVA alteração:</label>
+                            <textarea placeholder="Detalhe a alteração aqui..."></textarea>
                             <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
                         </div>
                     </div>`;
@@ -472,11 +482,26 @@ function renderizarConferencia() {
         
         const exp = isFirstSetor ? 'expanded' : ''; 
         const arr = isFirstSetor ? '▼' : '►';
-        htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${totalItensNoSetor}</div></div><span class="arrow">${arr}</span></div><div class="setor-content ${exp}">${htmlItens}</div></div>`;
+        htmlSetores += `
+            <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
+                <div class="setor-header" onclick="toggleSetor(this)">
+                    <div class="setor-info">
+                        <span>${setor.nome}</span>
+                        <div class="setor-status">0/${totalItensNoSetor}</div>
+                    </div>
+                    <span class="arrow">${arr}</span>
+                </div>
+                <div class="setor-content ${exp}">${htmlItens}</div>
+            </div>`;
     });
 
     const btnFin = document.getElementById('btn-finalizar');
-    if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
+    if (btnFin) {
+        // Insere todos os setores antes do botão finalizar
+        btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
+    }
+    
+    // Atualiza contadores e rascunhos após montar a tela
     updateOverallStatus();
 }
         function setItemStatus(btn, status) { 
@@ -579,41 +604,26 @@ function renderizarConferencia() {
         }
 
         function acrescentarPendencia(btn, uid, encodedData) { 
-    // 1. Localiza os containers principais
     const box = btn.closest('.pendencia-alert-box'); 
     const container = box.closest('.tombamento-container') || box.closest('.item-conferencia'); 
-    
-    // 2. Esconde o box de alerta atual para dar lugar ao campo de edição
     box.style.display = 'none'; 
     
     if (container) { 
-        // 3. Ativa visualmente o botão C/A (Alerta) e desativa o S/A
-        const btnCA = container.querySelector('.ca-alert'); 
-        const btnSA = container.querySelector('.sa-ok');
-        if (btnCA) btnCA.classList.add('active'); 
-        if (btnSA) btnSA.classList.remove('active'); 
-        
-        // 4. Exibe o container de digitação (obs)
         const edit = container.querySelector('.tombamento-obs-container') || container.querySelector('.alteracao-container'); 
         edit.style.display = 'block'; 
         
-        // 5. 🛡️ PRESERVAÇÃO DO PASSADO:
-        // Salva o JSON das pendências anteriores no dataset para ser resgatado no momento do SALVAR
         const hist = edit.querySelector('.historico-fixo'); 
         if (hist) {
-            hist.dataset.meta = encodedData; 
-            hist.style.display = 'none'; // Mantém escondido, serve apenas como "memória"
+            hist.dataset.meta = encodedData; // Injeta o passado aqui
         }
         
-        // 6. Prepara o campo de texto para a nova observação
         const textarea = edit.querySelector('textarea');
         textarea.value = ''; 
-        textarea.placeholder = "Descreva a NOVA alteração a ser acrescentada...";
         textarea.focus(); 
         
-        // 7. Atualiza o status temporário para que o sistema saiba que há uma edição em curso
-        window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' }; 
-        
+        // 🛡️ AQUI: Não resetamos o status para vazio se já houver algo.
+        // Apenas marcamos que uma edição está pendente.
+        window.itemStatus[uid] = { status: 'PENDING_CA', meta_origem: encodedData }; 
         salvarRascunho(); 
     } 
 }
@@ -628,40 +638,43 @@ function renderizarConferencia() {
 
     if(obsDigitada.length < 3) return alert("Descreva a alteração em detalhes.");
 
-    // 🛡️ RECUPERAÇÃO DE HISTÓRICO PARA ACUMULAR
+    // 🛡️ RECUPERAÇÃO DO PASSADO (Sem sobrescrever)
     let listaAcumulada = [];
+    
+    // Tentativa A: Pelo "cofre" meta (usado no botão acrescentar)
     const histFixo = containerEdit.querySelector('.historico-fixo');
     const metaData = histFixo ? histFixo.dataset.meta : null;
 
-    if (metaData && metaData !== "undefined") {
+    if (metaData && metaData !== "undefined" && metaData !== "") {
         try {
             const passado = JSON.parse(decodeURIComponent(metaData));
-            if (passado.pendencias_ca) {
-                listaAcumulada = [...passado.pendencias_ca];
-            } else if (passado.obs) {
-                // Converte dado antigo para o novo padrão de lista
-                listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
-            }
-        } catch (e) { console.error("Erro ao decodificar meta:", e); }
+            if (passado.pendencias_ca) listaAcumulada = [...passado.pendencias_ca];
+            else if (passado.obs) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
+        } catch (e) { console.error("Erro meta:", e); }
+    } 
+    
+    // Tentativa B: Se a lista ainda estiver vazia, busca direto no objeto original carregado
+    if (listaAcumulada.length === 0) {
+        const itemOriginal = dadosConferencia.flatMap(s => s.itens).find(i => i.id === uid);
+        if (itemOriginal && itemOriginal.pendencia) {
+            if (itemOriginal.pendencia.pendencias_ca) listaAcumulada = [...itemOriginal.pendencia.pendencias_ca];
+            else if (itemOriginal.pendencia.obs) listaAcumulada.push({ 
+                quem: itemOriginal.pendencia.quem, data: itemOuTomb.pendencia.data, obs: itemOuTomb.pendencia.obs 
+            });
+        }
     }
 
-    // Adiciona a nova entrada à lista acumulada
-    listaAcumulada.push({
-        quem: conferente,
-        data: dataAtual,
-        obs: obsDigitada
-    });
+    // Adiciona a nova entrada
+    listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
 
-    // 🛡️ MONTAGEM DO OBJETO PARA O RASCUNHO GLOBAL
     const novoObjeto = {
         status: 'C/A',
-        obs: obsDigitada, // Mantemos para compatibilidade de rascunho
-        pendencias_ca: listaAcumulada // CRÍTICO: Para a finalizarConferencia ler
+        pendencias_ca: listaAcumulada,
+        obs: listaAcumulada.map(p => p.obs).join(' | ') // Garante o texto para o PDF
     };
 
     window.itemStatus[uid] = novoObjeto; 
     containerEdit.style.display = 'none'; 
-    
     const d = item.querySelector('.descricao-salva'); 
     d.innerHTML = gerarHtmlVisualApp(novoObjeto); 
     d.style.display = 'block'; 
@@ -671,56 +684,91 @@ function renderizarConferencia() {
     updateOverallStatus(); 
 }
     
-        function salvarTombamento(btn) { 
+       function salvarTombamento(btn) { 
     const tomb = btn.closest('.tombamento-container'); 
     const item = btn.closest('.item-conferencia');
     const containerEdit = tomb.querySelector('.tombamento-obs-container');
     const obsDigitada = containerEdit.querySelector('textarea').value.trim(); 
     const dataAtual = new Date().toLocaleDateString('pt-BR');
-    const conferente = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    const p = userInfo;
+    const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
     const uid = `${item.dataset.id}-${tomb.dataset.tomb}`;
 
-    if(obsDigitada.length < 3) return alert("Digite a alteração.");
+    if(obsDigitada.length < 3) return alert("Por favor, descreva a alteração.");
 
-    // 🛡️ RECUPERAÇÃO DE HISTÓRICO PARA ACUMULAR
+    // 🛡️ LÓGICA DE PRESERVAÇÃO DO HISTÓRICO (ACUMULADOR)
     let listaAcumulada = [];
+    
+    // Tentativa A: Resgatar o passado pelo metadado injetado no botão "Acrescentar"
     const histFixo = containerEdit.querySelector('.historico-fixo');
     const metaData = histFixo ? histFixo.dataset.meta : null;
 
-    if (metaData && metaData !== "undefined") {
+    if (metaData && metaData !== "undefined" && metaData !== "") {
         try {
             const passado = JSON.parse(decodeURIComponent(metaData));
-            if (passado.pendencias_ca) {
+            if (passado.pendencias_ca && Array.isArray(passado.pendencias_ca)) {
                 listaAcumulada = [...passado.pendencias_ca];
             } else if (passado.obs) {
+                // Caso o dado antigo ainda esteja no formato de string simples
                 listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
             }
-        } catch (e) { console.error("Erro ao decodificar meta:", e); }
+        } catch (e) { 
+            console.error("Erro ao decodificar meta no tombamento:", e); 
+        }
+    } 
+    
+    // Tentativa B: Fallback de segurança (Busca direta no objeto global carregado)
+    if (listaAcumulada.length === 0) {
+        const itemPai = dadosConferencia.flatMap(s => s.itens).find(i => i.id === item.dataset.id);
+        if (itemPai && itemPai.tombamentos) {
+            const tombOriginal = itemPai.tombamentos.find(t => t.tomb === tomb.dataset.tomb);
+            if (tombOriginal && tombOriginal.pendencia) {
+                if (tombOriginal.pendencia.pendencias_ca) {
+                    listaAcumulada = [...tombOriginal.pendencia.pendencias_ca];
+                } else if (tombOriginal.pendencia.obs) {
+                    listaAcumulada.push({ 
+                        quem: tombOriginal.pendencia.quem, 
+                        data: tombOriginal.pendencia.data, 
+                        obs: tombOriginal.pendencia.obs 
+                    });
+                }
+            }
+        }
     }
 
-    // Adiciona a nova entrada
+    // ➕ Adiciona a nova observação ao final da lista recuperada
     listaAcumulada.push({
         quem: conferente,
         data: dataAtual,
         obs: obsDigitada
     });
 
+    // 📦 Montagem do objeto final para o Firebase/PDF
+    // Unimos todas as observações com o separador " | " para o campo de texto simples
+    const textoUnido = listaAcumulada.map(p => p.obs).filter(o => o).join(' | ');
+
     const novoObjeto = {
         status: 'C/A',
-        obs: obsDigitada,
-        pendencias_ca: listaAcumulada
+        obs: textoUnido,              // Texto "achatado" para o PDF
+        pendencias_ca: listaAcumulada // Lista estruturada para carimbos individuais
     };
 
+    // Atualiza o estado global da aplicação
     window.itemStatus[uid] = novoObjeto; 
-    containerEdit.style.display = 'none'; 
     
+    // Interface Visual
+    containerEdit.style.display = 'none'; 
     const d = tomb.querySelector('.tombamento-descricao-salva');
-    d.innerHTML = gerarHtmlVisualApp(novoObjeto);
-    d.style.display = 'block'; 
+    if (d) {
+        d.innerHTML = gerarHtmlVisualApp(novoObjeto); // Gera os carimbos na tela
+        d.style.display = 'block'; 
+    }
 
+    // Persistência local e atualização de status
     salvarRascunho(); 
     updateItemMainStatusDisplay(item); 
     updateSetorStatus(btn.closest('.setor')); 
+    updateOverallStatus();
 }
 
         function restaurarRascunho() {
