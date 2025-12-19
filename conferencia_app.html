@@ -76,7 +76,7 @@
         <div id="draft-message" class="draft-badge"><strong>Rascunho recuperado:</strong> Você está continuando de onde parou.</div>
         <div id="loading-message" class="loading-message">Inicializando sistema...</div>
         <div id="main-content" style="display: none;">
-            <button id="btn-finalizar" onclick="finalizarConferencia()" disabled>FINALIZAR CONFERÊNCIA (0/X ITENS)</button>
+            <button id="btn-finalizar" onclick="()" disabled>FINALIZAR CONFERÊNCIA (0/X ITENS)</button>
         </div>
     </div>
 
@@ -478,101 +478,80 @@ function renderizarConferencia() {
     updateOverallStatus();
 }
         function setItemStatus(btn, status) { 
-            const item = btn.closest('.item-conferencia');
-            const setor = btn.closest('.setor'); 
-            item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); 
-            item.querySelector('.descricao-salva').style.display='none'; 
-            
-            // Esconde a caixa de texto em todas as ações no início, garantindo o estado limpo
-            item.querySelector('.alteracao-container').style.display='none';
-            const pb = item.querySelector('.pendencia-alert-box'); 
-            
-            // 🛑 CORREÇÃO CRÍTICA: Proteger o alerta de Cautela Ativa de ser escondido 🛑
-            // Apenas esconde o alerta se ele existir E não for do tipo 'cautela' (pendências C/A normais)
-            if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
-                pb.style.display='none';
-            }
-            // ---------------------------------------------------------------------
+    const item = btn.closest('.item-conferencia');
+    const setor = btn.closest('.setor'); 
+    const uid = item.dataset.id;
+    
+    item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
+    btn.classList.add('active'); 
+    item.querySelector('.descricao-salva').style.display='none'; 
+    item.querySelector('.alteracao-container').style.display='none';
+    const pb = item.querySelector('.pendencia-alert-box'); 
+    
+    if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
+        pb.style.display='none';
+    }
+    
+    if (status === 'cautela_ciente') {
+        item.className = 'item-conferencia status-alert';
+        item.querySelector('.status-icon').className = 'status-icon alert';
+        
+        // 🛡️ CORREÇÃO: Usamos 'KEEP'. A finalizarConferencia saberá que deve manter o texto antigo.
+        window.itemStatus[uid] = { status: 'KEEP', obs: '' }; 
 
-            
-            // TRATAMENTO EXCLUSIVO para 'cautela_ciente' (Avança e Marca C/A)
-            if (status === 'cautela_ciente') {
-                item.className = 'item-conferencia status-alert';
-                // Cor amarela (C/A)
-                item.querySelector('.status-icon').className = 'status-icon alert';
-                // Salva o C/A SEM OBSERVACAO para não poluir o histórico (nova lógica)
-                window.itemStatus[item.dataset.id] = { status: 'C/A', obs: '' }; // <<< ALTERAÇÃO APLICADA
- 
-                // ✅ GARANTE VISIBILIDADE: Alerta de cautela fica visível
-                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-            }
-            // FIM do tratamento exclusivo
-            
-            else if(status==='ok'){
-                item.className='item-conferencia status-ok';
-                item.querySelector('.status-icon').className='status-icon ok';
-                // Salva o S/A SEM OBSERVAÇÃO para fins de limpeza de pendência (nova lógica)
-                window.itemStatus[item.dataset.id]={status:'S/A',obs:''}; // <<< ALTERAÇÃO APLICADA
-
-                // Remove o carimbo de cautela se o usuário der S/A (o que não deveria ser possível se estivesse 100% cautelado, mas a lógica de 'single' permite)
-                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
-            } 
-            else { // status === 'alert' (Abre caixa de texto para + Alteração)
-                item.className='item-conferencia status-alert';
-                item.querySelector('.status-icon').className='status-icon alert'; 
-                
-                // Reabre a caixa de alteração
-                item.querySelector('.alteracao-container').style.display='block';
-                window.itemStatus[item.dataset.id]={status:'PENDING_CA',obs:''};
-                item.querySelector('textarea').focus();
-
-                // ✅ GARANTE VISIBILIDADE: Alerta de cautela fica visível durante a edição
-                if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-            } 
-            
-            salvarRascunho();
-            updateSetorStatus(setor); updateOverallStatus(); 
-            // Finaliza a conferência para S/A ou CIENTE
-            if(status==='ok' || status==='cautela_ciente')checkSetorCompletion(setor,item.dataset.id);
-        }
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
+    }
+    else if(status==='ok'){
+        item.className='item-conferencia status-ok';
+        item.querySelector('.status-icon').className='status-icon ok';
+        window.itemStatus[uid]={status:'S/A',obs:''};
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
+    } 
+    else { // status === 'alert'
+        item.className='item-conferencia status-alert';
+        item.querySelector('.status-icon').className='status-icon alert'; 
+        item.querySelector('.alteracao-container').style.display='block';
+        
+        // Mantemos PENDING_CA para indicar que uma nova obs será digitada
+        window.itemStatus[uid]={status:'PENDING_CA',obs:''};
+        item.querySelector('textarea').focus();
+        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
+    } 
+    
+    salvarRascunho();
+    updateSetorStatus(setor); 
+    updateOverallStatus(); 
+    if(status==='ok' || status==='cautela_ciente') checkSetorCompletion(setor, uid);
+}
         
         function setTombamentoStatus(btn, status) { 
     const tomb = btn.closest('.tombamento-container');
     const item = btn.closest('.item-conferencia'); 
     const setor = btn.closest('.setor'); 
-    
-    // CRÍTICO: Constrói o UID
     const uid = `${item.dataset.id}-${tomb.dataset.tomb}`; 
     
-    // UI: Limpa e ativa o botão clicado
     tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
     btn.classList.add('active'); 
-    
-    // UI: Esconde campos de observação/descrição salva
     tomb.querySelector('.tombamento-obs-container').style.display='none'; 
     tomb.querySelector('.tombamento-descricao-salva').style.display='none'; 
     
     const pb = tomb.querySelector('.pendencia-alert-box');
-    
-    // Protege o alerta de Cautela Ativa
     if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
         pb.style.display='none';
     }
 
-    // LÓGICA DE STATUS
     if (status === 'cautela_ciente') {
-        // CIENTE: Marca KEEP (para manter C/A anterior se houver), mas sem obs nova.
+        // 🛡️ CORREÇÃO: Alterado para 'KEEP' para preservar histórico no Firebase/PDF
         window.itemStatus[uid] = { status: 'KEEP', obs: '' };
         if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
         updateItemMainStatusDisplay(item);
     }
     else if(status==='ok'){
-        // S/A: Limpa a Pendência C/A
         window.itemStatus[uid]={status:'S/A',obs:''};
         if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
         updateItemMainStatusDisplay(item);
     } 
-    else { // status === 'alert' (Abre caixa de texto para + Alteração)
+    else { 
         tomb.querySelector('.tombamento-obs-container').style.display='block';
         window.itemStatus[uid]={status:'PENDING_CA',obs:''}; 
         tomb.querySelector('textarea').focus();
@@ -580,12 +559,12 @@ function renderizarConferencia() {
         updateItemMainStatusDisplay(item);
     } 
     
-    // FINALIZAÇÃO
     salvarRascunho();
     updateSetorStatus(setor); 
     updateOverallStatus(); 
-    if(status==='ok' || status==='cautela_ciente')checkSetorCompletion(setor,item.dataset.id);
+    if(status==='ok' || status==='cautela_ciente') checkSetorCompletion(setor, item.dataset.id);
 }
+    
         function manterPendencia(btn, uid) { 
             const box = btn.closest('.pendencia-alert-box');
             if(box) { 
@@ -932,11 +911,6 @@ async function finalizarConferencia() {
     const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
     const CONFERENTE_UID = userInfo.uid || ''; 
 
-    if (isCautela) {
-        await finalizarRecebimentoCautela();
-        return;
-    }
-    
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
     btn.textContent = "Salvando..."; 
@@ -955,9 +929,9 @@ async function finalizarConferencia() {
 
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(item => {
-                
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
+                    // Se o item não foi tocado ou já foi salvo, processamos o estado atual dele
                     if (!s || s.status === 'pending') return; 
 
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
@@ -966,10 +940,10 @@ async function finalizarConferencia() {
                     let listaPendenciasAtivas = [];
 
                     if (finalStatus === 'C/A') {
-                        // 1. Recupera histórico existente
+                        // 1. CARREGAR HISTÓRICO: Pega o que já está salvo no Objeto (incluindo o que acabou de ser salvo pelo botão 'Salvar')
                         if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
-                        } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
+                        } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -977,55 +951,41 @@ async function finalizarConferencia() {
                             });
                         }
 
+                        // 2. VERIFICAR RASCUNHO: Se houver algo digitado mas não salvo no botão individual
                         const obsLimpa = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
-                        const ultimaObsNaLista = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
+                        const ultimaObs = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
 
-                        // 2. Adiciona nova observação se houver e não for duplicada
-                        if (obsLimpa !== '' && obsLimpa !== ultimaObsNaLista) {
-                            listaPendenciasAtivas.push({
-                                quem: conferente,
-                                data: dataSomenteDia,
-                                obs: obsLimpa
-                            });
-                            
-                            itemOuTomb.historico_vida.push({
-                                evento: "ALTERACAO_DETECTADA",
-                                quem: conferente,
-                                data: dataAtualCompleta,
-                                detalhes: obsLimpa
-                            });
+                        if (obsLimpa !== '' && obsLimpa !== ultimaObs) {
+                            listaPendenciasAtivas.push({ quem: conferente, data: dataSomenteDia, obs: obsLimpa });
+                            itemOuTomb.historico_vida.push({ evento: "ALTERACAO_DETECTADA", quem: conferente, data: dataAtualCompleta, detalhes: obsLimpa });
                         }
 
-                        // 3. Monta o texto corrido para o campo 'obs' (compatibilidade PDF/Firebase)
-                        const textoParaRelatorio = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
+                        // 🛡️ 3. A CHAVE DO SUCESSO: Gerar o texto para o PDF a partir da lista
+                        // Se a lista tiver itens, o 'obs' raiz NUNCA será vazio.
+                        const textoJoin = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
 
                         itemOuTomb.pendencia = {
                             tipo: "C/A",
                             pendencias_ca: listaPendenciasAtivas,
-                            obs: textoParaRelatorio, 
+                            obs: textoJoin || obsLimpa, // Persiste o texto aqui para o PDF
                             quem: listaPendenciasAtivas[0]?.quem || conferente,
                             data: listaPendenciasAtivas[0]?.data || dataSomenteDia
                         };
                         updated = true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                        itemOuTomb.historico_vida.push({
-                            evento: "SANEAMENTO_ALTERACAO",
-                            quem: conferente,
-                            data: dataAtualCompleta,
-                            detalhes: "Item conferido como S/A."
-                        });
+                        itemOuTomb.historico_vida.push({ evento: "SANEAMENTO_ALTERACAO", quem: conferente, data: dataAtualCompleta, detalhes: "S/A" });
                         delete itemOuTomb.pendencia;
                         updated = true;
                     }
 
-                    // 4. Montagem do objeto que vai para 'resultados_conferencias'
+                    // 4. MONTAR RELATÓRIO: Passar os campos explicitamente para o Relatório de Resultados
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
                         status: finalStatus, 
                         pendencias_ca: listaPendenciasAtivas, 
-                        obs: itemOuTomb.pendencia?.obs || '', // 🛡️ CRÍTICO: Repassa para o relatório
+                        obs: itemOuTomb.pendencia?.obs || '', // 👈 O PDF lê isso
                         quem: itemOuTomb.pendencia?.quem || '', 
                         data: itemOuTomb.pendencia?.data || '',
                         quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
@@ -1044,20 +1004,13 @@ async function finalizarConferencia() {
             });
         });
 
-        if(updated) {
-            await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-        }
+        if(updated) await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         
         await db.collection('resultados_conferencias').add({ 
-            local: localNome, 
-            lista_id: LISTA_ID, 
-            conferente_uid: CONFERENTE_UID,
-            conferente: conferente, 
-            timestamp: firebase.firestore.Timestamp.now(), 
-            totalItensConferidos: itensRelatorio.length, 
-            totalCaa: itensCaa.length, 
-            itensCaa, 
-            itensRelatorio 
+            local: localNome, lista_id: LISTA_ID, conferente_uid: CONFERENTE_UID,
+            conferente: conferente, timestamp: firebase.firestore.Timestamp.now(), 
+            totalItensConferidos: itensRelatorio.length, totalCaa: itensCaa.length, 
+            itensCaa, itensRelatorio 
         });
         
         const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
@@ -1068,16 +1021,10 @@ async function finalizarConferencia() {
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        if (window.self === window.top) { 
-            alert("Conferência finalizada com sucesso!"); 
-            window.location.href = "operacional.html"; 
-        }
+        if (window.self === window.top) { alert("Sucesso!"); window.location.href = "operacional.html"; }
 
     } catch (e) { 
-        console.error(e);
-        alert("Erro ao finalizar: " + e.message); 
-        btn.disabled = false; 
-        btn.textContent = "Finalizar Conferência";
+        console.error(e); alert("Erro: " + e.message); btn.disabled = false; 
     }
 }
         async function finalizarRecebimentoCautela(cautela) {
