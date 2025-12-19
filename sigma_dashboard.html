@@ -3315,7 +3315,7 @@ window.addEventListener('message', function(event) {
     const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
     const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
     
-    // CORREÇÃO: Adicionado o nome da função 'reimprimirPDF' no onclick
+    // CORREÇÃO: Adicionado o nome da função '' no onclick
     return `<li class="history-item">
                 <div class="hist-info">
                     <strong>${data.local}</strong>
@@ -3323,7 +3323,7 @@ window.addEventListener('message', function(event) {
                 </div>
                 <div style="display:flex;align-items:center;">
                     <span class="hist-status ${temAlteracao?'status-alert':'status-ok'}">${temAlteracao?'C/A':'S/A'}</span>
-                    <button class="btn-reprint" onclick='reimprimirPDF(${JSON.stringify(data)})'>
+                    <button class="btn-reprint" onclick='(${JSON.stringify(data)})'>
                         <i class="fas fa-file-pdf"></i>
                     </button>
                 </div>
@@ -3821,40 +3821,28 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                let textoCautela = '';
-                let textoPendencia = '';
-                let finalObs = '';
+                // 🛑 CORREÇÃO DA OBSERVAÇÃO 🛑
+                let finalObs = '-';
 
-                // 1. Extração da Posse (Cautelas)
-                if (item.cautelas && Array.isArray(item.cautelas) && item.cautelas.length > 0) {
-                    textoCautela = item.cautelas.map(c => `[EM CAUTELA: ${c.id}] ${c.quantidade}UN com ${c.destinatario}`).join(' | ');
-                } else if (item.cautela && typeof item.cautela === 'object') {
-                    textoCautela = `[EM CAUTELA: ${item.cautela.id}] com ${item.cautela.destinatario}`;
+                // 1. Prioriza o formato de objeto JSON (Novo Padrão)
+                if (item.quem && item.data && item.obs) {
+                    // Extrai apenas a data via RegEx
+                    const matchData = item.data.match(/\d{2}\/\d{2}\/\d{4}/);
+                    const dLimpa = matchData ? matchData[0] : item.data;
+                    finalObs = `Por ${item.quem} em ${dLimpa}: ${item.obs}`;
+                } 
+                // 2. Se for uma cautela real (posse de material)
+                else if (item.cautela && typeof item.cautela === 'object' && item.cautela.id) {
+                    const c = item.cautela;
+                    finalObs = `[EM CAUTELA: ${c.id}] com ${c.destinatario}`;
+                }
+                // 3. Fallback para String Legada (ou caso a obs não tenha quem/data)
+                else if (item.obs && typeof item.obs === 'string' && item.obs !== '-') {
+                    // Limpa possíveis separadores antigos de strings sujas
+                    finalObs = item.obs.split(' | +')[0]; 
                 }
 
-                // 2. Extração da Pendência (C/A) com limpeza de Hora via RegEx
-                if (item.obs && item.obs !== '-') {
-                    // Tenta extrair quem e data se for objeto JSON
-                    const q = item.quem || '';
-                    let d = item.data || '';
-                    const matchData = d.match(/\d{2}\/\d{2}\/\d{4}/);
-                    const dLimpa = matchData ? matchData[0] : d;
-
-                    if (q && dLimpa) {
-                        textoPendencia = `- Por ${q} em ${dLimpa}: "${item.obs}"`;
-                    } else {
-                        textoPendencia = item.obs;
-                    }
-                }
-
-                // 3. Montagem Final
-                if (textoCautela && textoPendencia) {
-                    finalObs = `${textoPendencia}\n${textoCautela}`;
-                } else {
-                    finalObs = textoPendencia || textoCautela || '-';
-                }
-
-                // 4. Resposta da Gestão (Admin)
+                // 4. Resposta da Gestão (Se houver)
                 if (item.statusAdmin && item.adminObs) {
                     finalObs = `RESPOSTA DA GESTÃO: ${item.adminObs}\n${finalObs}`;
                 }
