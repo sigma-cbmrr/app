@@ -313,13 +313,15 @@ const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, a
 const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
     let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 5px 0;">';
     
-    // 1. LÓGICA PARA A NOVA ESTRUTURA DE LISTA (Array pendencias_ca)
-    if (pendencia && pendencia.pendencias_ca && Array.isArray(pendencia.pendencias_ca)) {
-        pendencia.pendencias_ca.forEach(p => {
+    // 1. PRIORIDADE TOTAL: Nova estrutura de lista (Array pendencias_ca)
+    // Verificamos se pendencia é o objeto pai que contém a lista
+    const lista = (pendencia && pendencia.pendencias_ca) ? pendencia.pendencias_ca : 
+                  (Array.isArray(pendencia) ? pendencia : null);
+
+    if (lista && Array.isArray(lista)) {
+        lista.forEach(p => {
             const militar = p.quem || 'Militar';
             const dataFull = p.data || '';
-            
-            // REGEX: Captura apenas DD/MM/AAAA e ignora o resto
             const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
             const dataApenas = matchData ? matchData[0] : dataFull;
 
@@ -333,8 +335,8 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual, adminStatus, admin
                 </li>`;
         });
     } 
-    // 2. FALLBACK PARA O FORMATO DE OBJETO ÚNICO (Para não quebrar itens antigos)
-    else if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
+    // 2. FALLBACK: Formato de objeto único ou string
+    else if (pendencia && pendencia.obs) {
         const militar = pendencia.quem || autorAtual || 'Militar';
         const dataFull = pendencia.data || dataAtual || '';
         const matchData = dataFull.match(/\d{2}\/\d{2}\/\d{4}/);
@@ -343,24 +345,18 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual, adminStatus, admin
         html += `
             <li class="linha-obs" style="margin-bottom: 8px; line-height: 1.4; text-align: left; font-size: 0.9rem;">
                 <span style="margin-right: 8px;">⚠️</span>
-                <b>Por </b>
-                <span style="color: #d90f23; font-weight: bold;">${militar}</span>
-                <span> em <b>${dataApenas}</b>:</span>
-                <i style="margin-left: 5px; color: #333; font-weight: normal;">${pendencia.obs}</i>
+                <b>Por </b><span style="color: #d90f23; font-weight: bold;">${militar}</span> em <b>${dataApenas}</b>:
+                <i style="margin-left: 5px; color: #333;">${pendencia.obs}</i>
             </li>`;
     }
-    // 3. FALLBACK PARA STRINGS LEGADAS
-    else if (typeof pendencia === 'string' && pendencia.trim() !== '' && pendencia !== '-') {
-        const linhas = typeof gerarLinhasFormatadas === 'function' ? gerarLinhasFormatadas(pendencia, autorAtual, dataAtual, adminStatus, adminObs) : [pendencia];
-        linhas.forEach(l => {
-            html += `<li class="linha-obs" style="margin-bottom: 5px;"><span style="margin-right: 8px;">⚠️</span>${l}</li>`;
-        });
+    else if (typeof pendencia === 'string' && pendencia !== '-') {
+        html += `<li class="linha-obs" style="margin-bottom: 5px;"><span style="margin-right: 8px;">⚠️</span>${pendencia}</li>`;
     }
 
     html += '</ul>';
     return html;
 };
-
+    
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
