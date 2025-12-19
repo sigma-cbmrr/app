@@ -3784,7 +3784,7 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛡️ LÓGICA DE CAPTURA EXCLUSIVA (EVITA DUPLICIDADE)
+                // 🛡️ LÓGICA DE CAPTURA EXCLUSIVA (MATA O FANTASMA NO PDF)
                 let finalObs = '-';
                 
                 const formatData = (d) => {
@@ -3793,25 +3793,20 @@ function reimprimirPDF(data) {
                     return m ? m[0] : d;
                 };
 
-                // PRIORIDADE 1: Se existe a lista acumulada, usa APENAS ela
+                // REGRA: Se existe a lista de carimbos, usa ela e IGNORA o campo 'obs' raiz.
                 if (item.pendencias_ca && Array.isArray(item.pendencias_ca) && item.pendencias_ca.length > 0) {
-                    finalObs = item.pendencias_ca.map(p => `- Por ${p.quem || 'Militar'} em ${formatData(p.data)}: ${p.obs || ''}`).join('\n');
+                    finalObs = item.pendencias_ca.map(p => `- Por ${p.quem} em ${formatData(p.data)}: ${p.obs}`).join('\n');
                 } 
-                // PRIORIDADE 2: Formato antigo (apenas um militar)
-                else if (item.quem && item.obs) {
-                    finalObs = `Por ${item.quem} em ${formatData(item.data)}: ${item.obs}`;
-                } 
-                // PRIORIDADE 3: Texto puro/fallback
+                // FALLBACK: Se não tem a lista, tenta o texto do campo 'obs'
                 else if (item.obs && item.obs !== "") {
                     finalObs = item.obs;
                 }
 
                 let bgStatus = (item.status === 'C/A') ? RED_FILL : GREEN_FILL;
-                const itemQuantidade = item.quantidade || 1;
 
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
-                    { content: `QTD: ${itemQuantidade}`, styles: { halign: 'center' } }, 
+                    { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center' } }, 
                     { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center' } }, 
                     { content: finalObs, styles: { halign: 'left' } } 
                 ]);
@@ -3962,11 +3957,13 @@ const activeLink = document.getElementById(`link-${v}`);
         
         // --- FUNÇÕES DO MODAL GESTÃO C/A ---
         function mostrarTabela(data) {
-    const wrapper = document.getElementById('ca-table-wrapper'), tbody = document.getElementById('ca-list-body');
+    const wrapper = document.getElementById('ca-table-wrapper');
+    const tbody = document.getElementById('ca-list-body');
+    if (!wrapper || !tbody) return;
+
     document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; 
     tbody.innerHTML = '';
     
-    // Garante array
     const items = data.items || [];
     const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
     
@@ -3980,33 +3977,50 @@ const activeLink = document.getElementById(`link-${v}`);
         itemsToShow.forEach(i => {
             const tr = tbody.insertRow();
             
-            // 1. Formata o histórico de observações usando a função padronizada (HTML)
-            const obsHtmlFormatada = gerarHtmlVisual(
-                i.obs || '', 
-                data.conferente, // Nome do conferente original (fallback)
-                data.date, // Data da conferência original (fallback)
-                i.statusAdmin, 
-                i.adminObs
-            );
-
-            // 2. Define a classe do badge para o status de gestão
-            const statusAdmin = i.statusAdmin || 'Pendente';
-            // Garante que o status do Firebase (Ex: Em solução, Cautelado) seja minúsculo e com traço (Ex: em-solucao)
-            const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(' ', '-');
+            // 🛡️ LÓGICA DE VISUALIZAÇÃO BLINDADA (EVITA DUPLICIDADE NO DASHBOARD)
+            let obsHtmlFormatada = '';
             
-            // INJEÇÃO DO DOC_ID DO PAI NO ITEM FILHO
+            // 1. Tenta extrair a lista acumulada (Prioridade Máxima)
+            const listaAcumulada = (i.pendencias_ca && Array.isArray(i.pendencias_ca)) ? i.pendencias_ca : null;
+
+            if (listaAcumulada && listaAcumulada.length > 0) {
+                obsHtmlFormatada = '<ul style="list-style:none; padding:0; margin:0;">';
+                listaAcumulada.forEach(p => {
+                    const dMatch = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
+                    const dLimpa = dMatch ? dMatch[0] : (p.data || '');
+                    
+                    obsHtmlFormatada += `
+                        <li style="margin-bottom:8px; border-bottom:1px dashed #eee; padding-bottom:4px; font-size:0.9em; text-align:left;">
+                            <i class="fas fa-exclamation-triangle" style="color:#d90f23; margin-right:5px;"></i>
+                            <b>Por ${p.quem}</b> em ${dLimpa}:
+                            <br><i style="margin-left:18px; color:#444;">${p.obs}</i>
+                        </li>`;
+                });
+                obsHtmlFormatada += '</ul>';
+            } 
+            // 2. Fallback para formato antigo ou texto puro (Apenas se a lista não existir)
+            else if (i.obs) {
+                // Caso contenha dados de Admin, usa a função auxiliar que você já tinha
+                if (i.obs.includes('(Admin):') || i.obs.includes('| + NOVA:')) {
+                    obsHtmlFormatada = gerarHtmlVisual(i.obs, data.conferente, data.date, i.statusAdmin, i.adminObs);
+                } else {
+                    obsHtmlFormatada = `<div style="text-align:left;"><i class="fas fa-exclamation-triangle" style="color:#d90f23;"></i> ${i.obs}</div>`;
+                }
+            }
+
+            const statusAdmin = i.statusAdmin || 'Pendente';
+            const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(/\s/g, '-');
             const itemComDocId = { ...i, docId: data.docId }; 
             
             tr.innerHTML = `
                 <td><strong>${i.nomeCompleto}</strong></td>
                 <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
-                <td>${obsHtmlFormatada}</td>
+                <td style="max-width: 400px;">${obsHtmlFormatada}</td>
                 <td><small>${data.conferente}<br>${data.date}</small></td>
             `;
             
-            const td = tr.insertCell(); 
-            // Passa o item enriquecido para o modal de gestão
-            td.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
+            const tdAcao = tr.insertCell(); 
+            tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
         });
     }
     wrapper.style.display = 'block';
