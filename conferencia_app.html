@@ -958,7 +958,8 @@ async function finalizarConferencia() {
                 
                 const processarItemUnico = (itemOuTomb, id, nome) => {
                     const s = window.itemStatus[id];
-                    // Se o item não foi tocado nesta sessão, ignoramos o processamento de atualização
+                    
+                    // 1. Se o item não foi tocado nesta sessão (S/A ou C/A), ignoramos
                     if (!s || s.status === 'pending') return; 
 
                     if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
@@ -967,10 +968,11 @@ async function finalizarConferencia() {
                     let listaPendenciasAtivas = [];
 
                     if (finalStatus === 'C/A') {
-                        // 1. Recupera o que já existia no banco
+                        // 2. Recupera histórico existente do banco
                         if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } else if (itemOuTomb.pendencia && itemOuTomb.pendencia.quem) {
+                            // Converte formato antigo (se houver) para a nova lista
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -978,19 +980,19 @@ async function finalizarConferencia() {
                             });
                         }
 
+                        // 3. Blindagem contra erro de trim()
                         const obsLimpa = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
                         
-                        // 🛡️ BLOQUEIO DE DUPLICIDADE:
-                        // Só adicionamos a s.obs se ela já não for a ÚLTIMA coisa na lista (evita duplicar o que o salvarItem já fez)
+                        // 4. BLOQUEIO DE DUPLICIDADE:
+                        // Só adicionamos a nova obs se ela já não for a última da lista (evita duplicar o que o salvarItem já fez)
                         const ultimaObsNaLista = listaPendenciasAtivas.length > 0 ? listaPendenciasAtivas[listaPendenciasAtivas.length - 1].obs : null;
 
                         if ((s.status === 'C/A' || s.status === 'PENDING_CA') && obsLimpa !== '' && obsLimpa !== ultimaObsNaLista) {
-                            const novaPendencia = {
+                            listaPendenciasAtivas.push({
                                 quem: conferente,
                                 data: dataSomenteDia,
                                 obs: obsLimpa
-                            };
-                            listaPendenciasAtivas.push(novaPendencia);
+                            });
                             
                             itemOuTomb.historico_vida.push({
                                 evento: "ALTERACAO_DETECTADA",
@@ -1000,17 +1002,20 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 🛡️ SALVAMENTO ESTRUTURADO: Salva a lista E os campos raiz para o PDF
+                        // 5. SALVAMENTO HÍBRIDO (Lista para o App e Campos Raiz para o PDF)
+                        const textoJoin = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
+
                         itemOuTomb.pendencia = {
                             tipo: "C/A",
                             pendencias_ca: listaPendenciasAtivas,
-                            obs: listaPendenciasAtivas.map(p => p.obs).join(' | '), // Texto corrido para compatibilidade
-                            quem: listaPendenciasAtivas[0]?.quem || conferente,
-                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia
+                            obs: textoJoin, // PDF buscará aqui
+                            quem: listaPendenciasAtivas[0]?.quem || conferente, // PDF buscará aqui
+                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia // PDF buscará aqui
                         };
                         updated = true;
 
                     } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
+                        // Lógica de Saneamento
                         itemOuTomb.historico_vida.push({
                             evento: "SANEAMENTO_ALTERACAO",
                             quem: conferente,
@@ -1021,6 +1026,7 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
+                    // 6. Montagem dos dados para a coleção 'resultados_conferencias'
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
@@ -1037,6 +1043,7 @@ async function finalizarConferencia() {
                     if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
                 };
 
+                // Execução por tipo de item
                 if (item.tipo === 'multi' && item.tombamentos) {
                     item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
                 } else {
@@ -1045,6 +1052,7 @@ async function finalizarConferencia() {
             });
         });
 
+        // Gravação no Firestore
         if(updated) {
             await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
         }
@@ -1069,6 +1077,7 @@ async function finalizarConferencia() {
 
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        
         if (window.self === window.top) { 
             alert("Conferência finalizada com sucesso!"); 
             window.location.href = "operacional.html"; 
