@@ -3760,26 +3760,15 @@ function reimprimirPDF(data) {
         logoDraw('cbmrr.png', MARGIN);
         logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
 
-        doc.setFontSize(10);
-        doc.setTextColor(51); 
-        doc.setFont('helvetica','bold');
+        doc.setFontSize(10).setTextColor(51).setFont('helvetica','bold');
         doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
-        doc.setTextColor(217,15,35);
-        doc.text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
-        doc.setTextColor(51); 
-        doc.setFont('helvetica','italic');
-        doc.text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
-        doc.setFontSize(14); 
-        doc.setTextColor(0);
-        doc.setFont('helvetica','bold'); 
-        doc.text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
+        doc.setTextColor(217,15,35).text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
+        doc.setTextColor(51).setFont('helvetica','italic').text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
+        doc.setFontSize(14).setTextColor(0).setFont('helvetica','bold').text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
 
-        doc.setFillColor(240, 240, 240);
-        doc.setDrawColor(200, 200, 200); 
-        doc.roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
+        doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
         
-        doc.setFontSize(10); 
-        doc.setTextColor(50);
+        doc.setFontSize(10).setTextColor(50);
         let y = 46;
         const X_LABEL = MARGIN + 5; 
         const X_VAL = MARGIN + 35;
@@ -3787,29 +3776,19 @@ function reimprimirPDF(data) {
         const dataTimestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000) : new Date();
         const dataHoraStr = dataTimestamp.toLocaleString('pt-BR');
         
-        doc.setFont('helvetica','bold'); 
-        doc.text('Local:', X_LABEL, y); 
-        doc.setFont('helvetica','normal');
-        doc.text(data.local || '', X_VAL, y); 
+        doc.setFont('helvetica','bold').text('Local:', X_LABEL, y); 
+        doc.setFont('helvetica','normal').text(data.local || '', X_VAL, y); 
         y+=6; 
-        doc.setFont('helvetica','bold'); 
-        doc.text('Conferente:', X_LABEL, y); 
-        doc.setFont('helvetica','normal'); 
-        doc.text(data.conferente || '', X_VAL, y); 
+        doc.setFont('helvetica','bold').text('Conferente:', X_LABEL, y); 
+        doc.setFont('helvetica','normal').text(data.conferente || '', X_VAL, y); 
         y+=6; 
-        doc.setFont('helvetica','bold');
-        doc.text('Data/Hora:', X_LABEL, y); 
-        doc.setFont('helvetica','normal'); 
-        doc.text(dataHoraStr, X_VAL, y); 
+        doc.setFont('helvetica','bold').text('Data/Hora:', X_LABEL, y); 
+        doc.setFont('helvetica','normal').text(dataHoraStr, X_VAL, y); 
         
-        doc.setFont('helvetica','bold');
-        doc.setTextColor(128, 0, 32);
-        doc.text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
+        doc.setFont('helvetica','bold').setTextColor(128, 0, 32).text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
 
         let tableBody = [];
-        const RED_FILL = [217, 15, 35]; 
-        const GREEN_FILL = [27, 138, 62]; 
-        const SECTOR_BG = [60, 60, 60];
+        const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = [60, 60, 60];
         let listaParaImprimir = data.itensRelatorio || data.itensCaa || [];
         
         if (listaParaImprimir.length > 0) {
@@ -3821,32 +3800,27 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛑 AJUSTE FINAL E DEFINITIVO DA OBSERVAÇÃO 🛑
+                // 🛑 LÓGICA DE CAPTURA ROBUSTA (CIRÚRGICA) 🛑
                 let finalObs = '-';
                 
-                // Pega os dados brutos de onde estiverem (raiz ou sub-objeto pendencia)
+                // 1. Tenta extrair Responsável e Data (olhando na raiz e dentro do sub-objeto pendencia)
                 const militar = item.quem || (item.pendencia && item.pendencia.quem) || '';
-                const dataBruta = item.data || (item.pendencia && item.pendencia.data) || '';
-                const observacao = item.obs || (item.pendencia && item.pendencia.obs) || '';
+                const dataRaw = item.data || (item.pendencia && item.pendencia.data) || '';
+                
+                // 2. Tenta extrair o texto (suporta as chaves 'obs' ou 'detalhes' em ambos os níveis)
+                const textoObs = item.obs || item.detalhes || (item.pendencia && (item.pendencia.obs || item.pendencia.detalhes)) || '';
 
-                if (militar && dataBruta && observacao && observacao !== '-') {
-                    // Limpa a hora da data via RegEx
-                    const matchData = dataBruta.match(/\d{2}\/\d{2}\/\d{4}/);
-                    const dLimpa = matchData ? matchData[0] : dataBruta;
-                    // Concatena exatamente como na visualização do conferente
-                    finalObs = `Por ${militar} em ${dLimpa}: ${observacao}`;
-                } 
-                else if (observacao && observacao !== '-') {
-                    // Fallback para strings legadas
-                    finalObs = typeof observacao === 'string' ? observacao.split(' | +')[0].trim() : observacao;
+                if (militar && dataRaw && textoObs && textoObs !== '-') {
+                    // Limpeza de hora via RegEx (Padrão DD/MM/AAAA)
+                    const matchData = dataRaw.toString().match(/\d{2}\/\d{2}\/\d{4}/);
+                    const dLimpa = matchData ? matchData[0] : dataRaw;
+                    finalObs = `Por ${militar} em ${dLimpa}: ${textoObs}`;
+                } else if (textoObs && textoObs !== '-') {
+                    // Fallback: se não achar os metadados, limpa o texto de separadores antigos
+                    finalObs = textoObs.toString().split(' | +')[0].trim();
                 }
 
-                // Cautelas (caso o item esteja cautelado e não seja apenas uma pendência)
-                if (item.cautela && typeof item.cautela === 'object' && item.cautela.id) {
-                    finalObs += `\n[EM CAUTELA: ${item.cautela.id}] com ${item.cautela.destinatario}`;
-                }
-
-                // Resposta da Gestão/Admin
+                // 3. Resposta da Gestão/Admin (Se houver)
                 if (item.statusAdmin && item.adminObs) {
                     finalObs = `RESPOSTA DA GESTÃO: ${item.adminObs}\n${finalObs}`;
                 }
@@ -3876,8 +3850,7 @@ function reimprimirPDF(data) {
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
-            doc.setFontSize(8); 
-            doc.setTextColor(100);
+            doc.setFontSize(8); doc.setTextColor(100);
             doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-10);
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
         }
@@ -3889,8 +3862,7 @@ function reimprimirPDF(data) {
         console.error(e);
         alert("Erro ao gerar PDF: " + e.message);
     }
-}
-		// --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
+}		// --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
         
         function sairDoSistema() { 
             auth.signOut().then(() => { 
