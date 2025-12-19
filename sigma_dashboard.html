@@ -3315,7 +3315,7 @@ window.addEventListener('message', function(event) {
     const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
     const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
     
-    // AQUI ESTÁ O SEGREDO: O nome 'reimprimirPDF' deve preceder o JSON.stringify
+    // AQUI ESTÁ O SEGREDO: O nome '' deve preceder o JSON.stringify
     return `<li class="history-item">
                 <div class="hist-info">
                     <strong>${data.local}</strong>
@@ -3738,7 +3738,6 @@ const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs
 function reimprimirPDF(data) {
     try {
         const { jsPDF } = window.jspdf;
-        
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
 
@@ -3747,13 +3746,10 @@ function reimprimirPDF(data) {
             if(el) { 
                 try{
                     const c=document.createElement('canvas');
-                    c.width=160;
-                    c.height=160;
+                    c.width=160; c.height=160;
                     c.getContext('2d').drawImage(el,0,0,160,160);
                     doc.addImage(c.toDataURL('image/png'),'PNG',x,10,LOGO_S,LOGO_S);
-                }catch(e){
-                    console.warn(`Falha ao desenhar imagem ${domId}`);
-                } 
+                }catch(e){ console.warn(`Logo não encontrada: ${domId}`); } 
             }
         };
         
@@ -3767,23 +3763,15 @@ function reimprimirPDF(data) {
         doc.setFontSize(14).setTextColor(0).setFont('helvetica','bold').text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
 
         doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
-        
         doc.setFontSize(10).setTextColor(50);
-        let y = 46;
-        const X_LABEL = MARGIN + 5; 
-        const X_VAL = MARGIN + 35;
-        
         const dataTimestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000) : new Date();
-        const dataHoraStr = dataTimestamp.toLocaleString('pt-BR');
         
-        doc.setFont('helvetica','bold').text('Local:', X_LABEL, y); 
-        doc.setFont('helvetica','normal').text(data.local || '', X_VAL, y); 
-        y+=6; 
-        doc.setFont('helvetica','bold').text('Conferente:', X_LABEL, y); 
-        doc.setFont('helvetica','normal').text(data.conferente || '', X_VAL, y); 
-        y+=6; 
-        doc.setFont('helvetica','bold').text('Data/Hora:', X_LABEL, y); 
-        doc.setFont('helvetica','normal').text(dataHoraStr, X_VAL, y); 
+        doc.setFont('helvetica','bold').text('Local:', MARGIN + 5, 46); 
+        doc.setFont('helvetica','normal').text(data.local || '', MARGIN + 35, 46); 
+        doc.setFont('helvetica','bold').text('Conferente:', MARGIN + 5, 52); 
+        doc.setFont('helvetica','normal').text(data.conferente || '', MARGIN + 35, 52); 
+        doc.setFont('helvetica','bold').text('Data/Hora:', MARGIN + 5, 58); 
+        doc.setFont('helvetica','normal').text(dataTimestamp.toLocaleString('pt-BR'), MARGIN + 35, 58); 
         
         doc.setFont('helvetica','bold').setTextColor(128, 0, 32).text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
 
@@ -3800,42 +3788,32 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛑 AJUSTE CIRÚRGICO: DNA DA PENDÊNCIA 🛑
+                // 🛑 LÓGICA DE MULTIPLAS PENDENCIAS NO PDF 🛑
                 let finalObs = '-';
-                
-                // Agora buscamos os campos fixos salvos pela nova função finalizarConferencia
-                const autorOrigem = item.quem_ca_origem || '';
-                const dataOrigem = item.data_ca_origem || '';
-                const textoObs = item.obs || '';
-
-                if (autorOrigem && dataOrigem && textoObs && textoObs !== '-') {
-                    // Monta a frase exatamente como você solicitou
-                    finalObs = `Por ${autorOrigem} em ${dataOrigem}: ${textoObs}`;
-                } else if (textoObs && textoObs !== '-') {
-                    // Fallback para itens antigos ou sem o novo padrão
-                    finalObs = textoObs.toString().split(' | +')[0].trim();
+                if (item.pendencias_ca && Array.isArray(item.pendencias_ca) && item.pendencias_ca.length > 0) {
+                    finalObs = item.pendencias_ca.map(p => {
+                        const dLimpa = p.data.match(/\d{2}\/\d{2}\/\d{4}/) ? p.data.match(/\d{2}\/\d{2}\/\d{4}/)[0] : p.data;
+                        return `- Por ${p.quem} em ${dLimpa}: ${p.obs}`;
+                    }).join('\n');
+                } else if (item.obs) {
+                    finalObs = item.obs;
                 }
 
-                // Resposta da Gestão/Admin (Mantido)
-                if (item.statusAdmin && item.adminObs) {
-                    finalObs = `RESPOSTA DA GESTÃO: ${item.adminObs}\n${finalObs}`;
-                }
-
-                let bgStatus = (item.status === 'C/A' || item.status === 'KEEP') ? RED_FILL : GREEN_FILL;
+                let bgStatus = (item.status === 'C/A') ? RED_FILL : GREEN_FILL;
                 const itemQuantidade = item.tombamento ? 1 : (item.quantidade || 1);
 
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
-                    { content: `QTD: ${itemQuantidade}`, styles: { halign: 'center', valign: 'middle' } }, 
-                    { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center', valign: 'middle' } }, 
-                    { content: finalObs, styles: { halign: 'left', valign: 'middle' } } 
+                    { content: `QTD: ${itemQuantidade}`, styles: { halign: 'center' } }, 
+                    { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center' } }, 
+                    { content: finalObs, styles: { halign: 'left' } } 
                 ]);
             });
         }
         
         doc.autoTable({ 
             startY: 70, 
-            head: [['Item', 'Quantidade', 'Status', 'Observação']], 
+            head: [['Material', 'Quantidade', 'Status', 'Observação']], 
             body: tableBody, 
             theme: 'striped', 
             styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 1.5 }, 
