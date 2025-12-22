@@ -5797,38 +5797,27 @@ function getSelectedCautelaItemsData() {
 // A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
 
 async function iniciarCautelaProcesso() {
-    // 1. Captura os valores
     const localId = document.getElementById('cautela-local-origem').value;
     const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
     const destinatarioNome = document.getElementById('cautela-destinatario').value;
+    const obsEmissao = document.getElementById('cautela-obs')?.value || "";
     const itensCount = (typeof cautelaItensSelecionados !== 'undefined') ? cautelaItensSelecionados.length : 0;
 
-    // 2. MODO DEBUG - Isso vai nos dizer o culpado real
-    if (!localId) {
-        alert("O sistema não identificou o LOCAL DE ORIGEM.");
-        return;
-    }
-    if (!destinatarioUid) {
-        alert("O sistema não identificou o ID do MILITAR. Tente apagar o nome e selecionar novamente na lista que aparece.");
-        console.log("Dica: Verifique se você CLICOU no nome da lista de sugestões.");
-        return;
-    }
-    if (itensCount === 0) {
-        alert("O sistema não identificou NENHUM ITEM selecionado.");
+    if (!localId || !destinatarioUid || itensCount === 0) {
+        alert("Verifique se selecionou o local, o militar e os itens.");
         return;
     }
 
-    // Se passou daqui, o problema era o banco ou lógica interna
     const btn = document.getElementById('btn-iniciar-cautela');
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Processando...";
-    }
+    if (btn) { btn.disabled = true; btn.textContent = "Processando..."; }
 
     try {
         const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteUid = firebase.auth().currentUser.uid;
-        const emitenteNome = `${currentUserData.posto_grad} ${currentUserData.quadro_mil} ${currentUserData.nome_guerra}`;
+        
+        // 🛑 CORREÇÃO DO NOME DO EMITENTE
+        const emitenteNome = `${currentUserData.posto || ""} ${currentUserData.quadro || ""} ${currentUserData.nome_guerra || ""}`.trim();
+        
         const dataAtual = new Date().toLocaleString('pt-BR');
         const timestamp = firebase.firestore.FieldValue.serverTimestamp();
 
@@ -5844,7 +5833,7 @@ async function iniciarCautelaProcesso() {
             local_origem: document.getElementById('cautela-local-origem').options[document.getElementById('cautela-local-origem').selectedIndex].text,
             status: 'ABERTA',
             timestamp_emissao: timestamp,
-            observacoes_emissao: document.getElementById('cautela-obs')?.value || "",
+            observacoes_emissao: obsEmissao,
             itens: cautelaItensSelecionados
         };
 
@@ -5857,44 +5846,51 @@ async function iniciarCautelaProcesso() {
 
             let listaMestra = listaDoc.data().list;
 
-            cautelaItensSelecionados.forEach(cItem => {
-                listaMestra = listaMestra.map(setor => ({
-                    ...setor,
-                    itens: setor.itens.map(mItem => {
-                        if (mItem.id === (cItem.id_base || cItem.id)) {
-                            const objetoCautela = {
-                                id: cautelaId,
-                                emitente: emitenteNome,
-                                destinatario: destinatarioNome,
-                                data: dataAtual,
-                                quantidade: cItem.quantidade || 1
-                            };
+            // 🛑 NOVA LÓGICA: Processa a lista uma única vez para evitar duplicações
+            listaMestra = listaMestra.map(setor => ({
+                ...setor,
+                itens: setor.itens.map(mItem => {
+                    // Busca se este item da lista mestra foi selecionado para cautela
+                    const cItem = cautelaItensSelecionados.find(c => (c.id_base || c.id) === mItem.id);
+                    
+                    if (cItem) {
+                        const qtdParaAbater = Number(cItem.quantidade) || 1;
+                        
+                        const objetoCautela = {
+                            id: cautelaId,
+                            emitente: emitenteNome,
+                            destinatario: destinatarioNome,
+                            data: dataAtual,
+                            quantidade: qtdParaAbater
+                        };
 
-                            const logHistorico = {
-                                evento: "SAÍDA_CAUTELA",
-                                id_doc: cautelaId,
-                                quem: emitenteNome,
-                                data: dataAtual,
-                                detalhes: `Material cautelado para ${destinatarioNome}`
-                            };
+                        const logHistorico = {
+                            evento: "SAÍDA_CAUTELA",
+                            id_doc: cautelaId,
+                            quem: emitenteNome,
+                            data: dataAtual,
+                            detalhes: `Cautelado ${qtdParaAbater}un para ${destinatarioNome}. Obs: ${obsEmissao}`
+                        };
 
-                            if (!mItem.historico_vida) mItem.historico_vida = [];
-                            mItem.historico_vida.push(logHistorico);
+                        if (!mItem.historico_vida) mItem.historico_vida = [];
+                        mItem.historico_vida.push(logHistorico);
 
-                            if (cItem.tombamento) {
-                                mItem.tombamentos = (mItem.tombamentos || []).map(t => {
-                                    if (t.tomb === cItem.tombamento) t.cautela = objetoCautela;
-                                    return t;
-                                });
-                            } else {
-                                if (!mItem.cautelas) mItem.cautelas = [];
-                                mItem.cautelas.push(objetoCautela);
-                            }
+                        if (cItem.tipo === 'multi' || cItem.tombamento) {
+                            // Lógica para Multi (Tombamentos)
+                            mItem.tombamentos = (mItem.tombamentos || []).map(t => {
+                                // Se for o tombamento específico selecionado, carimba
+                                if (t.tomb === cItem.tombamento) t.cautela = objetoCautela;
+                                return t;
+                            });
+                        } else {
+                            // 🛑 Lógica para Single (Quantidade) - CRÍTICO PARA O "8 de 10"
+                            if (!mItem.cautelas) mItem.cautelas = [];
+                            mItem.cautelas.push(objetoCautela);
                         }
-                        return mItem;
-                    })
-                }));
-            });
+                    }
+                    return mItem;
+                })
+            }));
 
             transaction.set(cautelaRef, novaCautela);
             transaction.update(listaRef, { list: listaMestra });
@@ -5905,12 +5901,9 @@ async function iniciarCautelaProcesso() {
 
     } catch (e) {
         console.error(e);
-        alert("Erro ao emitir cautela: " + e.message);
+        alert("Erro ao emitir: " + e.message);
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Cautela';
-        }
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Cautela'; }
     }
 }
 		
