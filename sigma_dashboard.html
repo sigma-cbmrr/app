@@ -5632,47 +5632,67 @@ function toggleAccordion(header, contentId) {
  */
 function updateCautelaItemCount() {
     let selectedCount = 0;
+    // REINICIALIZA O ARRAY GLOBAL (O elo que estava faltando)
+    cautelaItensSelecionados = []; 
     
-    // 1. Contagem de itens com Tombamento (tipo 'multi')
-    selectedCount += document.querySelectorAll('input[name="cautela-item-multi"]:checked').length; 
+    // 1. Processar itens com Tombamento (tipo 'multi')
+    document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
+        const idBase = chk.getAttribute('data-id-base');
+        const tombamento = chk.getAttribute('data-tombamento');
+        const nome = chk.getAttribute('data-nome');
+
+        cautelaItensSelecionados.push({
+            id: `${idBase}-${tombamento}`, // ID único para o tombamento
+            id_base: idBase,
+            nome: nome,
+            tombamento: tombamento,
+            quantidade: 1,
+            tipo: 'multi'
+        });
+        selectedCount++;
+    });
     
-    // 2. Contagem de itens Únicos (tipo 'single') - FIX DO SELETOR APLICADO AQUI
+    // 2. Processar itens Únicos (tipo 'single')
     document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
-        // 🛑 CORREÇÃO: Usar o card como elemento pai 🛑
         const card = chk.closest('.item-selection-card');
         if (!card) return;
         
         const inputQtd = card.querySelector('.input-qtd-cautela');
+        const id = chk.getAttribute('data-id');
+        const nome = chk.getAttribute('data-nome');
 
-        let qtd = 0;
+        let qtd = 1;
         if (inputQtd && !inputQtd.disabled) {
             qtd = parseInt(inputQtd.value) || 0;
-            
             const max = parseInt(inputQtd.getAttribute('max')) || 0;
             
-            // Validação simples de quantidade
             if (qtd > max) {
-                alert(`A quantidade máxima disponível é ${max}.`);
+                alert(`A quantidade máxima disponível para ${nome} é ${max}.`);
                 inputQtd.value = max;
                 qtd = max;
             }
             if (qtd < 1) {
-                // Se a quantidade for inválida, desmarca o checkbox
                 chk.checked = false;
                 inputQtd.disabled = true;
-                qtd = 0;
-                // Re-executa a contagem para refletir a desmarcação
-                return updateCautelaItemCount(); 
+                return; 
             }
         }
+
+        cautelaItensSelecionados.push({
+            id: id,
+            nome: nome,
+            quantidade: qtd,
+            tipo: 'single'
+        });
         selectedCount += qtd;
     });
 
+    // 3. Atualizar Interface
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
-    
-    btnIniciar.textContent = `▶️ Enviar Cautela (${selectedCount} itens)`;
-    // Habilita o botão se a contagem for maior que zero
-    btnIniciar.disabled = (selectedCount <= 0);
+    if (btnIniciar) {
+        btnIniciar.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Cautela (${selectedCount} itens)`;
+        btnIniciar.disabled = (selectedCount <= 0);
+    }
 }
         function toggleItemQuantity(checkbox) {
     // 🛑 CORREÇÃO: Usar .item-selection-card como elemento pai mais próximo 🛑
