@@ -2485,6 +2485,7 @@
         let currentEditingId = null;
         let conferente = '';
         let userCache = {};
+		let cautelaItensSelecionados = [];
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -5632,24 +5633,29 @@ function toggleAccordion(header, contentId) {
  */
 function updateCautelaItemCount() {
     let selectedCount = 0;
-    // REINICIALIZA O ARRAY GLOBAL (O elo que estava faltando)
+    // REINICIALIZA O ARRAY GLOBAL (Garante que a função de envio veja os dados novos)
     cautelaItensSelecionados = []; 
     
     // 1. Processar itens com Tombamento (tipo 'multi')
     document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
         const idBase = chk.getAttribute('data-id-base');
         const tombamento = chk.getAttribute('data-tombamento');
-        const nome = chk.getAttribute('data-nome');
+        const nomeCompleto = chk.getAttribute('data-nome') || "";
 
-        cautelaItensSelecionados.push({
-            id: `${idBase}-${tombamento}`, // ID único para o tombamento
-            id_base: idBase,
-            nome: nome,
-            tombamento: tombamento,
-            quantidade: 1,
-            tipo: 'multi'
-        });
-        selectedCount++;
+        // Remove "(Tomb: ...)" do nome se ele já existir, para não salvar duplicado
+        const nomeLimpo = nomeCompleto.replace(/\s\(Tomb:\s[^\)]+\)/i, '').trim();
+
+        if (idBase && tombamento) {
+            cautelaItensSelecionados.push({
+                id: `${idBase}-${tombamento}`, 
+                id_base: idBase,
+                nome: nomeLimpo,
+                tombamento: tombamento,
+                quantidade: 1,
+                tipo: 'multi'
+            });
+            selectedCount++;
+        }
     });
     
     // 2. Processar itens Únicos (tipo 'single')
@@ -5671,6 +5677,7 @@ function updateCautelaItemCount() {
                 inputQtd.value = max;
                 qtd = max;
             }
+            
             if (qtd < 1) {
                 chk.checked = false;
                 inputQtd.disabled = true;
@@ -5678,19 +5685,23 @@ function updateCautelaItemCount() {
             }
         }
 
-        cautelaItensSelecionados.push({
-            id: id,
-            nome: nome,
-            quantidade: qtd,
-            tipo: 'single'
-        });
-        selectedCount += qtd;
+        if (id) {
+            cautelaItensSelecionados.push({
+                id: id,
+                id_base: id,
+                nome: nome,
+                quantidade: qtd,
+                tipo: 'single'
+            });
+            selectedCount += qtd;
+        }
     });
 
-    // 3. Atualizar Interface
+    // 3. Atualizar Interface do Botão
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     if (btnIniciar) {
         btnIniciar.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Cautela (${selectedCount} itens)`;
+        // O botão só habilita se houver itens no array global
         btnIniciar.disabled = (selectedCount <= 0);
     }
 }
@@ -5739,56 +5750,46 @@ function getSelectedCautelaItemsData() {
     
     // 1. Coleta itens com Tombamento (tipo 'multi')
     document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
-        const idCompleto = chk.getAttribute('data-id'); // Ex: ID_BASE-TOMBAMENTO (56911524-64012364-511.522)
+        // Captura direta dos atributos que definimos no loadCustodiaItens
+        const idBase = chk.getAttribute('data-id-base');
+        const tombamentoReal = chk.getAttribute('data-tombamento');
+        const nomeOriginal = chk.getAttribute('data-nome') || "";
         
-        // Separa o ID Completo (que tem múltiplos hífens, tornando o split complexo)
-        // O valor real do tombamento é a ÚLTIMA parte do data-id (Ex: 511.522)
-        const partesId = idCompleto.split('-');
-        const tombamentoReal = partesId[partesId.length - 1]; 
-        
-        // O ID Base é a parte anterior (Ex: 56911524-64012364)
-        // Isso é complexo e perigoso. Vamos usar o ID do item base do próprio input.
-        
-        // 🛑 Assumindo que o ID BASE (para a busca na lista mestra) é o id_base do mItem na lista de conferência.
-        // O ID BASE (ID do item que contém o tombamento) é o valor do data-id do item base antes do último split
-        // Se o data-id for "ID_BASE-TOMB", o ID base é tudo exceto o último.
-        const idBaseParaBusca = partesId.slice(0, -1).join('-'); // Recompõe a string sem o último elemento.
-        const nomeCompletoOriginal = chk.getAttribute('data-nome'); // Ex: EPR SCOTT 3M AIRPACK 75I COM VÁLVULA DE DEMANDA (Tomb: 511.522)
-        // Usa regex para remover a parte do tombamento real que foi adicionada à string nome
-        const nomeLimpo = nomeCompletoOriginal.replace(/\s\(Tomb:\s[^\)]+\)/i, '').trim();
-        
-        itens.push({
-            // 🛑 CRÍTICO: Usar o valor real do tombamento (511.522) 🛑
-            tombamento: tombamentoReal, 
-            
-            // Usado pelo loop de transação para encontrar o mItem
-            id_base: idBaseParaBusca, 
-            
-            // Outros dados (mantidos)
-            id_completo: idCompleto, // Mantido apenas para debug
-            nome: nomeLimpo,
-            quantidade: 1, // Sempre 1 para tombamento
-            tipo: 'multi',
-        });
+        // Limpa o nome para não salvar o texto "(Tomb: ...)" dentro do campo nome no banco
+        const nomeLimpo = nomeOriginal.replace(/\s\(Tomb:\s[^\)]+\)/i, '').trim();
+
+        if (idBase && tombamentoReal) {
+            itens.push({
+                id: `${idBase}-${tombamentoReal}`, // ID composto para controle
+                id_base: idBase,                   // ID do documento na lista mestra
+                tombamento: tombamentoReal,        // O número do tombamento
+                nome: nomeLimpo,
+                quantidade: 1,                     // Multi é sempre 1 por linha
+                tipo: 'multi'
+            });
+        }
     });
 
-    // 2. Coleta itens Únicos (tipo 'single') - Lógica preservada
+    // 2. Coleta itens Únicos (tipo 'single')
     document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
         const card = chk.closest('.item-selection-card');
         if (!card) return; 
 
         const inputQtd = card.querySelector('.input-qtd-cautela');
+        const idBase = chk.getAttribute('data-id');
+        const nome = chk.getAttribute('data-nome');
+        const maxPermitido = parseInt(chk.getAttribute('data-max-qtd')) || 0;
         
         let qtd = parseInt(inputQtd.value) || 0;
         
-        // Verifica se a quantidade é válida
-        if (qtd > 0 && qtd <= parseInt(chk.getAttribute('data-max-qtd'))) {
+        // Validação de segurança para garantir que a quantidade é real e permitida
+        if (qtd > 0 && qtd <= maxPermitido) {
             itens.push({
-                id_completo: chk.getAttribute('data-id'), // ID base é o ID completo para itens únicos
-                id_base: chk.getAttribute('data-id'), // Item base é o próprio ID
-                nome: chk.getAttribute('data-nome'),
+                id: idBase,       // Para single, o ID único é o próprio ID base
+                id_base: idBase,
+                nome: nome,
                 quantidade: qtd,
-                tipo: 'single',
+                tipo: 'single'
             });
         }
     });
