@@ -5395,14 +5395,10 @@ function showMainMenu() {
 		
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
-    
-    // 🛑 CORREÇÃO CRÍTICA: Usa o UID do militar logado, que é a chave imutável na custodia_atual
     const militarUid = firebase.auth().currentUser.uid;
 
     if (!selectLocal || !militarUid) {
-        // Usa o nome completo (variável global 'conferente') como fallback na mensagem de erro
         const fallbackNome = currentUserData.nome_militar_completo || 'Usuário Desconhecido';
-        console.warn(`Dados do usuário ou seletor de local ausente. UID: ${militarUid}`);
         selectLocal.innerHTML = `<option value="" disabled selected>Erro: Usuário (${fallbackNome}) não identificado.</option>`;
         return;
     }
@@ -5411,27 +5407,36 @@ async function loadCustodiaLocais() {
     selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
     
     try {
-        // 🛑 FILTRO POR UID: Busca na coleção 'custodia_atual' usando o UID
+        // Busca na coleção 'custodia_atual' as listas onde o militar logado é o conferente
         const custodyRef = db.collection('custodia_atual');
         const resultsSnapshot = await custodyRef
-            .where('conferente_uid', '==', militarUid) // 🛑 Filtra EXCLUSIVAMENTE pelo UID
+            .where('conferente_uid', '==', militarUid)
             .get();
         
-        const locaisDeCustodia = new Set();
+        // Usamos um Map para garantir que não haja duplicidade de IDs de lista
+        const locaisMap = new Map();
         
-        // Coleta os nomes de local_nome para preencher o dropdown
         resultsSnapshot.forEach(doc => {
-            locaisDeCustodia.add(doc.data().local_nome);
+            const data = doc.data();
+            const idRealDaLista = data.lista_id; // "alfa_abt17"
+            const nomeExibicao = data.local_nome; // "ALFA - ABT-17"
+
+            if (idRealDaLista && nomeExibicao) {
+                locaisMap.set(idRealDaLista, nomeExibicao);
+            }
         });
         
-        // Monta as opções do SELECT.
         let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
-        if (locaisDeCustodia.size === 0) {
-            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia (UID não vinculado).</option>';
+        
+        if (locaisMap.size === 0) {
+            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia.</option>';
         } else {
-            // Ordena os nomes antes de adicionar ao select
-            Array.from(locaisDeCustodia).sort().forEach(local => {
-                optionsHtml += `<option value="${local}">${local}</option>`;
+            // Converte o Map em Array e ordena pelo Nome legível
+            const listaOrdenada = Array.from(locaisMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+            
+            listaOrdenada.forEach(([id, nome]) => {
+                // 🛑 CORREÇÃO: O 'value' agora é o ID (alfa_abt17) e o texto é o Nome (ALFA - ABT-17)
+                optionsHtml += `<option value="${id}">${nome}</option>`;
             });
         }
         
