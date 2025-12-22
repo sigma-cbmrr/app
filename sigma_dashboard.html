@@ -5862,41 +5862,37 @@ function getSelectedCautelaItemsData() {
 // A função iniciarCautelaProcesso original no sigma_dashboard.txt será modificada.
 
 async function iniciarCautelaProcesso() {
-    // 1. Captura dos elementos exatos que estão no seu getNovaCautelaFormHTML
-    const elLocal = document.getElementById('cautela-local-origem');
-    const elUid = document.getElementById('cautela-destinatario-uid');
-    const elNome = document.getElementById('cautela-destinatario');
-    const elObs = document.getElementById('cautela-obs'); 
+    // 1. Captura os valores
+    const localId = document.getElementById('cautela-local-origem').value;
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
+    const destinatarioNome = document.getElementById('cautela-destinatario').value;
+    const itensCount = (typeof cautelaItensSelecionados !== 'undefined') ? cautelaItensSelecionados.length : 0;
 
-    // 2. Verificação de existência (se os elementos existem na página)
-    if (!elLocal || !elUid || !elNome) {
-        alert("Erro: Não foi possível localizar os campos do formulário no sistema.");
+    // 2. MODO DEBUG - Isso vai nos dizer o culpado real
+    if (!localId) {
+        alert("O sistema não identificou o LOCAL DE ORIGEM.");
+        return;
+    }
+    if (!destinatarioUid) {
+        alert("O sistema não identificou o ID do MILITAR. Tente apagar o nome e selecionar novamente na lista que aparece.");
+        console.log("Dica: Verifique se você CLICOU no nome da lista de sugestões.");
+        return;
+    }
+    if (itensCount === 0) {
+        alert("O sistema não identificou NENHUM ITEM selecionado.");
         return;
     }
 
-    const localId = elLocal.value;
-    const destinatarioUid = elUid.value;
-    const destinatarioNome = elNome.value;
-    const obsEmissao = elObs ? elObs.value : "";
-
-    // 3. Validação dos dados preenchidos pelo usuário
-    if (!localId || !destinatarioUid || !destinatarioNome || typeof cautelaItensSelecionados === 'undefined' || cautelaItensSelecionados.length === 0) {
-        alert("Atenção: Selecione o local, o militar destinatário e ao menos um item da lista.");
-        return;
-    }
-
-    // 4. Referência ao botão (no seu HTML o ID é btn-iniciar-cautela)
+    // Se passou daqui, o problema era o banco ou lógica interna
     const btn = document.getElementById('btn-iniciar-cautela');
     if (btn) {
         btn.disabled = true;
-        btn.textContent = "Processando Gravação...";
+        btn.textContent = "Processando...";
     }
 
     try {
         const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteUid = firebase.auth().currentUser.uid;
-        
-        // Montagem do nome do emitente (quem está logado no dashboard)
         const emitenteNome = `${currentUserData.posto_grad} ${currentUserData.quadro_mil} ${currentUserData.nome_guerra}`;
         const dataAtual = new Date().toLocaleString('pt-BR');
         const timestamp = firebase.firestore.FieldValue.serverTimestamp();
@@ -5910,20 +5906,19 @@ async function iniciarCautelaProcesso() {
             destinatario_uid: null,
             destinatario: null,
             local_origem_id: localId,
-            local_origem: elLocal.options[elLocal.selectedIndex].text,
+            local_origem: document.getElementById('cautela-local-origem').options[document.getElementById('cautela-local-origem').selectedIndex].text,
             status: 'ABERTA',
             timestamp_emissao: timestamp,
-            observacoes_emissao: obsEmissao,
+            observacoes_emissao: document.getElementById('cautela-obs')?.value || "",
             itens: cautelaItensSelecionados
         };
 
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const listaRef = db.collection('listas_conferencia').doc(localId);
 
-        // --- INÍCIO DA TRANSAÇÃO NO FIREBASE ---
         await db.runTransaction(async (transaction) => {
             const listaDoc = await transaction.get(listaRef);
-            if (!listaDoc.exists) throw new Error("Lista de origem não encontrada no banco de dados.");
+            if (!listaDoc.exists) throw new Error("Lista de origem não encontrada.");
 
             let listaMestra = listaDoc.data().list;
 
@@ -5931,9 +5926,7 @@ async function iniciarCautelaProcesso() {
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
-                        // Compara ID base ou ID direto
                         if (mItem.id === (cItem.id_base || cItem.id)) {
-                            
                             const objetoCautela = {
                                 id: cautelaId,
                                 emitente: emitenteNome,
@@ -5947,22 +5940,18 @@ async function iniciarCautelaProcesso() {
                                 id_doc: cautelaId,
                                 quem: emitenteNome,
                                 data: dataAtual,
-                                detalhes: `Material cautelado para ${destinatarioNome}. Obs: ${obsEmissao}`
+                                detalhes: `Material cautelado para ${destinatarioNome}`
                             };
 
                             if (!mItem.historico_vida) mItem.historico_vida = [];
                             mItem.historico_vida.push(logHistorico);
 
-                            // Lógica para itens com Tombamento (Multi)
                             if (cItem.tombamento) {
                                 mItem.tombamentos = (mItem.tombamentos || []).map(t => {
-                                    if (t.tomb === cItem.tombamento) {
-                                        t.cautela = objetoCautela;
-                                    }
+                                    if (t.tomb === cItem.tombamento) t.cautela = objetoCautela;
                                     return t;
                                 });
                             } else {
-                                // Lógica para itens sem tombamento (Single)
                                 if (!mItem.cautelas) mItem.cautelas = [];
                                 mItem.cautelas.push(objetoCautela);
                             }
@@ -5976,13 +5965,13 @@ async function iniciarCautelaProcesso() {
             transaction.update(listaRef, { list: listaMestra });
         });
 
-        alert(`✅ Cautela ${cautelaId} enviada com sucesso!`);
+        alert(`✅ Cautela ${cautelaId} emitida com sucesso!`);
         location.reload();
 
     } catch (e) {
-        console.error("Erro no processo de cautela:", e);
-        alert("Erro ao processar cautela: " + e.message);
-        
+        console.error(e);
+        alert("Erro ao emitir cautela: " + e.message);
+    } finally {
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Cautela';
