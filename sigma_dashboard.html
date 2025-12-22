@@ -5448,213 +5448,130 @@ async function loadCustodiaLocais() {
     const localNomeCompleto = selectLocal.value;
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    
     itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
-    btnIniciar.disabled = true;
+    if (btnIniciar) btnIniciar.disabled = true;
 
     if (!localNomeCompleto) return;
+    
     try {
-        // 1. Encontrar o LISTA_ID único a partir do NOME COMPLETO do local (Lógica preservada)
+        // 1. Encontrar o ID da Lista
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         
         let listaId = null;
         for (const [id, info] of Object.entries(rotas)) {
-            const nomeCompletoRota = `${info.posto} - ${info.nome}`;
-            if (nomeCompletoRota === localNomeCompleto) {
+            if (`${info.posto} - ${info.nome}` === localNomeCompleto) {
                 listaId = id;
                 break;
             }
         }
         
         if (!listaId) {
-            itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Erro: ID da Lista não encontrado para este Local.</p>';
+            itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro: ID da Lista não encontrado.</p>';
             return;
         }
 
-        // 2. Buscar a lista mestra (Lógica preservada)
+        // 2. Buscar Dados
         const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
         if (!listaDoc.exists) {
-            itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Lista Mestra de Materiais não encontrada.</p>';
+            itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Lista não encontrada.</p>';
             return;
         }
-        const listaMestra = listaDoc.data().list || [];
-        // 3. Renderizar o HTML para seleção (Acordeão/Cards)
-        let htmlContent = '<div class="inventory-accordion-container">';
-        let totalItensDisponiveis = 0;
-        let isFirstSetor = true;
 
+        const listaMestra = listaDoc.data().list || [];
+        let htmlContent = '<div class="inventory-accordion-container">';
+        let totalGeralDisponivel = 0;
+        let isFirst = true;
+
+        // 3. Renderização
         listaMestra.forEach(setor => {
-            
-            // Filtro inicial do setor: Apenas itens com quantidade ou tombamentos.
             const setorItems = (setor.itens || []).filter(i => 
                 (i.tipo === 'single' && i.quantidadeEsperada > 0) || 
-                (i.tipo === 'multi' && i.tombamentos && i.tombamentos.length > 0)
+                (i.tipo === 'multi' && i.tombamentos?.length > 0)
             );
-            
-            // O cálculo do total deve refletir o que será exibido
+
+            // Cálculo de disponibilidade do setor
             const setorTotal = setorItems.reduce((acc, item) => {
                 if(item.tipo === 'single') {
-                    // Item single: Disponível = Estoque - Cautelas Ativas
                     const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
                     return acc + (item.quantidadeEsperada - qtdCautelada);
                 }
-                if(item.tipo === 'multi') {
-                    // Item multi: Conta apenas os tombamentos sem carimbo de cautela
-                    const disponiveis = (item.tombamentos || []).filter(tomb => !tomb.cautela).length;
-                    return acc + disponiveis;
-                }
-                return acc;
+                return acc + (item.tombamentos || []).filter(t => !t.cautela).length;
             }, 0);
-            
-            // Se o setor não tem itens disponíveis (pelo menos 1), não o renderiza
-            if (setorTotal <= 0) return;
 
-            totalItensDisponiveis += setorTotal;
+            if (setorTotal <= 0) return;
+            totalGeralDisponivel += setorTotal;
 
             const contentId = `content-${setor.id}`;
-            const headerClass = isFirstSetor ? 'accordion-header active' : 'accordion-header';
-            const contentStyle = isFirstSetor ? 'max-height: 1500px;' : '';
-        
-            
-            // --- Cabeçalho do Acordeão (Setor) ---
             htmlContent += `
-                <div class="${headerClass}" onclick="toggleAccordion(this, '${contentId}')">
+                <div class="${isFirst ? 'accordion-header active' : 'accordion-header'}" onclick="toggleAccordion(this, '${contentId}')">
                     <span>${setor.nome} (${setorTotal} disponíveis)</span>
                     <i class="fas fa-chevron-down"></i>
                 </div>
-            `;
-            // --- Corpo do Acordeão (Itens) ---
-            htmlContent += `<div class="accordion-content" id="${contentId}" style="${contentStyle}">`;
-            if (setorItems.length > 0) {
-                htmlContent += '<div class="items-card-grid">';
-                setorItems.forEach(item => {
-                    const itemIdBase = item.id;
-                    
-                    if (item.tipo === 'single') {
-                        
-                        // CÁLCULO DE QUANTIDADE DISPONÍVEL
-                        const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
-                        const maxQtdDisponivel = item.quantidadeEsperada - qtdCautelada;
-                        const qtdTotalEstoque = item.quantidadeEsperada;
-                        
-                        // Não renderiza se não houver disponibilidade (redundante, mas seguro)
-                        if (maxQtdDisponivel <= 0) return; 
-                        
-                        // Mensagem de estoque para padronização
-                        const estoqueMsg = `Estoque: ${qtdTotalEstoque} | Dispon&iacute;vel: ${maxQtdDisponivel}`;
-                        
-                        // 🛑 NOVO CÓDIGO CRÍTICO PARA HOVER (SINGLE) 🛑
-                        let titleHover = 'Disponível para cautela.';
-                        if (qtdCautelada > 0) {
-                            // Cria a string de carimbos (separada por quebra de linha)
-                            const carimbos = (item.cautelas || []).map(c => 
-                                `Cautelado para: ${c.destinatario} (${c.quantidade}un) em ${c.data}`
-                            ).join('\n');
-                            titleHover = `ATENÇÃO: ${qtdCautelada} un cauteladas.\n---\n${carimbos}`;
-                        }
-                        // ----------------------------------------------------
+                <div class="accordion-content" id="${contentId}" style="${isFirst ? 'max-height: 1500px;' : ''}">
+                    <div class="items-card-grid">`;
 
-                        htmlContent += `
-                            <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="single">
-                                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
+            setorItems.forEach(item => {
+                if (item.tipo === 'single') {
+                    const qtdCautelada = (item.cautelas || []).reduce((sum, c) => sum + c.quantidade, 0);
+                    const max = item.quantidadeEsperada - qtdCautelada;
+                    if (max <= 0) return;
+
+                    htmlContent += `
+                        <div class="item-selection-card" data-item-id="${item.id}">
+                            <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
                             <div class="qtd-control-wrapper">
-                                    <label>
-                                        <input type="checkbox" 
-                                               name="cautela-item-base" 
-                                               data-id="${itemIdBase}" data-nome="${item.nome}" data-tipo="single" 
-                                               data-max-qtd="${maxQtdDisponivel}"
-                                               onchange="toggleItemQuantity(this); updateCardClass(this.closest('.item-selection-card'));">
-                                        Selecionar
-                                    </label>
-                                    <input type="number" 
-                                           class="input-qtd-cautela"
-                                           data-item-id="${itemIdBase}"
-                                           min="1" 
-                                           max="${maxQtdDisponivel}" 
-                                           value="1"
-                                           disabled 
-                                           style="width: 60px;">
-                                </div>
-                                <small style="display: block; margin-top: 5px; color:#a00030;" title="${titleHover}">${estoqueMsg}</small>
+                                <label>
+                                    <input type="checkbox" name="cautela-item-base" 
+                                           data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${max}"
+                                           onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
+                                </label>
+                                <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" min="1" max="${max}" value="1" disabled style="width: 50px;">
+                            </div>
+                            <small style="color:#a00030;">Disponível: ${max}</small>
+                        </div>`;
+                } else {
+                    const tags = (item.tombamentos || []).map(t => {
+                        const isC = !!t.cautela;
+                        return `
+                            <div class="tombamento-tag ${isC ? 'cautelado' : ''}" title="${isC ? 'Cautelado' : 'Livre'}">
+                                <input type="checkbox" name="cautela-item-multi" 
+                                       data-id="${item.id}-${t.tomb}" data-id-base="${item.id}" data-tombamento="${t.tomb}" 
+                                       data-nome="${item.nome}" data-tipo="multi" 
+                                       onchange="updateCautelaItemCount();" ${isC ? 'disabled' : ''}>
+                                ${t.tomb} ${isC ? '<i class="fas fa-lock"></i>' : ''}
                             </div>`;
+                    }).join('');
 
-                    } else if (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0) {
-                        
-                        // Tombamentos: Usamos o array completo (incluindo os cautelados)
-                        const tombamentosTotais = item.tombamentos;
-                        
-                        // Se não houver itens no estoque, não renderiza
-                        if (tombamentosTotais.length === 0) return;
-                        
-                        // NOVO PADRÃO DE ESTOQUE
-                        const disponiveis = tombamentosTotais.filter(tomb => !tomb.cautela).length;
-                        const estoqueMsg = `Estoque: ${tombamentosTotais.length} | Dispon&iacute;vel: ${disponiveis}`;
-                        
-                        // Renderização das Tags de Tombamento (Incluindo os Cautelados)
-                        let tagsHtml = tombamentosTotais.map(tomb => {
-                            const itemIdTombado = `${itemIdBase}-${tomb.tomb}`;
-                            const isCautelado = !!tomb.cautela;
-                            const isDisabled = isCautelado ? 'disabled' : '';
-                            const statusClass = isCautelado ? 'cautelado' : '';
-                            
-                            // Formato de carimbo para tombamento
-                            let titleText = isCautelado ? 
-                                `Cautelado para: ${tomb.cautela.destinatario} em ${tomb.cautela.data}` : 
-                                `Tombamento livre`;
-                            
-                            // Adiciona o ícone universal de cautela (cadeado)
-                            const icon = isCautelado ? 
-                                `<i class="fas fa-lock" style="margin-left: 5px; color: #800020;"></i>` : '';
-
-                            return `
-                                <div class="tombamento-tag ${statusClass}" data-item-id="${itemIdTombado}" title="${titleText}">
-                                    <input type="checkbox" name="cautela-item-multi" 
-                                           data-id="${itemIdTombado}" 
-                                           data-nome="${item.nome} (Tomb: ${tomb.tomb})" data-tipo="multi" 
-                                           data-qtd="1"
-                                           onchange="updateCardClass(this.closest('.item-selection-card'));"
-                                           ${isDisabled}>
-                                    ${tomb.tomb} ${icon}
-                                </div>`;
-                        }).join('');
-
-                        htmlContent += `
-                            <div class="item-selection-card" data-item-id="${itemIdBase}" data-tipo="multi">
-                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
-                                <small style="color:#555;">${estoqueMsg} | Selecione os tombamentos:</small>
-                                <div class="tombamento-tag-list">${tagsHtml}</div>
-                            </div>`;
-                    }
-                });
-                
-                htmlContent += '</div>';
-
-            } else {
-                 htmlContent += '<p style="padding:10px; color:#999;">Nenhum item disponível para cautela neste setor.</p>';
-            }
-
-            htmlContent += '</div>';
-            isFirstSetor = false;
+                    htmlContent += `
+                        <div class="item-selection-card">
+                            <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
+                            <div class="tombamento-tag-list">${tags}</div>
+                        </div>`;
+                }
+            });
+            htmlContent += '</div></div>';
+            isFirst = false;
         });
-        htmlContent += '</div>';
 
-        if (totalItensDisponiveis === 0) {
-             itemListContainer.innerHTML = '<p class="placeholder-message" style="color:green; padding:20px;">✅ Nenhum material disponível para cautela neste local.</p>';
+        if (totalGeralDisponivel === 0) {
+            itemListContainer.innerHTML = '<p style="color:green; padding:20px; text-align:center;">✅ Nenhum material disponível.</p>';
         } else {
-             itemListContainer.innerHTML = htmlContent;
-             document.querySelectorAll('input[name^="cautela-item"]').forEach(el => {
-                 el.addEventListener('change', updateCautelaItemCount);
-             });
-             document.querySelectorAll('.input-qtd-cautela').forEach(el => {
-                 el.addEventListener('input', updateCautelaItemCount);
-                 el.addEventListener('change', updateCautelaItemCount);
-             });
-             updateCautelaItemCount();
+            itemListContainer.innerHTML = htmlContent + '</div>';
+            
+            // Ativa os listeners de quantidade para itens single
+            document.querySelectorAll('.input-qtd-cautela').forEach(el => {
+                el.addEventListener('input', updateCautelaItemCount);
+            });
+            
+            // Inicializa a contagem (deve ser 0)
+            updateCautelaItemCount();
         }
 
     } catch (error) {
-        console.error("Erro ao carregar itens de custódia:", error);
-        itemListContainer.innerHTML = '<p class="placeholder-message" style="color:red;">Erro ao carregar lista de materiais.</p>';
+        console.error(error);
+        itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar materiais.</p>';
     }
 }
         
