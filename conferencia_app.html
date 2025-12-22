@@ -106,8 +106,7 @@
     const COLECAO_CAUTELAS = 'cautelas_abertas';
     
     let MODO_OPERACAO = 'recebimento'; 
-    let DESTINATARIO_DEVOLUCAO = null;
-    let conferênciaFinalizada = false; // Nova trava global
+    let DESTINATARIO_DEVOLUCAO = null; 
     
     const CAUTELA_ID = urlParams.get('cautelaId');
     const modoParam = urlParams.get('modo');
@@ -270,19 +269,7 @@
         }
         function isElementInViewport(el) { const rect = el.getBoundingClientRect(); return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth)); }
         function getStorageKey() { return `sigma_draft_${LISTA_ID}_${userInfo.nomeGuerra}`; }
-        function salvarRascunho() { 
-    // Impede o salvamento se a conferência já foi marcada como finalizada
-    if (conferenciaFinalizada) return;
-
-    try { 
-        localStorage.setItem(getStorageKey(), JSON.stringify({ 
-            timestamp: Date.now(), 
-            status: window.itemStatus 
-        })); 
-    } catch (e) {
-        console.error("Erro ao salvar rascunho:", e);
-    } 
-}
+        function salvarRascunho() { try { localStorage.setItem(getStorageKey(), JSON.stringify({ timestamp: Date.now(), status: window.itemStatus })); } catch (e) {} }
         function limparRascunho() {
             localStorage.removeItem('sigma_active_conf');
             const listId = CAUTELA_ID || LISTA_ID; // Pega o ID da lista ou cautela
@@ -993,11 +980,6 @@ async function finalizarConferencia() {
     
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
-
-    // --- INÍCIO DA PROTEÇÃO ---
-    conferenciaFinalizada = true; // Ativa a trava imediatamente ao clicar
-    // ---------------------------
-
     btn.textContent = "Salvando..."; 
     btn.disabled = true;
 
@@ -1029,12 +1011,15 @@ async function finalizarConferencia() {
                     if (finalStatus === 'C/A') {
                         // 2. RECUPERAÇÃO DO HISTÓRICO ACUMULADO
                         if (s.pendencias_ca && Array.isArray(s.pendencias_ca)) {
+                            // Se o usuário usou o botão "Salvar", a lista já está pronta aqui
                             listaPendenciasAtivas = [...s.pendencias_ca];
                         } 
                         else if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
+                            // Senão, pega o que já existia no banco
                             listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
                         } 
                         else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
+                            // Fallback para conversão de formato antigo
                             listaPendenciasAtivas.push({
                                 quem: itemOuTomb.pendencia.quem,
                                 data: itemOuTomb.pendencia.data,
@@ -1042,15 +1027,20 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // 3. TRAVA ANTIDUPLICIDADE
+                        // 🛡️ 3. TRAVA ANTIDUPLICIDADE (FIM DO CARIMBO FANTASMA)
+                        // Pegamos o texto que está no rascunho da tela (textarea)
                         let obsRascunho = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
+                        
+                        // Criamos uma string com a junção de todas as obs da lista para comparar
                         const textoAcumuladoNaLista = listaPendenciasAtivas.map(p => p.obs).join(' | ');
 
+                        // Se o texto do rascunho for IDENTICO à lista ou à última obs, nós limpamos
                         if (obsRascunho === textoAcumuladoNaLista || 
                             (listaPendenciasAtivas.length > 0 && obsRascunho === listaPendenciasAtivas[listaPendenciasAtivas.length -1].obs)) {
                             obsRascunho = ""; 
                         }
 
+                        // Só adiciona um carimbo NOVO se houver algo real no rascunho
                         if (obsRascunho !== "") {
                             listaPendenciasAtivas.push({
                                 quem: conferente,
@@ -1066,12 +1056,13 @@ async function finalizarConferencia() {
                             });
                         }
 
+                        // 4. GERAÇÃO DO CAMPO 'OBS' RAIZ (Apenas para compatibilidade/PDF)
                         const textoJoinFinal = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
 
                         itemOuTomb.pendencia = {
                             tipo: "C/A",
-                            pendencias_ca: listaPendenciasAtivas,
-                            obs: textoJoinFinal,
+                            pendencias_ca: listaPendenciasAtivas, // Fonte da verdade
+                            obs: textoJoinFinal,                  // Texto unido
                             quem: listaPendenciasAtivas[0]?.quem || conferente,
                             data: listaPendenciasAtivas[0]?.data || dataSomenteDia
                         };
@@ -1088,6 +1079,7 @@ async function finalizarConferencia() {
                         updated = true;
                     }
 
+                    // 5. MONTAGEM PARA COLEÇÃO 'resultados_conferencias' (Dashboard)
                     const dadosParaRelatorio = { 
                         id: id,
                         nomeCompleto: nome, 
@@ -1134,10 +1126,8 @@ async function finalizarConferencia() {
             conferente_completo: conferente, timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
         });
 
-        // Limpeza final e comunicação com o Dashboard
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        
         if (window.self === window.top) { 
             alert("Conferência finalizada com sucesso!"); 
             window.location.href = "operacional.html"; 
@@ -1146,7 +1136,6 @@ async function finalizarConferencia() {
     } catch (e) { 
         console.error("Erro na finalização:", e);
         alert("Erro ao finalizar: " + e.message); 
-        conferenciaFinalizada = false; // Libera a trava caso ocorra erro para permitir tentar salvar de novo
         btn.disabled = false; 
         btn.textContent = "Finalizar Conferência";
     }
