@@ -7311,60 +7311,59 @@ async function findUidByName(nomeCompleto) {
     }
 }
 		
-       async function limparDadosListaMestra(idDaLista) {
-    if (!idDaLista) {
-        alert("Erro: Nenhuma lista selecionada para limpeza.");
-        return;
-    }
+      async function resetTotalItensLocal(listaId) {
+    if (!confirm(`ATENÇÃO: Isso apagará TODOS os históricos e cautelas registradas nos itens da lista [${listaId}]. Deseja continuar?`)) return;
 
-    if (!confirm("⚠️ RESET TOTAL: Isso apagará TODOS os históricos, cautelas e pendências da lista [" + idDaLista + "]. Confirma?")) {
-        return;
-    }
+    const listaRef = db.collection('listas_conferencia').doc(listaId);
 
     try {
-        const listaRef = db.collection('listas_conferencia').doc(idDaLista);
-        
         await db.runTransaction(async (transaction) => {
             const doc = await transaction.get(listaRef);
             if (!doc.exists) throw new Error("Lista não encontrada.");
 
-            let listaMestra = doc.data().list;
+            let listaMestra = doc.data().list || [];
 
+            // Percorre setores e itens para resetar os campos
             const listaLimpa = listaMestra.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(item => {
-                    // Limpeza de itens Single
-                    delete item.pendencia;
-                    delete item.cautelas;
-                    delete item.cautela; // Por garantia
-                    delete item.historico_vida;
-
-                    // Limpeza de itens Multi (Tombamentos)
-                    if (item.tombamentos && Array.isArray(item.tombamentos)) {
+                    // 1. Limpa histórico de vida
+                    item.historico_vida = [];
+                    
+                    // 2. Limpa cautelas de itens single (Abatimento de estoque)
+                    if (item.tipo === 'single') {
+                        item.cautelas = [];
+                    }
+                    
+                    // 3. Limpa cautelas de itens multi (Tombamentos)
+                    if (item.tipo === 'multi' && item.tombamentos) {
                         item.tombamentos = item.tombamentos.map(t => {
-                            delete t.pendencia;
-                            delete t.cautela;
-                            delete t.historico_vida;
+                            // Remove o objeto 'cautela' de dentro do tombamento
+                            if (t.cautela) delete t.cautela;
+                            // Reseta o status de conferência se necessário
+                            t.status = 'pending';
                             return t;
                         });
+                        // Limpa array auxiliar se existir
+                        item.tombamentos_cautelados = [];
                     }
+                    
                     return item;
                 })
             }));
 
+            // Atualiza o banco com a lista resetada
             transaction.update(listaRef, { list: listaLimpa });
         });
 
-        alert("✅ Lista limpa com sucesso!");
-        // Se o iframe estiver aberto, recarrega ele
-        const iframe = document.getElementById('iframe-conferencia'); // Use o ID real do seu iframe
-        if(iframe) iframe.contentWindow.location.reload();
+        alert("✅ Limpeza concluída! A lista está como nova.");
+        location.reload();
 
     } catch (e) {
-        console.error(e);
-        alert("Erro ao limpar lista: " + e.message);
+        console.error("Erro no reset:", e);
+        alert("Erro ao limpar: " + e.message);
     }
-} 
+}
     </script>
 </body>
 </html>
