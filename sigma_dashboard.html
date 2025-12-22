@@ -5451,37 +5451,29 @@ async function loadCustodiaLocais() {
 }
 		async function loadCustodiaItens() {
     const selectLocal = document.getElementById('cautela-local-origem');
-    const localNomeCompleto = selectLocal.value;
+    
+    // 🛑 CORREÇÃO: O value agora já contém o ID REAL (ex: alfa_abt17)
+    // conforme configurado na nova função loadCustodiaLocais.
+    const listaId = selectLocal.value; 
+    
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
     
     itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
     if (btnIniciar) btnIniciar.disabled = true;
 
-    if (!localNomeCompleto) return;
+    // Se nenhum local estiver selecionado, interrompe aqui.
+    if (!listaId) {
+        itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #999;">Por favor, selecione um Local de Origem.</p>';
+        return;
+    }
     
     try {
-        // 1. Encontrar o ID da Lista
-        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-        const rotas = rotasDoc.data() || {};
-        
-        let listaId = null;
-        for (const [id, info] of Object.entries(rotas)) {
-            if (`${info.posto} - ${info.nome}` === localNomeCompleto) {
-                listaId = id;
-                break;
-            }
-        }
-        
-        if (!listaId) {
-            itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro: ID da Lista não encontrado.</p>';
-            return;
-        }
-
-        // 2. Buscar Dados
+        // 1. Buscar Dados diretamente usando o listaId capturado do select
         const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
+        
         if (!listaDoc.exists) {
-            itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Lista não encontrada.</p>';
+            itemListContainer.innerHTML = `<p style="color:red; text-align:center;">Erro: Documento da lista (${listaId}) não encontrado.</p>`;
             return;
         }
 
@@ -5490,7 +5482,7 @@ async function loadCustodiaLocais() {
         let totalGeralDisponivel = 0;
         let isFirst = true;
 
-        // 3. Renderização
+        // 2. Renderização
         listaMestra.forEach(setor => {
             const setorItems = (setor.itens || []).filter(i => 
                 (i.tipo === 'single' && i.quantidadeEsperada > 0) || 
@@ -5566,17 +5558,15 @@ async function loadCustodiaLocais() {
         } else {
             itemListContainer.innerHTML = htmlContent + '</div>';
             
-            // Ativa os listeners de quantidade para itens single
             document.querySelectorAll('.input-qtd-cautela').forEach(el => {
                 el.addEventListener('input', updateCautelaItemCount);
             });
             
-            // Inicializa a contagem (deve ser 0)
             updateCautelaItemCount();
         }
 
     } catch (error) {
-        console.error(error);
+        console.error("Erro ao carregar itens:", error);
         itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar materiais.</p>';
     }
 }
