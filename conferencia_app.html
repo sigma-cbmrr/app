@@ -451,19 +451,35 @@ function renderizarConferencia() {
             } 
             // CASO B: ITENS ÚNICOS (SINGLE)
             else {
-                let hasCautela = (item.cautelas && item.cautelas.length > 0);
+                // 🛑 NOVO: Lógica de Identificação de Cautelas para Single 🛑
+                const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                const hasCautela = totalCautelado > 0;
+                const saldoReal = (Number(item.quantidadeEsperada) || 0) - totalCautelado;
+
                 let singleBtnHtml = isCautela ? 
                     `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : 
                     (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
                 
+                // 🛑 NOVO: Montagem do Carimbo para Single 🛑
+                let alertaCautelaSingleHtml = '';
+                if (hasCautela && !isCautela) {
+                    const infoCautelas = item.cautelas.map(c => `- ${c.quantidade}un p/ ${c.destinatario}`).join('\n');
+                    alertaCautelaSingleHtml = montarPendenciaHtml(item.id, {
+                        obs: `ATENÇÃO: ${totalCautelado} un. cauteladas fora da VTR:\n${infoCautelas}`,
+                        quem: "Sistema/Estoque Parcial",
+                        status: "CAUTELA_ATV"
+                    });
+                }
+
                 htmlItens += `
                     <div class="item-conferencia" data-type="single" data-id="${item.id}">
                         <div class="item-header">
                             <span class="status-icon"></span>
                             <span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span>
-                            <span class="item-quantidade">QTD: ${item.quantidadeEsperada || 1}</span>
+                            <span class="item-quantidade">QTD: ${saldoReal} (de ${item.quantidadeEsperada || 1})</span>
                         </div>
                         <div class="item-options">${singleBtnHtml}</div>
+                        ${alertaCautelaSingleHtml}
                         ${montarPendenciaHtml(item.id, item.pendencia)}
                         <p class="descricao-salva"></p>
                         <div class="alteracao-container">
@@ -496,11 +512,9 @@ function renderizarConferencia() {
 
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) {
-        // Insere todos os setores antes do botão finalizar
         btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
     }
     
-    // Atualiza contadores e rascunhos após montar a tela
     updateOverallStatus();
 }
         function setItemStatus(btn, status) { 
