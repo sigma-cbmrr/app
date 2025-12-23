@@ -363,7 +363,6 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
-    // Limpeza de segurança para evitar duplicidade na renderização
     const antigos = mainContent.querySelectorAll('.setor'); 
     antigos.forEach(el => el.remove());
 
@@ -372,43 +371,42 @@ function renderizarConferencia() {
     dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
-    // --- Sub-função para montar os Cards de IDs Únicos ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
-
-        // 1. Renderiza os carimbos de Cautela
-        const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
         
+        // 1. Cautelas (Mantido)
+        const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
         cautelasAtivas.forEach(c => {
             htmlAcumulado += `
                 <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 5px;">
-                    <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;">
-                        <i class="fas fa-lock"></i> CAUTELA ATIVA (${c.id})
-                    </div>
-                    <div style="font-size: 0.9em; color: #333;">
-                        ${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b>
-                    </div>
+                    <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;"><i class="fas fa-lock"></i> CAUTELA ATIVA</div>
+                    <div style="font-size: 0.9em; color: #333;">${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b></div>
                     <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="setItemStatusID(this, 'cautela_ciente', '${uid}')">Ciente</button>
                 </div>`;
         });
 
-        // 2. Renderiza as Pendências Físicas (Objetos com IDs)
+        // 2. Pendências Físicas
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
+                // VERIFICAÇÃO: Se for temporário (criado agora), oculta botões
+                const isTemp = p.id.startsWith('TEMP-');
+                const acoesHtml = isTemp ? 
+                    `<div style="color:#d90f23; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px;">Aguardando finalização...</div>` :
+                    `<div class="pendencia-actions" style="display: flex; gap: 5px;">
+                        <button type="button" class="btn-manter" style="flex: 1; padding: 6px; font-size: 0.8em;" onclick="manterID('${p.id}', '${uid}')">Manter</button>
+                        <button type="button" class="btn-resolver" style="flex: 1; padding: 6px; font-size: 0.8em; background-color: #1b8a3e;" onclick="resolverID('${p.id}', '${uid}', ${p.quantidade})">Resolvido</button>
+                    </div>`;
+
                 htmlAcumulado += `
-                    <div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div class="pendencia-id-card" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
-                            <span><b>ID:</b> ${p.id}</span>
+                            <span><b>Relatado por:</b> ${p.autor_nome}</span>
                             <span>${p.data_criacao}</span>
                         </div>
                         <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
-                            <span style="color:#d90f23; font-weight:bold;">${p.autor_nome}:</span> 
                             <strong>${p.quantidade > 1 ? p.quantidade + ' un. ' : ''}</strong> ${p.descricao}
                         </div>
-                        <div class="pendencia-actions" style="display: flex; gap: 5px;">
-                            <button type="button" class="btn-manter" style="flex: 1; padding: 6px; font-size: 0.8em;" onclick="manterID('${p.id}', '${uid}')">Manter</button>
-                            <button type="button" class="btn-resolver" style="flex: 1; padding: 6px; font-size: 0.8em; background-color: #1b8a3e;" onclick="resolverID('${p.id}', '${uid}', ${p.quantidade})">Resolvido</button>
-                        </div>
+                        ${acoesHtml}
                     </div>`;
             });
         }
@@ -426,47 +424,51 @@ function renderizarConferencia() {
                 item.tombamentos.forEach(tomb => {
                     const uid = `${item.id}-${tomb.tomb}`;
                     const hasPendencia = tomb.pendencias_ids && tomb.pendencias_ids.length > 0;
-                    const hasCautela = !!tomb.cautela;
+                    
+                    // LÓGICA DE STATUS: Recupera o que já foi clicado ou define como pending
+                    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
+                    const currentStatus = window.itemStatus[uid].status;
+                    const isActive = (currentStatus === 'S/A' || currentStatus === 'ok') ? 'active' : '';
 
                     htmlTombamentos += `
                         <div class="tombamento-container" data-tomb="${tomb.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
                             <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
-                                <span>Tomb.: <b>${tomb.tomb}</b> ${hasCautela ? '🔒' : ''}</span>
+                                <span>Tomb.: <b>${tomb.tomb}</b></span>
                                 <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                    ${(!hasPendencia && !hasCautela) ? `<button type="button" class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
-                                    <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}')">C/A</button>
+                                    ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${isActive}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                                    <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${uid}')">+ Alteração</button>
                                 </div>
                             </div>
                             <div class="alerts-wrapper">${montarPendenciaHtml(uid, tomb)}</div>
                             <div class="form-novo-id" id="form-${uid}" style="display:none; padding: 10px; background: #f9f9f9; border: 1px dashed #ccc; margin-top: 5px;">
-                                <textarea id="obs-${uid}" placeholder="Descreva o novo problema..." style="width:100%; height: 60px; margin-bottom: 5px;"></textarea>
-                                <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${uid}', 1, 'multi')">SALVAR PENDÊNCIA</button>
+                                <textarea id="obs-${uid}" placeholder="Descreva a alteração..." style="width:100%; height: 60px; margin-bottom: 5px;"></textarea>
+                                <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${uid}', 1, 'multi')">INCLUIR</button>
                             </div>
                         </div>`;
                     totalItensNoSetor++; 
-                    // PROTEÇÃO: Só cria o status se ele não existir na memória
-                    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
                 });
-                htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
+                htmlItens += `<div class="item-conferencia item-has-tombamentos" data-id="${item.id}"><div class="item-header"><span class="status-icon ${window.itemStatus[item.id]?.status === 'ok' ? 'ok' : ''}"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } 
             else {
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const saldoReal = (Number(item.quantidadeEsperada) || 0) - totalCautelado;
                 const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
-                const hasCautela = totalCautelado > 0;
+
+                if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
+                const currentStatus = window.itemStatus[item.id].status;
 
                 htmlItens += `
-                    <div class="item-conferencia" data-type="single" data-id="${item.id}">
+                    <div class="item-conferencia" data-id="${item.id}">
                         <div class="item-header">
-                            <span class="status-icon"></span>
+                            <span class="status-icon ${currentStatus === 'S/A' ? 'ok' : (currentStatus === 'C/A' ? 'alert' : '')}"></span>
                             <div style="display:flex; flex-direction:column">
-                                <span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span>
-                                <span class="item-quantidade" style="font-size:0.8em; color:#666">Saldo: ${saldoReal} de ${item.quantidadeEsperada}</span>
+                                <span class="item-label">${item.nome}</span>
+                                <span style="font-size:0.8em; color:#666">QTD: ${saldoReal} de ${item.quantidadeEsperada}</span>
                             </div>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                            ${(!hasPendencia && !hasCautela) ? `<button type="button" class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${item.id}')">S/A</button>` : ''}
-                            <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${item.id}')">C/A</button>
+                            ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${currentStatus === 'S/A' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${item.id}')">S/A</button>` : ''}
+                            <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${item.id}')">+ Alteração</button>
                         </div>
                         <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(item.id, item)}</div>
                         <div class="form-novo-id" id="form-${item.id}" style="display:none; padding: 10px; background: #f9f9f9; border: 1px dashed #ccc; margin-top: 5px;">
@@ -475,27 +477,24 @@ function renderizarConferencia() {
                                 <input type="number" id="qtd-${item.id}" value="1" min="1" max="${saldoReal}" style="width: 50px;">
                             </div>
                             <textarea id="obs-${item.id}" placeholder="Descreva o problema..." style="width:100%; height: 60px; margin-bottom: 5px;"></textarea>
-                            <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${item.id}', document.getElementById('qtd-${item.id}').value, 'single')">SALVAR PENDÊNCIA</button>
+                            <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${item.id}', document.getElementById('qtd-${item.id}').value, 'single')">INCLUIR</button>
                         </div>
                     </div>`;
                 totalItensNoSetor++; 
-                // PROTEÇÃO: Só cria o status se ele não existir na memória
-                if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
             }
         });
         
-        const exp = isFirstSetor ? 'expanded' : ''; 
-        const arr = isFirstSetor ? '▼' : '►';
+        // Cabeçalho do Setor
         htmlSetores += `
-            <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
+            <div class="setor" data-id="${setor.id || setor.nome}">
                 <div class="setor-header" onclick="toggleSetor(this)">
                     <div class="setor-info">
                         <span>${setor.nome}</span>
-                        <div class="setor-status">0/${totalItensNoSetor}</div>
+                        <div class="setor-status">...</div>
                     </div>
-                    <span class="arrow">${arr}</span>
+                    <span class="arrow">${isFirstSetor ? '▼' : '►'}</span>
                 </div>
-                <div class="setor-content ${exp}">${htmlItens}</div>
+                <div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div>
             </div>`;
     });
 
@@ -1113,17 +1112,22 @@ function abrirFormNovoID(uid) {
 
 function salvarNovoID(uid, qtd, tipo) {
     const obsEl = document.getElementById(`obs-${uid}`);
+    if (!obsEl) return;
+    
     const obsDigitada = obsEl.value.trim();
     const qtdInformada = parseInt(qtd) || 1;
 
     if (obsDigitada.length < 3) return alert("Descreva o problema com mais detalhes.");
 
+    // Busca o nome completo do militar logado para o carimbo (nome civil)
+    const nomeAssinatura = userInfo.nome_militar_completo || userInfo.nomeCompleto || `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`;
+
     const novoID = {
-        id: "PEND_" + Date.now(), 
+        id: "TEMP-" + Date.now(), // Prefixo TEMP identifica que foi criado nesta sessão
         tipo: "PENDENCIA",
         data_criacao: new Date().toLocaleDateString('pt-BR'),
         autor_uid: userInfo.uid,
-        autor_nome: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
+        autor_nome: nomeAssinatura,
         descricao: obsDigitada,
         quantidade: qtdInformada,
         status_gestao: "PENDENTE",
@@ -1131,9 +1135,7 @@ function salvarNovoID(uid, qtd, tipo) {
         herdado_de: null
     };
 
-    // --- AÇÃO CRUCIAL: ATUALIZAR A FONTE DE DADOS ---
-    // Precisamos colocar o novo ID dentro de 'dadosConferencia' para que, 
-    // ao renderizar, o sistema veja que ele existe.
+    // --- ATUALIZAÇÃO DA FONTE DE DADOS (dadosConferencia) ---
     let itemEncontrado = false;
     dadosConferencia.forEach(setor => {
         setor.itens.forEach(item => {
@@ -1154,20 +1156,19 @@ function salvarNovoID(uid, qtd, tipo) {
     });
 
     if (itemEncontrado) {
-        // Marca na memória de conferência atual
+        // MARCAÇÃO AUTOMÁTICA DO STATUS PAI COMO C/A (VERMELHO)
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         window.itemStatus[uid].status = 'C/A';
 
-        // Feedback visual e limpeza
+        // Feedback visual e limpeza do formulário
         obsEl.value = '';
         const form = document.getElementById(`form-${uid}`);
         if(form) form.style.display = 'none';
 
-        // RE-RENDERIZAÇÃO TOTAL
-        // Isso vai reconstruir o HTML lendo o novo ID que injetamos em dadosConferencia
+        // RE-RENDERIZAÇÃO PARA MOSTRAR O CARIMBO SEM BOTÕES DE AÇÃO
         renderizarConferencia();
         
-        // Mantém o scroll no item que foi editado para não "resetar" a visão do usuário
+        // Mantém o scroll no item editado
         setTimeout(() => {
             const el = document.querySelector(`[data-id="${uid.split('-')[0]}"]`);
             if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
