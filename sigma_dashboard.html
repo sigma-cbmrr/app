@@ -6146,6 +6146,7 @@ async function loadActiveCautelas() {
 }
         // Localização: Aproximadamente linha 4610
 
+// Localização: Aproximadamente linha 4610 no seu código sigma_dashboard
 async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
@@ -6169,12 +6170,17 @@ async function showCautelaDetails(cautelaId) {
         const currentStatus = cautela.status || 'N/D';
         const meuUid = firebase.auth().currentUser.uid;
 
-        // 🛑 BUSCA CIRÚRGICA: Identifica o Dono Provisório Atual da Lista de Origem
         let donoProvisorioNome = "Aguardando Recebimento";
+        let destaqueRecebedor = ""; // 🛑 Variável para o destaque visual
+
         if (currentStatus === 'RECEBIDA' && cautela.local_origem_id) {
             const custodyDoc = await db.collection('custodia_atual').doc(cautela.local_origem_id).get();
             if (custodyDoc.exists) {
                 donoProvisorioNome = custodyDoc.data().conferente_completo || "Dono não identificado";
+                // 🛑 DESTAQUE CIRÚRGICO: Estilo tipo "Badge" para o alvo da devolução
+                destaqueRecebedor = `<span style="background-color: #e3f2fd; color: #0d47a1; padding: 4px 8px; border-radius: 4px; border: 1px solid #2196f3; font-weight: bold; display: inline-flex; align-items: center; gap: 5px;">
+                                        <i class="fas fa-map-marker-alt"></i> ${donoProvisorioNome}
+                                     </span>`;
             }
         }
 
@@ -6186,12 +6192,11 @@ async function showCautelaDetails(cautelaId) {
             return fallbackName || 'N/D';
         };
 
-        // Preenchimento dos dados do modal (campos existentes no seu HTML)
         document.getElementById('modal-emitente').textContent = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
         document.getElementById('modal-destinatario-original').textContent = await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original_nome);
         
-        // 🛑 VÍNCULO DINÂMICO: O campo 'Recebedor' agora espelha a custódia atual
-        document.getElementById('modal-destinatario-atual').textContent = donoProvisorioNome;
+        // 🛑 INJEÇÃO DO DESTAQUE: Usa innerHTML para processar o badge visual
+        document.getElementById('modal-destinatario-atual').innerHTML = destaqueRecebedor || donoProvisorioNome;
 
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
         document.getElementById('modal-data-emissao').textContent = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
@@ -6210,8 +6215,6 @@ async function showCautelaDetails(cautelaId) {
             });
         }
 
-        // --- LÓGICA DE BOTÕES (AÇÃO PARA USUÁRIO B) ---
-
         if (currentStatus === 'ABERTA' && cautela.destinatario_original_uid === meuUid) {
             if (btnReceber) {
                 btnReceber.style.display = 'block';
@@ -6219,10 +6222,8 @@ async function showCautelaDetails(cautelaId) {
             }
         } 
         else if (currentStatus === 'RECEBIDA' && (cautela.destinatario_uid === meuUid || cautela.destinatario_original_uid === meuUid)) {
-            // Se o USUÁRIO B (quem está com o material) abrir o modal, o botão aparece
             if (btnDevolver) {
                 btnDevolver.style.display = 'block';
-                // Devolve para o Dono Provisório que o sistema acabou de encontrar
                 btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, donoProvisorioNome);
             }
         }
