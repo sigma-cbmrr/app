@@ -6155,6 +6155,7 @@ async function showCautelaDetails(cautelaId) {
     document.getElementById('modal-cautela-id').textContent = cautelaId;
     document.getElementById('modal-status').textContent = 'Carregando...';
     modal.style.display = 'flex';
+    
     if (btnReceber) btnReceber.style.display = 'none';
     if (btnDevolver) btnDevolver.style.display = 'none';
     if (btnConfirmarDevolucao) btnConfirmarDevolucao.style.display = 'none';
@@ -6168,6 +6169,15 @@ async function showCautelaDetails(cautelaId) {
         const currentStatus = cautela.status || 'N/D';
         const meuUid = firebase.auth().currentUser.uid;
 
+        // 🛑 BUSCA CIRÚRGICA: Identifica o Dono Provisório Atual da Lista de Origem
+        let donoProvisorioNome = "Aguardando Recebimento";
+        if (currentStatus === 'RECEBIDA' && cautela.local_origem_id) {
+            const custodyDoc = await db.collection('custodia_atual').doc(cautela.local_origem_id).get();
+            if (custodyDoc.exists) {
+                donoProvisorioNome = custodyDoc.data().conferente_completo || "Dono não identificado";
+            }
+        }
+
         const getUpdatedName = async (uid, fallbackName) => {
              if (uid) {
                 const userData = await getUserInfoByUid(uid);
@@ -6176,39 +6186,31 @@ async function showCautelaDetails(cautelaId) {
             return fallbackName || 'N/D';
         };
 
-        const emitenteDisplay = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
-        const destOriginalDisplay = await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original_nome);
+        // Preenchimento dos dados do modal (campos existentes no seu HTML)
+        document.getElementById('modal-emitente').textContent = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
+        document.getElementById('modal-destinatario-original').textContent = await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original_nome);
         
-        let destinatarioAtualDisplay = "Aguardando Recebimento";
-        if (cautela.destinatario_uid) {
-            destinatarioAtualDisplay = await getUpdatedName(cautela.destinatario_uid, cautela.destinatario);
-        }
+        // 🛑 VÍNCULO DINÂMICO: O campo 'Recebedor' agora espelha a custódia atual
+        document.getElementById('modal-destinatario-atual').textContent = donoProvisorioNome;
 
-        const modalStatusElement = document.getElementById('modal-status');
-        const modalDestAtualElement = document.getElementById('modal-destinatario-atual');
-
-        document.getElementById('modal-emitente').textContent = emitenteDisplay;
-        document.getElementById('modal-destinatario-original').textContent = destOriginalDisplay;
-        modalDestAtualElement.textContent = destinatarioAtualDisplay;
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
         document.getElementById('modal-data-emissao').textContent = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação.';
-        modalStatusElement.textContent = `Status: ${currentStatus}`;
+        document.getElementById('modal-status').textContent = currentStatus;
 
         const itensList = document.getElementById('modal-itens-cautela');
         itensList.innerHTML = '';
         if (cautela.itens) {
             cautela.itens.forEach((item, idx) => {
                 const li = document.createElement('li');
-                const bgColor = idx % 2 !== 0 ? '#f2f2f2' : 'transparent';
-                li.style.cssText = `display:flex; justify-content:space-between; padding:8px 10px; border-bottom:1px solid #eee; background-color: ${bgColor};`;
-                const rotulo = item.tombamento 
-                    ? `<b style="color: #800020;">Tomb.:</b> ${item.tombamento}` 
-                    : `<b style="color: #800020;">QTD:</b> ${item.quantidade}`;
+                li.style.cssText = `display:flex; justify-content:space-between; padding:8px 10px; border-bottom:1px solid #eee; background-color: ${idx % 2 !== 0 ? '#f2f2f2' : 'transparent'};`;
+                const rotulo = item.tombamento ? `<b style="color: #800020;">Tomb.:</b> ${item.tombamento}` : `<b style="color: #800020;">QTD:</b> ${item.quantidade}`;
                 li.innerHTML = `<span>${idx + 1}. ${item.nome}</span> <span>${rotulo}</span>`;
                 itensList.appendChild(li);
             });
         }
+
+        // --- LÓGICA DE BOTÕES (AÇÃO PARA USUÁRIO B) ---
 
         if (currentStatus === 'ABERTA' && cautela.destinatario_original_uid === meuUid) {
             if (btnReceber) {
@@ -6216,15 +6218,12 @@ async function showCautelaDetails(cautelaId) {
                 btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId);
             }
         } 
-        else if (currentStatus === 'RECEBIDA' && cautela.destinatario_uid === meuUid) {
-            const ultimoConferente = await getLastConferente(cautela.local_origem);
-            if (modalDestAtualElement) {
-                modalDestAtualElement.innerHTML = `<span style="color: #800020; font-weight: bold;">${ultimoConferente}</span> (Conferente do Local)`;
-            }
+        else if (currentStatus === 'RECEBIDA' && (cautela.destinatario_uid === meuUid || cautela.destinatario_original_uid === meuUid)) {
+            // Se o USUÁRIO B (quem está com o material) abrir o modal, o botão aparece
             if (btnDevolver) {
                 btnDevolver.style.display = 'block';
-                modalStatusElement.innerHTML = `Status: ${currentStatus}<br><span style="font-size:0.85em; color:#d90f23; font-weight:bold;">Devolver p/: ${ultimoConferente}</span>`;
-                btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, ultimoConferente);
+                // Devolve para o Dono Provisório que o sistema acabou de encontrar
+                btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, donoProvisorioNome);
             }
         }
         else if (currentStatus === 'DEVOLUÇÃO' && cautela.destinatario_uid === meuUid) {
