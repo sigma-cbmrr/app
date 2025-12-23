@@ -426,12 +426,17 @@ function renderizarConferencia() {
 
     let htmlSetores = ''; 
     const setorIds = []; 
-    dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
+    
+    // Garantimos o uso da fonte global sincronizada
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    
+    fonteDados.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
         
+        // 1. Cautelas Ativas
         const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
         cautelasAtivas.forEach(c => {
             htmlAcumulado += `
@@ -442,9 +447,12 @@ function renderizarConferencia() {
                 </div>`;
         });
 
+        // 2. Pendências Físicas (Carimbos)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = p.id.startsWith('TEMP-');
+                
+                // Se for nova (TEMP), exibe aviso. Se for antiga, exibe botões Manter/Resolver.
                 const acoesHtml = isTemp ? 
                     `<div style="color:#d90f23; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px;">Aguardando finalização...</div>` :
                     `<div class="pendencia-actions" style="display: flex; gap: 5px;">
@@ -453,7 +461,7 @@ function renderizarConferencia() {
                     </div>`;
 
                 htmlAcumulado += `
-                    <div class="pendencia-id-card" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
+                    <div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
                             <span><b>Relatado por:</b> ${p.autor_nome}</span>
                             <span>${p.data_criacao}</span>
@@ -468,14 +476,14 @@ function renderizarConferencia() {
         return htmlAcumulado;
     };
 
-    dadosConferencia.forEach((setor, index) => {
+    fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
         let htmlItens = ''; 
         let totalItensNoSetor = 0;
         
         setor.itens.forEach(item => {
             if (item.tipo === 'multi' && item.tombamentos) {
-                totalItensNoSetor += item.tombamentos.length; // Soma cada tombamento como unidade
+                totalItensNoSetor += item.tombamentos.length; 
                 let htmlTombamentos = '';
                 item.tombamentos.forEach(tomb => {
                     const uid = `${item.id}-${tomb.tomb}`;
@@ -504,7 +512,7 @@ function renderizarConferencia() {
                 htmlItens += `<div class="item-conferencia item-has-tombamentos" data-id="${item.id}"><div class="item-header"><span class="status-icon ${window.itemStatus[item.id]?.status === 'ok' ? 'ok' : ''}"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } 
             else {
-                totalItensNoSetor += 1; // Soma 1 para o item single
+                totalItensNoSetor += 1; 
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const saldoReal = (Number(item.quantidadeEsperada) || 0) - totalCautelado;
                 const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
@@ -553,9 +561,10 @@ function renderizarConferencia() {
 
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
-    updateOverallStatus();
-}
     
+    // Atualiza o contador geral do botão e os status dos setores após renderizar
+    updateOverallStatus();
+}    
       function adaptarCautelaParaRender(cautelaData) {
     if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
 
