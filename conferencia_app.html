@@ -363,7 +363,7 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
-    // Limpa setores antigos para evitar duplicidade na tela
+    // Limpeza de segurança para evitar duplicidade na renderização
     const antigos = mainContent.querySelectorAll('.setor'); 
     antigos.forEach(el => el.remove());
 
@@ -372,122 +372,111 @@ function renderizarConferencia() {
     dadosConferencia.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
-    // --- Sub-função interna para montar o Alerta de Pendência ---
-    const montarPendenciaHtml = (uid, pendenciaObj) => {
-        if (!pendenciaObj) return '';
-        
-        // Trata Cautela Ativa (Visual Laranja/Diferenciado)
-        if (pendenciaObj.status === "CAUTELA_ATV") {
-            return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left; margin-bottom: 8px;" data-status-type="cautela">
-                        <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;"><i class="fas fa-boxes"></i> ${pendenciaObj.quem}</div>
-                        <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap;"><i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i>${pendenciaObj.obs}</p>
-                    </div>`;
-        }
-        
-        const htmlFormatado = gerarHtmlVisualApp(pendenciaObj);
-        const safeHistorico = encodeURIComponent(JSON.stringify(pendenciaObj));
+    // --- Sub-função para montar os Cards de IDs Únicos ---
+    const montarPendenciaHtml = (uid, itemOuTomb) => {
+        let htmlAcumulado = '';
 
-        if (pendenciaObj.isReadOnly) {
-            return `<div class="pendencia-alert-box" style="border-left: 3px solid #d32f2f; margin-top: 10px;">
-                        <div style="font-weight: bold; color: #d32f2f; margin-bottom: 5px;"><i class="fas fa-history"></i> C/A ANTERIOR</div>
-                        ${htmlFormatado}
-                    </div>`;
-        } else {
-            return `<div class="pendencia-alert-box">
-                        ${htmlFormatado}
-                        <div class="pendencia-actions">
-                            <button class="btn-manter" onclick="manterPendencia(this, '${uid}')">✅ Concordo (Manter)</button>
-                            <button class="btn-acrescentar" onclick="acrescentarPendencia(this, '${uid}', '${safeHistorico}')">➕ Acrescentar</button>
+        // 1. Renderiza os carimbos de Cautela (Sombra do sistema de cautelas)
+        // Itens Single usam o array 'cautelas', itens Multi usam o objeto 'cautela' dentro do tombamento
+        const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
+        
+        cautelasAtivas.forEach(c => {
+            htmlAcumulado += `
+                <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 5px;">
+                    <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;">
+                        <i class="fas fa-lock"></i> CAUTELA ATIVA (${c.id})
+                    </div>
+                    <div style="font-size: 0.9em; color: #333;">
+                        ${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b>
+                    </div>
+                    <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="marcarCienteCautela('${c.id}', '${uid}')">Ciente</button>
+                </div>`;
+        });
+
+        // 2. Renderiza as Pendências Físicas (Objetos com IDs)
+        if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
+            itemOuTomb.pendencias_ids.forEach(p => {
+                htmlAcumulado += `
+                    <div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
+                            <span><b>ID:</b> ${p.id}</span>
+                            <span>${p.data_criacao}</span>
+                        </div>
+                        <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
+                            <span style="color:#d90f23; font-weight:bold;">${p.autor_nome}:</span> 
+                            <strong>${p.quantidade > 1 ? p.quantidade + ' un. ' : ''}</strong> ${p.descricao}
+                        </div>
+                        <div class="pendencia-actions" style="display: flex; gap: 5px;">
+                            <button type="button" class="btn-manter" style="flex: 1; padding: 6px; font-size: 0.8em;" onclick="manterID('${p.id}', '${uid}')">Manter</button>
+                            <button type="button" class="btn-resolver" style="flex: 1; padding: 6px; font-size: 0.8em; background-color: #1b8a3e;" onclick="resolverID('${p.id}', '${uid}', ${p.quantidade})">Resolvido</button>
                         </div>
                     </div>`;
+            });
         }
+        return htmlAcumulado;
     };
 
-    // --- Loop Principal por Setores ---
     dadosConferencia.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
         let htmlItens = ''; 
         let totalItensNoSetor = 0;
         
         setor.itens.forEach(item => {
-            // CASO A: ITENS COM TOMBAMENTO (MULTI)
             if (item.tipo === 'multi' && item.tombamentos) {
                 let htmlTombamentos = '';
                 item.tombamentos.forEach(tomb => {
-                    const uid = `${item.id}-${tomb.tomb}`; 
-                    let isCautelado = !!tomb.cautela;
-                    
-                    let tombBtnHtml = isCautela ? 
-                        `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>` : 
-                        (isCautelado ? `<button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'cautela_ciente')">Ciente</button>` : `<button class="action-button sa-ok" onclick="setTombamentoStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setTombamentoStatus(this, 'alert')">C/A</button>`);
-                    
-                    let alertaCautelaHtml = (isCautelado && !isCautela) ? montarPendenciaHtml(uid, {obs: `CAUTELADO para ${tomb.cautela.destinatario} em ${tomb.cautela.data}`, quem: "Sistema/Cautela", status: "CAUTELA_ATV"}) : '';
-                    
+                    const uid = `${item.id}-${tomb.tomb}`;
+                    const hasPendencia = tomb.pendencias_ids && tomb.pendencias_ids.length > 0;
+                    const hasCautela = !!tomb.cautela;
+
                     htmlTombamentos += `
                         <div class="tombamento-container" data-tomb="${tomb.tomb}">
                             <div class="tombamento-controls">
-                                <span>Tomb.: ${tomb.tomb} ${isCautelado ? '🔒' : ''}</span>
-                                <div class="tombamento-options">${tombBtnHtml}</div>
+                                <span>Tomb.: <b>${tomb.tomb}</b> ${hasCautela ? '🔒' : ''}</span>
+                                <div class="tombamento-options">
+                                    ${(!hasPendencia && !hasCautela) ? `<button class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                                    <button class="action-button ca-alert" onclick="abrirFormNovoID('${uid}')">C/A</button>
+                                </div>
                             </div>
-                            ${alertaCautelaHtml}
-                            ${montarPendenciaHtml(uid, tomb.pendencia)}
-                            <p class="tombamento-descricao-salva"></p>
-                            <div class="tombamento-obs-container">
-                                <div class="historico-fixo" style="display:none"></div>
-                                <label>Descreva a NOVA alteração:</label>
-                                <textarea placeholder="Detalhe a alteração aqui..."></textarea>
-                                <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button>
+                            <div class="alerts-wrapper">${montarPendenciaHtml(uid, tomb)}</div>
+                            <div class="form-novo-id" id="form-${uid}" style="display:none; padding: 10px; background: #f9f9f9; border: 1px dashed #ccc; margin-top: 5px;">
+                                <textarea id="obs-${uid}" placeholder="Descreva o novo problema..." style="width:100%; height: 60px; margin-bottom: 5px;"></textarea>
+                                <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${uid}', 1, 'multi')">SALVAR PENDÊNCIA</button>
                             </div>
                         </div>`;
                     totalItensNoSetor++; 
-                    window.itemStatus[uid] = { status: 'pending', obs: '' };
+                    window.itemStatus[uid] = { status: 'pending' };
                 });
                 htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } 
-            // CASO B: ITENS ÚNICOS (SINGLE)
             else {
-                // 🛑 FORÇA O CÁLCULO DO SALDO REAL (Resolve o "10 de 10")
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                const hasCautela = totalCautelado > 0;
                 const saldoReal = (Number(item.quantidadeEsperada) || 0) - totalCautelado;
+                const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
+                const hasCautela = totalCautelado > 0;
 
-                let singleBtnHtml = isCautela ? 
-                    `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : 
-                    (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
-                
-                let alertaCautelaSingleHtml = '';
-                if (hasCautela && !isCautela) {
-                    const infoCautelas = item.cautelas.map(c => `- ${c.quantidade}un p/ ${c.destinatario}`).join('\n');
-                    alertaCautelaSingleHtml = montarPendenciaHtml(item.id, {
-                        obs: `ATENÇÃO: ${totalCautelado} un. cauteladas fora da VTR:\n${infoCautelas}`,
-                        quem: "Sistema/Estoque Parcial",
-                        status: "CAUTELA_ATV"
-                    });
-                }
-
-                // 🛑 GARANTE QUE A CAUTELA E A PENDÊNCIA (MANTER) APAREÇAM JUNTAS
                 htmlItens += `
                     <div class="item-conferencia" data-type="single" data-id="${item.id}">
                         <div class="item-header">
                             <span class="status-icon"></span>
-                            <span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span>
-                            <span class="item-quantidade">QTD: ${saldoReal} (de ${item.quantidadeEsperada || 1})</span>
+                            <div style="display:flex; flex-direction:column">
+                                <span class="item-label">${item.nome} ${hasCautela ? '🔒' : ''}</span>
+                                <span class="item-quantidade" style="font-size:0.8em; color:#666">Saldo: ${saldoReal} de ${item.quantidadeEsperada}</span>
+                            </div>
                         </div>
-                        <div class="item-options">${singleBtnHtml}</div>
-                        <div class="alerts-wrapper">
-                            ${alertaCautelaSingleHtml}
-                            ${montarPendenciaHtml(item.id, item.pendencia)}
+                        <div class="item-options" style="margin-top:10px">
+                            ${(!hasPendencia && !hasCautela) ? `<button class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${item.id}')">S/A</button>` : ''}
+                            <button class="action-button ca-alert" onclick="abrirFormNovoID('${item.id}')">C/A</button>
                         </div>
-                        <p class="descricao-salva"></p>
-                        <div class="alteracao-container">
-                            <div class="historico-fixo" style="display:none"></div>
-                            <label>Descreva a NOVA alteração:</label>
-                            <textarea placeholder="Detalhe a alteração aqui..."></textarea>
-                            <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
+                        <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(item.id, item)}</div>
+                        <div class="form-novo-id" id="form-${item.id}" style="display:none; padding: 10px; background: #f9f9f9; border: 1px dashed #ccc; margin-top: 5px;">
+                            <input type="number" id="qtd-${item.id}" value="1" min="1" max="${saldoReal}" style="width: 50px; margin-bottom: 5px;"> <span>unidades afetadas</span>
+                            <textarea id="obs-${item.id}" placeholder="Descreva o problema..." style="width:100%; height: 60px; margin-bottom: 5px;"></textarea>
+                            <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${item.id}', document.getElementById('qtd-${item.id}').value, 'single')">SALVAR PENDÊNCIA</button>
                         </div>
                     </div>`;
                 totalItensNoSetor++; 
-                window.itemStatus[item.id] = { status: 'pending', obs: '' };
+                window.itemStatus[item.id] = { status: 'pending' };
             }
         });
         
@@ -507,280 +496,10 @@ function renderizarConferencia() {
     });
 
     const btnFin = document.getElementById('btn-finalizar');
-    if (btnFin) {
-        btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
-    }
-    
+    if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
     updateOverallStatus();
 }
-        
-        function setTombamentoStatus(btn, status) { 
-    const tomb = btn.closest('.tombamento-container');
-    const item = btn.closest('.item-conferencia'); 
-    const setor = btn.closest('.setor'); 
-    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`; 
     
-    tomb.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
-    btn.classList.add('active'); 
-    tomb.querySelector('.tombamento-obs-container').style.display='none'; 
-    tomb.querySelector('.tombamento-descricao-salva').style.display='none'; 
-    
-    const pb = tomb.querySelector('.pendencia-alert-box');
-    if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
-        pb.style.display='none';
-    }
-
-    if (status === 'cautela_ciente') {
-        // 🛡️ CORREÇÃO: Alterado para 'KEEP' para preservar histórico no Firebase/PDF
-        window.itemStatus[uid] = { status: 'KEEP', obs: '' };
-        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-        updateItemMainStatusDisplay(item);
-    }
-    else if(status==='ok'){
-        window.itemStatus[uid]={status:'S/A',obs:''};
-        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
-        updateItemMainStatusDisplay(item);
-    } 
-    else { 
-        tomb.querySelector('.tombamento-obs-container').style.display='block';
-        window.itemStatus[uid]={status:'PENDING_CA',obs:''}; 
-        tomb.querySelector('textarea').focus();
-        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-        updateItemMainStatusDisplay(item);
-    } 
-    
-    salvarRascunho();
-    updateSetorStatus(setor); 
-    updateOverallStatus(); 
-    if(status==='ok' || status==='cautela_ciente') checkSetorCompletion(setor, item.dataset.id);
-}
-    function setItemStatus(btn, status) {
-    const item = btn.closest('.item-conferencia');
-    const setor = btn.closest('.setor');
-    const uid = item.dataset.id;
-
-    // Remove classe ativa de outros botões do mesmo item
-    item.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    
-    // Esconde containers de observação/descrição por padrão
-    const containerEdit = item.querySelector('.alteracao-container');
-    const descSalva = item.querySelector('.descricao-salva');
-    if (containerEdit) containerEdit.style.display = 'none';
-    if (descSalva) descSalva.style.display = 'none';
-
-    const pb = item.querySelector('.pendencia-alert-box');
-
-    if (status === 'cautela_ciente') {
-        window.itemStatus[uid] = { status: 'KEEP', obs: '' };
-        if (pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-    } 
-    else if (status === 'ok') {
-        window.itemStatus[uid] = { status: 'S/A', obs: '' };
-        if (pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
-    } 
-    else {
-        // Se for Alerta (C/A), abre o campo de texto
-        if (containerEdit) {
-            containerEdit.style.display = 'block';
-            containerEdit.querySelector('textarea').focus();
-        }
-        window.itemStatus[uid] = { status: 'PENDING_CA', obs: '' };
-        if (pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-    }
-
-    salvarRascunho();
-    updateSetorStatus(setor);
-    updateOverallStatus();
-    
-    if (status === 'ok' || status === 'cautela_ciente') {
-        checkSetorCompletion(setor, uid);
-    }
-}
-    
-        function manterPendencia(btn, uid) { 
-            const box = btn.closest('.pendencia-alert-box');
-            if(box) { 
-                box.querySelector('.pendencia-actions').style.display='none'; box.classList.add('kept');
-                box.insertAdjacentHTML('beforeend', '<div style="color:#1b8a3e;font-weight:bold;font-size:0.9em;margin-top:5px;border-top:1px dashed #ccc;padding-top:3px;">✔ Mantido</div>'); 
-                // Define status KEEP e obs VAZIA para não poluir o histórico (nova lógica)
-                window.itemStatus[uid]={status:'KEEP',obs:''}; salvarRascunho(); // <<< ALTERAÇÃO APLICADA
-                const c = box.closest('.tombamento-container')||box.closest('.item-conferencia'); 
-                const btnCA=c.querySelector('.ca-alert'); if(btnCA)btnCA.classList.add('active'); 
-                const item = c.classList.contains('item-conferencia')?c:c.closest('.item-conferencia'); 
-                if(c.classList.contains('tombamento-container'))updateItemMainStatusDisplay(item);
-                const setor=c.closest('.setor'); updateSetorStatus(setor); updateOverallStatus(); checkSetorCompletion(setor, item.dataset.id); 
-            } 
-        }
-
-        function acrescentarPendencia(btn, uid, encodedData) { 
-    const box = btn.closest('.pendencia-alert-box'); 
-    const container = box.closest('.tombamento-container') || box.closest('.item-conferencia'); 
-    box.style.display = 'none'; 
-    
-    if (container) { 
-        const edit = container.querySelector('.tombamento-obs-container') || container.querySelector('.alteracao-container'); 
-        edit.style.display = 'block'; 
-        
-        const hist = edit.querySelector('.historico-fixo'); 
-        if (hist) {
-            hist.dataset.meta = encodedData; // Injeta o passado aqui
-        }
-        
-        const textarea = edit.querySelector('textarea');
-        textarea.value = ''; 
-        textarea.focus(); 
-        
-        // 🛡️ AQUI: Não resetamos o status para vazio se já houver algo.
-        // Apenas marcamos que uma edição está pendente.
-        window.itemStatus[uid] = { status: 'PENDING_CA', meta_origem: encodedData }; 
-        salvarRascunho(); 
-    } 
-}
-
-        function salvarItem(btn) { 
-    const item = btn.closest('.item-conferencia');
-    const containerEdit = item.querySelector('.alteracao-container');
-    const obsDigitada = containerEdit.querySelector('textarea').value.trim(); 
-    const dataAtual = new Date().toLocaleDateString('pt-BR');
-    const conferente = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-    const uid = item.dataset.id;
-
-    if(obsDigitada.length < 3) return alert("Descreva a alteração em detalhes.");
-
-    // 🛡️ RECUPERAÇÃO DO PASSADO (Sem sobrescrever)
-    let listaAcumulada = [];
-    
-    // Tentativa A: Pelo "cofre" meta (usado no botão acrescentar)
-    const histFixo = containerEdit.querySelector('.historico-fixo');
-    const metaData = histFixo ? histFixo.dataset.meta : null;
-
-    if (metaData && metaData !== "undefined" && metaData !== "") {
-        try {
-            const passado = JSON.parse(decodeURIComponent(metaData));
-            if (passado.pendencias_ca) listaAcumulada = [...passado.pendencias_ca];
-            else if (passado.obs) listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
-        } catch (e) { console.error("Erro meta:", e); }
-    } 
-    
-    // Tentativa B: Se a lista ainda estiver vazia, busca direto no objeto original carregado
-    if (listaAcumulada.length === 0) {
-        const itemOriginal = dadosConferencia.flatMap(s => s.itens).find(i => i.id === uid);
-        if (itemOriginal && itemOriginal.pendencia) {
-            if (itemOriginal.pendencia.pendencias_ca) listaAcumulada = [...itemOriginal.pendencia.pendencias_ca];
-            else if (itemOriginal.pendencia.obs) listaAcumulada.push({ 
-                quem: itemOriginal.pendencia.quem, data: itemOuTomb.pendencia.data, obs: itemOuTomb.pendencia.obs 
-            });
-        }
-    }
-
-    // Adiciona a nova entrada
-    listaAcumulada.push({ quem: conferente, data: dataAtual, obs: obsDigitada });
-
-    const novoObjeto = {
-        status: 'C/A',
-        pendencias_ca: listaAcumulada,
-        obs: listaAcumulada.map(p => p.obs).join(' | ') // Garante o texto para o PDF
-    };
-
-    window.itemStatus[uid] = novoObjeto; 
-    containerEdit.style.display = 'none'; 
-    const d = item.querySelector('.descricao-salva'); 
-    d.innerHTML = gerarHtmlVisualApp(novoObjeto); 
-    d.style.display = 'block'; 
-    
-    salvarRascunho(); 
-    updateSetorStatus(btn.closest('.setor')); 
-    updateOverallStatus(); 
-}
-    
-       function salvarTombamento(btn) { 
-    const tomb = btn.closest('.tombamento-container'); 
-    const item = btn.closest('.item-conferencia');
-    const containerEdit = tomb.querySelector('.tombamento-obs-container');
-    const obsDigitada = containerEdit.querySelector('textarea').value.trim(); 
-    const dataAtual = new Date().toLocaleDateString('pt-BR');
-    const p = userInfo;
-    const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
-    const uid = `${item.dataset.id}-${tomb.dataset.tomb}`;
-
-    if(obsDigitada.length < 3) return alert("Por favor, descreva a alteração.");
-
-    // 🛡️ LÓGICA DE PRESERVAÇÃO DO HISTÓRICO (ACUMULADOR)
-    let listaAcumulada = [];
-    
-    // Tentativa A: Resgatar o passado pelo metadado injetado no botão "Acrescentar"
-    const histFixo = containerEdit.querySelector('.historico-fixo');
-    const metaData = histFixo ? histFixo.dataset.meta : null;
-
-    if (metaData && metaData !== "undefined" && metaData !== "") {
-        try {
-            const passado = JSON.parse(decodeURIComponent(metaData));
-            if (passado.pendencias_ca && Array.isArray(passado.pendencias_ca)) {
-                listaAcumulada = [...passado.pendencias_ca];
-            } else if (passado.obs) {
-                // Caso o dado antigo ainda esteja no formato de string simples
-                listaAcumulada.push({ quem: passado.quem, data: passado.data, obs: passado.obs });
-            }
-        } catch (e) { 
-            console.error("Erro ao decodificar meta no tombamento:", e); 
-        }
-    } 
-    
-    // Tentativa B: Fallback de segurança (Busca direta no objeto global carregado)
-    if (listaAcumulada.length === 0) {
-        const itemPai = dadosConferencia.flatMap(s => s.itens).find(i => i.id === item.dataset.id);
-        if (itemPai && itemPai.tombamentos) {
-            const tombOriginal = itemPai.tombamentos.find(t => t.tomb === tomb.dataset.tomb);
-            if (tombOriginal && tombOriginal.pendencia) {
-                if (tombOriginal.pendencia.pendencias_ca) {
-                    listaAcumulada = [...tombOriginal.pendencia.pendencias_ca];
-                } else if (tombOriginal.pendencia.obs) {
-                    listaAcumulada.push({ 
-                        quem: tombOriginal.pendencia.quem, 
-                        data: tombOriginal.pendencia.data, 
-                        obs: tombOriginal.pendencia.obs 
-                    });
-                }
-            }
-        }
-    }
-
-    // ➕ Adiciona a nova observação ao final da lista recuperada
-    listaAcumulada.push({
-        quem: conferente,
-        data: dataAtual,
-        obs: obsDigitada
-    });
-
-    // 📦 Montagem do objeto final para o Firebase/PDF
-    // Unimos todas as observações com o separador " | " para o campo de texto simples
-    const textoUnido = listaAcumulada.map(p => p.obs).filter(o => o).join(' | ');
-
-    const novoObjeto = {
-        status: 'C/A',
-        obs: textoUnido,              // Texto "achatado" para o PDF
-        pendencias_ca: listaAcumulada // Lista estruturada para carimbos individuais
-    };
-
-    // Atualiza o estado global da aplicação
-    window.itemStatus[uid] = novoObjeto; 
-    
-    // Interface Visual
-    containerEdit.style.display = 'none'; 
-    const d = tomb.querySelector('.tombamento-descricao-salva');
-    if (d) {
-        d.innerHTML = gerarHtmlVisualApp(novoObjeto); // Gera os carimbos na tela
-        d.style.display = 'block'; 
-    }
-
-    // Persistência local e atualização de status
-    salvarRascunho(); 
-    updateItemMainStatusDisplay(item); 
-    updateSetorStatus(btn.closest('.setor')); 
-    updateOverallStatus();
-}
-
         function restaurarRascunho() {
             const saved = localStorage.getItem(getStorageKey()); if (!saved) return;
             try {
@@ -967,199 +686,158 @@ function renderizarConferencia() {
         if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro ao carregar dados: ${e.message}</span>`;
     }
 }
-        function getCautelaTextForReport(itemOuTomb) {
-    if (!itemOuTomb) return "";
-    let textos = [];
-
-    if (itemOuTomb.cautela && typeof itemOuTomb.cautela === 'object') {
-        const c = itemOuTomb.cautela;
-        textos.push(`Cautela EMITIDA (${c.id}) para ${c.destinatario} em ${c.data}`);
-    } else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) {
-        itemOuTomb.cautelas.forEach(c => {
-            textos.push(`Cautela EMITIDA (${c.id}) ${c.quantidade}UN para ${c.destinatario}`);
-        });
-    }
-
-    if (itemOuTomb.pendencia && typeof itemOuTomb.pendencia === 'object') {
-        const p = itemOuTomb.pendencia;
-        textos.push(`- Por ${p.quem} em ${p.data}: ${p.obs}`);
-    } else if (typeof itemOuTomb.pendencia === 'string' && itemOuTomb.pendencia.trim() !== "") {
-        textos.push(itemOuTomb.pendencia);
-    }
-
-    return textos.join(' | ');
-}
-        // A função completa fornecida no passo anterior, que deve substituir a sua:
-
-async function finalizarConferencia() {
-    const CURRENT_LIST_ID = LISTA_ID || CAUTELA_ID;
-    const CONFERENTE_UID = userInfo.uid || ''; 
-
-    if (isCautela) {
-        await finalizarRecebimentoCautela();
-        return;
-    }
-    
+     
+        smasync function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
-    btn.textContent = "Salvando..."; 
+    btn.textContent = "PROCESSANDO CIRURGIA DE DADOS..."; 
     btn.disabled = true;
 
     try {
         const p = userInfo;
-        const conferente = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        const conferenteCompleto = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
         const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
-        const dataAtualCompleta = new Date().toLocaleString('pt-BR');
-        const dataSomenteDia = dataAtualCompleta.split(',')[0];
+        const dataAtual = new Date().toLocaleDateString('pt-BR');
+        const timestampAgora = firebase.firestore.Timestamp.now();
         
-        let updated = false;
         let itensRelatorio = [];
         let itensCaa = []; 
+        let totalCaa = 0;
 
-        dadosConferencia.forEach(setor => {
-            setor.itens.forEach(item => {
-                
-                const processarItemUnico = (itemOuTomb, id, nome) => {
-                    const s = window.itemStatus[id];
+        // Iremos percorrer os dados carregados e aplicar as mudanças do window.itemStatus
+        const novaListaMestra = dadosConferencia.map(setor => {
+            return {
+                ...setor,
+                itens: setor.itens.map(item => {
                     
-                    // 1. Ignora itens não conferidos
-                    if (!s || s.status === 'pending') return; 
+                    const processarEntidade = (entidade, uid, nomeParaRelatorio) => {
+                        const statusLocal = window.itemStatus[uid];
+                        if (!statusLocal || statusLocal.status === 'pending') return entidade;
 
-                    if (!itemOuTomb.historico_vida) itemOuTomb.historico_vida = [];
-                    
-                    let finalStatus = (s.status === 'KEEP' || s.status === 'C/A' || s.status === 'PENDING_CA') ? 'C/A' : 'S/A';
-                    let listaPendenciasAtivas = [];
+                        if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
+                        if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                    if (finalStatus === 'C/A') {
-                        // 2. RECUPERAÇÃO DO HISTÓRICO ACUMULADO
-                        if (s.pendencias_ca && Array.isArray(s.pendencias_ca)) {
-                            // Se o usuário usou o botão "Salvar", a lista já está pronta aqui
-                            listaPendenciasAtivas = [...s.pendencias_ca];
-                        } 
-                        else if (itemOuTomb.pendencia && itemOuTomb.pendencia.pendencias_ca) {
-                            // Senão, pega o que já existia no banco
-                            listaPendenciasAtivas = [...itemOuTomb.pendencia.pendencias_ca];
-                        } 
-                        else if (itemOuTomb.pendencia && itemOuTomb.pendencia.obs) {
-                            // Fallback para conversão de formato antigo
-                            listaPendenciasAtivas.push({
-                                quem: itemOuTomb.pendencia.quem,
-                                data: itemOuTomb.pendencia.data,
-                                obs: itemOuTomb.pendencia.obs
+                        // --- 1. TRATAMENTO DE RESOLVIDOS (TOTAL OU PARCIAL) ---
+                        if (statusLocal.ids_resolvidos) {
+                            statusLocal.ids_resolvidos.forEach(res => {
+                                // Localiza o ID original no array do item
+                                const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
+                                if (idx > -1) {
+                                    const pendenciaMorta = entidade.pendencias_ids[idx];
+                                    
+                                    // Move para o histórico de vida como SOLUCIONADO
+                                    entidade.historico_vida.push({
+                                        evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
+                                        id_pendencia_origem: pendenciaMorta.id,
+                                        quem: res.resolvido_por,
+                                        data: res.data_solucao,
+                                        detalhes: `Resolvido ${res.qtd_resolvida} de ${pendenciaMorta.quantidade}. Desc: ${pendenciaMorta.descricao}`
+                                    });
+
+                                    // Remove o ID antigo
+                                    entidade.pendencias_ids.splice(idx, 1);
+
+                                    // Se sobrou saldo, cria um NOVO ID para o resto
+                                    if (res.qtd_remanescente > 0) {
+                                        entidade.pendencias_ids.push({
+                                            ...pendenciaMorta,
+                                            id: "PEND_" + Date.now() + "_RES",
+                                            quantidade: res.qtd_remanescente,
+                                            descricao: pendenciaMorta.descricao + " (SALDO REMANESCENTE)",
+                                            herdado_de: pendenciaMorta.id,
+                                            data_criacao: res.data_solucao,
+                                            autor_nome: res.resolvido_por
+                                        });
+                                    }
+                                }
                             });
                         }
 
-                        // 🛡️ 3. TRAVA ANTIDUPLICIDADE (FIM DO CARIMBO FANTASMA)
-                        // Pegamos o texto que está no rascunho da tela (textarea)
-                        let obsRascunho = (s.obs && typeof s.obs === 'string') ? s.obs.trim() : "";
+                        // --- 2. TRATAMENTO DE NOVOS (CRIADOS AGORA) ---
+                        if (statusLocal.pendencias_ids) {
+                            statusLocal.pendencias_ids.forEach(nova => {
+                                entidade.pendencias_ids.push(nova);
+                                entidade.historico_vida.push({
+                                    evento: "NOVA_PENDENCIA",
+                                    id_pendencia: nova.id,
+                                    quem: nova.autor_nome,
+                                    data: nova.data_criacao,
+                                    detalhes: `${nova.quantidade}un - ${nova.descricao}`
+                                });
+                            });
+                        }
+
+                        // --- 3. PREPARAÇÃO DE DADOS PARA O RELATÓRIO PDF/DASHBOARD ---
+                        const temAlteracao = entidade.pendencias_ids.length > 0;
+                        const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         
-                        // Criamos uma string com a junção de todas as obs da lista para comparar
-                        const textoAcumuladoNaLista = listaPendenciasAtivas.map(p => p.obs).join(' | ');
-
-                        // Se o texto do rascunho for IDENTICO à lista ou à última obs, nós limpamos
-                        if (obsRascunho === textoAcumuladoNaLista || 
-                            (listaPendenciasAtivas.length > 0 && obsRascunho === listaPendenciasAtivas[listaPendenciasAtivas.length -1].obs)) {
-                            obsRascunho = ""; 
-                        }
-
-                        // Só adiciona um carimbo NOVO se houver algo real no rascunho
-                        if (obsRascunho !== "") {
-                            listaPendenciasAtivas.push({
-                                quem: conferente,
-                                data: dataSomenteDia,
-                                obs: obsRascunho
-                            });
-                            
-                            itemOuTomb.historico_vida.push({
-                                evento: "ALTERACAO_DETECTADA",
-                                quem: conferente,
-                                data: dataAtualCompleta,
-                                detalhes: obsRascunho
-                            });
-                        }
-
-                        // 4. GERAÇÃO DO CAMPO 'OBS' RAIZ (Apenas para compatibilidade/PDF)
-                        const textoJoinFinal = listaPendenciasAtivas.map(p => p.obs).filter(o => o).join(' | ');
-
-                        itemOuTomb.pendencia = {
-                            tipo: "C/A",
-                            pendencias_ca: listaPendenciasAtivas, // Fonte da verdade
-                            obs: textoJoinFinal,                  // Texto unido
-                            quem: listaPendenciasAtivas[0]?.quem || conferente,
-                            data: listaPendenciasAtivas[0]?.data || dataSomenteDia
+                        const dadosRelatorio = {
+                            id: uid,
+                            nomeCompleto: nomeParaRelatorio,
+                            status: statusFinal,
+                            pendencias_ids: [...entidade.pendencias_ids],
+                            quantidade: entidade.quantidadeEsperada || 1,
+                            setor: setor.nome,
+                            // Campo 'obs' para compatibilidade com PDF atual (gera texto baseado nos IDs)
+                            obs: entidade.pendencias_ids.map(p => `[${p.id}] ${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
-                        updated = true;
 
-                    } else if (s.status === 'S/A' && itemOuTomb.pendencia) {
-                        itemOuTomb.historico_vida.push({
-                            evento: "SANEAMENTO_ALTERACAO",
-                            quem: conferente,
-                            data: dataAtualCompleta,
-                            detalhes: "Item conferido como S/A."
-                        });
-                        delete itemOuTomb.pendencia;
-                        updated = true;
-                    }
+                        itensRelatorio.push(dadosRelatorio);
+                        if (temAlteracao) {
+                            itensCaa.push(dadosRelatorio);
+                            totalCaa++;
+                        }
 
-                    // 5. MONTAGEM PARA COLEÇÃO 'resultados_conferencias' (Dashboard)
-                    const dadosParaRelatorio = { 
-                        id: id,
-                        nomeCompleto: nome, 
-                        status: finalStatus, 
-                        pendencias_ca: listaPendenciasAtivas, 
-                        obs: itemOuTomb.pendencia?.obs || '', 
-                        quem: itemOuTomb.pendencia?.quem || '', 
-                        data: itemOuTomb.pendencia?.data || '',
-                        quantidade: itemOuTomb.quantidade || (item.quantidadeEsperada || 1), 
-                        setor: setor.nome
+                        return entidade;
                     };
 
-                    itensRelatorio.push(dadosParaRelatorio);
-                    if (finalStatus === 'C/A') itensCaa.push(dadosParaRelatorio);
-                };
-
-                if (item.tipo === 'multi' && item.tombamentos) {
-                    item.tombamentos.forEach(t => processarItemUnico(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
-                } else {
-                    processarItemUnico(item, item.id, item.nome);
-                }
-            });
+                    // Diferencia Multi de Single
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        item.tombamentos = item.tombamentos.map(t => processarEntidade(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
+                    } else {
+                        item = processarEntidade(item, item.id, item.nome);
+                    }
+                    return item;
+                })
+            };
         });
 
-        if(updated) {
-            await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: dadosConferencia });
-        }
+        // --- SALVAMENTO NO BANCO ---
         
-        await db.collection('resultados_conferencias').add({ 
-            local: localNome, 
-            lista_id: LISTA_ID, 
-            conferente_uid: CONFERENTE_UID,
-            conferente: conferente, 
-            timestamp: firebase.firestore.Timestamp.now(), 
-            totalItensConferidos: itensRelatorio.length, 
-            totalCaa: itensCaa.length, 
-            itensCaa, 
-            itensRelatorio 
-        });
-        
-        const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
-        await custodiaRef.set({
-            lista_id: LISTA_ID, local_nome: localNome, conferente_uid: CONFERENTE_UID,
-            conferente_completo: conferente, timestamp_ultima_conferencia: firebase.firestore.FieldValue.serverTimestamp(),
+        // 1. Atualiza a Lista Mestra com a nova estrutura de IDs
+        await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: novaListaMestra });
+
+        // 2. Registra o Resultado da Conferência (Documento que o Gestor vê)
+        await db.collection('resultados_conferencias').add({
+            local: localNome,
+            lista_id: LISTA_ID,
+            conferente_uid: p.uid,
+            conferente: conferenteCompleto,
+            timestamp: timestampAgora,
+            totalItensConferidos: itensRelatorio.length,
+            totalCaa: totalCaa,
+            itensCaa: itensCaa,
+            itensRelatorio: itensRelatorio
         });
 
+        // 3. Atualiza Custódia
+        await db.collection('custodia_atual').doc(LISTA_ID).set({
+            lista_id: LISTA_ID,
+            local_nome: localNome,
+            conferente_uid: p.uid,
+            conferente_completo: conferenteCompleto,
+            timestamp_ultima_conferencia: timestampAgora
+        });
+
+        alert("✅ Conferência Finalizada!\nIDs Únicos registrados e histórico atualizado.");
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        if (window.self === window.top) { 
-            alert("Conferência finalizada com sucesso!"); 
-            window.location.href = "operacional.html"; 
-        }
 
-    } catch (e) { 
-        console.error("Erro na finalização:", e);
-        alert("Erro ao finalizar: " + e.message); 
-        btn.disabled = false; 
-        btn.textContent = "Finalizar Conferência";
+    } catch (e) {
+        console.error("Erro fatal na gravação:", e);
+        alert("Erro ao gravar IDs: " + e.message);
+        btn.disabled = false;
+        btn.textContent = "FINALIZAR CONFERÊNCIA";
     }
 }
         async function finalizarRecebimentoCautela(cautela) {
@@ -1462,6 +1140,143 @@ async function finalizarConferencia() {
         btn.textContent = "FINALIZAR RECEBIMENTO DA DEVOLUÇÃO";
         btn.disabled = false;
     }
+}
+    // --- NOVAS FUNÇÕES DE CONTROLE DE IDS ÚNICOS ---
+
+function abrirFormNovoID(uid) {
+    const form = document.getElementById(`form-${uid}`);
+    if (form) {
+        form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        if (form.style.display === 'block') {
+            form.querySelector('textarea').focus();
+        }
+    }
+}
+
+function salvarNovoID(uid, qtd, tipo) {
+    const obsEl = document.getElementById(`obs-${uid}`);
+    const obsDigitada = obsEl.value.trim();
+    const qtdInformada = parseInt(qtd);
+
+    if (obsDigitada.length < 3) return alert("Descreva o problema com mais detalhes.");
+
+    const novoID = {
+        id: "PEND_" + Date.now(), // ID Único baseado em tempo
+        tipo: "PENDENCIA",
+        data_criacao: new Date().toLocaleDateString('pt-BR'),
+        autor_uid: userInfo.uid,
+        autor_nome: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
+        descricao: obsDigitada,
+        quantidade: qtdInformada,
+        status_gestao: "PENDENTE",
+        id_conferencia_origem: "CONF_TEMP", // Será atualizado na gravação final
+        herdado_de: null
+    };
+
+    // Inicializa o array se não existir no estado temporário
+    if (!window.itemStatus[uid].pendencias_ids) {
+        window.itemStatus[uid].pendencias_ids = [];
+    }
+
+    // Adiciona o novo ID ao array de conferência deste item
+    window.itemStatus[uid].pendencias_ids.push(novoID);
+    window.itemStatus[uid].status = 'C/A';
+    
+    // Limpa e esconde o formulário
+    obsEl.value = '';
+    document.getElementById(`form-${uid}`).style.display = 'none';
+
+    // Atualiza a visualização local para mostrar o novo card imediatamente
+    const wrapper = document.querySelector(`[data-id="${uid.split('-')[0]}"] .alerts-wrapper`);
+    // Se for tombamento, o wrapper está dentro do tombamento-container
+    const tombWrapper = document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"] .alerts-wrapper`);
+    
+    const targetWrapper = tombWrapper || wrapper;
+    if (targetWrapper) {
+        // Forçamos uma re-renderização parcial ou apenas adicionamos o card
+        // Por simplicidade neste passo, chamaremos a atualização de status que já reflete na UI
+        const setor = targetWrapper.closest('.setor');
+        updateSetorStatus(setor);
+        updateOverallStatus();
+        
+        // Alerta visual de sucesso
+        alert("Alteração registrada localmente!");
+        // Re-renderiza para mostrar o botão S/A sumindo
+        renderizarConferencia(); 
+    }
+}
+
+function manterID(pendenciaId, uid) {
+    const card = document.getElementById(`card-${pendenciaId}`);
+    if (card) {
+        card.style.borderColor = "#1b8a3e";
+        card.style.backgroundColor = "#f0fff4";
+        card.querySelector('.pendencia-actions').innerHTML = '<div style="color:#1b8a3e; font-weight:bold; text-align:center; width:100%">✔ Mantido para esta conferência</div>';
+        
+        // Registra no itemStatus que este ID específico foi conferido
+        if (!window.itemStatus[uid].ids_mantidos) window.itemStatus[uid].ids_mantidos = [];
+        window.itemStatus[uid].ids_mantidos.push(pendenciaId);
+        window.itemStatus[uid].status = 'C/A';
+
+        const setor = card.closest('.setor');
+        updateSetorStatus(setor);
+        updateOverallStatus();
+        checkSetorCompletion(setor, uid);
+    }
+}
+
+function resolverID(pendenciaId, uid, qtdOriginal) {
+    let qtdResolvida = 1;
+
+    if (qtdOriginal > 1) {
+        const input = prompt(`Este problema afeta ${qtdOriginal} unidades. Quantas unidades foram resolvidas?`, qtdOriginal);
+        if (input === null) return; // Cancelou
+        qtdResolvida = parseInt(input);
+        if (isNaN(qtdResolvida) || qtdResolvida < 1 || qtdResolvida > qtdOriginal) {
+            return alert("Quantidade inválida.");
+        }
+    }
+
+    if (!window.itemStatus[uid].ids_resolvidos) window.itemStatus[uid].ids_resolvidos = [];
+    
+    window.itemStatus[uid].ids_resolvidos.push({
+        id: pendenciaId,
+        qtd_resolvida: qtdResolvida,
+        qtd_remanescente: qtdOriginal - qtdResolvida,
+        resolvido_por: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
+        data_solucao: new Date().toLocaleDateString('pt-BR')
+    });
+
+    const card = document.getElementById(`card-${pendenciaId}`);
+    if (card) {
+        card.style.opacity = "0.5";
+        card.style.backgroundColor = "#e8f5e9";
+        card.querySelector('.pendencia-actions').innerHTML = `<div style="color:#2e7d32; font-weight:bold; text-align:center; width:100%">✔ Marcado como Resolvido (${qtdResolvida} un.)</div>`;
+    }
+
+    const setor = card.closest('.setor');
+    updateSetorStatus(setor);
+    updateOverallStatus();
+    checkSetorCompletion(setor, uid);
+}
+
+function setItemStatusID(btn, status, uid) {
+    const item = btn.closest('.item-conferencia') || btn.closest('.tombamento-container');
+    const setor = btn.closest('.setor');
+
+    if (status === 'ok') {
+        window.itemStatus[uid] = { status: 'S/A' };
+        item.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const icon = item.querySelector('.status-icon');
+        if(icon) icon.className = 'status-icon ok';
+    }
+    
+    updateSetorStatus(setor);
+    updateOverallStatus();
+    checkSetorCompletion(setor, uid);
+    salvarRascunho();
 }
         window.onload = carregarDadosRemotos;
     </script>
