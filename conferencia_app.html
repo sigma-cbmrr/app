@@ -615,26 +615,26 @@ function renderizarConferencia() {
         
         const data = doc.data();
         
-        // 🛑 CORREÇÃO AQUI: Processamento de Saldo para Itens Single 🛑
+        // 🛑 PROCESSAMENTO DOS DADOS 🛑
         if (isCautela) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
-            // Se for lista normal, percorremos os itens para aplicar o abatimento das cautelas
             const listaBruta = data.list || [];
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
                     if (item.tipo === 'single') {
-                        // Calcula o total que está na rua para este item
+                        // Cálculo de saldo para conferência visual
                         const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                        // Criamos o saldo real para garantir que a renderização use o valor correto
-                        // Note que não alteramos o quantidadeEsperada para não estragar o banco, 
-                        // apenas garantimos que a lógica de renderização terá os dados prontos.
+                        // O saldo real é calculado dinamicamente na renderização usando quantidadeEsperada e totalCautelado
                     }
                     return item;
                 })
             }));
         }
+
+        // --- VÍNCULO GLOBAL (CRÍTICO PARA O SIMULADOR) ---
+        window.dadosConferencia = dadosConferencia;
         
         const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista de Conferência");
         const postoLocal = isCautela ? `Destinatário: ${data.destinatario || data.destinatario_original_nome}` : (data.posto || "Geral");
@@ -680,13 +680,12 @@ function renderizarConferencia() {
         
         if (loadingMsg) loadingMsg.innerHTML = "Renderizando itens...";
         
-        // Agora o renderizarConferencia vai ler os dados já processados com o reduce
+        // Dispara a renderização com os dados globais sincronizados
         renderizarConferencia(); 
 
         if (typeof updateHeaderInfo === "function") try { updateHeaderInfo(); } catch(e) {}
         if (typeof updateOverallStatus === "function") try { updateOverallStatus(); } catch(e) {}
         
-
         if (loadingMsg) loadingMsg.style.display = 'none'; 
         const mainContent = document.getElementById('main-content');
         if (mainContent) mainContent.style.display = 'block';
@@ -700,42 +699,50 @@ function renderizarConferencia() {
         async function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
+    
+    // Feedback visual imediato
     btn.textContent = "PROCESSANDO CIRURGIA DE DADOS..."; 
     btn.disabled = true;
 
     try {
         const p = userInfo;
-        const conferenteCompleto = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        
+        // Busca o nome institucional completo (igual ao carimbo)
+        const militarInfoEl = document.getElementById('militar-info');
+        const conferenteCompleto = militarInfoEl ? 
+            militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : 
+            `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+
         const localNome = `${infoLocal.posto} - ${infoLocal.nome}`;
-        const dataAtual = new Date().toLocaleDateString('pt-BR');
         const timestampAgora = firebase.firestore.Timestamp.now();
         
         let itensRelatorio = [];
         let itensCaa = []; 
         let totalCaa = 0;
 
-        // Iremos percorrer os dados carregados e aplicar as mudanças do window.itemStatus
-        const novaListaMestra = dadosConferencia.map(setor => {
+        // --- REFERÊNCIA À FONTE DE DADOS GLOBAL ---
+        const fonteDeDados = window.dadosConferencia || dadosConferencia;
+
+        const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
                 itens: setor.itens.map(item => {
                     
                     const processarEntidade = (entidade, uid, nomeParaRelatorio) => {
                         const statusLocal = window.itemStatus[uid];
+                        
+                        // Se não houve ação neste item, retorna ele como está
                         if (!statusLocal || statusLocal.status === 'pending') return entidade;
 
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // --- 1. TRATAMENTO DE RESOLVIDOS (TOTAL OU PARCIAL) ---
+                        // --- 1. TRATAMENTO DE RESOLVIDOS ---
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
-                                // Localiza o ID original no array do item
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
                                 if (idx > -1) {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
-                                    
-                                    // Move para o histórico de vida como SOLUCIONADO
                                     entidade.historico_vida.push({
                                         evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
                                         id_pendencia_origem: pendenciaMorta.id,
@@ -743,41 +750,43 @@ function renderizarConferencia() {
                                         data: res.data_solucao,
                                         detalhes: `Resolvido ${res.qtd_resolvida} de ${pendenciaMorta.quantidade}. Desc: ${pendenciaMorta.descricao}`
                                     });
-
-                                    // Remove o ID antigo
                                     entidade.pendencias_ids.splice(idx, 1);
 
-                                    // Se sobrou saldo, cria um NOVO ID para o resto
                                     if (res.qtd_remanescente > 0) {
                                         entidade.pendencias_ids.push({
                                             ...pendenciaMorta,
                                             id: "PEND_" + Date.now() + "_RES",
                                             quantidade: res.qtd_remanescente,
                                             descricao: pendenciaMorta.descricao + " (SALDO REMANESCENTE)",
-                                            herdado_de: pendenciaMorta.id,
-                                            data_criacao: res.data_solucao,
-                                            autor_nome: res.resolvido_por
+                                            herdado_de: pendenciaMorta.id
                                         });
                                     }
                                 }
                             });
                         }
 
-                        // --- 2. TRATAMENTO DE NOVOS (CRIADOS AGORA) ---
-                        if (statusLocal.pendencias_ids) {
-                            statusLocal.pendencias_ids.forEach(nova => {
-                                entidade.pendencias_ids.push(nova);
+                        // --- 2. TRATAMENTO DE NOVOS (IMPORTANTE) ---
+                        // Como a função 'salvarNovoID' já injetou o objeto TEMP- no dadosConferencia, 
+                        // aqui nós apenas limpamos o prefixo TEMP- para virar um ID definitivo PEND-
+                        entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
+                            if (p.id.startsWith('TEMP-')) {
+                                const novoIdDefinitivo = p.id.replace('TEMP-', 'PEND-');
+                                
+                                // Registra no histórico de vida
                                 entidade.historico_vida.push({
                                     evento: "NOVA_PENDENCIA",
-                                    id_pendencia: nova.id,
-                                    quem: nova.autor_nome,
-                                    data: nova.data_criacao,
-                                    detalhes: `${nova.quantidade}un - ${nova.descricao}`
+                                    id_pendencia: novoIdDefinitivo,
+                                    quem: p.autor_nome,
+                                    data: p.data_criacao,
+                                    detalhes: `${p.quantidade}un - ${p.descricao}`
                                 });
-                            });
-                        }
+                                
+                                return { ...p, id: novoIdDefinitivo };
+                            }
+                            return p;
+                        });
 
-                        // --- 3. PREPARAÇÃO DE DADOS PARA O RELATÓRIO PDF/DASHBOARD ---
+                        // --- 3. PREPARAÇÃO PARA RELATÓRIO ---
                         const temAlteracao = entidade.pendencias_ids.length > 0;
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         
@@ -788,8 +797,7 @@ function renderizarConferencia() {
                             pendencias_ids: [...entidade.pendencias_ids],
                             quantidade: entidade.quantidadeEsperada || 1,
                             setor: setor.nome,
-                            // Campo 'obs' para compatibilidade com PDF atual (gera texto baseado nos IDs)
-                            obs: entidade.pendencias_ids.map(p => `[${p.id}] ${p.quantidade}un: ${p.descricao}`).join(' | ')
+                            obs: entidade.pendencias_ids.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
 
                         itensRelatorio.push(dadosRelatorio);
@@ -801,7 +809,6 @@ function renderizarConferencia() {
                         return entidade;
                     };
 
-                    // Diferencia Multi de Single
                     if (item.tipo === 'multi' && item.tombamentos) {
                         item.tombamentos = item.tombamentos.map(t => processarEntidade(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
                     } else {
@@ -812,12 +819,11 @@ function renderizarConferencia() {
             };
         });
 
-        // --- SALVAMENTO NO BANCO ---
-        
-        // 1. Atualiza a Lista Mestra com a nova estrutura de IDs
+        // --- GRAVAÇÃO NO FIREBASE ---
+        // 1. Atualiza a Lista Mestra (Onde vivem os itens e tombamentos)
         await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: novaListaMestra });
 
-        // 2. Registra o Resultado da Conferência (Documento que o Gestor vê)
+        // 2. Registra o Relatório de Conferência (O histórico que o gestor consulta)
         await db.collection('resultados_conferencias').add({
             local: localNome,
             lista_id: LISTA_ID,
@@ -830,7 +836,7 @@ function renderizarConferencia() {
             itensRelatorio: itensRelatorio
         });
 
-        // 3. Atualiza Custódia
+        // 3. Atualiza a Custódia (Quem é o atual responsável pelo local)
         await db.collection('custodia_atual').doc(LISTA_ID).set({
             lista_id: LISTA_ID,
             local_nome: localNome,
@@ -839,13 +845,13 @@ function renderizarConferencia() {
             timestamp_ultima_conferencia: timestampAgora
         });
 
-        alert("✅ Conferência Finalizada!\nIDs Únicos registrados e histórico atualizado.");
+        alert("✅ Conferência Finalizada!\nAs alterações foram registradas permanentemente.");
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
 
     } catch (e) {
         console.error("Erro fatal na gravação:", e);
-        alert("Erro ao gravar IDs: " + e.message);
+        alert("Erro ao gravar dados: " + e.message);
         btn.disabled = false;
         btn.textContent = "FINALIZAR CONFERÊNCIA";
     }
@@ -1171,16 +1177,27 @@ function salvarNovoID(uid, qtd, tipo) {
     const qtdInformada = parseInt(qtd) || 1;
     if (obsDigitada.length < 3) return alert("Descreva o problema com mais detalhes.");
 
-    const nomeAssinatura = userInfo.nome_militar_completo || 
-                           (document.getElementById('militar-info') ? document.getElementById('militar-info').innerText.replace('Conferente: ', '').trim() : '') ||
-                           `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`;
+    // Busca o nome que já aparece no seu HTML (Conferente: 3º SGT QPCBM JHONATH)
+    const militarInfoEl = document.getElementById('militar-info');
+    let nomeAssinatura = "";
+    
+    if (militarInfoEl) {
+        // Pega o texto, remove o rótulo "Conferente:" e limpa a quebra de linha da Data/Hora
+        const textoBruto = militarInfoEl.innerText;
+        nomeAssinatura = textoBruto.split('\n')[0].replace('Conferente:', '').trim();
+    }
+
+    // Se falhar, usa o fallback
+    if (!nomeAssinatura) {
+        nomeAssinatura = userInfo.nome_militar_completo || `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    }
 
     const novoID = {
         id: "TEMP-" + Date.now(),
         tipo: "PENDENCIA",
         data_criacao: new Date().toLocaleDateString('pt-BR'),
         autor_uid: userInfo.uid,
-        autor_nome: nomeAssinatura,
+        autor_nome: nomeAssinatura, // Agora garantido o nome institucional
         descricao: obsDigitada,
         quantidade: qtdInformada,
         status_gestao: "PENDENTE",
@@ -1188,13 +1205,12 @@ function salvarNovoID(uid, qtd, tipo) {
         herdado_de: null
     };
 
-    console.log(`Tentando injetar pendência no UID: ${uid} (Tipo: ${tipo})`);
-
     let itemEncontrado = false;
-    // Usamos window.dadosConferencia para garantir que estamos mexendo na global
-    (window.dadosConferencia || dadosConferencia).forEach(setor => {
+    // Força o uso da global
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+
+    fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // Normalizamos para String para evitar erro de tipo (String vs Number)
             const itemIdStr = String(item.id);
             const uidStr = String(uid);
 
@@ -1202,15 +1218,12 @@ function salvarNovoID(uid, qtd, tipo) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
-                console.log("✅ Pendência injetada em Item Single:", item.nome);
             } else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    const tombUid = `${itemIdStr}-${t.tomb}`;
-                    if (tombUid === uidStr) {
+                    if (String(`${item.id}-${t.tomb}`) === uidStr) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
-                        console.log("✅ Pendência injetada em Tombamento:", t.tomb);
                     }
                 });
             }
@@ -1218,25 +1231,22 @@ function salvarNovoID(uid, qtd, tipo) {
     });
 
     if (itemEncontrado) {
-        // Se a variável itemStatus não existe no window, vamos criá-la
         if (!window.itemStatus) window.itemStatus = {};
         window.itemStatus[uid] = { status: 'C/A' };
-
+        
         obsEl.value = '';
-        const form = document.getElementById(`form-${uid}`);
-        if(form) form.style.display = 'none';
+        document.getElementById(`form-${uid}`).style.display = 'none';
 
         renderizarConferencia();
         
         setTimeout(() => {
-            const el = document.querySelector(`[data-id="${uid.split('-')[0]}"]`);
+            const baseId = uid.split('-')[0];
+            const el = document.querySelector(`[data-id="${baseId}"]`);
             if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 100);
-    } else {
-        console.error("❌ ERRO: O item não foi encontrado em dadosConferencia para salvar a pendência.");
-        alert("Erro técnico: O item não foi localizado na base de dados. Recarregue a página.");
     }
 }
+
 function manterID(pendenciaId, uid) {
     const card = document.getElementById(`card-${pendenciaId}`);
     if (card) {
