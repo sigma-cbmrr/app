@@ -388,7 +388,7 @@ function renderizarConferencia() {
                     <div style="font-size: 0.9em; color: #333;">
                         ${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b>
                     </div>
-                    <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="marcarCienteCautela('${c.id}', '${uid}')">Ciente</button>
+                    <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="setItemStatusID(this, 'cautela_ciente', '${uid}')">Ciente</button>
                 </div>`;
         });
 
@@ -444,6 +444,7 @@ function renderizarConferencia() {
                             </div>
                         </div>`;
                     totalItensNoSetor++; 
+                    // PROTEÇÃO: Só cria o status se ele não existir na memória
                     if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
                 });
                 htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
@@ -469,12 +470,16 @@ function renderizarConferencia() {
                         </div>
                         <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(item.id, item)}</div>
                         <div class="form-novo-id" id="form-${item.id}" style="display:none; padding: 10px; background: #f9f9f9; border: 1px dashed #ccc; margin-top: 5px;">
-                            <input type="number" id="qtd-${item.id}" value="1" min="1" max="${saldoReal}" style="width: 50px; margin-bottom: 5px;"> <span>unidades afetadas</span>
+                            <div style="margin-bottom: 5px;">
+                                <label style="font-size: 0.8em;">Unidades afetadas:</label>
+                                <input type="number" id="qtd-${item.id}" value="1" min="1" max="${saldoReal}" style="width: 50px;">
+                            </div>
                             <textarea id="obs-${item.id}" placeholder="Descreva o problema..." style="width:100%; height: 60px; margin-bottom: 5px;"></textarea>
                             <button type="button" class="btn-salvar-alteracao" onclick="salvarNovoID('${item.id}', document.getElementById('qtd-${item.id}').value, 'single')">SALVAR PENDÊNCIA</button>
                         </div>
                     </div>`;
                 totalItensNoSetor++; 
+                // PROTEÇÃO: Só cria o status se ele não existir na memória
                 if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
             }
         });
@@ -497,8 +502,7 @@ function renderizarConferencia() {
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
     updateOverallStatus();
-}
-    
+}    
 
       function adaptarCautelaParaRender(cautelaData) {
     if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
@@ -1108,58 +1112,68 @@ function abrirFormNovoID(uid) {
 }
 
 function salvarNovoID(uid, qtd, tipo) {
-    const obsField = document.getElementById(`obs-${uid}`);
-    const descricao = obsField.value.trim();
+    const obsEl = document.getElementById(`obs-${uid}`);
+    const obsDigitada = obsEl.value.trim();
+    const qtdInformada = parseInt(qtd) || 1;
 
-    if (!descricao) {
-        alert("Por favor, descreva o problema.");
-        return;
-    }
+    if (obsDigitada.length < 3) return alert("Descreva o problema com mais detalhes.");
 
-    // 1. Cria o objeto da nova pendência (Simulando o que virá do Firebase)
-    const novaPendencia = {
-        id: "TEMP-" + Date.now(), // ID temporário até o salvamento real
-        autor_nome: militarLogado ? militarLogado.nome : "Conferente",
-        descricao: descricao,
-        quantidade: parseInt(qtd) || 1,
-        data_criacao: new Date().toLocaleString('pt-BR'),
-        status_gestao: "PENDENTE"
+    const novoID = {
+        id: "PEND_" + Date.now(), 
+        tipo: "PENDENCIA",
+        data_criacao: new Date().toLocaleDateString('pt-BR'),
+        autor_uid: userInfo.uid,
+        autor_nome: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
+        descricao: obsDigitada,
+        quantidade: qtdInformada,
+        status_gestao: "PENDENTE",
+        id_conferencia_origem: "CONF_TEMP",
+        herdado_de: null
     };
 
-    // 2. Localiza o item nos dados carregados para injetar a pendência
-    // Assim, quando a tela renderizar de novo, o card já existe nos dados
+    // --- AÇÃO CRUCIAL: ATUALIZAR A FONTE DE DADOS ---
+    // Precisamos colocar o novo ID dentro de 'dadosConferencia' para que, 
+    // ao renderizar, o sistema veja que ele existe.
+    let itemEncontrado = false;
     dadosConferencia.forEach(setor => {
         setor.itens.forEach(item => {
             if (tipo === 'single' && item.id === uid) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
-                item.pendencias_ids.push(novaPendencia);
+                item.pendencias_ids.push(novoID);
+                itemEncontrado = true;
             } else if (tipo === 'multi' && item.tombamentos) {
-                item.tombamentos.forEach(tomb => {
-                    const tombUid = `${item.id}-${tomb.tomb}`;
-                    if (tombUid === uid) {
-                        if (!tomb.pendencias_ids) tomb.pendencias_ids = [];
-                        tomb.pendencias_ids.push(novaPendencia);
+                item.tombamentos.forEach(t => {
+                    if (`${item.id}-${t.tomb}` === uid) {
+                        if (!t.pendencias_ids) t.pendencias_ids = [];
+                        t.pendencias_ids.push(novoID);
+                        itemEncontrado = true;
                     }
                 });
             }
         });
     });
 
-    // 3. Marca o status na memória para não perder o "verde" dos outros itens
-    window.itemStatus[uid] = { status: 'C/A' };
+    if (itemEncontrado) {
+        // Marca na memória de conferência atual
+        if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
+        window.itemStatus[uid].status = 'C/A';
 
-    // 4. Feedback e fechamento do formulário
-    obsField.value = '';
-    document.getElementById(`form-${uid}`).style.display = 'none';
-    
-    // 5. RE-RENDERIZAÇÃO CONTROLADA
-    // Em vez de recarregar a página, chamamos a função que desenha os itens
-    // Ela vai ler os 'pendencias_ids' que acabamos de injetar acima
-    renderizarConferencia();
-    
-    alert("Alteração registrada! Lembre-se de FINALIZAR ao término para salvar no banco.");
-}
-    
+        // Feedback visual e limpeza
+        obsEl.value = '';
+        const form = document.getElementById(`form-${uid}`);
+        if(form) form.style.display = 'none';
+
+        // RE-RENDERIZAÇÃO TOTAL
+        // Isso vai reconstruir o HTML lendo o novo ID que injetamos em dadosConferencia
+        renderizarConferencia();
+        
+        // Mantém o scroll no item que foi editado para não "resetar" a visão do usuário
+        setTimeout(() => {
+            const el = document.querySelector(`[data-id="${uid.split('-')[0]}"]`);
+            if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+    }
+}    
 function manterID(pendenciaId, uid) {
     const card = document.getElementById(`card-${pendenciaId}`);
     if (card) {
