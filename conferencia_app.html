@@ -227,10 +227,52 @@
             else { document.querySelectorAll('.setor-content.expanded').forEach(c=>{c.classList.remove('expanded'); c.previousElementSibling.querySelector('.arrow').textContent='►';}); content.classList.add('expanded'); arrow.textContent = '▼'; } 
         }
 
-        function checkSetorCompletion(currentSetor, currentItemId) { 
-            const total = parseInt(currentSetor.dataset.totalItems); const comp = parseInt(currentSetor.querySelector('.setor-status').dataset.completed); 
-            if (comp >= total) { autoAdvanceSetor(currentSetor.dataset.id); } else { focusNextItem(currentItemId); }
+        function checkSetorCompletion(currentSetor, currentItemId) {
+    if (!currentSetor) return;
+
+    // 1. Identifica todos os elementos conferíveis dentro deste setor
+    // Buscamos tanto itens simples quanto tombamentos individuais
+    const itensNoSetor = currentSetor.querySelectorAll('.item-conferencia, .tombamento-container');
+    const total = itensNoSetor.length;
+    let concluidos = 0;
+
+    // 2. Conta quantos realmente estão com status diferente de 'pending'
+    itensNoSetor.forEach(itemEl => {
+        let uid;
+        if (itemEl.classList.contains('tombamento-container')) {
+            // Se for tombamento, monta o UID: IDITEM-TOMBNUMBER
+            const itemPaiId = itemEl.closest('.item-conferencia').getAttribute('data-id');
+            const tombNumero = itemEl.getAttribute('data-tomb');
+            uid = `${itemPaiId}-${tombNumero}`;
+        } else {
+            // Se for item single
+            uid = itemEl.getAttribute('data-id');
         }
+
+        if (window.itemStatus[uid] && window.itemStatus[uid].status !== 'pending') {
+            concluidos++;
+        }
+    });
+
+    // 3. Atualiza o contador visual do cabeçalho do setor
+    const statusDiv = currentSetor.querySelector('.setor-status');
+    if (statusDiv) {
+        statusDiv.innerText = `${concluidos}/${total}`;
+        // Sincroniza o dataset para outras funções que possam ler dele
+        currentSetor.querySelector('.setor-status').dataset.completed = concluidos;
+    }
+
+    // 4. LÓGICA DE AVANÇO: Só fecha o setor se chegar ao final (100%)
+    if (concluidos === total && total > 0) {
+        // Aguarda um pequeno delay para o usuário ver a última marcação
+        setTimeout(() => {
+            autoAdvanceSetor(currentSetor.dataset.id);
+        }, 300);
+    } else {
+        // Se ainda não terminou o setor, foca no próximo campo de entrada
+        focusNextItem(currentItemId);
+    }
+}
 
         function focusNextItem(currentItemId) { 
             const allItems = Array.from(document.querySelectorAll('.item-conferencia')); 
