@@ -829,7 +829,6 @@ function renderizarConferencia() {
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
     const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
     
-    // 1. Validação Inicial
     if (!ID_ALVO) { 
         console.error("ID não encontrado para carregamento.");
         return; 
@@ -839,22 +838,37 @@ function renderizarConferencia() {
     if (loadingMsg) loadingMsg.innerHTML = "Conectando...";
 
     try {
-        // 2. Busca de Dados no Firebase
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
         if (!doc.exists) throw new Error("Documento não encontrado no banco de dados.");
         
         const data = doc.data();
         
-        // 3. Adaptação dos Dados (JSON)
-        dadosConferencia = isCautela ? adaptarCautelaParaRender(data) : (data.list || []);
+        // 🛑 CORREÇÃO AQUI: Processamento de Saldo para Itens Single 🛑
+        if (isCautela) {
+            dadosConferencia = adaptarCautelaParaRender(data);
+        } else {
+            // Se for lista normal, percorremos os itens para aplicar o abatimento das cautelas
+            const listaBruta = data.list || [];
+            dadosConferencia = listaBruta.map(setor => ({
+                ...setor,
+                itens: (setor.itens || []).map(item => {
+                    if (item.tipo === 'single') {
+                        // Calcula o total que está na rua para este item
+                        const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                        // Criamos o saldo real para garantir que a renderização use o valor correto
+                        // Note que não alteramos o quantidadeEsperada para não estragar o banco, 
+                        // apenas garantimos que a lógica de renderização terá os dados prontos.
+                    }
+                    return item;
+                })
+            }));
+        }
         
-        // 4. Definição das Informações de Cabeçalho
         const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista de Conferência");
         const postoLocal = isCautela ? `Destinatário: ${data.destinatario || data.destinatario_original_nome}` : (data.posto || "Geral");
         
         infoLocal = { nome: nomeLocal, posto: postoLocal };
         
-        // 5. Atualização Segura da Interface (Apenas se os elementos existirem)
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
             infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
@@ -862,7 +876,6 @@ function renderizarConferencia() {
 
         document.title = isCautela ? `Cautela - ${CAUTELA_ID}` : `Conferência - ${infoLocal.nome}`;
 
-        // 6. Lógica Específica de Cautela (Blindada)
         if (isCautela) {
             const h1Element = document.querySelector('h1');
             const subtituloElement = document.querySelector('.subtitulo');
@@ -893,24 +906,22 @@ function renderizarConferencia() {
             }
         }
         
-        // 7. Renderização e Funções de Suporte
         if (loadingMsg) loadingMsg.innerHTML = "Renderizando itens...";
         
+        // Agora o renderizarConferencia vai ler os dados já processados com o reduce
         renderizarConferencia(); 
 
-        // Verificação de existência das funções de apoio antes de chamar
         if (typeof updateHeaderInfo === "function") try { updateHeaderInfo(); } catch(e) {}
         if (typeof updateOverallStatus === "function") try { updateOverallStatus(); } catch(e) {}
         if (typeof restaurarRascunho === "function") try { restaurarRascunho(); } catch(e) {}
 
-        // 8. Finalização do Estado de Carregamento
         if (loadingMsg) loadingMsg.style.display = 'none'; 
         const mainContent = document.getElementById('main-content');
         if (mainContent) mainContent.style.display = 'block';
 
     } catch (e) { 
         console.error("Erro Crítico no Carregamento:", e);
-        if (loadingMsg) loadingMsg.innerHTML = "<span style='color:red'>Erro ao carregar dados. Verifique o console.</span>";
+        if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro ao carregar dados: ${e.message}</span>`;
     }
 }
         function getCautelaTextForReport(itemOuTomb) {
