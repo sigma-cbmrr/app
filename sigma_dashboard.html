@@ -2205,34 +2205,32 @@
     <div id="modal-gestao-ca" class="modal-overlay">
         <div class="modal-content">
             <button class="close-btn" onclick="document.getElementById('modal-gestao-ca').style.display='none'"><i class="fas fa-times"></i></button>
-            <h2>Gerenciar Item</h2>
-            <p id="gestao-item-nome" style="color:#800020; font-weight:bold; margin-bottom:20px; border-bottom:1px dashed #ccc; padding-bottom:10px;"></p>
+            <h2>Gerenciar Pendência</h2>
+            <p id="gestao-item-nome" style="color:#800020; font-weight:bold; margin-bottom:5px; padding-bottom:0;"></p>
             
             <input type="hidden" id="gestao-doc-id">
-            <input type="hidden" id="gestao-item-index">
             <input type="hidden" id="gestao-item-id-lista">
-            <input type="hidden" id="gestao-item-max-qtd">
+            <input type="hidden" id="gestao-pendencia-id"> <input type="hidden" id="gestao-item-max-qtd">
             
-            <label>Ação a realizar</label>
+            <label>Ação do Gestor</label>
             <select id="gestao-status">
-                <option value="Solucionado">Solucionado (Apenas dar baixa)</option>
-                <option value="Em solução">Em solução (Manter alerta)</option>
-                <option value="Cautelado">Cautelado (Material saiu)</option>
-                <option value="Remover">Remover da Lista (Baixar estoque)</option>
+                <option value="Solucionado">Resolvido (Saneia este ID e move para histórico)</option>
+                <option value="Em solução">Em solução (Informa o status mas mantém o alerta)</option>
+                <option value="Cautelado">Passar para Cautela Administrativa</option>
             </select>
             
             <div id="div-gestao-qtd" style="display:none;">
-                <label style="color:#d90f23;">Quantidade a Remover do Estoque:</label>
+                <label style="color:#d90f23;">Quantidade Afetada:</label>
                 <input type="number" id="gestao-qtd" min="1" value="1">
                 <small id="gestao-qtd-info" style="color:#666; font-size:0.85em;"></small>
             </div>
             
-            <label>Observação da Gestão (Obrigatório)</label>
-            <textarea id="gestao-obs" placeholder="Descreva o que foi feito (ex: Material consertado; Enviado para manutenção; etc)"></textarea>
+            <label>Anotação Técnica / Despacho (Obrigatório)</label>
+            <textarea id="gestao-obs" style="min-height: 100px;" placeholder="Descreva a solução ou o andamento da manutenção deste item específico..."></textarea>
             
             <div class="modal-buttons">
                 <button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-gestao-ca').style.display='none'">Cancelar</button>
-                <button class="btn-modern-action btn-sync" onclick="salvarGestaoCa()">Confirmar</button>
+                <button class="btn-modern-action btn-sync" onclick="salvarGestaoCa()">Salvar Ação</button>
             </div>
         </div>
     </div>
@@ -3630,112 +3628,7 @@ function formatarDataSimples(timestamp) {
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleDateString('pt-BR');
 }
-
-const gerarLinhasFormatadas = (textoBruto, autorAtual, dataAtual, adminStatus, adminObs) => {
-    const linhas = [];
-    
-    // 1. FORMATAÇÃO DA RESPOSTA DO GESTOR (ADMIN)
-    if (adminStatus) {
-        const gestorLinha = `[${adminStatus}] (Admin): ${adminObs}`;
-        linhas.push(gestorLinha);
-    }
-    
-    const separator = ' | + NOVA: ';
-    const cautelaSeparator = ' | + CAUTELA: '; // NOVO: Separador de Cautela
-    
-    // 2. TRATAMENTO DO HISTÓRICO LINEAR
-    // Substitui o separador de cautela por um separador de nova linha temporário para evitar que a regex o trate como nova observação.
-    const textoComCautelaTratada = textoBruto.replace(cautelaSeparator, ' \n\n[CAUTELA_LINE_START]\n\n');
-    
-    // Divide pelo separador de NOVA OBSERVAÇÃO
-    let partes = [textoComCautelaTratada];
-    if (textoComCautelaTratada.includes(separator)) {
-        partes = textoComCautelaTratada.split(separator);
-    }
-
-    partes.forEach(p => {
-        p = p.trim();
-        
-        // 🛑 NOVO: TRATAMENTO DA LINHA DE CAUTELA
-        if (p.includes('[CAUTELA_LINE_START]')) {
-            // Remove a flag interna
-            const cautelaText = p.replace(/(\n\n\[CAUTELA_LINE_START\]\n\n)/g, '').trim();
-            // Adiciona a linha de cautela com um prefixo de identificação
-            if (cautelaText) {
-                linhas.push(`[CAUTELA]: ${cautelaText}`);
-            }
-            return;
-        }
-
-        const regex = /^"(.*)" \(Por: (.*) em (.*)\)$/; 
-        const match = p.match(regex);
-        
-        // Verifica se é a AÇÃO GESTOR já salva no histórico.
-        if (match && match[1].includes('[AÇÃO GESTOR:')) {
-            return; 
-        }
-
-        // Se for observação de Conferente:
-        if (match) {
-            // Formato padrão: Por: NOME em DATA: "OBS"
-            linhas.push(`Por: ${match[2]} em ${match[3]}: "${match[1]}"`);
-        } else {
-            // Se for texto simples (fallback)
-            linhas.push(`Por: ${autorAtual} em ${dataAtual}: "${p}"`);
-        }
-    });
-
-    return linhas;
-};
-
-// Função wrapper apenas para manter a consistência com o app (não usada no PDF)
-const gerarHtmlVisual = (pendencia, autorAtual, dataAtual, adminStatus, adminObs) => {
-    let html = '<ul class="lista-pendencias" style="list-style: none; padding: 0; margin: 0;">';
-
-    // 1. PRIORIDADE: Nova estrutura de lista acumulativa (Array pendencias_ca)
-    if (pendencia && pendencia.pendencias_ca && Array.isArray(pendencia.pendencias_ca)) {
-        pendencia.pendencias_ca.forEach(p => {
-            const dataMatch = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
-            const dataLimpa = dataMatch ? dataMatch[0] : (p.data || '');
-            
-            html += `
-                <li style="margin-bottom: 8px; border-bottom: 1px dashed #eee; padding-bottom: 4px;">
-                    <i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 5px;"></i>
-                    <b>Por ${p.quem}</b> em ${dataLimpa}:
-                    <br><i style="margin-left: 20px; color: #444;">${p.obs}</i>
-                </li>`;
-        });
-    } 
-    // 2. FALLBACK: Formato de objeto único (Legado recente)
-    else if (typeof pendencia === 'object' && pendencia !== null && pendencia.obs) {
-        html += `
-            <li style="margin-bottom: 5px;">
-                <i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 5px;"></i>
-                <b>Por ${pendencia.quem}</b> em ${pendencia.data}:
-                <br><i style="margin-left: 20px;">${pendencia.obs}</i>
-            </li>`;
-    } 
-    // 3. FALLBACK: Strings legadas e tratamento de Admin
-    else if (typeof pendencia === 'string' && pendencia !== '-' && pendencia.trim() !== '') {
-        const linhas = gerarLinhasFormatadas(pendencia, autorAtual, dataAtual, adminStatus, adminObs);
-        linhas.forEach(l => {
-            // ... (Mantenha sua lógica de detecção de 'Admin' e 'Cautela' aqui dentro igual ao original)
-            if (l.includes('(Admin):')) {
-                // Seu código original de renderização do Gestor...
-                const [carimboStatus, obsText] = l.split(':');
-                const statusMatch = carimboStatus.match(/\[(.*?)\]/);
-                const statusText = statusMatch ? statusMatch[1] : 'PENDENTE';
-                html += `<li><span style="color: #d90f23;"><b>Gestor</b></span>: <i class="fas fa-check-circle"></i> ${statusText}: ${obsText || ''}</li>`;
-            } else {
-                html += `<li class="linha-obs"><i class="fas fa-exclamation-triangle" style="color: #d90f23; margin-right: 5px;"></i>${l}</li>`;
-            }
-        });
-    }
-
-    html += '</ul>';
-    return html;
-};
-		
+	
 // --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
 function reimprimirPDF(data) {
     try {
@@ -3957,70 +3850,78 @@ function reimprimirPDF(data) {
     const tbody = document.getElementById('ca-list-body');
     if (!wrapper || !tbody) return;
 
-    document.getElementById('table-title').textContent = `Detalhes: ${data.local}`; 
+    document.getElementById('table-title').textContent = `Detalhes: ${data.local}`;
     tbody.innerHTML = '';
-    
+
     const items = data.items || [];
-    const itemsToShow = items.filter(i => i.statusAdmin !== 'Solucionado');
-    
-    if (itemsToShow.length === 0) { 
+    // Filtra itens que possuem pendências ativas (IDs no array)
+    const itemsWithIssues = items.filter(i => i.pendencias_ids && i.pendencias_ids.length > 0);
+
+    if (itemsWithIssues.length === 0) {
         wrapper.querySelector('table').style.display = 'none';
         document.getElementById('no-issues-msg').style.display = 'block';
     } else {
         wrapper.querySelector('table').style.display = 'table';
         document.getElementById('no-issues-msg').style.display = 'none';
-        
-        itemsToShow.forEach(i => {
-            const tr = tbody.insertRow();
-            
-            // 🛡️ LÓGICA DE VISUALIZAÇÃO BLINDADA (EVITA DUPLICIDADE NO DASHBOARD)
-            let obsHtmlFormatada = '';
-            
-            // 1. Tenta extrair a lista acumulada (Prioridade Máxima)
-            const listaAcumulada = (i.pendencias_ca && Array.isArray(i.pendencias_ca)) ? i.pendencias_ca : null;
 
-            if (listaAcumulada && listaAcumulada.length > 0) {
-                obsHtmlFormatada = '<ul style="list-style:none; padding:0; margin:0;">';
-                listaAcumulada.forEach(p => {
-                    const dMatch = p.data ? p.data.match(/\d{2}\/\d{2}\/\d{4}/) : null;
-                    const dLimpa = dMatch ? dMatch[0] : (p.data || '');
-                    
-                    obsHtmlFormatada += `
-                        <li style="margin-bottom:8px; border-bottom:1px dashed #eee; padding-bottom:4px; font-size:0.9em; text-align:left;">
-                            <i class="fas fa-exclamation-triangle" style="color:#d90f23; margin-right:5px;"></i>
-                            <b>Por ${p.quem}</b> em ${dLimpa}:
-                            <br><i style="margin-left:18px; color:#444;">${p.obs}</i>
-                        </li>`;
-                });
-                obsHtmlFormatada += '</ul>';
-            } 
-            // 2. Fallback para formato antigo ou texto puro (Apenas se a lista não existir)
-            else if (i.obs) {
-                // Caso contenha dados de Admin, usa a função auxiliar que você já tinha
-                if (i.obs.includes('(Admin):') || i.obs.includes('| + NOVA:')) {
-                    obsHtmlFormatada = gerarHtmlVisual(i.obs, data.conferente, data.date, i.statusAdmin, i.adminObs);
-                } else {
-                    obsHtmlFormatada = `<div style="text-align:left;"><i class="fas fa-exclamation-triangle" style="color:#d90f23;"></i> ${i.obs}</div>`;
-                }
-            }
+        itemsWithIssues.forEach(item => {
+            // Para cada item, vamos percorrer seus IDs de pendência
+            item.pendencias_ids.forEach(p => {
+                const tr = tbody.insertRow();
+                
+                // Status visual para o Gestor (Baseado no campo status_gestao do ID)
+                const statusG = p.status_gestao || 'PENDENTE';
+                const badgeClass = 'badge-' + statusG.toLowerCase().replace(/\s/g, '-');
 
-            const statusAdmin = i.statusAdmin || 'Pendente';
-            const badgeClass = 'badge-' + statusAdmin.toLowerCase().replace(/\s/g, '-');
-            const itemComDocId = { ...i, docId: data.docId }; 
-            
-            tr.innerHTML = `
-                <td><strong>${i.nomeCompleto}</strong></td>
-                <td><span class="status-badge ${badgeClass}">${statusAdmin}</span></td>
-                <td style="max-width: 400px;">${obsHtmlFormatada}</td>
-                <td><small>${data.conferente}<br>${data.date}</small></td>
-            `;
-            
-            const tdAcao = tr.insertCell(); 
-            tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestao(${JSON.stringify(itemComDocId)})'>Gerenciar</button>`;
+                tr.innerHTML = `
+                    <td>
+                        <strong>${item.nomeCompleto}</strong><br>
+                        <small style="color:#666">ID: ${p.id}</small>
+                    </td>
+                    <td><span class="status-badge ${badgeClass}">${statusG}</span></td>
+                    <td style="text-align:left;">
+                        <div style="font-size:0.9em;">
+                            <b>Por ${p.autor_nome}:</b><br>
+                            ${p.quantidade > 1 ? '<span style="color:red">('+p.quantidade+' un.)</span> ' : ''}${p.descricao}
+                        </div>
+                    </td>
+                    <td><small>${data.conferente}<br>${data.date}</small></td>
+                `;
+
+                // Botão de Gerenciar vinculado ao ID específico
+                const tdAcao = tr.insertCell();
+                const btnData = {
+                    docId: data.docId,      // ID do documento em resultados_conferencias
+                    listaId: data.lista_id, // ID da lista mestra para refletir a solução
+                    itemId: item.id,        // ID do item (single ou multi)
+                    pendenciaId: p.id,      // O ID específico da pendência
+                    nome: item.nomeCompleto,
+                    descricao: p.descricao,
+                    qtd: p.quantidade
+                };
+
+                tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestaoID(${JSON.stringify(btnData)})'>Gerenciar</button>`;
+            });
         });
     }
     wrapper.style.display = 'block';
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+		function abrirModalGestaoID(data) {
+    // Preenche campos ocultos para saber o que estamos editando
+    document.getElementById('gestao-item-nome').textContent = data.nome;
+    document.getElementById('gestao-doc-id').value = data.docId;         // Ref em resultados
+    document.getElementById('gestao-item-id-lista').value = data.itemId; // Ref na lista mestra
+    
+    // Novo campo oculto que você deve adicionar ao seu HTML: <input type="hidden" id="gestao-pendencia-id">
+    const inputPendId = document.getElementById('gestao-pendencia-id');
+    if(inputPendId) inputPendId.value = data.pendenciaId;
+
+    // Mostra a descrição para o Gestor saber o que está tratando
+    document.getElementById('gestao-obs').value = '';
+    document.getElementById('gestao-obs').placeholder = `Ação para: ${data.descricao}`;
+
+    document.getElementById('modal-gestao-ca').style.display = 'flex';
 }
         function fecharTabela(){ 
             document.getElementById('ca-table-wrapper').style.display='none';
@@ -4057,142 +3958,95 @@ function reimprimirPDF(data) {
 
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
-        async function salvarGestaoCa(){
-    // [1] RECUPERAÇÃO DE DADOS DO MODAL
-    const docId = document.getElementById('gestao-doc-id').value;
-    const itemId = document.getElementById('gestao-item-id-lista').value;
-    const status = document.getElementById('gestao-status').value;
-    const obsRaw = document.getElementById('gestao-obs').value.trim();
-    const qtdRemover = parseInt(document.getElementById('gestao-qtd').value);
-    
-    // [2] VALIDAÇÃO BÁSICA
-    if(!obsRaw) return alert("Digite uma observação.");
+        async function salvarGestaoCa() {
+    const docId = document.getElementById('gestao-doc-id').value;          // Doc em resultados_conferencias
+    const itemId = document.getElementById('gestao-item-id-lista').value;  // ID do item
+    const pendId = document.getElementById('gestao-pendencia-id').value;   // ID da pendência (NOVO)
+    const statusAcao = document.getElementById('gestao-status').value;     // Solucionado, Em solução, etc.
+    const obsGestor = document.getElementById('gestao-obs').value.trim();
+
+    if (!obsGestor) return alert("Descreva a ação tomada.");
 
     try {
-        // [3] RECUPERAÇÃO DE METADADOS DO GESTOR E DATA/HORA
-        const nomeGestor = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
-        const dataHoraStr = new Date().toLocaleString('pt-BR');
-        
-        // Texto que será carimbado na linha do HISTÓRICO (item.obs)
-        const carimboTextoHistorico = `[AÇÃO GESTOR: ${status.toUpperCase()}] ${obsRaw}` + 
-                                    (status === 'Remover' ? ` (Removido ${qtdRemover} do estoque)` : '');
+        const nomeGestor = `${currentUserData.posto} ${currentUserData.nome_guerra}`;
+        const dataHora = new Date().toLocaleString('pt-BR');
 
-        // A linha completa a ser adicionada no histórico linear (formato padronizado)
-        const novaLinhaObs = `"${carimboTextoHistorico}" (Por: ${nomeGestor} em ${dataHoraStr})`;
-        
-        // Texto para exibição no campo adminObs (apenas o raw)
-        const obsFinalDisplay = obsRaw; 
+        // 1. Atualizar no Documento de Resultados (O que aparece no Dashboard)
+        const resRef = db.collection('resultados_conferencias').doc(docId);
+        const resSnap = await resRef.get();
+        if (!resSnap.exists) throw new Error("Registro de conferência não encontrado.");
 
+        let resData = resSnap.data();
+        let itensCaa = resData.itensCaa || [];
 
-        // [4] BUSCA DO DOCUMENTO PAI NO FIREBASE
-        const ref = db.collection(COLECAO_RESULTADOS).doc(docId);
-        const snap = await ref.get();
-        if(!snap.exists) return alert("Erro: Conferência não encontrada.");
-        
-        const resData = snap.data();
-        const items = resData.itensCaa || [];
-        
-        // [5] BUSCA INTELIGENTE DO ITEM (Pelo ID)
-        let targetIndex = -1;
-        targetIndex = items.findIndex(i => i.id === itemId);
-        
-        if (targetIndex === -1) {
-            const nomeAlvo = document.getElementById('gestao-item-nome').textContent;
-            targetIndex = items.findIndex(i => i.nomeCompleto === nomeAlvo);
-        }
-
-        if (targetIndex === -1) return alert("Erro: Item não encontrado na lista de pendências. Alguém pode ter modificado antes.");
-        
-        // [6] ATUALIZAÇÃO DOS CAMPOS DO ITEM
-        const itemParaAtualizar = items[targetIndex];
-
-        // *** CORREÇÃO CRUCIAL 1: Atualiza o campo de histórico linear (item.obs) no resultados_conferencias ***
-        let obsAtualizada = itemParaAtualizar.obs || '';
-        if (obsAtualizada.trim() !== '') {
-            obsAtualizada += ' | + NOVA: ';
-        }
-        obsAtualizada += novaLinhaObs;
-        itemParaAtualizar.obs = obsAtualizada; // SALVA A NOVA LINHA NO HISTÓRICO LINEAR
-
-        // Atualiza campos específicos do Administrador (para uso no Dashboard)
-        itemParaAtualizar.statusAdmin = (status === 'Remover' ? 'Solucionado' : status); 
-        itemParaAtualizar.adminObs = obsFinalDisplay; 
-        
-        
-        // [7] SALVA AS MUDANÇAS NO FIREBASE
-        await ref.update({ itensCaa: items });
-        
-        
-        // [8] ATUALIZAÇÃO NA LISTA MESTRE (LÓGICA DO ESTOQUE E PERSISTÊNCIA DO CARIMBO)
-        
-        const listaId = resData.lista_id;
-        if(listaId) {
-            const listRef = db.collection(COLECAO_LISTAS).doc(listaId);
-            const listSnap = await listRef.get();
-            let updated = false;
-
-            if(listSnap.exists) {
-                let listaData = listSnap.data().list;
-                
-                const updateItemInMasterList = (item, isTombamento = false) => {
-                    const isSolved = (status === 'Remover' || status === 'Solucionado');
-                    const isManaged = (status === 'Em solução' || status === 'Cautelado');
-                    
-                    if (isSolved) {
-                        // LÓGICA DE SOLUÇÃO (Remove do estoque ou deleta pendência)
-                        if (status === 'Remover') {
-                            if (!isTombamento) item.quantidadeEsperada -= qtdRemover;
-                            else item.tombamentos.splice(item.tombamentos.findIndex(t => t.tomb === itemId.split('-')[1]), 1);
-                            
-                            if (item.quantidadeEsperada <= 0 || isTombamento) { 
-                                // O Splicing do tombamento foi feito na linha acima. 
-                                // O splicing do item completo precisa de lógica mais complexa, mas vamos manter o delete pendencia aqui.
-                            }
-                        }
-                        
-                        // Atualiza o histórico na lista Mestra antes de deletar a pendência
-                        if(item.pendencia && item.pendencia.obs) item.pendencia.obs = obsAtualizada;
-                        delete item.pendencia;
-                        updated = true;
-                        
-                    } else if (isManaged) {
-                        // LÓGICA DE GESTÃO (ATUALIZA APENAS O CAMPO OBS PARA PERSISTÊNCIA)
-                        if (item.pendencia) {
-                            item.pendencia.obs = obsAtualizada; // Injeta o histórico completo na lista mestra
-                            // item.pendencia.statusAdmin e adminObs NÃO SÃO SALVOS AQUI.
-                            updated = true;
-                        }
-                    }
-                    return updated;
-                };
-
-                for(let s of listaData) {
-                    for(let i = s.itens.length - 1; i >= 0; i--) {
-                        const item = s.itens[i];
-                        if(item.tipo === 'single' && item.id === itemId) {
-                            updateItemInMasterList(item);
-                        }
-                        else if(item.tipo === 'multi' && item.tombamentos) {
-                            const tIndex = item.tombamentos.findIndex(t => `${item.id}-${t.tomb}` === itemId);
-                            if(tIndex > -1) {
-                                updateItemInMasterList(item.tombamentos[tIndex], true);
-                            }
-                        }
-                    }
+        // Localiza o item e o ID da pendência dentro dele
+        const itemRes = itensCaa.find(i => i.id === itemId);
+        if (itemRes && itemRes.pendencias_ids) {
+            const pIdx = itemRes.pendencias_ids.findIndex(p => p.id === pendId);
+            if (pIdx > -1) {
+                if (statusAcao === 'Solucionado') {
+                    itemRes.pendencias_ids.splice(pIdx, 1); // Remove se resolvido
+                } else {
+                    itemRes.pendencias_ids[pIdx].status_gestao = statusAcao.toUpperCase();
+                    itemRes.pendencias_ids[pIdx].descricao += `\n[GESTÃO ${dataHora}]: ${obsGestor}`;
                 }
-                
-                if(updated) await listRef.update({ list: listaData });
             }
         }
+        await resRef.update({ itensCaa });
 
-        // [9] FINALIZAÇÃO
-        alert("Salvo com sucesso!");
+        // 2. Atualizar na Lista Mestra (Persistência para a próxima conferência)
+        const listaId = resData.lista_id;
+        const listaRef = db.collection('listas_conferencia').doc(listaId);
+        const listaSnap = await listaRef.get();
+        
+        if (listaSnap.exists) {
+            let listaMestra = listaSnap.data().list;
+            
+            listaMestra = listaMestra.map(setor => ({
+                ...setor,
+                itens: setor.itens.map(mItem => {
+                    const processar = (obj) => {
+                        if (obj.pendencias_ids) {
+                            const idx = obj.pendencias_ids.findIndex(p => p.id === pendId);
+                            if (idx > -1) {
+                                if (statusAcao === 'Solucionado') {
+                                    // Move para histórico antes de deletar
+                                    if(!obj.historico_vida) obj.historico_vida = [];
+                                    obj.historico_vida.push({
+                                        evento: "SOLUCAO_GESTOR",
+                                        quem: nomeGestor,
+                                        data: dataHora,
+                                        detalhes: `ID ${pendId} resolvido pelo Gestor. Obs: ${obsGestor}`
+                                    });
+                                    obj.pendencias_ids.splice(idx, 1);
+                                } else {
+                                    obj.pendencias_ids[idx].status_gestao = statusAcao.toUpperCase();
+                                }
+                            }
+                        }
+                        return obj;
+                    };
+
+                    if (mItem.tipo === 'multi' && mItem.tombamentos) {
+                        mItem.tombamentos = mItem.tombamentos.map(t => processar(t));
+                    } else if (mItem.id === itemId) {
+                        mItem = processar(mItem);
+                    }
+                    return mItem;
+                })
+            }));
+
+            await listaRef.update({ list: listaMestra });
+        }
+
+        alert("Ação de gestão registrada com sucesso!");
         fecharModalGestao();
         fecharTabela();
-        loadCaaData(); 
-    } catch(e) { 
-        console.error(e); 
-        alert("Erro ao salvar: " + e.message);
+        loadCaaData(); // Recarrega os cards do dashboard
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao salvar ação do gestor: " + e.message);
     }
 }
         // --- FUNÇÕES DE EDITOR (MOVIDAS PARA O ESCOPO GLOBAL) ---
