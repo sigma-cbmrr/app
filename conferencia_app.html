@@ -378,16 +378,13 @@ function renderizarConferencia() {
         
         // Trata Cautela Ativa (Visual Laranja/Diferenciado)
         if (pendenciaObj.status === "CAUTELA_ATV") {
-            return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left;" data-status-type="cautela">
+            return `<div class="pendencia-alert-box status-cautela" style="border-left: 3px solid #f57c00; background-color: #fff8e0; text-align: left; margin-bottom: 8px;" data-status-type="cautela">
                         <div style="font-weight: bold; color: #f57c00; margin-bottom: 5px;"><i class="fas fa-boxes"></i> ${pendenciaObj.quem}</div>
                         <p style="margin: 0; font-size: 0.9em; white-space: pre-wrap;"><i class="fas fa-dot-circle" style="color: #f57c00; margin-right: 5px;"></i>${pendenciaObj.obs}</p>
                     </div>`;
         }
         
-        // Gera o visual dos carimbos (Por Fulano em Data...)
         const htmlFormatado = gerarHtmlVisualApp(pendenciaObj);
-        
-        // 🛡️ PERSISTÊNCIA: Codifica o objeto completo para o botão 'Acrescentar'
         const safeHistorico = encodeURIComponent(JSON.stringify(pendenciaObj));
 
         if (pendenciaObj.isReadOnly) {
@@ -437,7 +434,6 @@ function renderizarConferencia() {
                             <p class="tombamento-descricao-salva"></p>
                             <div class="tombamento-obs-container">
                                 <div class="historico-fixo" style="display:none"></div>
-
                                 <label>Descreva a NOVA alteração:</label>
                                 <textarea placeholder="Detalhe a alteração aqui..."></textarea>
                                 <button type="button" class="btn-salvar-alteracao" onclick="salvarTombamento(this)">SALVAR</button>
@@ -447,11 +443,10 @@ function renderizarConferencia() {
                     window.itemStatus[uid] = { status: 'pending', obs: '' };
                 });
                 htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
-            
             } 
             // CASO B: ITENS ÚNICOS (SINGLE)
             else {
-                // 🛑 NOVO: Lógica de Identificação de Cautelas para Single 🛑
+                // 🛑 FORÇA O CÁLCULO DO SALDO REAL (Resolve o "10 de 10")
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const hasCautela = totalCautelado > 0;
                 const saldoReal = (Number(item.quantidadeEsperada) || 0) - totalCautelado;
@@ -460,7 +455,6 @@ function renderizarConferencia() {
                     `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>` : 
                     (hasCautela ? `<button class="action-button sa-ok" onclick="setItemStatus(this, 'cautela_ciente')">Ciente</button><button class="action-button btn-acrescentar" onclick="setItemStatus(this, 'alert')">+ Alteração</button>` : `<button class="action-button sa-ok" onclick="setItemStatus(this, 'ok')">S/A</button><button class="action-button ca-alert" onclick="setItemStatus(this, 'alert')">C/A</button>`);
                 
-                // 🛑 NOVO: Montagem do Carimbo para Single 🛑
                 let alertaCautelaSingleHtml = '';
                 if (hasCautela && !isCautela) {
                     const infoCautelas = item.cautelas.map(c => `- ${c.quantidade}un p/ ${c.destinatario}`).join('\n');
@@ -471,6 +465,7 @@ function renderizarConferencia() {
                     });
                 }
 
+                // 🛑 GARANTE QUE A CAUTELA E A PENDÊNCIA (MANTER) APAREÇAM JUNTAS
                 htmlItens += `
                     <div class="item-conferencia" data-type="single" data-id="${item.id}">
                         <div class="item-header">
@@ -479,12 +474,13 @@ function renderizarConferencia() {
                             <span class="item-quantidade">QTD: ${saldoReal} (de ${item.quantidadeEsperada || 1})</span>
                         </div>
                         <div class="item-options">${singleBtnHtml}</div>
-                        ${alertaCautelaSingleHtml}
-                        ${montarPendenciaHtml(item.id, item.pendencia)}
+                        <div class="alerts-wrapper">
+                            ${alertaCautelaSingleHtml}
+                            ${montarPendenciaHtml(item.id, item.pendencia)}
+                        </div>
                         <p class="descricao-salva"></p>
                         <div class="alteracao-container">
                             <div class="historico-fixo" style="display:none"></div>
-
                             <label>Descreva a NOVA alteração:</label>
                             <textarea placeholder="Detalhe a alteração aqui..."></textarea>
                             <button type="button" class="btn-salvar-alteracao" onclick="salvarItem(this)">SALVAR</button>
@@ -516,48 +512,6 @@ function renderizarConferencia() {
     }
     
     updateOverallStatus();
-}
-        function setItemStatus(btn, status) { 
-    const item = btn.closest('.item-conferencia');
-    const setor = btn.closest('.setor'); 
-    const uid = item.dataset.id;
-    
-    item.querySelectorAll('.action-button').forEach(b=>b.classList.remove('active')); 
-    btn.classList.add('active'); 
-    item.querySelector('.descricao-salva').style.display='none'; 
-    item.querySelector('.alteracao-container').style.display='none';
-    const pb = item.querySelector('.pendencia-alert-box'); 
-    
-    if (pb && pb.getAttribute('data-status-type') !== 'cautela') {
-        pb.style.display='none';
-    }
-    
-    if (status === 'cautela_ciente') {
-        item.className = 'item-conferencia status-alert';
-        item.querySelector('.status-icon').className = 'status-icon alert';
-        // 🛡️ Mantém KEEP para a finalizarConferencia preservar o texto
-        window.itemStatus[uid] = { status: 'KEEP', obs: '' }; 
-        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-    }
-    else if(status==='ok'){
-        item.className='item-conferencia status-ok';
-        item.querySelector('.status-icon').className='status-icon ok';
-        window.itemStatus[uid]={status:'S/A',obs:''};
-        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'none';
-    } 
-    else { 
-        item.className='item-conferencia status-alert';
-        item.querySelector('.status-icon').className='status-icon alert'; 
-        item.querySelector('.alteracao-container').style.display='block';
-        window.itemStatus[uid]={status:'PENDING_CA',obs:''};
-        item.querySelector('textarea').focus();
-        if(pb && pb.getAttribute('data-status-type') === 'cautela') pb.style.display = 'block';
-    } 
-    
-    salvarRascunho();
-    if(setor) updateSetorStatus(setor); 
-    updateOverallStatus(); 
-    if((status==='ok' || status==='cautela_ciente') && setor) checkSetorCompletion(setor, uid);
 }
         
         function setTombamentoStatus(btn, status) { 
