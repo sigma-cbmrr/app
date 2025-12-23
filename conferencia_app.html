@@ -1108,58 +1108,58 @@ function abrirFormNovoID(uid) {
 }
 
 function salvarNovoID(uid, qtd, tipo) {
-    const obsEl = document.getElementById(`obs-${uid}`);
-    const obsDigitada = obsEl.value.trim();
-    const qtdInformada = parseInt(qtd);
+    const obsField = document.getElementById(`obs-${uid}`);
+    const descricao = obsField.value.trim();
 
-    if (obsDigitada.length < 3) return alert("Descreva o problema com mais detalhes.");
+    if (!descricao) {
+        alert("Por favor, descreva o problema.");
+        return;
+    }
 
-    const novoID = {
-        id: "PEND_" + Date.now(), // ID Único baseado em tempo
-        tipo: "PENDENCIA",
-        data_criacao: new Date().toLocaleDateString('pt-BR'),
-        autor_uid: userInfo.uid,
-        autor_nome: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
-        descricao: obsDigitada,
-        quantidade: qtdInformada,
-        status_gestao: "PENDENTE",
-        id_conferencia_origem: "CONF_TEMP", // Será atualizado na gravação final
-        herdado_de: null
+    // 1. Cria o objeto da nova pendência (Simulando o que virá do Firebase)
+    const novaPendencia = {
+        id: "TEMP-" + Date.now(), // ID temporário até o salvamento real
+        autor_nome: militarLogado ? militarLogado.nome : "Conferente",
+        descricao: descricao,
+        quantidade: parseInt(qtd) || 1,
+        data_criacao: new Date().toLocaleString('pt-BR'),
+        status_gestao: "PENDENTE"
     };
 
-    // Inicializa o array se não existir no estado temporário
-    if (!window.itemStatus[uid].pendencias_ids) {
-        window.itemStatus[uid].pendencias_ids = [];
-    }
+    // 2. Localiza o item nos dados carregados para injetar a pendência
+    // Assim, quando a tela renderizar de novo, o card já existe nos dados
+    dadosConferencia.forEach(setor => {
+        setor.itens.forEach(item => {
+            if (tipo === 'single' && item.id === uid) {
+                if (!item.pendencias_ids) item.pendencias_ids = [];
+                item.pendencias_ids.push(novaPendencia);
+            } else if (tipo === 'multi' && item.tombamentos) {
+                item.tombamentos.forEach(tomb => {
+                    const tombUid = `${item.id}-${tomb.tomb}`;
+                    if (tombUid === uid) {
+                        if (!tomb.pendencias_ids) tomb.pendencias_ids = [];
+                        tomb.pendencias_ids.push(novaPendencia);
+                    }
+                });
+            }
+        });
+    });
 
-    // Adiciona o novo ID ao array de conferência deste item
-    window.itemStatus[uid].pendencias_ids.push(novoID);
-    window.itemStatus[uid].status = 'C/A';
-    
-    // Limpa e esconde o formulário
-    obsEl.value = '';
+    // 3. Marca o status na memória para não perder o "verde" dos outros itens
+    window.itemStatus[uid] = { status: 'C/A' };
+
+    // 4. Feedback e fechamento do formulário
+    obsField.value = '';
     document.getElementById(`form-${uid}`).style.display = 'none';
-
-    // Atualiza a visualização local para mostrar o novo card imediatamente
-    const wrapper = document.querySelector(`[data-id="${uid.split('-')[0]}"] .alerts-wrapper`);
-    // Se for tombamento, o wrapper está dentro do tombamento-container
-    const tombWrapper = document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"] .alerts-wrapper`);
     
-    const targetWrapper = tombWrapper || wrapper;
-    if (targetWrapper) {
-        // Forçamos uma re-renderização parcial ou apenas adicionamos o card
-        // Por simplicidade neste passo, chamaremos a atualização de status que já reflete na UI
-        const setor = targetWrapper.closest('.setor');
-        updateSetorStatus(setor);
-        updateOverallStatus();
-        
-        // Alerta visual de sucesso
-        alert("Alteração registrada localmente!");
-        // Re-renderiza para mostrar o botão S/A sumindo
-        renderizarConferencia(); 
-    }
+    // 5. RE-RENDERIZAÇÃO CONTROLADA
+    // Em vez de recarregar a página, chamamos a função que desenha os itens
+    // Ela vai ler os 'pendencias_ids' que acabamos de injetar acima
+    renderizarConferencia();
+    
+    alert("Alteração registrada! Lembre-se de FINALIZAR ao término para salvar no banco.");
 }
-
+    
 function manterID(pendenciaId, uid) {
     const card = document.getElementById(`card-${pendenciaId}`);
     if (card) {
