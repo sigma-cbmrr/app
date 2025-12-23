@@ -376,8 +376,7 @@ function renderizarConferencia() {
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
 
-        // 1. Renderiza os carimbos de Cautela (Sombra do sistema de cautelas)
-        // Itens Single usam o array 'cautelas', itens Multi usam o objeto 'cautela' dentro do tombamento
+        // 1. Renderiza os carimbos de Cautela
         const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
         
         cautelasAtivas.forEach(c => {
@@ -430,12 +429,12 @@ function renderizarConferencia() {
                     const hasCautela = !!tomb.cautela;
 
                     htmlTombamentos += `
-                        <div class="tombamento-container" data-tomb="${tomb.tomb}">
-                            <div class="tombamento-controls">
+                        <div class="tombamento-container" data-tomb="${tomb.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+                            <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
                                 <span>Tomb.: <b>${tomb.tomb}</b> ${hasCautela ? '🔒' : ''}</span>
-                                <div class="tombamento-options">
-                                    ${(!hasPendencia && !hasCautela) ? `<button class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
-                                    <button class="action-button ca-alert" onclick="abrirFormNovoID('${uid}')">C/A</button>
+                                <div class="tombamento-options" style="display: flex; gap: 5px;">
+                                    ${(!hasPendencia && !hasCautela) ? `<button type="button" class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                                    <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}')">C/A</button>
                                 </div>
                             </div>
                             <div class="alerts-wrapper">${montarPendenciaHtml(uid, tomb)}</div>
@@ -445,9 +444,9 @@ function renderizarConferencia() {
                             </div>
                         </div>`;
                     totalItensNoSetor++; 
-                    window.itemStatus[uid] = { status: 'pending' };
+                    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
                 });
-                htmlItens += `<div class="item-conferencia" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
+                htmlItens += `<div class="item-conferencia item-has-tombamentos" data-type="multi" data-id="${item.id}"><div class="item-header"><span class="status-icon"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } 
             else {
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
@@ -464,9 +463,9 @@ function renderizarConferencia() {
                                 <span class="item-quantidade" style="font-size:0.8em; color:#666">Saldo: ${saldoReal} de ${item.quantidadeEsperada}</span>
                             </div>
                         </div>
-                        <div class="item-options" style="margin-top:10px">
-                            ${(!hasPendencia && !hasCautela) ? `<button class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${item.id}')">S/A</button>` : ''}
-                            <button class="action-button ca-alert" onclick="abrirFormNovoID('${item.id}')">C/A</button>
+                        <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
+                            ${(!hasPendencia && !hasCautela) ? `<button type="button" class="action-button sa-ok" onclick="setItemStatusID(this, 'ok', '${item.id}')">S/A</button>` : ''}
+                            <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${item.id}')">C/A</button>
                         </div>
                         <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(item.id, item)}</div>
                         <div class="form-novo-id" id="form-${item.id}" style="display:none; padding: 10px; background: #f9f9f9; border: 1px dashed #ccc; margin-top: 5px;">
@@ -476,7 +475,7 @@ function renderizarConferencia() {
                         </div>
                     </div>`;
                 totalItensNoSetor++; 
-                window.itemStatus[item.id] = { status: 'pending' };
+                if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
             }
         });
         
@@ -1216,16 +1215,28 @@ function resolverID(pendenciaId, uid, qtdOriginal) {
 }
 
 function setItemStatusID(btn, status, uid) {
-    const item = btn.closest('.item-conferencia') || btn.closest('.tombamento-container');
+    // 🛡️ CORREÇÃO: Busca o container IMEDIATO (Tombamento ou Item Single)
+    // Isso impede que a limpeza de classes 'active' afete os vizinhos.
+    const container = btn.closest('.tombamento-container') || btn.closest('.item-conferencia');
     const setor = btn.closest('.setor');
 
     if (status === 'ok') {
         window.itemStatus[uid] = { status: 'S/A' };
-        item.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
+        
+        // Limpa 'active' apenas dentro deste tombamento específico
+        container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        const icon = item.querySelector('.status-icon');
-        if(icon) icon.className = 'status-icon ok';
+        // Trata o ícone visual
+        const icon = container.querySelector('.status-icon') || container.closest('.item-conferencia').querySelector('.status-icon');
+        
+        // Se for tombamento, chama a lógica de verificação global do item pai
+        const itemPai = btn.closest('.item-conferencia');
+        if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
+            updateItemMainStatusDisplay(itemPai);
+        } else if (icon) {
+            icon.className = 'status-icon ok';
+        }
     }
     
     updateSetorStatus(setor);
