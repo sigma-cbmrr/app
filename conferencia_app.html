@@ -491,39 +491,45 @@ function renderizarConferencia() {
 
     // --- FUNÇÃO INTERNA ATUALIZADA COM ÍCONE DE EDIÇÃO ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
-        let htmlAcumulado = '';
-        
-        // 1. Cautelas Ativas
-        const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
-        cautelasAtivas.forEach(c => {
-            htmlAcumulado += `
-                <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 5px;">
-                    <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;"><i class="fas fa-lock"></i> CAUTELA ATIVA</div>
-                    <div style="font-size: 0.9em; color: #333;">${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b></div>
-                    <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="setItemStatusID(this, 'cautela_ciente', '${uid}')">Ciente</button>
-                </div>`;
-        });
+    let htmlAcumulado = '';
+    
+    // 1. Cautelas Ativas
+    const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
+    cautelasAtivas.forEach(c => {
+        htmlAcumulado += `
+            <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 5px;">
+                <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;"><i class="fas fa-lock"></i> CAUTELA ATIVA</div>
+                <div style="font-size: 0.9em; color: #333;">${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b></div>
+                <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="setItemStatusID(this, 'cautela_ciente', '${uid}')">Ciente</button>
+            </div>`;
+    });
 
-        // 2. Pendências Físicas (Carimbos)
-        if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
+    // 2. Pendências Físicas (Carimbos)
+    if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
         itemOuTomb.pendencias_ids.forEach(p => {
             const isTemp = String(p.id).startsWith('TEMP-');
 
             // --- REGRA DE BOTÕES ---
             let acoesHtml = '';
-            let botaoEditarHtml = '';
+            let botoesGestaoHtml = ''; // Espaço para Editar e Excluir
 
             if (isTemp) {
-                // É lançamento novo: Pode editar, mas não faz sentido "manter/resolver" algo que nem foi salvo ainda
-                botaoEditarHtml = `
-                    <span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" 
-                           style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;" title="Corrigir este relato">
-                           <i class="fas fa-edit"></i>
-                    </span>`;
+                // Lançamento novo: Pode EDITAR e EXCLUIR
+                botoesGestaoHtml = `
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" 
+                               style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;" title="Editar seu relato">
+                               <i class="fas fa-edit"></i>
+                        </span>
+                        <span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" 
+                               style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;" title="Apagar este relato">
+                               <i class="fas fa-trash-alt"></i>
+                        </span>
+                    </div>`;
                 acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
             } else {
-                // É carimbo antigo: NÃO pode editar, mas DEVE Manter ou Resolver
-                botaoEditarHtml = ''; // Bloqueado para antigos
+                // Carimbo antigo: Somente MANTER ou RESOLVER
+                botoesGestaoHtml = ''; 
                 acoesHtml = `
                     <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
                         <button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')">
@@ -541,7 +547,7 @@ function renderizarConferencia() {
                         <span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? '<b>LANÇAMENTO ATUAL</b>' : '<b>Relatado por:</b> ' + p.autor_nome}</span>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span>${p.data_criacao}</span>
-                            ${botaoEditarHtml}
+                            ${botoesGestaoHtml}
                         </div>
                     </div>
                     <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
@@ -1423,6 +1429,37 @@ function processarAcaoFinalModal() {
     if (editado) {
         renderizarConferencia();
         console.log("Relato editado com sucesso.");
+    }
+}
+    function confirmarExclusaoRelato(pendenciaId, uid) {
+    if (!confirm("Deseja apagar este relato de alteração? Isso removerá o item da lista de pendências atuais.")) return;
+
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    let excluido = false;
+
+    fonteDados.forEach(setor => {
+        setor.itens.forEach(item => {
+            const alvos = item.tombamentos ? item.tombamentos : [item];
+            alvos.forEach(alvo => {
+                if (alvo.pendencias_ids) {
+                    const index = alvo.pendencias_ids.findIndex(p => p.id === pendenciaId);
+                    if (index > -1) {
+                        alvo.pendencias_ids.splice(index, 1);
+                        excluido = true;
+                        
+                        // Se não sobraram pendências, resetamos o status do item para pending
+                        if (alvo.pendencias_ids.length === 0) {
+                            delete window.itemStatus[uid]; 
+                        }
+                    }
+                }
+            });
+        });
+    });
+
+    if (excluido) {
+        renderizarConferencia();
+        updateOverallStatus();
     }
 }
     
