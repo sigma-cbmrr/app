@@ -48,13 +48,14 @@
         
         .texto-admin { font-weight: bold; color: #0d47a1; }
         .linha-obs { color: #333; font-weight: 500; }
-        
-        .pendencia-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; border-top: 1px dotted #ccc; padding-top: 5px; }
-        .btn-manter { background-color: #5d6d7e !important; color: white !important; border: none !important; padding: 8px 12px !important; border-radius: 6px !important; font-weight: bold !important; text-transform: uppercase !important; font-size: 0.75em !important; cursor: pointer !important; transition: background 0.3s !important; display: inline-flex !important; align-items: center !important; gap: 5px !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important; }
+        .btn-manter, .btn-resolver { flex: 1; border: none; padding: 10px 5px; border-radius: 6px; font-weight: bold; text-transform: uppercase; font-size: 0.75em; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 5px; transition: filter 0.2s; }
+        .btn-manter { background-color: #5d6d7e; color: white; }
+        .pendencia-actions { display: flex; gap: 8px; margin-top: 10px; border-top: 1px dotted #ccc; padding-top: 8px; }
+        .btn-manter:active, .btn-resolver:active { filter: brightness(1.2); }
         .btn-manter:hover { background-color: #34495e !important; }
         .btn-acrescentar { background-color: #e0e0e0; border: 1px solid #ccc; color: #333; font-size: 0.8em; padding: 5px 10px; cursor: pointer; border-radius: 4px; }
-        .btn-resolver { background-color: #1b8a3e !important; color: white !important; border: none !important; padding: 8px 12px !important; border-radius: 6px !important; font-weight: bold !important; text-transform: uppercase !important; font-size: 0.75em !important; cursor: pointer !important; transition: background 0.3s !important; display: inline-flex !important; align-items: center !important; gap: 5px !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important; }
-        .btn-resolver:hover { background-color: #14682f !important; }
+        span[onclick] { min-width: 35px; min-height: 35px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(0,0,0,0.02); }
+        .btn-resolver { background-color: #1b8a3e; color: white; }
         .historico-fixo { background-color: #eeeeee; border: 1px solid #ccc; color: #555; padding: 8px; border-radius: 4px; font-size: 0.85em; margin-bottom: 5px; font-style: italic; display: none; }
         .tombamento-container { border-top: 1px dotted #eee; margin-top: 5px; padding-top: 5px; text-align: left; padding-bottom: 5px; }
         .tombamento-controls { display: flex; justify-content: space-between; align-items: center; font-size: 0.85em; }
@@ -475,14 +476,19 @@ function renderizarConferencia() {
 
     let htmlSetores = ''; 
     const setorIds = []; 
-    
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
     fonteDados.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
+    // --- FUNÇÃO INTERNA CORRIGIDA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
+        
+        // Verificamos o status local desta sessão para este item específico
+        const statusLocal = window.itemStatus[uid] || {};
+
+        // 1. Cautelas Ativas
         const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
         cautelasAtivas.forEach(c => {
             htmlAcumulado += `
@@ -493,9 +499,14 @@ function renderizarConferencia() {
                 </div>`;
         });
 
+        // 2. Pendências Físicas (Carimbos)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
+                
+                // Checagem CRÍTICA: Se esta pendência específica já foi marcada como mantida agora
+                const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
+
                 let acoesHtml = '';
                 let botoesGestaoHtml = '';
 
@@ -512,7 +523,15 @@ function renderizarConferencia() {
                             </span>
                         </div>`;
                     acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
+                } else if (jaFoiMantido) {
+                    // SE JÁ FOI MANTIDO: Removemos os botões e mostramos o selo verde
+                    botoesGestaoHtml = '';
+                    acoesHtml = `
+                        <div style="color:#1b8a3e; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:8px; margin-top:10px;">
+                            <i class="fas fa-check-circle"></i> MANTIDO NESTA CONFERÊNCIA
+                        </div>`;
                 } else {
+                    // CARIMBO ANTIGO PENDENTE: Mostra os botões originais
                     botoesGestaoHtml = ''; 
                     acoesHtml = `
                         <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
@@ -526,7 +545,7 @@ function renderizarConferencia() {
                 }
 
                 htmlAcumulado += `
-                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : '#d90f23'}; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
+                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: ${jaFoiMantido ? '#f0fff4' : '#fff'};">
                         <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
                             <span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? '<b>LANÇAMENTO ATUAL</b>' : '<b>Relatado por:</b> ' + p.autor_nome}</span>
                             <div style="display:flex; align-items:center; gap:8px;">
@@ -582,11 +601,9 @@ function renderizarConferencia() {
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPendencias = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 const saldoReal = totalEsperado - totalCautelado - totalPendencias;
-                
-                // LÓGICA DE COR DO SALDO
                 const corSaldo = saldoReal < totalEsperado ? '#d90f23' : '#1b8a3e';
-
                 const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
+
                 if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
                 const currentStatus = window.itemStatus[item.id].status;
 
@@ -1541,22 +1558,36 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
 }
 
 function manterID(pendenciaId, uid) {
-    const card = document.getElementById(`card-${pendenciaId}`);
-    if (card) {
-        card.style.borderColor = "#1b8a3e";
-        card.style.backgroundColor = "#f0fff4";
-        card.querySelector('.pendencia-actions').innerHTML = '<div style="color:#1b8a3e; font-weight:bold; text-align:center; width:100%">✔ Mantido para esta conferência</div>';
-        
-        if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
-        if (!window.itemStatus[uid].ids_mantidos) window.itemStatus[uid].ids_mantidos = [];
-        window.itemStatus[uid].ids_mantidos.push(pendenciaId);
-        window.itemStatus[uid].status = 'C/A';
-
-        const setor = card.closest('.setor');
-        updateSetorStatus(setor);
-        updateOverallStatus();
-        checkSetorCompletion(setor, uid);
+    // 1. Inicializa o status do item na memória se não existir
+    if (!window.itemStatus[uid]) {
+        window.itemStatus[uid] = { status: 'pending' };
     }
+    
+    // 2. Inicializa o array de IDs mantidos
+    if (!window.itemStatus[uid].ids_mantidos) {
+        window.itemStatus[uid].ids_mantidos = [];
+    }
+    
+    // 3. Adiciona o ID se ele ainda não estiver na lista (evita duplicatas)
+    if (!window.itemStatus[uid].ids_mantidos.includes(pendenciaId)) {
+        window.itemStatus[uid].ids_mantidos.push(pendenciaId);
+    }
+    
+    // 4. Marca o item como Conferido com Alteração (C/A)
+    window.itemStatus[uid].status = 'C/A';
+
+    // 5. ESSENCIAL: Dispara a re-renderização completa da tela
+    // Isso fará com que o montarPendenciaHtml veja o ID no array 'ids_mantidos'
+    renderizarConferencia();
+    
+    // 6. Atualiza contadores globais e avanços automáticos
+    updateOverallStatus();
+    
+    // Opcional: Feedback visual de scroll
+    setTimeout(() => {
+        const el = document.getElementById(`card-${pendenciaId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
 }
 
 function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
@@ -1614,8 +1645,10 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     });
 
     if (acaoConcluida) {
+        if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
+        window.itemStatus[uid].status = 'C/A';
         renderizarConferencia();
-        
+        updateOverallStatus();
         // --- ADICIONANDO O FOCO E SCROLL ---
         setTimeout(() => {
             // Procura o elemento pelo UID (ID do item ou ID-TOMB)
