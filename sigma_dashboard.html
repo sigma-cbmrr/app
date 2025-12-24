@@ -7146,77 +7146,70 @@ async function findUidByName(nomeCompleto) {
     }
 }
 		async function estornarEResetarCautela(cautelaId) {
-    if (!confirm("Deseja estornar esta cautela? Os itens voltarão ao estoque e os tombamentos serão liberados.")) return;
+    if (!confirm("Deseja estornar esta cautela?")) return;
 
-    // Caminho extraído do seu log: listas_conferencias/alfa_abt17
-    const caminhoLista = 'alfa_abt17'; 
+    // Tente verificar no seu Firebase se o ID do documento é 'alfa_abt17' 
+    // ou se é um código tipo 'Bm72Kmm...'
+    const idDocumentoLista = 'alfa_abt17'; 
 
     try {
-        // 1. Referência do documento da cautela
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const docCautela = await cautelaRef.get();
         
         if (!docCautela.exists) {
-            alert("❌ Erro: Documento da cautela não encontrado em 'cautelas_abertas'.");
+            alert("❌ Cautela não encontrada em 'cautelas_abertas'.");
             return;
         }
         
         const dadosCautela = docCautela.data();
-        const listaRef = db.collection('listas_conferencias').doc(caminhoLista);
+        const listaRef = db.collection('listas_conferencias').doc(idDocumentoLista);
 
         await db.runTransaction(async (transaction) => {
             const listaDoc = await transaction.get(listaRef);
             
             if (!listaDoc.exists) {
-                throw new Error(`Lista mestra não encontrada em listas_conferencias/${caminhoLista}`);
+                throw new Error("Não encontrei o documento em listas_conferencias/" + idDocumentoLista);
             }
             
             let dadosMestra = listaDoc.data().list || [];
 
-            // 2. Percorre os itens que estavam na cautela para "limpar" a lista mestra
-            dadosCautela.itens.forEach(itemCautelado => {
-                dadosMestra.forEach(setor => {
-                    // Localiza o item pai pelo id_base (Ex: 56911524-64012364)
-                    let itemNoEstoque = setor.itens.find(i => i.id === itemCautelado.id_base);
-                    
-                    if (itemNoEstoque) {
-                        if (itemCautelado.tipo === 'multi') {
-                            // Localiza o tombamento específico e DELETA o objeto cautela
-                            let t = itemNoEstoque.tombamentos.find(tomb => tomb.tomb === itemCautelado.tombamento);
-                            if (t) {
-                                // Remove a trava de cautela e reseta status
-                                if (t.cautela) delete t.cautela;
+            // VARREDURA TOTAL: Não confiamos no que a cautela diz ter. 
+            // Varremos a lista inteira limpando qualquer menção ao ID desta cautela.
+            dadosMestra.forEach(setor => {
+                setor.itens.forEach(item => {
+                    // Limpa itens MULTI (Tombamentos)
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        item.tombamentos.forEach(t => {
+                            if (t.cautela && t.cautela.id === cautelaId) {
+                                delete t.cautela;
                                 t.status = 'pending';
                                 t.status_conferencia = 'OK';
                             }
-                        } else {
-                            // Para itens SINGLE: Remove a cautela do array de cautelas
-                            if (itemNoEstoque.cautelas) {
-                                itemNoEstoque.cautelas = itemNoEstoque.cautelas.filter(c => c.id !== cautelaId && c.id_cautela !== cautelaId);
-                            }
-                            // Reseta contadores auxiliares se existirem
-                            itemNoEstoque.quantidadeCautelada = Math.max(0, (itemNoEstoque.quantidadeCautelada || 0) - (itemCautelado.quantidade || 0));
-                        }
+                        });
+                    }
+                    
+                    // Limpa itens SINGLE
+                    if (item.tipo === 'single' && item.cautelas) {
+                        item.cautelas = item.cautelas.filter(c => c.id !== cautelaId);
+                    }
 
-                        // Remove também do histórico de vida do item o registro dessa saída
-                        if (itemNoEstoque.historico_vida) {
-                            itemNoEstoque.historico_vida = itemNoEstoque.historico_vida.filter(h => h.id_doc !== cautelaId);
-                        }
+                    // Limpa o Histórico de Vida do item (Muito importante!)
+                    if (item.historico_vida) {
+                        item.historico_vida = item.historico_vida.filter(h => h.id_doc !== cautelaId);
                     }
                 });
             });
 
-            // 3. Salva a lista mestra limpa e deleta o registro da cautela aberta
             transaction.update(listaRef, { list: dadosMestra });
             transaction.delete(cautelaRef);
         });
 
-        alert("✅ Sucesso! Itens devolvidos ao armário e cautela excluída.");
+        alert("✅ Reset concluído. O 2º tombamento e todos os outros vestígios foram limpos.");
         location.reload();
 
     } catch (error) {
-        console.error("Erro detalhado no estorno:", error);
-        alert("Erro ao processar estorno: " + error.message);
+        console.error("Erro no estorno:", error);
+        alert("Erro: " + error.message + "\n\nVerifique se o ID do documento em 'listas_conferencias' é realmente 'alfa_abt17'.");
     }
 }
     </script>
