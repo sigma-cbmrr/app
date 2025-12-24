@@ -1199,6 +1199,8 @@ function renderizarConferencia() {
 }
     // --- NOVAS FUNÇÕES DE CONTROLE DE IDS ÚNICOS ---
 
+// --- NOVAS FUNÇÕES DE CONTROLE DE IDS ÚNICOS ---
+
 function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     const modal = document.getElementById('modal-nova-pendencia');
     const inputQtd = document.getElementById('modal-input-qtd');
@@ -1206,26 +1208,33 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     const inputObs = document.getElementById('modal-input-obs');
     const infoMax = document.getElementById('modal-info-max');
     const subtitulo = document.getElementById('modal-subtitulo-detalhe');
+    const btnConfirmar = document.getElementById('modal-btn-confirmar');
     
+    // Configuração de Identidade para INCLUSÃO
+    document.getElementById('modal-acao-objetivo').value = "incluir";
     inputObs.value = '';
     document.getElementById('modal-uid').value = uid;
     document.getElementById('modal-tipo').value = tipo;
     
     const nomeLimpo = nomeItem.replace(/\\'/g, "'");
     document.getElementById('modal-titulo-item').innerText = nomeLimpo;
+    document.getElementById('modal-label-obs').innerText = "Descrição do Problema:";
+    document.getElementById('modal-label-qtd').innerText = "Unidades Afetadas:";
+    inputObs.placeholder = "Descreva o problema...";
+
+    // Estética Original (Vinho/Vermelho)
+    btnConfirmar.innerText = "INCLUIR";
+    btnConfirmar.style.backgroundColor = "#800020";
+    document.querySelector('.modal-content').style.borderTopColor = "#d90f23";
 
     if (tipo === 'multi') {
-        // --- VISUAL PARA TOMBAMENTO ---
-        // Exibimos apenas a referência do tombamento de forma limpa
         subtitulo.innerHTML = `Referência Tomb.: <span style="color:#d90f23; font-weight:bold;">${tombReal}</span>`;
-        
         grupoQtd.style.setProperty('display', 'none', 'important');
         inputQtd.value = 1;
         inputQtd.max = 1;
     } else {
         subtitulo.innerHTML = ""; 
         grupoQtd.style.setProperty('display', 'block', 'important');
-        
         const saldoReal = parseInt(saldo) || 0;
         inputQtd.max = saldoReal;
         inputQtd.value = 1;
@@ -1240,23 +1249,25 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     modal.style.display = 'flex';
     setTimeout(() => { if(inputObs) inputObs.focus(); }, 150);
 }
-    function fecharModalPendencia() {
+
+function fecharModalPendencia() {
     const modal = document.getElementById('modal-nova-pendencia');
     if (modal) {
         modal.style.display = 'none';
-        // Limpa a observação para o próximo uso
         document.getElementById('modal-input-obs').value = '';
     }
-        function abrirModalResolver(pendenciaId, uid, qtdOriginal, descricaoOriginal) {
+}
+
+function abrirModalResolver(pendenciaId, uid, qtdOriginal, descricaoOriginal) {
     const modal = document.getElementById('modal-nova-pendencia');
     const inputQtd = document.getElementById('modal-input-qtd');
     const inputObs = document.getElementById('modal-input-obs');
     const btnConfirmar = document.getElementById('modal-btn-confirmar');
     
-    // Configuração de Identidade
+    // Configuração de Identidade para RESOLUÇÃO
     document.getElementById('modal-acao-objetivo').value = "resolver";
     document.getElementById('modal-uid').value = uid;
-    document.getElementById('modal-tipo').value = pendenciaId; // Passamos o ID da pendência aqui
+    document.getElementById('modal-tipo').value = pendenciaId; 
 
     // Ajuste de Textos para "Modo Solução"
     document.getElementById('modal-titulo-item').innerText = "Resolver Alteração";
@@ -1280,9 +1291,8 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     modal.style.display = 'flex';
     setTimeout(() => inputObs.focus(), 150);
 }
-        
-}
-    function processarAcaoFinalModal() {
+
+function processarAcaoFinalModal() {
     const objetivo = document.getElementById('modal-acao-objetivo').value;
     const uid = document.getElementById('modal-uid').value;
     const qtd = document.getElementById('modal-input-qtd').value;
@@ -1294,69 +1304,27 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     }
 
     if (objetivo === "resolver") {
-        // Se objetivo é resolver, tipoOuPendenciaId contém o ID da pendência original (ex: TEMP-...)
         resolverID(tipoOuPendenciaId, uid, qtd, obs);
     } else {
-        // Fluxo normal de inclusão
         salvarNovoID(uid, qtd, tipoOuPendenciaId, obs);
     }
     
     fecharModalPendencia();
 }
-    function confirmarInclusaoPendencia() {
-    const uid = document.getElementById('modal-uid').value;
-    const tipo = document.getElementById('modal-tipo').value;
-    const inputQtd = document.getElementById('modal-input-qtd');
-    const obs = document.getElementById('modal-input-obs').value.trim();
-
-    // 1. Validação de Descrição
-    if (obs.length < 3) {
-        return alert("Por favor, descreva o problema com mais detalhes.");
-    }
-
-    // 2. Validação Inteligente de Quantidade (Trava de Saldo)
-    const qtdDigitada = parseInt(inputQtd.value) || 0;
-    const maxPermitido = parseInt(inputQtd.max) || 1;
-
-    if (tipo === 'single') {
-        if (qtdDigitada < 1) {
-            return alert("A quantidade deve ser pelo menos 1.");
-        }
-        if (qtdDigitada > maxPermitido) {
-            return alert(`Quantidade inválida! Existem apenas ${maxPermitido} unidades disponíveis para este item (descontando cautelas).`);
-        }
-    }
-
-    // 3. Chamada da Função Principal de Salvamento
-    // Passamos a observação e quantidade validadas para a função que injeta no 'dadosConferencia'
-    salvarNovoID(uid, qtdDigitada, tipo, obs);
-    
-    // 4. Fechamento do Modal e Feedback
-    fecharModalPendencia();
-}
-
 
 function salvarNovoID(uid, qtd, tipo, obsModal = null) {
-    // 1. Definição da Observação (se vier do modal ou do elemento fixo antigo)
-    const obsDigitada = obsModal ? obsModal.trim() : (document.getElementById(`obs-${uid}`)?.value.trim() || "");
+    const obsDigitada = obsModal ? obsModal.trim() : "";
     const qtdInformada = parseInt(qtd) || 1;
 
-    // 2. Validação Básica
-    if (obsDigitada.length < 3) {
-        return alert("Por favor, descreva o problema com mais detalhes.");
-    }
-
-    // 3. Captura do Nome Institucional para o Carimbo (Ex: 3º SGT QPCBM JHONATH)
     const militarInfoEl = document.getElementById('militar-info');
     let nomeAssinatura = "";
     if (militarInfoEl) {
         nomeAssinatura = militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim();
     }
     if (!nomeAssinatura) {
-        nomeAssinatura = userInfo.nome_militar_completo || `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+        nomeAssinatura = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     }
 
-    // 4. Criação do Objeto de Pendência com ID Temporário
     const novoID = {
         id: "TEMP-" + Date.now(),
         tipo: "PENDENCIA",
@@ -1365,27 +1333,21 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         autor_nome: nomeAssinatura,
         descricao: obsDigitada,
         quantidade: qtdInformada,
-        status_gestao: "PENDENTE",
-        id_conferencia_origem: "CONF_TEMP",
-        herdado_de: null
+        status_gestao: "PENDENTE"
     };
 
-    // 5. Injeção nos Dados em Memória (Fonte Global)
     let itemEncontrado = false;
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            const itemIdStr = String(item.id);
-            const uidStr = String(uid);
-
-            if (tipo === 'single' && itemIdStr === uidStr) {
+            if (tipo === 'single' && String(item.id) === String(uid)) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
             } else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    if (String(`${item.id}-${t.tomb}`) === uidStr) {
+                    if (String(`${item.id}-${t.tomb}`) === String(uid)) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
@@ -1395,43 +1357,20 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         });
     });
 
-    // 6. Atualização da Interface e Feedback
-    // 6. Atualização da Interface e Feedback
     if (itemEncontrado) {
-        // Marca o item como C/A (Com Alteração)
-        if (!window.itemStatus) window.itemStatus = {};
         window.itemStatus[uid] = { status: 'C/A' };
-        
-        // Re-renderiza a tela para exibir o novo carimbo
         renderizarConferencia();
-        
-        // --- CORREÇÃO CIRÚRGICA DO FOCO ---
         setTimeout(() => {
-            // Se for multi, o uid é "ID-TOMB". Se for single, é apenas "ID".
-            // Procuramos o elemento que tenha exatamente esse data-id (item ou tombamento)
-            let el = document.querySelector(`[data-id="${uid}"]`);
-            
-            // Caso seja um tombamento dentro de um container específico
-            if (!el && uid.includes('-')) {
-                el = document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"]`);
-            }
-
+            let el = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"]`);
             if (el) {
-                el.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'center' // <--- Centraliza o item exato na tela
-                });
-                
-                // Destaque visual temporário para o usuário não se perder
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 el.style.backgroundColor = "#fff9c4";
                 setTimeout(() => { el.style.backgroundColor = ""; }, 1000);
             }
-        }, 300); // 300ms garante que a renderização terminou antes de mover a tela
-    } else {
-        console.error("Erro: Item não localizado para injeção de dados.");
+        }, 300);
     }
 }
-    
+
 function manterID(pendenciaId, uid) {
     const card = document.getElementById(`card-${pendenciaId}`);
     if (card) {
@@ -1439,7 +1378,7 @@ function manterID(pendenciaId, uid) {
         card.style.backgroundColor = "#f0fff4";
         card.querySelector('.pendencia-actions').innerHTML = '<div style="color:#1b8a3e; font-weight:bold; text-align:center; width:100%">✔ Mantido para esta conferência</div>';
         
-        // Registra no itemStatus que este ID específico foi conferido
+        if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         if (!window.itemStatus[uid].ids_mantidos) window.itemStatus[uid].ids_mantidos = [];
         window.itemStatus[uid].ids_mantidos.push(pendenciaId);
         window.itemStatus[uid].status = 'C/A';
@@ -1452,16 +1391,13 @@ function manterID(pendenciaId, uid) {
 }
 
 function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
-    // 1. Captura de dados (vindos do modal)
     const qtdResolvida = parseInt(qtdResolvidaModal) || 1;
     const justificativa = justificativaModal ? justificativaModal.trim() : "";
-    const nomeResolutor = userInfo.nome_militar_completo || `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`;
+    const nomeResolutor = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
 
-    // 2. Processamento de Dados (Localização na Fonte Global)
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let acaoConcluida = false;
 
-    // Função interna de processamento (Ajustada para o Diário de Bordo)
     function executarBaixaNoObjeto(obj) {
         if (!obj.pendencias_ids) return false;
         const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
@@ -1470,13 +1406,12 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         const pOriginal = obj.pendencias_ids[index];
         const qtdAnterior = pOriginal.quantidade;
 
-        // Prepara o registro para o historico_vida (Rastreabilidade Total)
         if (!obj.historico_vida) obj.historico_vida = [];
         
         const registroHistorico = {
-            ...pOriginal, // Herda tudo (quem relatou, data original, etc)
+            ...pOriginal,
             id_referencia: pOriginal.id,
-            id: pOriginal.id + "-RES-" + Date.now(), // Novo ID para a entrada de histórico
+            id: pOriginal.id + "-RES-" + Date.now(),
             quantidade: qtdResolvida,
             data_resolucao: new Date().toLocaleDateString('pt-BR'),
             resolvido_por: nomeResolutor,
@@ -1484,22 +1419,17 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             status_final: "RESOLVIDO"
         };
 
-        // Lógica de Retirada/Subtração
         if (qtdResolvida >= qtdAnterior) {
-            // RESOLUÇÃO TOTAL: Remove a pendência da lista ativa
             obj.pendencias_ids.splice(index, 1);
         } else {
-            // RESOLUÇÃO PARCIAL: Subtrai a quantidade mas mantém o carimbo ativo
             pOriginal.quantidade -= qtdResolvida;
             registroHistorico.justificativa_resolucao += " (Resolução Parcial)";
         }
 
-        // Salva no Diário de Bordo do material
         obj.historico_vida.push(registroHistorico);
         return true;
     }
 
-    // Varredura nos setores para encontrar o item exato
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             if (String(item.id) === String(uid)) {
@@ -1514,53 +1444,38 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         });
     });
 
-    // 3. Finalização e Feedback Visual
     if (acaoConcluida) {
-        renderizarConferencia(); // Atualiza a tela (limpa o carimbo ou reduz a QTD)
-        
-        // Mantém o foco no item que foi alterado
+        renderizarConferencia();
         setTimeout(() => {
-            let el = document.querySelector(`[data-id="${uid}"]`);
-            if (!el && uid.includes('-')) {
-                el = document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"]`);
-            }
+            let el = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"]`);
             if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 300);
-    } else {
-        console.error("Erro técnico: Pendência não localizada no objeto global.");
     }
 }
 
 function setItemStatusID(btn, status, uid) {
-    // 🛡️ CORREÇÃO: Busca o container IMEDIATO (Tombamento ou Item Single)
-    // Isso impede que a limpeza de classes 'active' afete os vizinhos.
     const container = btn.closest('.tombamento-container') || btn.closest('.item-conferencia');
     const setor = btn.closest('.setor');
 
     if (status === 'ok') {
         window.itemStatus[uid] = { status: 'S/A' };
-        
-        // Limpa 'active' apenas dentro deste tombamento específico
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        // Trata o ícone visual
-        const icon = container.querySelector('.status-icon') || container.closest('.item-conferencia').querySelector('.status-icon');
-        
-        // Se for tombamento, chama a lógica de verificação global do item pai
         const itemPai = btn.closest('.item-conferencia');
         if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
             updateItemMainStatusDisplay(itemPai);
-        } else if (icon) {
-            icon.className = 'status-icon ok';
+        } else {
+            const icon = container.querySelector('.status-icon');
+            if (icon) icon.className = 'status-icon ok';
         }
     }
     
-    updateSetorStatus(setor);
     updateOverallStatus();
     checkSetorCompletion(setor, uid);
 }
-        window.onload = carregarDadosRemotos;
+
+window.onload = carregarDadosRemotos;
     </script>
 </body>
 </html>
