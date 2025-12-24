@@ -476,17 +476,13 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const setorIds = []; 
     
-    // Garantimos o uso da fonte global sincronizada
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
     fonteDados.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
-    // --- FUNÇÃO INTERNA CORRIGIDA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
-        
-        // 1. Cautelas Ativas
         const cautelasAtivas = itemOuTomb.cautelas || (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
         cautelasAtivas.forEach(c => {
             htmlAcumulado += `
@@ -497,7 +493,6 @@ function renderizarConferencia() {
                 </div>`;
         });
 
-        // 2. Pendências Físicas (Carimbos)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
@@ -505,7 +500,6 @@ function renderizarConferencia() {
                 let botoesGestaoHtml = '';
 
                 if (isTemp) {
-                    // Lançamento novo: Pode EDITAR e EXCLUIR
                     botoesGestaoHtml = `
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" 
@@ -519,7 +513,6 @@ function renderizarConferencia() {
                         </div>`;
                     acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
                 } else {
-                    // Carimbo antigo: Somente MANTER ou RESOLVER
                     botoesGestaoHtml = ''; 
                     acoesHtml = `
                         <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
@@ -551,7 +544,6 @@ function renderizarConferencia() {
         return htmlAcumulado;
     };
 
-    // 3. Renderização dos Setores e Itens
     fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
         let htmlItens = ''; 
@@ -566,7 +558,6 @@ function renderizarConferencia() {
                 item.tombamentos.forEach(t => {
                     const uid = `${item.id}-${t.tomb}`;
                     const hasPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
-                    
                     if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
                     const currentStatus = window.itemStatus[uid].status;
                     const isActiveOk = (currentStatus === 'S/A' || currentStatus === 'ok') ? 'active' : '';
@@ -592,8 +583,10 @@ function renderizarConferencia() {
                 const totalPendencias = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 const saldoReal = totalEsperado - totalCautelado - totalPendencias;
                 
-                const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
+                // LÓGICA DE COR DO SALDO
+                const corSaldo = saldoReal < totalEsperado ? '#d90f23' : '#1b8a3e';
 
+                const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
                 if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
                 const currentStatus = window.itemStatus[item.id].status;
 
@@ -603,7 +596,7 @@ function renderizarConferencia() {
                             <span class="status-icon ${currentStatus === 'S/A' ? 'ok' : (currentStatus === 'C/A' ? 'alert' : '')}"></span>
                             <div style="display:flex; flex-direction:column">
                                 <span class="item-label">${item.nome}</span>
-                                <span style="font-size:0.8em; color:#666">DISPONÍVEL: ${saldoReal} de ${totalEsperado}</span>
+                                <span style="font-size:0.85em; color:${corSaldo}; font-weight:bold;">DISPONÍVEL: ${saldoReal} de ${totalEsperado}</span>
                             </div>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
@@ -631,7 +624,6 @@ function renderizarConferencia() {
 
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
-    
     updateOverallStatus();
 }
     function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
@@ -1400,15 +1392,18 @@ function processarAcaoFinalModal() {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let editado = false;
 
+    // Garantimos que estamos comparando Strings para evitar erro de tipo
+    const idProcurado = String(pendenciaId);
+
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // Verifica itens simples (single) e itens com tombamento (multi)
-            const alvos = item.tombamentos ? item.tombamentos : [item];
+            // Criamos uma lista de alvos (o próprio item ou a lista de tombamentos dele)
+            let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
             
-            alvos.forEach(alvo => {
-                if (alvo.pendencias_ids) {
-                    // Procura a pendência específica pelo ID (o que começa com TEMP-)
-                    const p = alvo.pendencias_ids.find(pend => String(pend.id) === String(pendenciaId));
+            alvosParaVerificar.forEach(alvo => {
+                if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
+                    // Tenta encontrar a pendência exata dentro do array do item/tombamento
+                    const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
                     
                     if (p) {
                         p.descricao = novaObs;
@@ -1421,21 +1416,21 @@ function processarAcaoFinalModal() {
     });
 
     if (editado) {
-        // RE-RENDERIZAÇÃO: Isso é o que faz o carimbo atualizar na tela
+        // ESSENCIAL: Redesenha a tela para refletir a mudança no "carimbo"
         renderizarConferencia(); 
         
-        // Feedback visual para o usuário
+        // Feedback visual para o usuário localizar onde editou
         setTimeout(() => {
             const el = document.getElementById(`card-${pendenciaId}`);
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.backgroundColor = "#e3f2fd"; // Azul claro de edição
+                el.style.backgroundColor = "#e3f2fd"; // Pisca em azul claro
                 setTimeout(() => { el.style.backgroundColor = "#fff"; }, 1000);
             }
         }, 300);
     } else {
-        console.error("Erro: Pendência não encontrada para edição. ID:", pendenciaId);
-        alert("Erro ao salvar: a alteração não foi localizada nos dados temporários.");
+        console.error("Erro: Pendência " + idProcurado + " não encontrada nos dados.");
+        alert("Erro ao salvar: Não foi possível localizar o registro original para alteração.");
     }
 }
    function confirmarExclusaoRelato(pendenciaId, uid) {
