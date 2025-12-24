@@ -61,7 +61,7 @@
         .tombamento-obs-container textarea, .alteracao-container textarea { width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #d90f23; box-sizing: border-box; font-size: 0.85em; resize: vertical; min-height: 40px; margin-bottom: 5px; }
         .btn-salvar-alteracao { background-color: #800020; color: white; font-weight: bold; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; width: 100%; transition: background-color 0.3s; font-size: 0.85em; }
         .descricao-salva, .tombamento-descricao-salva { font-size: 0.9em; margin-top: 5px; display: none; padding-top: 5px; border-top: 1px dashed #ddd; text-align: left; background-color: #fff8f8; padding: 8px; border-radius: 4px; }
-        
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 9999; }
         #btn-finalizar { background-color: #d90f23; color: white; font-weight: bold; border: none; padding: 15px 10px; border-radius: 6px; width: 100%; cursor: pointer; transition: background-color 0.3s ease; margin-top: 30px; font-size: 1.1em; box-shadow: 0 4px 8px rgba(217, 15, 35, 0.4); }
         #btn-finalizar:disabled { background-color: #999; cursor: not-allowed; box-shadow: none; }
         
@@ -81,10 +81,35 @@
 </button>
         </div>
     </div>
+    </div> <div id="modal-nova-pendencia" class="modal-overlay" style="display:none;">
+        <div class="modal-content" style="max-width: 450px; border-top: 5px solid #d90f23;">
+            <h2 id="modal-titulo-item" style="font-size: 1.2em; color: #333; margin-bottom: 5px;">Relatar Alteração</h2>
+            <p id="modal-subtitulo-detalhe" style="font-size: 0.85em; color: #666; margin-bottom: 20px;"></p>
+
+            <input type="hidden" id="modal-uid">
+            <input type="hidden" id="modal-tipo">
+
+            <div id="modal-grupo-qtd" class="form-group" style="display:none;">
+                <label style="color: #d90f23; font-weight: bold;">Unidades Afetadas:</label>
+                <input type="number" id="modal-input-qtd" min="1" value="1" style="font-size: 1.1em; text-align: center; border: 2px solid #d90f23; width: 100%; box-sizing: border-box; padding: 10px; border-radius: 5px;">
+                <small id="modal-info-max" style="display: block; color: #888; margin-top: 5px;"></small>
+            </div>
+
+            <div class="form-group" style="margin-top: 15px;">
+                <label style="font-weight: bold;">Descrição do Problema:</label>
+                <textarea id="modal-input-obs" placeholder="Ex: Equipamento com avaria na carcaça, faltando acessório X..." style="width: 100%; min-height: 100px; border: 1px solid #ccc; border-radius: 5px; padding: 10px; box-sizing: border-box; font-family: inherit;"></textarea>
+            </div>
+
+            <div class="modal-buttons" style="display: flex; gap: 10px; margin-top: 20px;">
+                <button type="button" class="action-button" onclick="fecharModalPendencia()" style="flex: 1; background: #eee; border: 1px solid #ccc; color: #333; cursor: pointer; padding: 10px; border-radius: 5px; font-weight: bold;">Cancelar</button>
+                <button type="button" class="action-button" onclick="confirmarInclusaoPendencia()" style="flex: 2; background: #800020; color: white; border: none; cursor: pointer; padding: 10px; border-radius: 5px; font-weight: bold;">INCLUIR ALTERAÇÃO</button>
+            </div>
+        </div>
+    </div>
 
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
-<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
 
 <script>
     const firebaseConfig = { 
@@ -1169,44 +1194,121 @@ function renderizarConferencia() {
     // --- NOVAS FUNÇÕES DE CONTROLE DE IDS ÚNICOS ---
 
 function abrirFormNovoID(uid) {
-    const form = document.getElementById(`form-${uid}`);
-    if (form) {
-        form.style.display = form.style.display === 'none' ? 'block' : 'none';
-        if (form.style.display === 'block') {
-            form.querySelector('textarea').focus();
-        }
+    const modal = document.getElementById('modal-nova-pendencia');
+    const inputQtd = document.getElementById('modal-input-qtd');
+    const grupoQtd = document.getElementById('modal-grupo-qtd');
+    const inputObs = document.getElementById('modal-input-obs');
+    const infoMax = document.getElementById('modal-info-max');
+    
+    // Limpa campos anteriores
+    inputObs.value = '';
+    
+    // Identifica se é Single ou Multi
+    const isMulti = uid.includes('-');
+    document.getElementById('modal-uid').value = uid;
+    document.getElementById('modal-tipo').value = isMulti ? 'multi' : 'single';
+
+    if (isMulti) {
+        // Lógica para Tombamento
+        const tombNum = uid.split('-')[1];
+        document.getElementById('modal-titulo-item').innerText = "Alteração no Tombamento";
+        document.getElementById('modal-subtitulo-detalhe').innerText = `Referência: ${tombNum}`;
+        grupoQtd.style.display = 'none';
+        inputQtd.value = 1;
+    } else {
+        // Lógica Inteligente para Item Single (Quantidade)
+        grupoQtd.style.display = 'block';
+        
+        // Localiza o item nos dados para saber o saldo real
+        let saldoDisponivel = 1;
+        window.dadosConferencia.forEach(s => s.itens.forEach(i => {
+            if (i.id === uid) {
+                const totalCautelado = (i.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                saldoDisponivel = (Number(i.quantidadeEsperada) || 0) - totalCautelado;
+                document.getElementById('modal-titulo-item').innerText = i.nome;
+            }
+        }));
+
+        inputQtd.max = saldoDisponivel;
+        inputQtd.value = 1;
+        infoMax.innerText = `Limite máximo permitido: ${saldoDisponivel} unidades.`;
+        document.getElementById('modal-subtitulo-detalhe').innerText = "Informe quantas unidades apresentam problema.";
+    }
+
+    modal.style.display = 'flex';
+    inputObs.focus();
+}
+    function fecharModalPendencia() {
+    const modal = document.getElementById('modal-nova-pendencia');
+    if (modal) {
+        modal.style.display = 'none';
+        // Limpa a observação para o próximo uso
+        document.getElementById('modal-input-obs').value = '';
     }
 }
+    function confirmarInclusaoPendencia() {
+    const uid = document.getElementById('modal-uid').value;
+    const tipo = document.getElementById('modal-tipo').value;
+    const inputQtd = document.getElementById('modal-input-qtd');
+    const obs = document.getElementById('modal-input-obs').value.trim();
 
-function salvarNovoID(uid, qtd, tipo) {
-    const obsEl = document.getElementById(`obs-${uid}`);
-    if (!obsEl) return;
-    
-    const obsDigitada = obsEl.value.trim();
-    const qtdInformada = parseInt(qtd) || 1;
-    if (obsDigitada.length < 3) return alert("Descreva o problema com mais detalhes.");
-
-    // Busca o nome que já aparece no seu HTML (Conferente: 3º SGT QPCBM JHONATH)
-    const militarInfoEl = document.getElementById('militar-info');
-    let nomeAssinatura = "";
-    
-    if (militarInfoEl) {
-        // Pega o texto, remove o rótulo "Conferente:" e limpa a quebra de linha da Data/Hora
-        const textoBruto = militarInfoEl.innerText;
-        nomeAssinatura = textoBruto.split('\n')[0].replace('Conferente:', '').trim();
+    // 1. Validação de Descrição
+    if (obs.length < 3) {
+        return alert("Por favor, descreva o problema com mais detalhes.");
     }
 
-    // Se falhar, usa o fallback
+    // 2. Validação Inteligente de Quantidade (Trava de Saldo)
+    const qtdDigitada = parseInt(inputQtd.value) || 0;
+    const maxPermitido = parseInt(inputQtd.max) || 1;
+
+    if (tipo === 'single') {
+        if (qtdDigitada < 1) {
+            return alert("A quantidade deve ser pelo menos 1.");
+        }
+        if (qtdDigitada > maxPermitido) {
+            return alert(`Quantidade inválida! Existem apenas ${maxPermitido} unidades disponíveis para este item (descontando cautelas).`);
+        }
+    }
+
+    // 3. Chamada da Função Principal de Salvamento
+    // Passamos a observação e quantidade validadas para a função que injeta no 'dadosConferencia'
+    salvarNovoID(uid, qtdDigitada, tipo, obs);
+    
+    // 4. Fechamento do Modal e Feedback
+    fecharModalPendencia();
+}
+
+/**
+ * Salva uma nova pendência/alteração injetando os dados no array global.
+ * Esta versão é otimizada para trabalhar com o Modal Centralizado.
+ */
+function salvarNovoID(uid, qtd, tipo, obsModal = null) {
+    // 1. Definição da Observação (se vier do modal ou do elemento fixo antigo)
+    const obsDigitada = obsModal ? obsModal.trim() : (document.getElementById(`obs-${uid}`)?.value.trim() || "");
+    const qtdInformada = parseInt(qtd) || 1;
+
+    // 2. Validação Básica
+    if (obsDigitada.length < 3) {
+        return alert("Por favor, descreva o problema com mais detalhes.");
+    }
+
+    // 3. Captura do Nome Institucional para o Carimbo (Ex: 3º SGT QPCBM JHONATH)
+    const militarInfoEl = document.getElementById('militar-info');
+    let nomeAssinatura = "";
+    if (militarInfoEl) {
+        nomeAssinatura = militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim();
+    }
     if (!nomeAssinatura) {
         nomeAssinatura = userInfo.nome_militar_completo || `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     }
 
+    // 4. Criação do Objeto de Pendência com ID Temporário
     const novoID = {
         id: "TEMP-" + Date.now(),
         tipo: "PENDENCIA",
         data_criacao: new Date().toLocaleDateString('pt-BR'),
         autor_uid: userInfo.uid,
-        autor_nome: nomeAssinatura, // Agora garantido o nome institucional
+        autor_nome: nomeAssinatura,
         descricao: obsDigitada,
         quantidade: qtdInformada,
         status_gestao: "PENDENTE",
@@ -1214,8 +1316,8 @@ function salvarNovoID(uid, qtd, tipo) {
         herdado_de: null
     };
 
+    // 5. Injeção nos Dados em Memória (Fonte Global)
     let itemEncontrado = false;
-    // Força o uso da global
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
     fonteDados.forEach(setor => {
@@ -1239,23 +1341,32 @@ function salvarNovoID(uid, qtd, tipo) {
         });
     });
 
+    // 6. Atualização da Interface e Feedback
     if (itemEncontrado) {
+        // Marca o item como C/A (Com Alteração)
         if (!window.itemStatus) window.itemStatus = {};
         window.itemStatus[uid] = { status: 'C/A' };
         
-        obsEl.value = '';
-        document.getElementById(`form-${uid}`).style.display = 'none';
+        // Limpeza visual
+        const obsFixa = document.getElementById(`obs-${uid}`);
+        if (obsFixa) obsFixa.value = '';
+        
+        const formFixo = document.getElementById(`form-${uid}`);
+        if (formFixo) formFixo.style.display = 'none';
 
+        // Re-renderiza a tela para exibir o novo carimbo
         renderizarConferencia();
         
+        // Mantém o scroll no item editado
         setTimeout(() => {
             const baseId = uid.split('-')[0];
             const el = document.querySelector(`[data-id="${baseId}"]`);
             if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 100);
+        }, 150);
+    } else {
+        console.error("Erro: Item não localizado para injeção de dados.");
     }
 }
-
 function manterID(pendenciaId, uid) {
     const card = document.getElementById(`card-${pendenciaId}`);
     if (card) {
