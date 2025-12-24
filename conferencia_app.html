@@ -1394,38 +1394,90 @@ function manterID(pendenciaId, uid) {
 }
 
 function resolverID(pendenciaId, uid, qtdOriginal) {
-    let qtdResolvida = 1;
+    let qtdResolvida = qtdOriginal;
 
+    // 1. Inteligência de Resolução Parcial (da sua função original)
     if (qtdOriginal > 1) {
         const input = prompt(`Este problema afeta ${qtdOriginal} unidades. Quantas unidades foram resolvidas?`, qtdOriginal);
-        if (input === null) return; // Cancelou
+        if (input === null) return; 
         qtdResolvida = parseInt(input);
         if (isNaN(qtdResolvida) || qtdResolvida < 1 || qtdResolvida > qtdOriginal) {
             return alert("Quantidade inválida.");
         }
+    } else {
+        // Se for apenas 1 unidade, pede confirmação simples
+        if (!confirm("Deseja marcar esta alteração como RESOLVIDA?")) return;
     }
 
-    if (!window.itemStatus[uid].ids_resolvidos) window.itemStatus[uid].ids_resolvidos = [];
-    
-    window.itemStatus[uid].ids_resolvidos.push({
-        id: pendenciaId,
-        qtd_resolvida: qtdResolvida,
-        qtd_remanescente: qtdOriginal - qtdResolvida,
-        resolvido_por: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
-        data_solucao: new Date().toLocaleDateString('pt-BR')
+    // 2. Coleta da Justificativa (Obrigatória para o Diário de Bordo)
+    const justificativa = prompt("JUSTIFICATIVA:\nDescreva como o problema foi sanado (Ex: Reposto, consertado, troca efetuada):");
+    if (justificativa === null) return;
+    if (justificativa.trim().length < 5) {
+        return alert("Para fins de histórico militar, forneça uma justificativa detalhada.");
+    }
+
+    // 3. Identifica quem está resolvendo
+    const nomeResolutor = userInfo.nome_militar_completo || `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`;
+
+    // 4. Processamento de Dados (Move para historico_vida)
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    let acaoConcluida = false;
+
+    fonteDados.forEach(setor => {
+        setor.itens.forEach(item => {
+            if (String(item.id) === String(uid)) {
+                acaoConcluida = executarBaixaNoObjeto(item);
+            } else if (item.tombamentos) {
+                item.tombamentos.forEach(t => {
+                    if (String(`${item.id}-${t.tomb}`) === String(uid)) {
+                        acaoConcluida = executarBaixaNoObjeto(t);
+                    }
+                });
+            }
+        });
     });
 
-    const card = document.getElementById(`card-${pendenciaId}`);
-    if (card) {
-        card.style.opacity = "0.5";
-        card.style.backgroundColor = "#e8f5e9";
-        card.querySelector('.pendencia-actions').innerHTML = `<div style="color:#2e7d32; font-weight:bold; text-align:center; width:100%">✔ Marcado como Resolvido (${qtdResolvida} un.)</div>`;
+    function executarBaixaNoObjeto(obj) {
+        if (!obj.pendencias_ids) return false;
+        const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
+        if (index === -1) return false;
+
+        const pOriginal = obj.pendencias_ids[index];
+
+        // Se resolveu TUDO
+        if (qtdResolvida === qtdOriginal) {
+            const removida = obj.pendencias_ids.splice(index, 1)[0];
+            if (!obj.historico_vida) obj.historico_vida = [];
+            obj.historico_vida.push({
+                ...removida,
+                data_resolucao: new Date().toLocaleDateString('pt-BR'),
+                resolvido_por: nomeResolutor,
+                justificativa_resolucao: justificativa,
+                status_final: "RESOLVIDO"
+            });
+        } 
+        // Se resolveu PARCIAL (Ex: resolveu 2 de 5)
+        else {
+            pOriginal.quantidade -= qtdResolvida; // Diminui o que ficou pendente
+            if (!obj.historico_vida) obj.historico_vida = [];
+            obj.historico_vida.push({
+                ...pOriginal,
+                id: pOriginal.id + "-RES",
+                quantidade: qtdResolvida, // Grava apenas a parte resolvida
+                data_resolucao: new Date().toLocaleDateString('pt-BR'),
+                resolvido_por: nomeResolutor,
+                justificativa_resolucao: justificativa + " (Resolução Parcial)",
+                status_final: "RESOLVIDO"
+            });
+        }
+        return true;
     }
 
-    const setor = card.closest('.setor');
-    updateSetorStatus(setor);
-    updateOverallStatus();
-    checkSetorCompletion(setor, uid);
+    // 5. Atualização da Interface
+    if (acaoConcluida) {
+        alert("Baixa registrada no histórico de vida do material.");
+        renderizarConferencia(); // Recarrega a lista para mostrar o novo saldo/status
+    }
 }
 
 function setItemStatusID(btn, status, uid) {
