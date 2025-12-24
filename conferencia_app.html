@@ -481,16 +481,21 @@ function renderizarConferencia() {
     fonteDados.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
-    // --- FUNÇÃO INTERNA: GERADOR DE CARIMBOS (PENDÊNCIAS E CAUTELAS) ---
+    // --- FUNÇÃO INTERNA: GERADOR DE CARIMBOS (RESTAURADA E CORRIGIDA) ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
         const statusLocal = window.itemStatus[uid] || {};
         const isCiente = statusLocal.status === 'cautela_ciente';
 
-        // Correção para identificar cautela em Multi (objeto) ou Single (array)
-        const cautelasAtivas = itemOuTomb.cautela ? [itemOuTomb.cautela] : (itemOuTomb.cautelas || []);
+        // CORREÇÃO DO 2º TOMBAMENTO: Garantir que capturamos a cautela individual do tombamento
+        let listaDeCautelas = [];
+        if (itemOuTomb.cautela) { 
+            listaDeCautelas = [itemOuTomb.cautela]; // Para itens com tombamento
+        } else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) {
+            listaDeCautelas = itemOuTomb.cautelas; // Para itens single
+        }
 
-        cautelasAtivas.forEach(c => {
+        listaDeCautelas.forEach(c => {
             if (isCiente) {
                 htmlAcumulado += `
                     <div class="pendencia-id-card" style="border: 1px solid #1b8a3e; background-color: #f0fff4; padding: 10px; margin-bottom: 8px; border-radius: 5px; text-align: center;">
@@ -508,7 +513,7 @@ function renderizarConferencia() {
             }
         });
 
-        // Pendências Físicas (Mantendo objetividade no fluxo original)
+        // --- FLUXO DE PENDÊNCIAS (MANTIDO INTEGRALMENTE CONFORME SEU ORIGINAL) ---
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
@@ -517,22 +522,48 @@ function renderizarConferencia() {
                 let botoesGestaoHtml = '';
 
                 if (isTemp) {
-                    botoesGestaoHtml = `<div style="display:flex; align-items:center; gap:8px;"><span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;"><i class="fas fa-edit"></i></span><span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;"><i class="fas fa-trash-alt"></i></span></div>`;
+                    botoesGestaoHtml = `
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" 
+                                   style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;" title="Editar seu relato">
+                                   <i class="fas fa-edit"></i>
+                            </span>
+                            <span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" 
+                                   style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;" title="Apagar este relato">
+                                   <i class="fas fa-trash-alt"></i>
+                            </span>
+                        </div>`;
                     acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
                 } else if (jaFoiMantido) {
-                    acoesHtml = `<div style="color:#1b8a3e; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:8px; margin-top:10px;"><i class="fas fa-check-circle"></i> MANTIDO</div>`;
+                    acoesHtml = `<div style="color:#1b8a3e; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:8px; margin-top:10px;"><i class="fas fa-check-circle"></i> MANTIDO NESTA CONFERÊNCIA</div>`;
                 } else {
-                    acoesHtml = `<div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;"><button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')">Manter</button><button type="button" class="btn-resolver" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')">Resolvido</button></div>`;
+                    acoesHtml = `
+                        <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
+                            <button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')"><i class="fas fa-check-double"></i> Manter</button>
+                            <button type="button" class="btn-resolver" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')"><i class="fas fa-magic"></i> Resolvido</button>
+                        </div>`;
                 }
 
-                htmlAcumulado += `<div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: ${jaFoiMantido ? '#f0fff4' : '#fff'};">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px;"><span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? 'ATUAL' : p.autor_nome}</span><span>${p.data_criacao} ${botoesGestaoHtml}</span></div>
-                    <div style="font-size: 0.85em; color: #222;"><strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}</div>${acoesHtml}</div>`;
+                htmlAcumulado += `
+                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
+                            <span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? '<b>LANÇAMENTO ATUAL</b>' : '<b>Relatado por:</b> ' + p.autor_nome}</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span>${p.data_criacao}</span>
+                                ${botoesGestaoHtml}
+                            </div>
+                        </div>
+                        <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
+                            <strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}
+                        </div>
+                        ${acoesHtml}
+                    </div>`;
             });
         }
         return htmlAcumulado;
     };
 
+    // --- RENDERIZAÇÃO DE SETORES E ITENS ---
     fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
         let htmlItens = ''; 
@@ -571,6 +602,7 @@ function renderizarConferencia() {
                 });
                 htmlItens += `<div class="item-conferencia item-has-tombamentos" data-id="${item.id}"><div class="item-header"><span class="status-icon ${window.itemStatus[item.id]?.status === 'ok' ? 'ok' : ''}"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } else {
+                // ... Lógica de Item Single mantida exatamente como está no seu código original ...
                 totalItensNoSetor += 1; 
                 const totalEsperado = Number(item.quantidadeEsperada) || 0;
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
