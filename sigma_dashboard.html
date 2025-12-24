@@ -7145,6 +7145,62 @@ async function findUidByName(nomeCompleto) {
         alert("Erro ao limpar: " + e.message);
     }
 }
+		async function estornarEResetarCautela(cautelaId) {
+    if (!confirm("Deseja estornar esta cautela? Os itens voltarão ao estoque e os tombamentos serão liberados.")) return;
+
+    try {
+        // 1. Busca os dados da cautela específica no Firebase
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
+        const doc = await cautelaRef.get();
+        if (!doc.exists) throw new Error("Cautela não encontrada.");
+        
+        const dadosCautela = doc.data();
+        const listaRef = db.collection('configuracoes').doc('lista_mestra');
+        
+        await db.runTransaction(async (transaction) => {
+            const listaDoc = await transaction.get(listaRef);
+            if (!listaDoc.exists) throw new Error("Lista mestra não encontrada.");
+            
+            let dadosMestra = listaDoc.data().list;
+
+            // 2. Loop nos itens da cautela para desfazer a matemática
+            dadosCautela.itens.forEach(itemCautelado => {
+                dadosMestra.forEach(setor => {
+                    let itemNoEstoque = setor.itens.find(i => i.id === itemCautelado.id_base);
+                    
+                    if (itemNoEstoque) {
+                        if (itemCautelado.tipo === 'multi') {
+                            // Devolve o tombamento: remove a trava
+                            let t = itemNoEstoque.tombamentos.find(tomb => tomb.tomb === itemCautelado.tombamento);
+                            if (t && t.cautela) {
+                                delete t.cautela;
+                                t.status = 'disponivel'; 
+                            }
+                        } else {
+                            // Devolve a quantidade: limpa o registro no array de cautelas do item single
+                            if (itemNoEstoque.cautelas) {
+                                itemNoEstoque.cautelas = itemNoEstoque.cautelas.filter(c => c.id_cautela !== cautelaId);
+                            }
+                        }
+                    }
+                });
+            });
+
+            // 3. Atualiza a lista mestra com os saldos devolvidos
+            transaction.update(listaRef, { list: dadosMestra });
+            
+            // 4. Exclui o documento da cautela
+            transaction.delete(cautelaRef);
+        });
+
+        alert("✅ Cautela estornada com sucesso! Estoque atualizado.");
+        location.reload();
+
+    } catch (error) {
+        console.error("Erro ao estornar:", error);
+        alert("Erro: " + error.message);
+    }
+}
     </script>
 </body>
 </html>
