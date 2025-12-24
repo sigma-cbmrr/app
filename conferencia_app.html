@@ -1201,23 +1201,39 @@ function abrirFormNovoID(uid) {
     const inputObs = document.getElementById('modal-input-obs');
     const infoMax = document.getElementById('modal-info-max');
     
-    // 1. Limpa campos anteriores para evitar resíduos de cliques passados
     inputObs.value = '';
     
-    // 2. Identifica o tipo e armazena nos campos ocultos do modal
+    // Identifica se é Multi (Tombamento) pela presença do hifen
     const isMulti = uid.includes('-');
     document.getElementById('modal-uid').value = uid;
     document.getElementById('modal-tipo').value = isMulti ? 'multi' : 'single';
 
     if (isMulti) {
-        // --- LÓGICA PARA TOMBAMENTO ---
-        const tombNum = uid.split('-')[1];
+        // --- LÓGICA PARA TOMBAMENTO (BUSCA O NÚMERO REAL) ---
+        let numeroTombamentoReal = "Não identificado";
+        let nomeDoItem = "Equipamento";
+
+        // Varre os dados para achar o texto exato do tombamento associado a este UID
+        (window.dadosConferencia || dadosConferencia).forEach(setor => {
+            setor.itens.forEach(item => {
+                if (item.tombamentos) {
+                    item.tombamentos.forEach(t => {
+                        // Verifica se o UID gerado combina com este tombamento específico
+                        if (`${item.id}-${t.tomb}` === uid) {
+                            numeroTombamentoReal = t.tomb;
+                            nomeDoItem = item.nome;
+                        }
+                    });
+                }
+            });
+        });
+
         document.getElementById('modal-titulo-item').innerText = "Relatar Alteração";
-        document.getElementById('modal-subtitulo-detalhe').innerText = `Referência Tomb.: ${tombNum}`;
+        document.getElementById('modal-subtitulo-detalhe').innerHTML = `Item: <b>${nomeDoItem}</b><br>Referência Tomb.: <span style="color:#d90f23; font-weight:bold;">${numeroTombamentoReal}</span>`;
         
         grupoQtd.style.display = 'none';
         inputQtd.value = 1;
-        inputQtd.max = 1; // Trava o máximo em 1 para segurança
+        inputQtd.max = 1;
     } else {
         // --- LÓGICA PARA ITEM SINGLE (QUANTIDADE) ---
         grupoQtd.style.display = 'block';
@@ -1225,11 +1241,9 @@ function abrirFormNovoID(uid) {
         let saldoDisponivel = 0;
         let nomeItem = "Item não localizado";
 
-        // Busca o item na variável global sincronizada
         (window.dadosConferencia || dadosConferencia).forEach(setor => {
             setor.itens.forEach(i => {
                 if (String(i.id) === String(uid)) {
-                    // Calcula saldo real: (Total Esperado) - (Total já na rua/cautelado)
                     const totalCautelado = (i.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                     saldoDisponivel = (Number(i.quantidadeEsperada) || 0) - totalCautelado;
                     nomeItem = i.nome;
@@ -1237,27 +1251,21 @@ function abrirFormNovoID(uid) {
             });
         });
 
-        // Atualiza a interface do modal com os dados encontrados
         document.getElementById('modal-titulo-item').innerText = nomeItem;
         document.getElementById('modal-subtitulo-detalhe').innerText = "Informe as unidades com alteração:";
         
-        // 3. Aplica as travas no input
         inputQtd.max = saldoDisponivel;
-        inputQtd.value = 1; // Reseta sempre para 1 ao abrir
+        inputQtd.value = 1;
         infoMax.innerText = `Saldo disponível para este item: ${saldoDisponivel} un.`;
         
-        // Se por erro o saldo for 0, bloqueia a edição
         if(saldoDisponivel <= 0) {
             alert("Este item não possui saldo disponível (todos cautelados).");
             return;
         }
     }
 
-    // 4. Exibe o modal usando FLEX (necessário para o alinhamento do seu CSS)
     modal.style.display = 'flex';
-    
-    // Foca no campo de texto com um pequeno atraso para o navegador processar a abertura
-    setTimeout(() => inputObs.focus(), 50);
+    setTimeout(() => inputObs.focus(), 100);
 }
     function fecharModalPendencia() {
     const modal = document.getElementById('modal-nova-pendencia');
