@@ -7148,8 +7148,8 @@ async function findUidByName(nomeCompleto) {
 		async function estornarEResetarCautela(cautelaId) {
     if (!confirm("Deseja estornar esta cautela?")) return;
 
-    // Tente verificar no seu Firebase se o ID do documento é 'alfa_abt17' 
-    // ou se é um código tipo 'Bm72Kmm...'
+    // Ajustado conforme sua correção: "listas_conferencia"
+    const nomeColecao = 'listas_conferencia';
     const idDocumentoLista = 'alfa_abt17'; 
 
     try {
@@ -7162,54 +7162,68 @@ async function findUidByName(nomeCompleto) {
         }
         
         const dadosCautela = docCautela.data();
-        const listaRef = db.collection('listas_conferencias').doc(idDocumentoLista);
+        const listaRef = db.collection(nomeColecao).doc(idDocumentoLista);
 
         await db.runTransaction(async (transaction) => {
             const listaDoc = await transaction.get(listaRef);
             
             if (!listaDoc.exists) {
-                throw new Error("Não encontrei o documento em listas_conferencias/" + idDocumentoLista);
+                throw new Error(`Não encontrei o documento em ${nomeColecao}/${idDocumentoLista}`);
             }
             
             let dadosMestra = listaDoc.data().list || [];
 
-            // VARREDURA TOTAL: Não confiamos no que a cautela diz ter. 
-            // Varremos a lista inteira limpando qualquer menção ao ID desta cautela.
+            // VARREDURA TOTAL:
+            // Percorre toda a lista procurando por qualquer menção ao cautelaId,
+            // corrigindo inclusive os itens que foram gravados de forma incompleta.
             dadosMestra.forEach(setor => {
-                setor.itens.forEach(item => {
-                    // Limpa itens MULTI (Tombamentos)
-                    if (item.tipo === 'multi' && item.tombamentos) {
-                        item.tombamentos.forEach(t => {
-                            if (t.cautela && t.cautela.id === cautelaId) {
-                                delete t.cautela;
-                                t.status = 'pending';
-                                t.status_conferencia = 'OK';
-                            }
-                        });
-                    }
-                    
-                    // Limpa itens SINGLE
-                    if (item.tipo === 'single' && item.cautelas) {
-                        item.cautelas = item.cautelas.filter(c => c.id !== cautelaId);
-                    }
+                if (setor.itens) {
+                    setor.itens.forEach(item => {
+                        
+                        // 1. Limpa itens MULTI (Tombamentos)
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            item.tombamentos.forEach(t => {
+                                // Se o ID bater OU se o status estiver 'pending' mas deveria estar livre
+                                if (t.cautela && (t.cautela.id === cautelaId || t.cautela.id_cautela === cautelaId)) {
+                                    delete t.cautela;
+                                    t.status = 'pending';
+                                    t.status_conferencia = 'OK';
+                                }
+                                // Caso especial: se o tombamento está marcado no array de itens da cautela 
+                                // mas o objeto cautela sumiu do banco (seu caso do 2º item)
+                                const constaSaiuNaCautela = dadosCautela.itens.find(ic => ic.tombamento === t.tomb);
+                                if (constaSaiuNaCautela) {
+                                    if (t.cautela) delete t.cautela;
+                                    t.status = 'pending';
+                                    t.status_conferencia = 'OK';
+                                }
+                            });
+                        }
+                        
+                        // 2. Limpa itens SINGLE
+                        if (item.tipo === 'single' && item.cautelas) {
+                            item.cautelas = item.cautelas.filter(c => c.id !== cautelaId && c.id_cautela !== cautelaId);
+                        }
 
-                    // Limpa o Histórico de Vida do item (Muito importante!)
-                    if (item.historico_vida) {
-                        item.historico_vida = item.historico_vida.filter(h => h.id_doc !== cautelaId);
-                    }
-                });
+                        // 3. Limpa o Histórico de Vida do item
+                        if (item.historico_vida) {
+                            item.historico_vida = item.historico_vida.filter(h => h.id_doc !== cautelaId);
+                        }
+                    });
+                }
             });
 
+            // 4. Grava a lista atualizada e deleta o documento da cautela
             transaction.update(listaRef, { list: dadosMestra });
             transaction.delete(cautelaRef);
         });
 
-        alert("✅ Reset concluído. O 2º tombamento e todos os outros vestígios foram limpos.");
+        alert("✅ Reset concluído com sucesso!");
         location.reload();
 
     } catch (error) {
         console.error("Erro no estorno:", error);
-        alert("Erro: " + error.message + "\n\nVerifique se o ID do documento em 'listas_conferencias' é realmente 'alfa_abt17'.");
+        alert("Erro: " + error.message);
     }
 }
     </script>
