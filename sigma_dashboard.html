@@ -7148,65 +7148,75 @@ async function findUidByName(nomeCompleto) {
 		async function estornarEResetarCautela(cautelaId) {
     if (!confirm("Deseja estornar esta cautela? Os itens voltarão ao estoque e os tombamentos serão liberados.")) return;
 
+    // Caminho extraído do seu log: listas_conferencias/alfa_abt17
+    const caminhoLista = 'alfa_abt17'; 
+
     try {
-        // 1. Busca os dados da cautela
+        // 1. Referência do documento da cautela
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
-        const doc = await cautelaRef.get();
+        const docCautela = await cautelaRef.get();
         
-        if (!doc.exists) {
-            alert("❌ Erro: Documento da cautela não encontrado no Firebase.");
+        if (!docCautela.exists) {
+            alert("❌ Erro: Documento da cautela não encontrado em 'cautelas_abertas'.");
             return;
         }
         
-        const dadosCautela = doc.data();
-
-        // 2. Referência da Lista Mestra (Ajuste o caminho se necessário)
-        // No seu código original é: .collection('configuracoes').doc('lista_mestra')
-        const listaRef = db.collection('configuracoes').doc('lista_mestra');
+        const dadosCautela = docCautela.data();
+        const listaRef = db.collection('listas_conferencias').doc(caminhoLista);
 
         await db.runTransaction(async (transaction) => {
             const listaDoc = await transaction.get(listaRef);
             
             if (!listaDoc.exists) {
-                throw new Error("O documento 'configuracoes/lista_mestra' não foi encontrado. Verifique o nome no Firebase.");
+                throw new Error(`Lista mestra não encontrada em listas_conferencias/${caminhoLista}`);
             }
             
             let dadosMestra = listaDoc.data().list || [];
 
-            // 3. Loop para devolver os itens
+            // 2. Percorre os itens que estavam na cautela para "limpar" a lista mestra
             dadosCautela.itens.forEach(itemCautelado => {
                 dadosMestra.forEach(setor => {
+                    // Localiza o item pai pelo id_base (Ex: 56911524-64012364)
                     let itemNoEstoque = setor.itens.find(i => i.id === itemCautelado.id_base);
                     
                     if (itemNoEstoque) {
                         if (itemCautelado.tipo === 'multi') {
-                            // Devolve o tombamento específico
+                            // Localiza o tombamento específico e DELETA o objeto cautela
                             let t = itemNoEstoque.tombamentos.find(tomb => tomb.tomb === itemCautelado.tombamento);
                             if (t) {
-                                delete t.cautela; // Remove a trava
-                                t.status = 'pending'; // Volta ao estado original
+                                // Remove a trava de cautela e reseta status
+                                if (t.cautela) delete t.cautela;
+                                t.status = 'pending';
+                                t.status_conferencia = 'OK';
                             }
                         } else {
-                            // Devolve saldo do item single
+                            // Para itens SINGLE: Remove a cautela do array de cautelas
                             if (itemNoEstoque.cautelas) {
-                                itemNoEstoque.cautelas = itemNoEstoque.cautelas.filter(c => c.id_cautela !== cautelaId);
+                                itemNoEstoque.cautelas = itemNoEstoque.cautelas.filter(c => c.id !== cautelaId && c.id_cautela !== cautelaId);
                             }
+                            // Reseta contadores auxiliares se existirem
+                            itemNoEstoque.quantidadeCautelada = Math.max(0, (itemNoEstoque.quantidadeCautelada || 0) - (itemCautelado.quantidade || 0));
+                        }
+
+                        // Remove também do histórico de vida do item o registro dessa saída
+                        if (itemNoEstoque.historico_vida) {
+                            itemNoEstoque.historico_vida = itemNoEstoque.historico_vida.filter(h => h.id_doc !== cautelaId);
                         }
                     }
                 });
             });
 
-            // 4. Grava as alterações e deleta a cautela
+            // 3. Salva a lista mestra limpa e deleta o registro da cautela aberta
             transaction.update(listaRef, { list: dadosMestra });
             transaction.delete(cautelaRef);
         });
 
-        alert("✅ Sucesso! Itens devolvidos e cautela excluída.");
+        alert("✅ Sucesso! Itens devolvidos ao armário e cautela excluída.");
         location.reload();
 
     } catch (error) {
-        console.error("Erro detalhado:", error);
-        alert("Erro ao processar: " + error.message);
+        console.error("Erro detalhado no estorno:", error);
+        alert("Erro ao processar estorno: " + error.message);
     }
 }
     </script>
