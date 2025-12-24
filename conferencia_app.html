@@ -91,26 +91,25 @@
 
         <input type="hidden" id="modal-uid">
         <input type="hidden" id="modal-tipo">
-
-        <div id="modal-grupo-qtd" style="display:none; margin-top: 15px; margin-bottom: 20px; padding: 12px; background: #fdf2f2; border-radius: 8px; border: 1px solid #ffdada;">
+        <input type="hidden" id="modal-acao-objetivo" value="incluir"> <div id="modal-grupo-qtd" style="display:none; margin-top: 15px; margin-bottom: 20px; padding: 12px; background: #fdf2f2; border-radius: 8px; border: 1px solid #ffdada;">
             <div style="display: flex; align-items: center; gap: 15px;">
                 <div style="flex: 1;">
-                    <label style="display: block; font-weight: bold; font-size: 0.9em; color: #d90f23; font-family: sans-serif;">Unidades Afetadas:</label>
+                    <label id="modal-label-qtd" style="display: block; font-weight: bold; font-size: 0.9em; color: #d90f23; font-family: sans-serif;">Unidades Afetadas:</label>
                     <small id="modal-info-max" style="display: block; color: #888; font-size: 0.75em; font-family: sans-serif;"></small>
                 </div>
                 <input type="number" id="modal-input-qtd" min="1" value="1" 
-               style="width: 80px; padding: 10px; border: 2px solid #d90f23; border-radius: 6px; box-sizing: border-box; font-size: 1.2em; text-align: center; font-weight: bold; background: white;">
+                       style="width: 80px; padding: 10px; border: 2px solid #d90f23; border-radius: 6px; box-sizing: border-box; font-size: 1.2em; text-align: center; font-weight: bold; background: white;">
             </div>
         </div>
 
         <div style="margin-top: 15px; text-align: left;">
-            <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em;">Descrição do Problema:</label>
+            <label id="modal-label-obs" style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em;">Descrição do Problema:</label>
             <textarea id="modal-input-obs" placeholder="Descreva o problema..." style="width: 100%; padding: 12px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; min-height: 100px; resize: vertical; font-family: inherit;"></textarea>
         </div>
 
         <div style="display: flex; gap: 10px; margin-top: 20px;">
             <button type="button" onclick="fecharModalPendencia()" style="flex: 1; background: #eee; border: 1px solid #ccc; color: #333; cursor: pointer; padding: 12px; border-radius: 6px; font-weight: bold;">Cancelar</button>
-            <button type="button" onclick="confirmarInclusaoPendencia()" style="flex: 2; background: #800020; color: white; border: none; cursor: pointer; padding: 12px; border-radius: 6px; font-weight: bold;">INCLUIR</button>
+            <button id="modal-btn-confirmar" type="button" onclick="processarAcaoFinalModal()" style="flex: 2; background: #800020; color: white; border: none; cursor: pointer; padding: 12px; border-radius: 6px; font-weight: bold;">INCLUIR</button>
         </div>
     </div>
 </div>
@@ -460,11 +459,13 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const setorIds = []; 
     
+    // Garantimos o uso da fonte global sincronizada
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
     fonteDados.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
+    // Função interna para montar o HTML de Cautelas e Pendências (Carimbos)
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
         
@@ -481,32 +482,34 @@ function renderizarConferencia() {
 
         // 2. Pendências Físicas (Carimbos)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
-        itemOuTomb.pendencias_ids.forEach(p => {
-            const isTemp = p.id.startsWith('TEMP-');
-            
-            // Definição das ações (Manter/Resolver)
-            const acoesHtml = isTemp ? 
-                `<div style="color:#d90f23; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px;">Aguardando finalização...</div>` :
-                `<div class="pendencia-actions" style="display: flex; gap: 5px; margin-top:8px;">
-                    <button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')">Manter</button>
-                    <button type="button" class="btn-resolver" onclick="resolverID('${p.id}', '${uid}', ${p.quantidade})">Resolvido</button>
-                </div>`;
+            itemOuTomb.pendencias_ids.forEach(p => {
+                const isTemp = p.id.startsWith('TEMP-');
+                
+                // O botão Resolvido agora chama o Modal em modo "resolver"
+                const acoesHtml = isTemp ? 
+                    `<div style="color:#d90f23; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;"><i class="fas fa-clock"></i> Aguardando finalização...</div>` :
+                    `<div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')"><i class="fas fa-check-double"></i> Manter</button>
+                        <button type="button" class="btn-resolver" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')">
+                            <i class="fas fa-magic"></i> Resolvido
+                        </button>
+                    </div>`;
 
-            htmlAcumulado += `
-                <div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
-                        <span><b>Relatado por:</b> ${p.autor_nome}</span>
-                        <span>${p.data_criacao}</span>
-                    </div>
-                    <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
-                        <strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}
-                    </div>
-                    ${acoesHtml}
-                </div>`;
-        });
-    }
-    return htmlAcumulado;
-};
+                htmlAcumulado += `
+                    <div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
+                            <span><b>Relatado por:</b> ${p.autor_nome}</span>
+                            <span>${p.data_criacao}</span>
+                        </div>
+                        <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
+                            <strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}
+                        </div>
+                        ${acoesHtml}
+                    </div>`;
+            });
+        }
+        return htmlAcumulado;
+    };
 
     fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
@@ -514,7 +517,6 @@ function renderizarConferencia() {
         let totalItensNoSetor = 0;
         
         setor.itens.forEach(item => {
-            // Nome escapado para evitar erro em strings com aspas
             const nomeEscapado = item.nome.replace(/'/g, "\\'");
 
             if (item.tipo === 'multi' && item.tombamentos) {
@@ -529,7 +531,7 @@ function renderizarConferencia() {
                     const isActiveOk = (currentStatus === 'S/A' || currentStatus === 'ok') ? 'active' : '';
 
                     htmlTombamentos += `
-                        <div class="tombamento-container" data-tomb="${t.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+                        <div class="tombamento-container" data-id="${uid}" data-tomb="${t.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
                             <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
                                 <span>Tomb.: <b>${t.tomb}</b></span>
                                 <div class="tombamento-options" style="display: flex; gap: 5px;">
@@ -545,9 +547,12 @@ function renderizarConferencia() {
             } 
             else {
                 totalItensNoSetor += 1; 
+                // Cálculo de Saldo considerando Cautelas e Pendências Físicas
+                const totalEsperado = Number(item.quantidadeEsperada) || 0;
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPendencias = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-                const saldoReal = (Number(item.quantidadeEsperada) || 0) - totalCautelado - totalPendencias;
+                const saldoReal = totalEsperado - totalCautelado - totalPendencias;
+                
                 const hasPendencia = item.pendencias_ids && item.pendencias_ids.length > 0;
 
                 if (!window.itemStatus[item.id]) window.itemStatus[item.id] = { status: 'pending' };
@@ -559,7 +564,7 @@ function renderizarConferencia() {
                             <span class="status-icon ${currentStatus === 'S/A' ? 'ok' : (currentStatus === 'C/A' ? 'alert' : '')}"></span>
                             <div style="display:flex; flex-direction:column">
                                 <span class="item-label">${item.nome}</span>
-                                <span style="font-size:0.8em; color:#666">QTD: ${saldoReal} de ${item.quantidadeEsperada}</span>
+                                <span style="font-size:0.8em; color:#666">DISPONÍVEL: ${saldoReal} de ${totalEsperado}</span>
                             </div>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
@@ -1242,6 +1247,61 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
         // Limpa a observação para o próximo uso
         document.getElementById('modal-input-obs').value = '';
     }
+        function abrirModalResolver(pendenciaId, uid, qtdOriginal, descricaoOriginal) {
+    const modal = document.getElementById('modal-nova-pendencia');
+    const inputQtd = document.getElementById('modal-input-qtd');
+    const inputObs = document.getElementById('modal-input-obs');
+    const btnConfirmar = document.getElementById('modal-btn-confirmar');
+    
+    // Configuração de Identidade
+    document.getElementById('modal-acao-objetivo').value = "resolver";
+    document.getElementById('modal-uid').value = uid;
+    document.getElementById('modal-tipo').value = pendenciaId; // Passamos o ID da pendência aqui
+
+    // Ajuste de Textos para "Modo Solução"
+    document.getElementById('modal-titulo-item').innerText = "Resolver Alteração";
+    document.getElementById('modal-subtitulo-detalhe').innerHTML = `Relato original: <b>"${descricaoOriginal}"</b>`;
+    document.getElementById('modal-label-obs').innerText = "Justificativa da Resolução:";
+    document.getElementById('modal-label-qtd').innerText = "Unidades Resolvidas:";
+    inputObs.placeholder = "Diga como foi resolvido (ex: reposto, consertado)...";
+    inputObs.value = '';
+
+    // Ajuste de Quantidade
+    document.getElementById('modal-grupo-qtd').style.setProperty('display', 'block', 'important');
+    inputQtd.max = qtdOriginal;
+    inputQtd.value = qtdOriginal;
+    document.getElementById('modal-info-max').innerText = `Total que estava pendente: ${qtdOriginal} un.`;
+
+    // Estética de Sucesso (Verde)
+    btnConfirmar.innerText = "CONFIRMAR SOLUÇÃO";
+    btnConfirmar.style.backgroundColor = "#1b8a3e"; 
+    document.querySelector('.modal-content').style.borderTopColor = "#1b8a3e";
+
+    modal.style.display = 'flex';
+    setTimeout(() => inputObs.focus(), 150);
+}
+        
+}
+    function processarAcaoFinalModal() {
+    const objetivo = document.getElementById('modal-acao-objetivo').value;
+    const uid = document.getElementById('modal-uid').value;
+    const qtd = document.getElementById('modal-input-qtd').value;
+    const obs = document.getElementById('modal-input-obs').value;
+    const tipoOuPendenciaId = document.getElementById('modal-tipo').value;
+
+    if (obs.trim().length < 5) {
+        return alert("Por favor, preencha a descrição/justificativa com mais detalhes.");
+    }
+
+    if (objetivo === "resolver") {
+        // Se objetivo é resolver, tipoOuPendenciaId contém o ID da pendência original (ex: TEMP-...)
+        resolverID(tipoOuPendenciaId, uid, qtd, obs);
+    } else {
+        // Fluxo normal de inclusão
+        salvarNovoID(uid, qtd, tipoOuPendenciaId, obs);
+    }
+    
+    fecharModalPendencia();
 }
     function confirmarInclusaoPendencia() {
     const uid = document.getElementById('modal-uid').value;
@@ -1275,10 +1335,7 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     fecharModalPendencia();
 }
 
-/**
- * Salva uma nova pendência/alteração injetando os dados no array global.
- * Esta versão é otimizada para trabalhar com o Modal Centralizado.
- */
+
 function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     // 1. Definição da Observação (se vier do modal ou do elemento fixo antigo)
     const obsDigitada = obsModal ? obsModal.trim() : (document.getElementById(`obs-${uid}`)?.value.trim() || "");
@@ -1374,6 +1431,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         console.error("Erro: Item não localizado para injeção de dados.");
     }
 }
+    
 function manterID(pendenciaId, uid) {
     const card = document.getElementById(`card-${pendenciaId}`);
     if (card) {
@@ -1393,36 +1451,55 @@ function manterID(pendenciaId, uid) {
     }
 }
 
-function resolverID(pendenciaId, uid, qtdOriginal) {
-    let qtdResolvida = qtdOriginal;
-
-    // 1. Inteligência de Resolução Parcial (da sua função original)
-    if (qtdOriginal > 1) {
-        const input = prompt(`Este problema afeta ${qtdOriginal} unidades. Quantas unidades foram resolvidas?`, qtdOriginal);
-        if (input === null) return; 
-        qtdResolvida = parseInt(input);
-        if (isNaN(qtdResolvida) || qtdResolvida < 1 || qtdResolvida > qtdOriginal) {
-            return alert("Quantidade inválida.");
-        }
-    } else {
-        // Se for apenas 1 unidade, pede confirmação simples
-        if (!confirm("Deseja marcar esta alteração como RESOLVIDA?")) return;
-    }
-
-    // 2. Coleta da Justificativa (Obrigatória para o Diário de Bordo)
-    const justificativa = prompt("JUSTIFICATIVA:\nDescreva como o problema foi sanado (Ex: Reposto, consertado, troca efetuada):");
-    if (justificativa === null) return;
-    if (justificativa.trim().length < 5) {
-        return alert("Para fins de histórico militar, forneça uma justificativa detalhada.");
-    }
-
-    // 3. Identifica quem está resolvendo
+function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
+    // 1. Captura de dados (vindos do modal)
+    const qtdResolvida = parseInt(qtdResolvidaModal) || 1;
+    const justificativa = justificativaModal ? justificativaModal.trim() : "";
     const nomeResolutor = userInfo.nome_militar_completo || `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`;
 
-    // 4. Processamento de Dados (Move para historico_vida)
+    // 2. Processamento de Dados (Localização na Fonte Global)
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let acaoConcluida = false;
 
+    // Função interna de processamento (Ajustada para o Diário de Bordo)
+    function executarBaixaNoObjeto(obj) {
+        if (!obj.pendencias_ids) return false;
+        const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
+        if (index === -1) return false;
+
+        const pOriginal = obj.pendencias_ids[index];
+        const qtdAnterior = pOriginal.quantidade;
+
+        // Prepara o registro para o historico_vida (Rastreabilidade Total)
+        if (!obj.historico_vida) obj.historico_vida = [];
+        
+        const registroHistorico = {
+            ...pOriginal, // Herda tudo (quem relatou, data original, etc)
+            id_referencia: pOriginal.id,
+            id: pOriginal.id + "-RES-" + Date.now(), // Novo ID para a entrada de histórico
+            quantidade: qtdResolvida,
+            data_resolucao: new Date().toLocaleDateString('pt-BR'),
+            resolvido_por: nomeResolutor,
+            justificativa_resolucao: justificativa,
+            status_final: "RESOLVIDO"
+        };
+
+        // Lógica de Retirada/Subtração
+        if (qtdResolvida >= qtdAnterior) {
+            // RESOLUÇÃO TOTAL: Remove a pendência da lista ativa
+            obj.pendencias_ids.splice(index, 1);
+        } else {
+            // RESOLUÇÃO PARCIAL: Subtrai a quantidade mas mantém o carimbo ativo
+            pOriginal.quantidade -= qtdResolvida;
+            registroHistorico.justificativa_resolucao += " (Resolução Parcial)";
+        }
+
+        // Salva no Diário de Bordo do material
+        obj.historico_vida.push(registroHistorico);
+        return true;
+    }
+
+    // Varredura nos setores para encontrar o item exato
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             if (String(item.id) === String(uid)) {
@@ -1437,46 +1514,64 @@ function resolverID(pendenciaId, uid, qtdOriginal) {
         });
     });
 
+    // 3. Finalização e Feedback Visual
+    if (acaoConcluida) {
+        renderizarConferencia(); // Atualiza a tela (limpa o carimbo ou reduz a QTD)
+        
+        // Mantém o foco no item que foi alterado
+        setTimeout(() => {
+            let el = document.querySelector(`[data-id="${uid}"]`);
+            if (!el && uid.includes('-')) {
+                el = document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"]`);
+            }
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
+    } else {
+        console.error("Erro técnico: Pendência não localizada no objeto global.");
+    }
+}
+
     function executarBaixaNoObjeto(obj) {
         if (!obj.pendencias_ids) return false;
         const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
         if (index === -1) return false;
 
         const pOriginal = obj.pendencias_ids[index];
+        const qtdOriginal = pOriginal.quantidade;
 
-        // Se resolveu TUDO
-        if (qtdResolvida === qtdOriginal) {
-            const removida = obj.pendencias_ids.splice(index, 1)[0];
-            if (!obj.historico_vida) obj.historico_vida = [];
-            obj.historico_vida.push({
-                ...removida,
-                data_resolucao: new Date().toLocaleDateString('pt-BR'),
-                resolvido_por: nomeResolutor,
-                justificativa_resolucao: justificativa,
-                status_final: "RESOLVIDO"
-            });
-        } 
-        // Se resolveu PARCIAL (Ex: resolveu 2 de 5)
-        else {
-            pOriginal.quantidade -= qtdResolvida; // Diminui o que ficou pendente
-            if (!obj.historico_vida) obj.historico_vida = [];
-            obj.historico_vida.push({
-                ...pOriginal,
-                id: pOriginal.id + "-RES",
-                quantidade: qtdResolvida, // Grava apenas a parte resolvida
-                data_resolucao: new Date().toLocaleDateString('pt-BR'),
-                resolvido_por: nomeResolutor,
-                justificativa_resolucao: justificativa + " (Resolução Parcial)",
-                status_final: "RESOLVIDO"
-            });
+        if (!obj.historico_vida) obj.historico_vida = [];
+
+        // Registro para o Diário de Bordo
+        const logResolucao = {
+            ...pOriginal,
+            id: pOriginal.id + "-RES-" + Date.now(),
+            quantidade: qtdResolvida,
+            data_resolucao: new Date().toLocaleDateString('pt-BR'),
+            resolvido_por: nomeResolutor,
+            justificativa_resolucao: justificativa,
+            status_final: "RESOLVIDO"
+        };
+
+        if (qtdResolvida >= qtdOriginal) {
+            // Resolução Total
+            obj.pendencias_ids.splice(index, 1);
+        } else {
+            // Resolução Parcial
+            pOriginal.quantidade -= qtdResolvida;
+            logResolucao.justificativa_resolucao += " (Resolução Parcial)";
         }
+
+        obj.historico_vida.push(logResolucao);
         return true;
     }
 
-    // 5. Atualização da Interface
     if (acaoConcluida) {
-        alert("Baixa registrada no histórico de vida do material.");
-        renderizarConferencia(); // Recarrega a lista para mostrar o novo saldo/status
+        renderizarConferencia();
+        // Foco no item resolvido
+        setTimeout(() => {
+            const el = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`[data-tomb="${uid.split('-')[1]}"]`);
+            if(el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 300);
     }
 }
 
