@@ -284,42 +284,64 @@
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
-    // 1. CORREÇÃO: Seleciona apenas os blocos que representam uma ação de conferência
-    // (tombamentos individuais OU itens single que não têm tombamento)
+    // 1. Contagem de progresso (Mantive sua lógica que está correta)
     const blocosConferencia = currentSetor.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]');
     const total = blocosConferencia.length;
     let concluidos = 0;
 
-    // 2. Conta os blocos conferidos no window.itemStatus
     blocosConferencia.forEach(bloco => {
-        let uid;
-        if (bloco.classList.contains('tombamento-container')) {
-            const itemPaiId = bloco.closest('.item-conferencia').getAttribute('data-id');
-            const tombNumero = bloco.getAttribute('data-tomb');
-            uid = `${itemPaiId}-${tombNumero}`;
-        } else {
-            uid = bloco.getAttribute('data-id');
-        }
+        let uid = bloco.classList.contains('tombamento-container') 
+            ? `${bloco.closest('.item-conferencia').getAttribute('data-id')}-${bloco.getAttribute('data-tomb')}`
+            : bloco.getAttribute('data-id');
 
         if (window.itemStatus[uid] && window.itemStatus[uid].status !== 'pending') {
             concluidos++;
         }
     });
 
-    // 3. Atualiza o contador visual
     const statusDiv = currentSetor.querySelector('.setor-status');
     if (statusDiv) {
         statusDiv.innerText = `${concluidos}/${total}`;
         statusDiv.dataset.completed = concluidos;
     }
 
-    // 4. LÓGICA DE AVANÇO: Agora baseada na contagem real e unificada
+    // 2. LÓGICA DE FOCO INTELIGENTE
     if (concluidos === total && total > 0) {
+        // Se o setor fechou, avança para o próximo setor
         setTimeout(() => {
             autoAdvanceSetor(currentSetor.dataset.id);
         }, 300);
     } else {
-        focusNextItem(currentItemId);
+        // Se ainda há itens, busca o PRÓXIMO ITEM PENDENTE na página inteira
+        const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
+        
+        // Encontra a posição do item que acabamos de conferir
+        const indexAtual = todosAlvos.findIndex(el => {
+            const id = el.classList.contains('tombamento-container') 
+                ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
+                : el.getAttribute('data-id');
+            return id === currentItemId;
+        });
+
+        // Procura o primeiro item com status 'pending' que venha DEPOIS do atual
+        const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
+            const id = el.classList.contains('tombamento-container') 
+                ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
+                : el.getAttribute('data-id');
+            return !window.itemStatus[id] || window.itemStatus[id].status === 'pending';
+        });
+
+        if (proximoAlvo) {
+            setTimeout(() => {
+                // block: 'center' garante que o item fique no meio da tela
+                proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Feedback visual sutil (borda temporária) para guiar o olho do conferente
+                proximoAlvo.style.transition = "box-shadow 0.3s";
+                proximoAlvo.style.boxShadow = "0 0 10px rgba(27, 138, 62, 0.5)";
+                setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
+            }, 300);
+        }
     }
 }
         function focusNextItem(currentItemId) { 
