@@ -488,6 +488,21 @@ function renderizarConferencia() {
     window.setorIds = setorIds;
 
     // Função interna para montar o HTML de Cautelas e Pendências (Carimbos)
+    function renderizarConferencia() {
+    const mainContent = document.getElementById('main-content');
+    const antigos = mainContent.querySelectorAll('.setor'); 
+    antigos.forEach(el => el.remove());
+
+    let htmlSetores = ''; 
+    const setorIds = []; 
+    
+    // Garantimos o uso da fonte global sincronizada
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    
+    fonteDados.forEach(s => setorIds.push(s.id || s.nome));
+    window.setorIds = setorIds;
+
+    // --- FUNÇÃO INTERNA ATUALIZADA COM ÍCONE DE EDIÇÃO ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
         
@@ -507,7 +522,12 @@ function renderizarConferencia() {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = p.id.startsWith('TEMP-');
                 
-                // O botão Resolvido agora chama o Modal em modo "resolver"
+                // Botão de Editar (Aparece apenas durante a conferência ativa)
+                const botaoEditarHtml = `<span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" 
+                                              style="cursor:pointer; color:#666; font-size:1.1em; padding:5px;" title="Editar relato">
+                                              <i class="fas fa-edit"></i>
+                                         </span>`;
+
                 const acoesHtml = isTemp ? 
                     `<div style="color:#d90f23; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;"><i class="fas fa-clock"></i> Aguardando finalização...</div>` :
                     `<div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
@@ -518,10 +538,13 @@ function renderizarConferencia() {
                     </div>`;
 
                 htmlAcumulado += `
-                    <div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
+                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid #d90f23; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: #fff;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
                             <span><b>Relatado por:</b> ${p.autor_nome}</span>
-                            <span>${p.data_criacao}</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span>${p.data_criacao}</span>
+                                ${botaoEditarHtml}
+                            </div>
                         </div>
                         <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
                             <strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}
@@ -569,7 +592,6 @@ function renderizarConferencia() {
             } 
             else {
                 totalItensNoSetor += 1; 
-                // Cálculo de Saldo considerando Cautelas e Pendências Físicas
                 const totalEsperado = Number(item.quantidadeEsperada) || 0;
                 const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPendencias = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
@@ -616,6 +638,37 @@ function renderizarConferencia() {
     if (btnFin) btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
     
     updateOverallStatus();
+}
+    function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
+    const modal = document.getElementById('modal-nova-pendencia');
+    const inputQtd = document.getElementById('modal-input-qtd');
+    const inputObs = document.getElementById('modal-input-obs');
+    const btnConfirmar = document.getElementById('modal-btn-confirmar');
+
+    // 1. Configura para Modo Edição
+    document.getElementById('modal-acao-objetivo').value = "editar";
+    document.getElementById('modal-uid').value = uid;
+    document.getElementById('modal-tipo').value = pendenciaId; // ID da pendência a ser editada
+
+    // 2. Preenche com os dados atuais
+    document.getElementById('modal-titulo-item').innerText = "Editar Relato";
+    document.getElementById('modal-subtitulo-detalhe').innerText = "Ajuste os detalhes da alteração selecionada.";
+    document.getElementById('modal-label-obs').innerText = "Nova Descrição:";
+    inputObs.value = descricaoAtual;
+    
+    // 3. Quantidade
+    document.getElementById('modal-grupo-qtd').style.setProperty('display', 'block', 'important');
+    inputQtd.value = qtdAtual;
+    // O máximo para editar é o que já estava (ou o saldo total, mas para simplificar mantemos a lógica da pendência)
+    inputQtd.max = 1000; 
+
+    // 4. Estética (Azul para Edição)
+    btnConfirmar.innerText = "SALVAR ALTERAÇÕES";
+    btnConfirmar.style.backgroundColor = "#2196F3"; 
+    document.querySelector('.modal-content').style.borderTopColor = "#2196F3";
+
+    modal.style.display = 'flex';
+    setTimeout(() => inputObs.focus(), 150);
 }
     
       function adaptarCautelaParaRender(cautelaData) {
@@ -1322,16 +1375,44 @@ function processarAcaoFinalModal() {
     const tipoOuPendenciaId = document.getElementById('modal-tipo').value;
 
     if (obs.trim().length < 5) {
-        return alert("Por favor, preencha a descrição/justificativa com mais detalhes.");
+        return alert("Descrição muito curta.");
     }
 
-    if (objetivo === "resolver") {
+    if (objetivo === "editar") {
+        executarEdicaoRelato(tipoOuPendenciaId, uid, qtd, obs);
+    } else if (objetivo === "resolver") {
         resolverID(tipoOuPendenciaId, uid, qtd, obs);
     } else {
         salvarNovoID(uid, qtd, tipoOuPendenciaId, obs);
     }
     
     fecharModalPendencia();
+}
+    function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    let editado = false;
+
+    fonteDados.forEach(setor => {
+        setor.itens.forEach(item => {
+            // Verifica itens single e multi
+            const alvos = item.tombamentos ? item.tombamentos : [item];
+            alvos.forEach(alvo => {
+                if (alvo.pendencias_ids) {
+                    const p = alvo.pendencias_ids.find(p => p.id === pendenciaId);
+                    if (p) {
+                        p.descricao = novaObs;
+                        p.quantidade = parseInt(novaQtd);
+                        editado = true;
+                    }
+                }
+            });
+        });
+    });
+
+    if (editado) {
+        renderizarConferencia();
+        console.log("Relato editado com sucesso.");
+    }
 }
     
 function salvarNovoID(uid, qtd, tipo, obsModal = null) {
