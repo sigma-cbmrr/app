@@ -481,93 +481,53 @@ function renderizarConferencia() {
     fonteDados.forEach(s => setorIds.push(s.id || s.nome));
     window.setorIds = setorIds;
 
-    // --- FUNÇÃO INTERNA CORRIGIDA ---
+    // --- FUNÇÃO INTERNA: GERADOR DE CARIMBOS (PENDÊNCIAS E CAUTELAS) ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
-    let htmlAcumulado = '';
-    const statusLocal = window.itemStatus[uid] || {};
-    const isCiente = statusLocal.status === 'cautela_ciente';
+        let htmlAcumulado = '';
+        const statusLocal = window.itemStatus[uid] || {};
+        const isCiente = statusLocal.status === 'cautela_ciente';
 
-    const cautelasAtivas = itemOuTomb.cautela ? [itemOuTomb.cautela] : (itemOuTomb.cautelas || []);
+        // Correção para identificar cautela em Multi (objeto) ou Single (array)
+        const cautelasAtivas = itemOuTomb.cautela ? [itemOuTomb.cautela] : (itemOuTomb.cautelas || []);
 
-    cautelasAtivas.forEach(c => {
-        if (isCiente) {
-        // Visual de cautela já conferida
-        htmlAcumulado += `
-            <div class="pendencia-id-card" style="border: 1px solid #1b8a3e; background-color: #f0fff4; padding: 10px; margin-bottom: 8px; border-radius: 5px; text-align: center;">
-                <div style="font-weight: bold; color: #1b8a3e; font-size: 0.85em;">
-                    <i class="fas fa-check-circle"></i> CIENTE: ${c.quantidade ? c.quantidade + ' un. ' : ''} com ${c.destinatario}
-                </div>
-            </div>`;
-    } else {
-        // Visual de cautela pendente de ciência (Original Alaranjado)
-        htmlAcumulado += `
-            <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 5px;">
-                <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;"><i class="fas fa-lock"></i> CAUTELA ATIVA</div>
-                <div style="font-size: 0.9em; color: #333;">${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b></div>
-                <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="setItemStatusID(this, 'cautela_ciente', '${uid}')">Ciente</button>
-            </div>`;
-    }
-});
+        cautelasAtivas.forEach(c => {
+            if (isCiente) {
+                htmlAcumulado += `
+                    <div class="pendencia-id-card" style="border: 1px solid #1b8a3e; background-color: #f0fff4; padding: 10px; margin-bottom: 8px; border-radius: 5px; text-align: center;">
+                        <div style="font-weight: bold; color: #1b8a3e; font-size: 0.85em;">
+                            <i class="fas fa-check-circle"></i> CIENTE: ${c.quantidade ? c.quantidade + ' un. ' : ''} com ${c.destinatario}
+                        </div>
+                    </div>`;
+            } else {
+                htmlAcumulado += `
+                    <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 5px;">
+                        <div style="font-weight: bold; color: #f57c00; font-size: 0.85em; margin-bottom: 3px;"><i class="fas fa-lock"></i> CAUTELA ATIVA</div>
+                        <div style="font-size: 0.9em; color: #333;">${c.quantidade ? c.quantidade + ' un. ' : ''} com <b>${c.destinatario}</b></div>
+                        <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px;" onclick="setItemStatusID(this, 'cautela_ciente', '${uid}')">Ciente</button>
+                    </div>`;
+            }
+        });
 
-        // 2. Pendências Físicas (Carimbos)
+        // Pendências Físicas (Mantendo objetividade no fluxo original)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
-                
-                // Checagem CRÍTICA: Se esta pendência específica já foi marcada como mantida agora
                 const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
-
                 let acoesHtml = '';
                 let botoesGestaoHtml = '';
 
                 if (isTemp) {
-                    botoesGestaoHtml = `
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" 
-                                   style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;" title="Editar seu relato">
-                                   <i class="fas fa-edit"></i>
-                            </span>
-                            <span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" 
-                                   style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;" title="Apagar este relato">
-                                   <i class="fas fa-trash-alt"></i>
-                            </span>
-                        </div>`;
+                    botoesGestaoHtml = `<div style="display:flex; align-items:center; gap:8px;"><span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;"><i class="fas fa-edit"></i></span><span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;"><i class="fas fa-trash-alt"></i></span></div>`;
                     acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
                 } else if (jaFoiMantido) {
-                    // SE JÁ FOI MANTIDO: Removemos os botões e mostramos o selo verde
-                    botoesGestaoHtml = '';
-                    acoesHtml = `
-                        <div style="color:#1b8a3e; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:8px; margin-top:10px;">
-                            <i class="fas fa-check-circle"></i> MANTIDO NESTA CONFERÊNCIA
-                        </div>`;
+                    acoesHtml = `<div style="color:#1b8a3e; font-size:0.8em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:8px; margin-top:10px;"><i class="fas fa-check-circle"></i> MANTIDO</div>`;
                 } else {
-                    // CARIMBO ANTIGO PENDENTE: Mostra os botões originais
-                    botoesGestaoHtml = ''; 
-                    acoesHtml = `
-                        <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
-                            <button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')">
-                                <i class="fas fa-check-double"></i> Manter
-                            </button>
-                            <button type="button" class="btn-resolver" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')">
-                                <i class="fas fa-magic"></i> Resolvido
-                            </button>
-                        </div>`;
+                    acoesHtml = `<div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;"><button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')">Manter</button><button type="button" class="btn-resolver" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')">Resolvido</button></div>`;
                 }
 
-                htmlAcumulado += `
-                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: ${jaFoiMantido ? '#f0fff4' : '#fff'};">
-                        <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px; border-bottom: 1px solid #eee; padding-bottom: 3px;">
-                            <span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? '<b>LANÇAMENTO ATUAL</b>' : '<b>Relatado por:</b> ' + p.autor_nome}</span>
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <span>${p.data_criacao}</span>
-                                ${botoesGestaoHtml}
-                            </div>
-                        </div>
-                        <div style="font-size: 0.85em; margin-bottom: 8px; color: #222;">
-                            <strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}
-                        </div>
-                        ${acoesHtml}
-                    </div>`;
+                htmlAcumulado += `<div class="pendencia-id-card" id="card-${p.id}" style="border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 10px; margin-bottom: 10px; background-color: ${jaFoiMantido ? '#f0fff4' : '#fff'};">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 5px;"><span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? 'ATUAL' : p.autor_nome}</span><span>${p.data_criacao} ${botoesGestaoHtml}</span></div>
+                    <div style="font-size: 0.85em; color: #222;"><strong style="color: #d90f23;">${p.quantidade} un.</strong> - ${p.descricao}</div>${acoesHtml}</div>`;
             });
         }
         return htmlAcumulado;
@@ -585,31 +545,30 @@ function renderizarConferencia() {
                 totalItensNoSetor += item.tombamentos.length; 
                 let htmlTombamentos = '';
                 item.tombamentos.forEach(t => {
-    const uid = `${item.id}-${t.tomb}`;
-    const hasPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
-    const hasCautela = !!t.cautela; // Verifica se há cautela ativa
+                    const uid = `${item.id}-${t.tomb}`;
+                    const hasPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
+                    const hasCautela = !!t.cautela; // Verifica cada tombamento individualmente
 
-    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
-    const currentStatus = window.itemStatus[uid].status;
-    const isCiente = currentStatus === 'cautela_ciente';
+                    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'pending' };
+                    const currentStatus = window.itemStatus[uid].status;
+                    const isCiente = currentStatus === 'cautela_ciente';
 
-    // Lógica de exibição dos botões: Só mostra se NÃO houver cautela
-    const controlesHtml = hasCautela ? 
-        `<span style="color: #f57c00; font-size: 0.85em; font-weight: bold;"><i class="fas fa-lock"></i> EM CAUTELA</span>` : 
-        ` <div class="tombamento-options" style="display: flex; gap: 5px;">
-            ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${(currentStatus === 'S/A' || currentStatus === 'ok') ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
-            <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alteração</button>
-          </div>`;
+                    let botoesTombamento = hasCautela ? 
+                        `<span style="color: #f57c00; font-size: 0.8em; font-weight: bold;"><i class="fas fa-lock"></i> EM CAUTELA</span>` : 
+                        `<div class="tombamento-options" style="display: flex; gap: 5px;">
+                            ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${(currentStatus === 'S/A' || currentStatus === 'ok') ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                            <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alteração</button>
+                        </div>`;
 
-    htmlTombamentos += `
-        <div class="tombamento-container" data-id="${uid}" data-tomb="${t.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4; border-color: #1b8a3e;' : ''}">
-            <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Tomb.: <b>${t.tomb}</b></span>
-                ${controlesHtml}
-            </div>
-            <div class="alerts-wrapper">${montarPendenciaHtml(uid, t)}</div>
-        </div>`;
-});
+                    htmlTombamentos += `
+                        <div class="tombamento-container" data-id="${uid}" data-tomb="${t.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4; border-color: #1b8a3e;' : ''}">
+                            <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span>Tomb.: <b>${t.tomb}</b></span>
+                                ${botoesTombamento}
+                            </div>
+                            <div class="alerts-wrapper">${montarPendenciaHtml(uid, t)}</div>
+                        </div>`;
+                });
                 htmlItens += `<div class="item-conferencia item-has-tombamentos" data-id="${item.id}"><div class="item-header"><span class="status-icon ${window.itemStatus[item.id]?.status === 'ok' ? 'ok' : ''}"></span><span class="item-label">${item.nome}</span></div>${htmlTombamentos}</div>`;
             } else {
                 totalItensNoSetor += 1; 
@@ -627,32 +586,18 @@ function renderizarConferencia() {
                     <div class="item-conferencia" data-type="single" data-id="${item.id}">
                         <div class="item-header">
                             <span class="status-icon ${currentStatus === 'S/A' ? 'ok' : (currentStatus === 'C/A' ? 'alert' : '')}"></span>
-                            <div style="display:flex; flex-direction:column">
-                                <span class="item-label">${item.nome}</span>
-                                <span style="font-size:0.85em; color:${corSaldo}; font-weight:bold;">DISPONÍVEL: ${saldoReal} de ${totalEsperado}</span>
-                            </div>
+                            <div style="display:flex; flex-direction:column"><span class="item-label">${item.nome}</span><span style="font-size:0.85em; color:${corSaldo}; font-weight:bold;">DISPONÍVEL: ${saldoReal} de ${totalEsperado}</span></div>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
                             ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${currentStatus === 'S/A' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${item.id}')">S/A</button>` : ''}
-                            <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" 
-                                    onclick="abrirFormNovoID('${item.id}', 'single', '${nomeEscapado}', ${saldoReal})">+ Alteração</button>
+                            <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${item.id}', 'single', '${nomeEscapado}', ${saldoReal})">+ Alteração</button>
                         </div>
                         <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(item.id, item)}</div>
                     </div>`;
             }
         });
         
-        htmlSetores += `
-            <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
-                <div class="setor-header" onclick="toggleSetor(this)">
-                    <div class="setor-info">
-                        <span>${setor.nome}</span>
-                        <div class="setor-status">0/${totalItensNoSetor}</div>
-                    </div>
-                    <span class="arrow">${isFirstSetor ? '▼' : '►'}</span>
-                </div>
-                <div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div>
-            </div>`;
+        htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${totalItensNoSetor}</div></div><span class="arrow">${isFirstSetor ? '▼' : '►'}</span></div><div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div></div>`;
     });
 
     const btnFin = document.getElementById('btn-finalizar');
