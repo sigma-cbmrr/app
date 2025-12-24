@@ -1451,26 +1451,29 @@ function processarAcaoFinalModal() {
     }
 }
    function confirmarExclusaoRelato(pendenciaId, uid) {
-    // 1. Confirmação de segurança para evitar cliques acidentais
-    if (!confirm("Deseja realmente apagar este relato? O item voltará ao estado de 'Pendente'.")) return;
+    if (!confirm("Deseja realmente apagar este relato temporário?")) return;
 
     const fonteDados = window.dadosConferencia || dadosConferencia;
-    let itemEncontrado = false;
+    let excluido = false;
+    
+    // Convertemos para String para garantir que "TEMP-123" seja comparado corretamente
+    const idProcurado = String(pendenciaId);
 
-    // 2. Localiza e remove o item do array global de dados
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // Verifica se é um item de tombamento (multi) ou simples (single)
-            const alvos = item.tombamentos ? item.tombamentos : [item];
+            // Define os alvos (item ou lista de tombamentos)
+            let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
+            
             alvos.forEach(alvo => {
-                if (alvo.pendencias_ids) {
-                    const index = alvo.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+                if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
+                    // Buscamos o índice comparando as Strings brutas
+                    const index = alvo.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
+                    
                     if (index > -1) {
                         alvo.pendencias_ids.splice(index, 1);
-                        itemEncontrado = true;
+                        excluido = true;
                         
-                        // 3. REGRA CRÍTICA: Se não há mais pendências, o status de conferência é resetado
-                        // Isso obriga o conferente a clicar em "S/A" ou relatar algo novo.
+                        // Se não houver mais nada relatado, o item volta a ser "pendente" (cinza)
                         if (alvo.pendencias_ids.length === 0) {
                             delete window.itemStatus[uid]; 
                         }
@@ -1480,21 +1483,15 @@ function processarAcaoFinalModal() {
         });
     });
 
-    if (itemEncontrado) {
-        // 4. Atualiza a interface completa
-        renderizarConferencia(); // Reconstrói o HTML (remove o carimbo da tela)
-        updateOverallStatus();   // Recalcula o botão Finalizar e contadores de setor
-        
-        // 5. Feedback visual: faz o scroll até o item para o usuário ver que ele limpou
-        setTimeout(() => {
-            const el = document.querySelector(`[data-id="${uid}"]`) || 
-                       document.querySelector(`.tombamento-container[data-id="${uid}"]`);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.backgroundColor = "#fff9c4"; // Destaque amarelo temporário
-                setTimeout(() => { el.style.backgroundColor = ""; }, 1000);
-            }
-        }, 300);
+    if (excluido) {
+        // ESSENCIAL: Redesenha a tela. Como o item sumiu do Array, 
+        // a renderização não vai mais criar o carimbo.
+        renderizarConferencia(); 
+        updateOverallStatus();
+        console.log("Sucesso: Relato temporário removido:", idProcurado);
+    } else {
+        console.error("Não localizei o ID:", idProcurado);
+        alert("Erro: Não foi possível localizar este carimbo para exclusão.");
     }
 }
     
