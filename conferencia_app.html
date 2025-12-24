@@ -340,31 +340,46 @@
         }
     }
 }
-        /*function focusNextItem(currentItemId) { 
-            const allItems = Array.from(document.querySelectorAll('.item-conferencia')); 
-            let baseId = currentItemId.split('-')[0]; 
-            const idx = allItems.findIndex(i => i.dataset.id === baseId); 
-            for (let i = idx; i < allItems.length; i++) { 
-                const item = allItems[i]; if (!item) continue; const id = item.dataset.id; 
-                if (item.dataset.type === 'single') { 
-                    const st = window.itemStatus[id]; 
-                    if (!st || st.status === 'pending' || st.status === 'PENDING_CA') { 
-                        item.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-                        if (st && st.status === 'PENDING_CA') item.querySelector('textarea').focus(); return; 
-                    } 
-                } 
-                if (item.dataset.type === 'multi') { 
-                    const pendingTomb = Array.from(item.querySelectorAll('.tombamento-container')).find(t => { 
-                        const uid = `${id}-${t.dataset.tomb}`; const s = window.itemStatus[uid]?.status; return s === 'pending' || s === 'PENDING_CA'; 
-                    }); 
-                    if (pendingTomb) { 
-                        pendingTomb.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-                        const uid = `${id}-${pendingTomb.dataset.tomb}`; 
-                        if (window.itemStatus[uid]?.status === 'PENDING_CA') pendingTomb.querySelector('textarea').focus(); return; 
-                    } 
-                } 
-            } 
-        } */
+        function injetarCautelasNaLista() {
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    // Aqui simulamos a leitura da sua coleção cautelas_abertas
+    // No seu código real, você deve garantir que window.cautelasAbertas contenha os itens que você me enviou
+    const cautelas = window.cautelasAbertas || []; 
+
+    fonteDados.forEach(setor => {
+        setor.itens.forEach(item => {
+            cautelas.forEach(cautelaDoc => {
+                cautelaDoc.itens.forEach(itemCautelado => {
+                    // Se o ID base coincide (Ex: 56911524-64012364)
+                    if (item.id === itemCautelado.id_base) {
+                        
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            // Procura o tombamento específico (Ex: 511.524 ou 511.527)
+                            const t = item.tombamentos.find(tomb => tomb.tomb === itemCautelado.tombamento);
+                            if (t) {
+                                t.cautela = {
+                                    destinatario: cautelaDoc.destinatario_original_nome,
+                                    quantidade: 1,
+                                    id_cautela: cautelaDoc.cautela_id
+                                };
+                            }
+                        } else if (item.tipo === 'single') {
+                            if (!item.cautelas) item.cautelas = [];
+                            // Evita duplicados
+                            if (!item.cautelas.find(c => c.id_cautela === cautelaDoc.cautela_id)) {
+                                item.cautelas.push({
+                                    destinatario: cautelaDoc.destinatario_original_nome,
+                                    quantidade: itemCautelado.quantidade,
+                                    id_cautela: cautelaDoc.cautela_id
+                                });
+                            }
+                        }
+                    }
+                });
+            });
+        });
+    });
+}
 
         function autoAdvanceSetor(sid) { 
             const s = document.querySelector(`.setor[data-id="${sid}"]`); 
@@ -482,14 +497,14 @@ function renderizarConferencia() {
     window.setorIds = setorIds;
 
     // --- FUNÇÃO INTERNA: GERADOR DE CARIMBOS (RESTAURADA E CORRIGIDA) ---
-    const montarPendenciaHtml = (uid, itemOuTomb) => {
+   const montarPendenciaHtml = (uid, itemOuTomb) => {
     let htmlAcumulado = '';
     const statusLocal = window.itemStatus[uid] || {};
     const isCiente = statusLocal.status === 'cautela_ciente';
 
-    // --- CORREÇÃO DEFINITIVA PARA O 2º TOMBAMENTO ---
+    // --- CORREÇÃO PARA IDENTIFICAR O 2º TOMBAMENTO (VINCULO DE DADOS) ---
     let listaDeCautelas = [];
-    // Se o objeto tem .cautela (singular), é um tombamento. Se tem .cautelas (plural), é single.
+    // Prioriza a cautela injetada diretamente no tombamento pelo script de cruzamento
     if (itemOuTomb.cautela) {
         listaDeCautelas = [itemOuTomb.cautela];
     } else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) {
@@ -514,7 +529,7 @@ function renderizarConferencia() {
         }
     });
 
-    // --- PENDÊNCIAS FÍSICAS (RESTAURADO ÍCONES E TEXTOS ORIGINAIS) ---
+    // --- PENDÊNCIAS FÍSICAS (MANTIDAS INTEGRALMENTE) ---
     if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
         itemOuTomb.pendencias_ids.forEach(p => {
             const isTemp = String(p.id).startsWith('TEMP-');
