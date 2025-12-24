@@ -90,10 +90,13 @@
         <input type="hidden" id="modal-uid">
         <input type="hidden" id="modal-tipo">
 
-        <div id="modal-grupo-qtd" style="display:none; margin-top: 15px; text-align: left;">
-            <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: #d90f23;">Unidades Afetadas:</label>
-            <input type="number" id="modal-input-qtd" min="1" value="1" style="width: 100%; padding: 12px; border: 2px solid #d90f23; border-radius: 6px; box-sizing: border-box; font-size: 1.1em; text-align: center;">
-            <small id="modal-info-max" style="display: block; color: #888; margin-top: 5px; font-size: 0.8em;"></small>
+        <div id="modal-grupo-qtd" style="display:none; margin-top: 15px; margin-bottom: 15px; text-align: left;">
+            <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: #d90f23; font-family: sans-serif;">Unidades Afetadas:</label>
+    
+            <input type="number" id="modal-input-qtd" min="1" value="1" 
+                   style="width: 100%; padding: 12px; border: 2px solid #d90f23; border-radius: 6px; box-sizing: border-box; font-size: 1.1em; text-align: center; font-weight: bold;">
+    
+            <small id="modal-info-max" style="display: block; color: #888; margin-top: 5px; font-size: 0.8em; font-style: italic; font-family: sans-serif;"></small>
         </div>
 
         <div style="margin-top: 15px; text-align: left;">
@@ -1203,24 +1206,26 @@ function abrirFormNovoID(uid) {
     
     inputObs.value = '';
     
-    // Identifica se é Multi (Tombamento) pela presença do hifen
+    // Identifica se é Multi (Tombamento)
     const isMulti = uid.includes('-');
     document.getElementById('modal-uid').value = uid;
     document.getElementById('modal-tipo').value = isMulti ? 'multi' : 'single';
 
     if (isMulti) {
-        // --- LÓGICA PARA TOMBAMENTO (BUSCA O NÚMERO REAL) ---
+        // --- LÓGICA PARA TOMBAMENTO (BUSCANDO O CAMPO "TOMB") ---
         let numeroTombamentoReal = "Não identificado";
         let nomeDoItem = "Equipamento";
 
-        // Varre os dados para achar o texto exato do tombamento associado a este UID
         (window.dadosConferencia || dadosConferencia).forEach(setor => {
             setor.itens.forEach(item => {
-                if (item.tombamentos) {
+                if (item.tipo === 'multi' && item.tombamentos) {
                     item.tombamentos.forEach(t => {
-                        // Verifica se o UID gerado combina com este tombamento específico
-                        if (`${item.id}-${t.tomb}` === uid) {
-                            numeroTombamentoReal = t.tomb;
+                        // A comparação deve ser exata com o UID que gerou o botão na lista
+                        // Geralmente: item.id + "-" + t.tomb
+                        const uidGerado = `${item.id}-${t.tomb}`;
+                        
+                        if (uidGerado === uid) {
+                            numeroTombamentoReal = t.tomb; // Pega o campo "tomb" (ex: 511.524)
                             nomeDoItem = item.nome;
                         }
                     });
@@ -1231,13 +1236,12 @@ function abrirFormNovoID(uid) {
         document.getElementById('modal-titulo-item').innerText = "Relatar Alteração";
         document.getElementById('modal-subtitulo-detalhe').innerHTML = `Item: <b>${nomeDoItem}</b><br>Referência Tomb.: <span style="color:#d90f23; font-weight:bold;">${numeroTombamentoReal}</span>`;
         
-        grupoQtd.style.display = 'none';
+        // Esconde Qtd (Tombamento é sempre 1 unidade)
+        grupoQtd.style.setProperty('display', 'none', 'important'); 
         inputQtd.value = 1;
         inputQtd.max = 1;
     } else {
         // --- LÓGICA PARA ITEM SINGLE (QUANTIDADE) ---
-        grupoQtd.style.display = 'block';
-        
         let saldoDisponivel = 0;
         let nomeItem = "Item não localizado";
 
@@ -1252,20 +1256,22 @@ function abrirFormNovoID(uid) {
         });
 
         document.getElementById('modal-titulo-item').innerText = nomeItem;
-        document.getElementById('modal-subtitulo-detalhe').innerText = "Informe as unidades com alteração:";
+        document.getElementById('modal-subtitulo-detalhe').innerText = "Informe a quantidade de itens com alteração:";
         
+        // Mostra Qtd
+        grupoQtd.style.setProperty('display', 'block', 'important');
         inputQtd.max = saldoDisponivel;
         inputQtd.value = 1;
-        infoMax.innerText = `Saldo disponível para este item: ${saldoDisponivel} un.`;
+        infoMax.innerText = `Saldo máximo disponível: ${saldoDisponivel} un.`;
         
         if(saldoDisponivel <= 0) {
-            alert("Este item não possui saldo disponível (todos cautelados).");
+            alert("Este item não possui saldo disponível para alteração.");
             return;
         }
     }
 
     modal.style.display = 'flex';
-    setTimeout(() => inputObs.focus(), 100);
+    setTimeout(() => inputObs.focus(), 150);
 }
     function fecharModalPendencia() {
     const modal = document.getElementById('modal-nova-pendencia');
