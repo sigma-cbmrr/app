@@ -5581,9 +5581,11 @@ async function iniciarCautelaProcesso() {
     const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
     const destinatarioNome = document.getElementById('cautela-destinatario').value;
     const obsEmissao = document.getElementById('cautela-obs')?.value || "";
-    const itensCount = (typeof cautelaItensSelecionados !== 'undefined') ? cautelaItensSelecionados.length : 0;
+    
+    // Captura segura da variável de itens
+    const itensParaProcessar = (typeof cautelaItensSelecionados !== 'undefined') ? cautelaItensSelecionados : [];
 
-    if (!localId || !destinatarioUid || itensCount === 0) {
+    if (!localId || !destinatarioUid || itensParaProcessar.length === 0) {
         alert("Verifique se selecionou o local, o militar e os itens.");
         return;
     }
@@ -5611,7 +5613,7 @@ async function iniciarCautelaProcesso() {
             status: 'ABERTA',
             timestamp_emissao: timestamp,
             observacoes_emissao: obsEmissao,
-            itens: cautelaItensSelecionados
+            itens: itensParaProcessar
         };
 
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
@@ -5623,39 +5625,37 @@ async function iniciarCautelaProcesso() {
 
             let listaMestra = listaDoc.data().list;
 
-            // --- CORREÇÃO APLICADA AQUI ---
+            // --- AQUI ESTÁ A CORREÇÃO PARA O 2º TOMBAMENTO ---
             listaMestra = listaMestra.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(mItem => {
-                    // 1. Filtramos TODOS os itens selecionados que pertencem a este item pai (mItem)
-                    const selecoesDesteItem = cautelaItensSelecionados.filter(c => (c.id_base || c.id) === mItem.id);
+                    // Buscamos TODOS os itens da cautela que pertencem a este ID de material
+                    const selecoesDesteMaterial = itensParaProcessar.filter(c => (c.id_base || c.id) === mItem.id);
                     
-                    if (selecoesDesteItem.length > 0) {
+                    if (selecoesDesteMaterial.length > 0) {
                         if (!mItem.historico_vida) mItem.historico_vida = [];
 
-                        // 2. Processamos cada seleção (pode ser mais de um tombamento do mesmo item)
-                        selecoesDesteItem.forEach(cItem => {
-                            const qtdParaAbater = Number(cItem.quantidade) || 1;
-                            
+                        // Processamos cada seleção individualmente (Resolve o problema de múltiplos tombamentos)
+                        selecoesDesteMaterial.forEach(cItem => {
                             const objetoCautela = {
                                 id: cautelaId,
                                 emitente: emitenteNome,
                                 destinatario: destinatarioNome,
                                 data: dataAtual,
-                                quantidade: qtdParaAbater
+                                quantidade: Number(cItem.quantidade) || 1
                             };
 
-                            // Adiciona log no histórico de vida
+                            // Carimba o histórico
                             mItem.historico_vida.push({
                                 evento: "SAÍDA_CAUTELA",
                                 id_doc: cautelaId,
                                 quem: emitenteNome,
                                 data: dataAtual,
-                                detalhes: `Cautelado ${qtdParaAbater}un (${cItem.tombamento || 'S/T'}) para ${destinatarioNome}. Obs: ${obsEmissao}`
+                                detalhes: `Cautelado ${objetoCautela.quantidade}un (${cItem.tombamento || 'S/T'}) para ${destinatarioNome}.`
                             });
 
                             if (mItem.tipo === 'multi' && cItem.tombamento) {
-                                // Carimba o tombamento específico dentro do array
+                                // CARIMBA CADA TOMBAMENTO SELECIONADO
                                 mItem.tombamentos = (mItem.tombamentos || []).map(t => {
                                     if (t.tomb === cItem.tombamento) {
                                         t.cautela = objetoCautela;
@@ -5663,7 +5663,7 @@ async function iniciarCautelaProcesso() {
                                     return t;
                                 });
                             } else {
-                                // Para itens Single, adiciona ao array de cautelas
+                                // Para itens Single
                                 if (!mItem.cautelas) mItem.cautelas = [];
                                 mItem.cautelas.push(objetoCautela);
                             }
