@@ -192,6 +192,7 @@
         }
     });
 
+    // Atualiza o Botão Finalizar
     const btn = document.getElementById('btn-finalizar');
     if (btn) {
         let buttonPrefix = MODO_OPERACAO === 'devolucao' ? 'FINALIZAR DEVOLUÇÃO' : 'FINALIZAR CONFERÊNCIA';
@@ -201,17 +202,40 @@
         btn.style.opacity = btn.disabled ? '0.6' : '1';
     }
 
-    // Sincroniza os contadores dos Setores
+    // Atualiza os Setores com a lógica de "Extrato"
     document.querySelectorAll('.setor').forEach(s => {
         const totalNoSetor = parseInt(s.getAttribute('data-total-items')) || 0;
-        const concluidosNoSetor = s.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
+        const itensConcluidos = s.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert');
+        const numConcluidos = itensConcluidos.length;
+        
+        // Conta especificamente quantos têm alteração (classe status-alert)
+        const numAlteracoes = s.querySelectorAll('.item-conferencia.status-alert').length;
         
         const statusDiv = s.querySelector('.setor-status');
         if (statusDiv) {
-            statusDiv.innerText = `${concluidosNoSetor}/${totalNoSetor}`;
-            // CORREÇÃO: Forçamos a cor branca para o contador
-            statusDiv.style.color = "#ffffff"; 
+            // Estilo base do "Selo"
+            statusDiv.style.padding = "2px 8px";
+            statusDiv.style.borderRadius = "4px";
             statusDiv.style.fontWeight = "bold";
+            statusDiv.style.fontSize = "0.85em";
+            statusDiv.style.color = "#ffffff";
+
+            if (numConcluidos >= totalNoSetor && totalNoSetor > 0) {
+                // SETOR FINALIZADO: Exibe Extrato
+                if (numAlteracoes > 0) {
+                    statusDiv.innerText = `${numAlteracoes} C/A`;
+                    statusDiv.style.backgroundColor = "#d90f23"; // Vermelho
+                } else {
+                    statusDiv.innerText = "S/A";
+                    statusDiv.style.backgroundColor = "#1b8a3e"; // Verde
+                }
+            } else {
+                // SETOR EM ANDAMENTO: Exibe Contador padrão
+                statusDiv.innerText = `${numConcluidos}/${totalNoSetor}`;
+                statusDiv.style.backgroundColor = "transparent";
+                statusDiv.style.color = "#ffffff";
+            }
+            statusDiv.dataset.completed = numConcluidos;
         }
     });
 }
@@ -376,33 +400,37 @@
 }
 
         function autoAdvanceSetor(currentSetorElement) {
-    // 1. Captura todos os setores que existem na página agora
     const todosSetores = Array.from(document.querySelectorAll('.setor'));
-    
-    // 2. Encontra a posição do setor atual dentro desse array
     const currentIndex = todosSetores.indexOf(currentSetorElement);
     
-    // 3. Se não for o último, abre o próximo
+    // 1. AÇÃO OBRIGATÓRIA: Retrair o setor que acabou de ser finalizado
+    const currentContent = currentSetorElement.querySelector('.setor-content');
+    const currentArrow = currentSetorElement.querySelector('.arrow');
+    
+    if (currentContent) currentContent.classList.remove('expanded');
+    if (currentArrow) currentArrow.textContent = '►';
+
+    // 2. AÇÃO CONDICIONAL: Se houver um próximo, expande-o
     if (currentIndex !== -1 && currentIndex < todosSetores.length - 1) {
         const nextSetorEl = todosSetores[currentIndex + 1];
-
-        // FECHA O ATUAL
-        const currentContent = currentSetorElement.querySelector('.setor-content');
-        const currentArrow = currentSetorElement.querySelector('.arrow');
-        if (currentContent) currentContent.classList.remove('expanded');
-        if (currentArrow) currentArrow.textContent = '►';
-
-        // ABRE O PRÓXIMO
         const nextContent = nextSetorEl.querySelector('.setor-content');
         const nextArrow = nextSetorEl.querySelector('.arrow');
         
         if (nextContent) nextContent.classList.add('expanded');
         if (nextArrow) nextArrow.textContent = '▼';
         
-        // SCROLL SUAVE PARA O NOVO SETOR
+        // Scroll suave para o novo setor
         setTimeout(() => {
             nextSetorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 150);
+    } else {
+        // Se for o último setor, apenas faz o scroll para o botão de finalizar
+        const btnFin = document.getElementById('btn-finalizar');
+        if (btnFin) {
+            setTimeout(() => {
+                btnFin.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 300);
+        }
     }
 }
         function isElementInViewport(el) { const rect = el.getBoundingClientRect(); return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth)); }
