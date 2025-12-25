@@ -219,9 +219,12 @@
             statusDiv.style.fontWeight = "bold";
             statusDiv.style.fontSize = "0.85em";
             statusDiv.style.color = "#ffffff";
+            statusDiv.style.display = "inline-block"; // Garante que o fundo apareça corretamente
 
             if (numConcluidos >= totalNoSetor && totalNoSetor > 0) {
-                // SETOR FINALIZADO: Exibe Extrato
+                // LIMPEZA CRÍTICA: Remove o texto "2/2" antes de definir o novo
+                statusDiv.innerText = ""; 
+                
                 if (numAlteracoes > 0) {
                     statusDiv.innerText = `${numAlteracoes} C/A`;
                     statusDiv.style.backgroundColor = "#d90f23"; // Vermelho
@@ -305,26 +308,22 @@
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
-    // 1. CONTAGEM BASEADA NA CLASSE (Sincronizada com 0/3)
-    // Contamos os itens-pai (Materiais) que estão verdes ou laranjas
+    // 1. Atualiza o estado global e visual primeiro
+    // Isso garante que o selo S/A ou C/A seja desenhado antes de qualquer movimento
+    updateOverallStatus();
+
+    // 2. CONTAGEM PARA LÓGICA DE AVANÇO
     const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
     const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
 
-    const statusDiv = currentSetor.querySelector('.setor-status');
-    if (statusDiv) {
-        statusDiv.innerText = `${concluidos}/${totalItensNoSetor}`;
-        statusDiv.dataset.completed = concluidos;
-    }
-
-    // 2. LÓGICA DE AVANÇO
+    // 3. DECISÃO DE FLUXO
     if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
-        // Se o setor fechou (3/3), avança para o próximo setor
+        // SETOR CONCLUÍDO: Aguarda um pouco para o usuário ver o selo mudar e então retrai
         setTimeout(() => {
-            autoAdvanceSetor(currentSetor); // Passamos o elemento inteiro
-        }, 300);
+            autoAdvanceSetor(currentSetor); 
+        }, 550); // Tempo ideal para ver a "mágica" do selo antes de fechar
     } else {
-        // Se ainda há itens, busca o PRÓXIMO ALVO PENDENTE (Tombamento ou Single)
-        // Aqui mantemos a busca por blocos individuais para o scroll ser preciso
+        // SETOR EM ANDAMENTO: Busca o PRÓXIMO ALVO PENDENTE
         const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
         
         const indexAtual = todosAlvos.findIndex(el => {
@@ -339,7 +338,6 @@
                 ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
                 : el.getAttribute('data-id');
             
-            // Verifica status normal E status de cautela isolado
             const stNormal = window.itemStatus[id]?.status;
             const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
             
@@ -350,7 +348,7 @@
             setTimeout(() => {
                 proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 
-                // Feedback visual sutil
+                // Feedback visual sutil no próximo item
                 proximoAlvo.style.transition = "box-shadow 0.3s";
                 proximoAlvo.style.boxShadow = "0 0 10px rgba(245, 124, 0, 0.5)";
                 setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
