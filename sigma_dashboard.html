@@ -5594,10 +5594,7 @@ async function iniciarCautelaProcesso() {
     try {
         const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteUid = firebase.auth().currentUser.uid;
-        
-        // 🛑 CORREÇÃO DO NOME DO EMITENTE
         const emitenteNome = `${currentUserData.posto || ""} ${currentUserData.quadro || ""} ${currentUserData.nome_guerra || ""}`.trim();
-        
         const dataAtual = new Date().toLocaleString('pt-BR');
         const timestamp = firebase.firestore.FieldValue.serverTimestamp();
 
@@ -5626,47 +5623,51 @@ async function iniciarCautelaProcesso() {
 
             let listaMestra = listaDoc.data().list;
 
-            // 🛑 NOVA LÓGICA: Processa a lista uma única vez para evitar duplicações
+            // --- CORREÇÃO APLICADA AQUI ---
             listaMestra = listaMestra.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(mItem => {
-                    // Busca se este item da lista mestra foi selecionado para cautela
-                    const cItem = cautelaItensSelecionados.find(c => (c.id_base || c.id) === mItem.id);
+                    // 1. Filtramos TODOS os itens selecionados que pertencem a este item pai (mItem)
+                    const selecoesDesteItem = cautelaItensSelecionados.filter(c => (c.id_base || c.id) === mItem.id);
                     
-                    if (cItem) {
-                        const qtdParaAbater = Number(cItem.quantidade) || 1;
-                        
-                        const objetoCautela = {
-                            id: cautelaId,
-                            emitente: emitenteNome,
-                            destinatario: destinatarioNome,
-                            data: dataAtual,
-                            quantidade: qtdParaAbater
-                        };
-
-                        const logHistorico = {
-                            evento: "SAÍDA_CAUTELA",
-                            id_doc: cautelaId,
-                            quem: emitenteNome,
-                            data: dataAtual,
-                            detalhes: `Cautelado ${qtdParaAbater}un para ${destinatarioNome}. Obs: ${obsEmissao}`
-                        };
-
+                    if (selecoesDesteItem.length > 0) {
                         if (!mItem.historico_vida) mItem.historico_vida = [];
-                        mItem.historico_vida.push(logHistorico);
 
-                        if (cItem.tipo === 'multi' || cItem.tombamento) {
-                            // Lógica para Multi (Tombamentos)
-                            mItem.tombamentos = (mItem.tombamentos || []).map(t => {
-                                // Se for o tombamento específico selecionado, carimba
-                                if (t.tomb === cItem.tombamento) t.cautela = objetoCautela;
-                                return t;
+                        // 2. Processamos cada seleção (pode ser mais de um tombamento do mesmo item)
+                        selecoesDesteItem.forEach(cItem => {
+                            const qtdParaAbater = Number(cItem.quantidade) || 1;
+                            
+                            const objetoCautela = {
+                                id: cautelaId,
+                                emitente: emitenteNome,
+                                destinatario: destinatarioNome,
+                                data: dataAtual,
+                                quantidade: qtdParaAbater
+                            };
+
+                            // Adiciona log no histórico de vida
+                            mItem.historico_vida.push({
+                                evento: "SAÍDA_CAUTELA",
+                                id_doc: cautelaId,
+                                quem: emitenteNome,
+                                data: dataAtual,
+                                detalhes: `Cautelado ${qtdParaAbater}un (${cItem.tombamento || 'S/T'}) para ${destinatarioNome}. Obs: ${obsEmissao}`
                             });
-                        } else {
-                            // 🛑 Lógica para Single (Quantidade) - CRÍTICO PARA O "8 de 10"
-                            if (!mItem.cautelas) mItem.cautelas = [];
-                            mItem.cautelas.push(objetoCautela);
-                        }
+
+                            if (mItem.tipo === 'multi' && cItem.tombamento) {
+                                // Carimba o tombamento específico dentro do array
+                                mItem.tombamentos = (mItem.tombamentos || []).map(t => {
+                                    if (t.tomb === cItem.tombamento) {
+                                        t.cautela = objetoCautela;
+                                    }
+                                    return t;
+                                });
+                            } else {
+                                // Para itens Single, adiciona ao array de cautelas
+                                if (!mItem.cautelas) mItem.cautelas = [];
+                                mItem.cautelas.push(objetoCautela);
+                            }
+                        });
                     }
                     return mItem;
                 })
