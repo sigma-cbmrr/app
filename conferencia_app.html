@@ -297,38 +297,28 @@
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
-    // 1. Contagem de progresso (Mantive sua lógica que está correta)
-    const blocosConferencia = currentSetor.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]');
-    const total = blocosConferencia.length;
-    let concluidos = 0;
-
-    blocosConferencia.forEach(bloco => {
-        let uid = bloco.classList.contains('tombamento-container') 
-            ? `${bloco.closest('.item-conferencia').getAttribute('data-id')}-${bloco.getAttribute('data-tomb')}`
-            : bloco.getAttribute('data-id');
-
-        if (window.itemStatus[uid] && window.itemStatus[uid].status !== 'pending') {
-            concluidos++;
-        }
-    });
+    // 1. CONTAGEM BASEADA NA CLASSE (Sincronizada com 0/3)
+    // Contamos os itens-pai (Materiais) que estão verdes ou laranjas
+    const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
+    const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
 
     const statusDiv = currentSetor.querySelector('.setor-status');
     if (statusDiv) {
-        statusDiv.innerText = `${concluidos}/${total}`;
+        statusDiv.innerText = `${concluidos}/${totalItensNoSetor}`;
         statusDiv.dataset.completed = concluidos;
     }
 
-    // 2. LÓGICA DE FOCO INTELIGENTE
-    if (concluidos === total && total > 0) {
-        // Se o setor fechou, avança para o próximo setor
+    // 2. LÓGICA DE AVANÇO
+    if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
+        // Se o setor fechou (3/3), avança para o próximo setor
         setTimeout(() => {
-            autoAdvanceSetor(currentSetor.dataset.id);
+            autoAdvanceSetor(currentSetor); // Passamos o elemento inteiro
         }, 300);
     } else {
-        // Se ainda há itens, busca o PRÓXIMO ITEM PENDENTE na página inteira
+        // Se ainda há itens, busca o PRÓXIMO ALVO PENDENTE (Tombamento ou Single)
+        // Aqui mantemos a busca por blocos individuais para o scroll ser preciso
         const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
         
-        // Encontra a posição do item que acabamos de conferir
         const indexAtual = todosAlvos.findIndex(el => {
             const id = el.classList.contains('tombamento-container') 
                 ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
@@ -336,22 +326,25 @@
             return id === currentItemId;
         });
 
-        // Procura o primeiro item com status 'pending' que venha DEPOIS do atual
         const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
             const id = el.classList.contains('tombamento-container') 
                 ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
                 : el.getAttribute('data-id');
-            return !window.itemStatus[id] || window.itemStatus[id].status === 'pending';
+            
+            // Verifica status normal E status de cautela isolado
+            const stNormal = window.itemStatus[id]?.status;
+            const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
+            
+            return (!stNormal || stNormal === 'pending') && (stCautela !== 'cautela_ciente');
         });
 
         if (proximoAlvo) {
             setTimeout(() => {
-                // block: 'center' garante que o item fique no meio da tela
                 proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 
-                // Feedback visual sutil (borda temporária) para guiar o olho do conferente
+                // Feedback visual sutil
                 proximoAlvo.style.transition = "box-shadow 0.3s";
-                proximoAlvo.style.boxShadow = "0 0 10px rgba(27, 138, 62, 0.5)";
+                proximoAlvo.style.boxShadow = "0 0 10px rgba(245, 124, 0, 0.5)";
                 setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
             }, 300);
         }
@@ -398,15 +391,34 @@
     });
 }
 
-        function autoAdvanceSetor(sid) { 
-            const s = document.querySelector(`.setor[data-id="${sid}"]`); 
-            if (s) toggleSetor(s.querySelector('.setor-header')); 
-            const idx = window.setorIds.indexOf(sid); const nextId = window.setorIds[idx + 1]; 
-            if (nextId) { 
-                const next = document.querySelector(`.setor[data-id="${nextId}"]`); 
-                if (next) { const h = next.querySelector('.setor-header'); toggleSetor(h); next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } 
-            } 
-        }
+        function autoAdvanceSetor(currentSetorElement) {
+    const setorIds = window.setorIds || [];
+    const currentId = currentSetorElement.getAttribute('data-id');
+    
+    // Proteção: se não houver IDs ou ID atual, aborta antes de dar erro
+    if (!currentId || setorIds.length === 0) return;
+
+    const currentIndex = setorIds.indexOf(currentId);
+    
+    // Se não encontrar o índice ou for o último setor, não faz nada
+    if (currentIndex === -1 || currentIndex >= setorIds.length - 1) return;
+
+    const nextSetorId = setorIds[currentIndex + 1];
+    const nextSetorEl = document.querySelector(`.setor[data-id="${nextSetorId}"]`);
+
+    if (nextSetorEl) {
+        // Retrai o atual
+        currentSetorElement.querySelector('.setor-content').classList.remove('expanded');
+        currentSetorElement.querySelector('.arrow').textContent = '►';
+
+        // Abre o próximo
+        nextSetorEl.querySelector('.setor-content').classList.add('expanded');
+        nextSetorEl.querySelector('.arrow').textContent = '▼';
+        
+        // Scroll suave para o novo setor
+        nextSetorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
         function isElementInViewport(el) { const rect = el.getBoundingClientRect(); return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth)); }
         
         
