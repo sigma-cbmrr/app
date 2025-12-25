@@ -1727,33 +1727,44 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
 function setItemStatusID(btn, status, uid) {
     const container = btn.closest('.tombamento-container') || btn.closest('.item-conferencia');
     const setor = btn.closest('.setor');
+    const itemPai = btn.closest('.item-conferencia');
 
     // Inicializa o objeto se não existir para evitar erros
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
     if (status === 'ok') {
+        // 1. Atualiza o banco de dados local preservando outros estados
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'S/A' 
         };
 
+        // 2. Feedback visual nos botões
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        const itemPai = btn.closest('.item-conferencia');
-        const icon = container.querySelector('.status-icon');
+        // 3. ATUALIZAÇÃO DE CLASSE (Crítico para o contador funcionar)
+        // Se for um item single, aplicamos a classe status-ok imediatamente
+        if (itemPai && itemPai.getAttribute('data-type') === 'single') {
+            itemPai.classList.add('status-ok');
+            itemPai.classList.remove('status-alert');
+            const icon = itemPai.querySelector('.status-icon');
+            if (icon) icon.className = 'status-icon ok';
+        }
 
+        // 4. Se for parte de um item Multi, chama a função que reavalia o "Pai"
         if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
             updateItemMainStatusDisplay(itemPai);
-        } else if (icon) {
-            icon.className = 'status-icon ok'; 
         }
+
     } else if (status === 'cautela_ciente') {
+        // PRESERVAÇÃO CRÍTICA: Mantém IDs mantidos ao marcar ciência
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'cautela_ciente' 
         };
         
+        // Feedback visual imediato no botão
         btn.innerHTML = '<i class="fas fa-check"></i> Ciente registrado';
         btn.disabled = true;
         btn.style.backgroundColor = "#1b8a3e";
@@ -1768,6 +1779,7 @@ function setItemStatusID(btn, status, uid) {
         }, 400);
     }
 
+    // 5. Atualiza contadores globais e de setor
     updateOverallStatus();
 
     if (setor) { 
