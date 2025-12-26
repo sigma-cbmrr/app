@@ -2547,6 +2547,7 @@
 		let cautelaIdAtualParaReporte = '';
 		let itensDaCautelaAtual = [];
 		let pendenciaSendoResolvida = null
+		let cachePendenciasCautela = [];
 
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -7476,17 +7477,16 @@ async function findUidByName(nomeCompleto) {
         alert("Erro: " + error.message);
     }
 }
-		async function loadCautelaPendencies() {
+
+async function loadCautelaPendencies() {
     const container = document.getElementById('admin-gestor-cards-container');
     if (!container || !currentUserData) return;
 
     try {
         console.log("=== BUSCANDO PENDÊNCIAS DE CAUTELA ===");
         
-        // 1. Obtém os IDs das listas que pertencem à unidade do gestor
         const unitListIds = await getUnitListIds();
         
-        // 2. Query simplificada por Status (evita erro de múltiplos filtros 'in')
         let query = db.collection('cautelas_abertas')
                       .where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
         
@@ -7496,14 +7496,9 @@ async function findUidByName(nomeCompleto) {
 
         snap.forEach(doc => {
             const data = doc.data();
-            
-            // 3. Filtro de Unidade: O gestor vê se a cautela pertence ao seu setor/unidade
             const pertenceAoSetor = currentUserData.role === 'admin' || unitListIds.includes(data.local_origem_id);
 
             if (pertenceAoSetor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
-                
-                // 4. Captura todas as pendências ativas desta cautela
-                // Removido o filtro de UID específico para que a gestão seja compartilhada na unidade
                 const pendenciasFiltradas = data.pendencias_ativas; 
 
                 if (pendenciasFiltradas.length > 0) {
@@ -7518,21 +7513,22 @@ async function findUidByName(nomeCompleto) {
             }
         });
 
+        // ATUALIZA O CACHE GLOBAL
+        cachePendenciasCautela = cautelasComPendencia;
         console.log("Total de itens para troca localizados:", totalPendenciasTroca);
 
         const cardExistente = document.getElementById('card-pendencia-cautela-ativa');
         
-        // Se não houver pendências, remove o card (limpeza após resolução)
         if (totalPendenciasTroca === 0) {
             if (cardExistente) cardExistente.remove();
             return;
         }
 
-        // 5. Montagem do Card Laranja
+        // MONTAGEM DO CARD (Removido a passagem de JSON via parâmetro)
         let cardHtml = `
             <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
                  style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
-                 onclick="abrirGestaoPendenciasCautela('${encodeURIComponent(JSON.stringify(cautelasComPendencia))}')">
+                 onclick="abrirGestaoPendenciasCautela()">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <h3 style="color: #e65100; margin: 0; font-size: 1.1em;"><i class="fas fa-exclamation-circle"></i> Pendências de Cautelas Ativas</h3>
@@ -7556,8 +7552,10 @@ async function findUidByName(nomeCompleto) {
         console.error("Erro ao carregar pendências de cautela:", e);
     }
 }
-	async function abrirGestaoPendenciasCautela(cautelasJson) {
-    const cautelas = JSON.parse(decodeURIComponent(cautelasJson));
+
+async function abrirGestaoPendenciasCautela() {
+    // LÊ DIRETO DO CACHE GLOBAL PARA EVITAR ERRO DE PARSE
+    const cautelas = cachePendenciasCautela;
     const wrapper = document.getElementById('ca-table-wrapper');
     const tbody = document.getElementById('ca-list-body');
     if (!wrapper || !tbody) return;
@@ -7583,7 +7581,7 @@ async function findUidByName(nomeCompleto) {
             const tdStatus = tr.insertCell();
             tdStatus.innerHTML = `<span class="status-badge badge-pendente">AGUARDANDO TROCA</span>`;
 
-            // 3. Coluna Alteração (Motivo visível na tabela)
+            // 3. Coluna Alteração
             const tdAlteracao = tr.insertCell();
             tdAlteracao.style.textAlign = "left";
             tdAlteracao.innerHTML = `
@@ -7593,17 +7591,13 @@ async function findUidByName(nomeCompleto) {
                 </div>
             `;
 
-            // 4. Coluna Solicitante e Data (CORREÇÃO DO INVALID DATE)
+            // 4. Coluna Solicitante e Data
             const tdMilitar = tr.insertCell();
             let dataFormatada = "Data indisponível";
-            
             if (p.timestamp) {
-                // Se for objeto Timestamp do Firebase que passou pelo JSON vira {seconds, nanoseconds}
                 if (p.timestamp.seconds) {
                     dataFormatada = new Date(p.timestamp.seconds * 1000).toLocaleString('pt-BR');
-                } 
-                // Se já for uma string ou Date padrão
-                else {
+                } else {
                     const d = new Date(p.timestamp);
                     if (!isNaN(d.getTime())) {
                         dataFormatada = d.toLocaleString('pt-BR');
@@ -7612,7 +7606,7 @@ async function findUidByName(nomeCompleto) {
             }
             tdMilitar.innerHTML = `<small><b>${p.solicitante_nome}</b><br>${dataFormatada}</small>`;
 
-            // 5. Preparação dos dados para o Modal (CORREÇÃO DO MOTIVO)
+            // 5. Preparação dos dados para o Modal
             const btnData = encodeURIComponent(JSON.stringify({
                 cautelaId: cautela.id,
                 solicitacaoId: p.id_solicitacao,
@@ -7621,7 +7615,7 @@ async function findUidByName(nomeCompleto) {
                 itemTomb: p.item_tombamento,
                 qtdProblema: p.quantidade,
                 localId: cautela.local_origem_id,
-                motivo: p.motivo // Passando o motivo para o modal
+                motivo: p.motivo
             }));
 
             const tdAcao = tr.insertCell();
