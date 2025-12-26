@@ -5266,15 +5266,16 @@ async function loadCustodiaLocais() {
 
             // 🛑 CÁLCULO DE DISPONIBILIDADE DO SETOR (Correção do NaN)
             const setorTotal = setorItems.reduce((acc, item) => {
-                if (item.tipo === 'single') {
-                    const esperado = Number(item.quantidadeEsperada) || 0;
-                    const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                    return acc + (esperado - cautelado);
-                } else if (item.tipo === 'multi') {
-                    return acc + (item.tombamentos || []).filter(t => !t.cautela).length;
-                }
-                return acc;
-            }, 0);
+    			if (item.tipo === 'single') {
+        			const esperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
+       			 const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+       			 const saldo = esperado - cautelado;
+        			return acc + (saldo > 0 ? saldo : 0);
+    			} else if (item.tipo === 'multi') {
+        			return acc + (item.tombamentos || []).filter(t => !t.cautela).length;
+   				}
+   			 return acc;
+			}, 0);
 
             if (setorTotal <= 0) return;
             totalGeralDisponivel += setorTotal;
@@ -5289,28 +5290,28 @@ async function loadCustodiaLocais() {
                     <div class="items-card-grid">`;
 
             setorItems.forEach(item => {
-                if (item.tipo === 'single') {
-                    // 🛑 CÁLCULO DE SALDO DO ITEM (Garante que 10 - 2 = 8)
-                    const totalEsperado = Number(item.quantidadeEsperada) || 0;
-                    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                    const saldoDisponivel = totalEsperado - totalCautelado;
+               if (item.tipo === 'single') {
+    const totalEsperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
+    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+    const saldoDisponivel = totalEsperado - totalCautelado;
 
-                    if (saldoDisponivel > 0) {
-                        htmlContent += `
-                            <div class="item-selection-card" data-item-id="${item.id}">
-                                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
-                                <div class="qtd-control-wrapper">
-                                    <label>
-                                        <input type="checkbox" name="cautela-item-base" 
-                                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
-                                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
-                                    </label>
-                                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
-                                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
-                                </div>
-                                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
-                            </div>`;
-                    }
+    if (saldoDisponivel > 0) {
+        htmlContent += `
+            <div class="item-selection-card" data-item-id="${item.id}">
+                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
+                <div class="qtd-control-wrapper">
+                    <label>
+                        <input type="checkbox" name="cautela-item-base" 
+                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
+                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
+                    </label>
+                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
+                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
+                </div>
+                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
+            </div>`;
+    }
+}
                 } else if (item.tipo === 'multi' && item.tombamentos?.length > 0) {
                     const tags = (item.tombamentos || []).map(t => {
                         const isC = !!t.cautela;
