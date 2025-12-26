@@ -6120,34 +6120,39 @@ async function iniciarFluxoSubstituicao() {
 
         const data = doc.data();
         itensDaCautelaAtual = data.itens || [];
+        
+        // --- TRAVA DE DUPLICIDADE ---
+        // Pega os índices de itens que já estão no array de pendências ativas
+        const pendenciasAtivas = data.pendencias_ativas || [];
+        const indicesBloqueados = pendenciasAtivas.map(p => p.item_index);
 
-        // --- NOVO: IDENTIFICAÇÃO DA UNIDADE VIA ROTA ---
+        // --- IDENTIFICAÇÃO DA UNIDADE VIA ROTA ---
         let unidadeAlvo = data.unidade_destino || "";
-
-        // Se a cautela não tem a unidade gravada, buscamos pelo mapeamento do local_origem_id
         if (!unidadeAlvo && data.local_origem_id) {
             const rotasDoc = await db.collection('config_geral').doc('rotas').get();
             const rotas = rotasDoc.data() || {};
             if (rotas[data.local_origem_id]) {
                 unidadeAlvo = rotas[data.local_origem_id].unidade;
-                console.log("Unidade identificada via local_origem_id:", unidadeAlvo);
             }
         }
-
-        // Fallback final: usa a unidade do usuário logado se tudo falhar
-        if (!unidadeAlvo) {
-            unidadeAlvo = currentUserData.unidade;
-            console.log("Usando unidade do usuário logado como fallback:", unidadeAlvo);
-        }
+        if (!unidadeAlvo) unidadeAlvo = currentUserData.unidade;
 
         const container = document.getElementById('lista-itens-reporte');
         
-        // 1. Renderiza a lista de itens para seleção
-        container.innerHTML = itensDaCautelaAtual.map((item, index) => `
-            <div style="margin-bottom: 10px; padding: 10px; border-bottom: 1px solid #ddd; background: #fff; border-radius:6px;">
-                <label style="display: flex; align-items: center; cursor: pointer; font-weight: bold;">
-                    <input type="checkbox" class="check-item-reporte" data-index="${index}" style="margin-right: 10px;" onchange="toggleObsInput(${index})">
-                    ${item.nome} ${item.tombamento ? `<span style="color:#800020; margin-left:5px;">[Tomb: ${item.tombamento}]</span>` : `<span style="color:#666; margin-left:5px;">(${item.quantidade} un)</span>`}
+        // 1. Renderiza a lista com lógica de bloqueio visual
+        container.innerHTML = itensDaCautelaAtual.map((item, index) => {
+            const estaBloqueado = indicesBloqueados.includes(index);
+            const corFundo = estaBloqueado ? '#fff5f5' : '#fff';
+            const corTexto = estaBloqueado ? '#999' : '#000';
+
+            return `
+            <div style="margin-bottom: 10px; padding: 10px; border: 1px solid ${estaBloqueado ? '#ffcccc' : '#ddd'}; background: ${corFundo}; border-radius:6px; opacity: ${estaBloqueado ? '0.8' : '1'};">
+                <label style="display: flex; align-items: center; cursor: ${estaBloqueado ? 'not-allowed' : 'pointer'}; font-weight: bold; color: ${corTexto};">
+                    <input type="checkbox" class="check-item-reporte" data-index="${index}" 
+                           ${estaBloqueado ? 'disabled' : ''} 
+                           style="margin-right: 10px;" onchange="toggleObsInput(${index})">
+                    ${item.nome} ${item.tombamento ? `[Tomb: ${item.tombamento}]` : `(${item.quantidade} un)`}
+                    ${estaBloqueado ? '<span style="margin-left:auto; color:#d90f23; font-size:0.7em;"><i class="fas fa-clock"></i> EM ANÁLISE</span>' : ''}
                 </label>
                 <div id="div-obs-${index}" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
                     ${!item.tombamento ? `
@@ -6155,32 +6160,27 @@ async function iniciarFluxoSubstituicao() {
                         <input type="number" id="qtd-obs-${index}" value="1" min="1" max="${item.quantidade}" style="width: 100%; padding: 5px; margin-bottom: 8px; border: 1px solid #ccc; border-radius:4px;">
                     ` : `<input type="hidden" id="qtd-obs-${index}" value="1">`}
                     <label style="font-size: 0.8em; font-weight:bold;">MOTIVO DO RELATO:</label>
-                    <textarea id="text-obs-${index}" placeholder="Descreva o que houve com este item..." style="width: 100%; height: 50px; font-size: 0.85em; padding: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"></textarea>
+                    <textarea id="text-obs-${index}" placeholder="Descreva o que houve..." style="width: 100%; height: 50px; font-size: 0.85em; padding: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"></textarea>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
 
-        // 2. Busca os Gestores da Unidade mapeada
+        // 2. Busca os Gestores
         const selectGestor = document.getElementById('select-gestor-alvo');
-        selectGestor.innerHTML = '<option value="" disabled selected>Buscando gestores da unidade...</option>';
+        selectGestor.innerHTML = '<option value="" disabled selected>Buscando gestores...</option>';
 
-        const gestoresSnap = await db.collection('usuarios')
-            .where('unidade', '==', unidadeAlvo)
-            .get();
-
+        const gestoresSnap = await db.collection('usuarios').where('unidade', '==', unidadeAlvo).get();
         let options = '<option value="" disabled selected>Selecione o Gestor...</option>';
         let encontrouAlguem = false;
 
         gestoresSnap.forEach(gDoc => {
             const gData = gDoc.data();
-            // Filtramos a role no código para evitar necessidade de índices compostos complexos no início
             if (gData.role === 'gestor' || gData.role === 'admin') {
                 options += `<option value="${gDoc.id}">${gData.nome_militar_completo}</option>`;
                 encontrouAlguem = true;
             }
         });
 
-        // Caso a unidade não tenha gestores próprios, oferecemos os Admins Gerais do sistema
         if (!encontrouAlguem) {
             const adminsGerais = await db.collection('usuarios').where('role', '==', 'admin').get();
             adminsGerais.forEach(aDoc => {
@@ -6189,15 +6189,14 @@ async function iniciarFluxoSubstituicao() {
             });
         }
 
-        selectGestor.innerHTML = encontrouAlguem ? options : '<option value="" disabled selected>Nenhum gestor/admin disponível</option>';
+        selectGestor.innerHTML = encontrouAlguem ? options : '<option value="" disabled selected>Nenhum gestor disponível</option>';
 
-        // Troca de Modais
         document.getElementById('cautelaDetailsModal').style.display = 'none';
         document.getElementById('modalReportarItem').style.display = 'flex';
 
     } catch (e) { 
-        console.error("Erro no fluxo de substituição:", e);
-        alert("Erro ao carregar dados para reporte. Verifique o console.");
+        console.error("Erro:", e);
+        alert("Erro ao carregar dados.");
     }
 }
 
