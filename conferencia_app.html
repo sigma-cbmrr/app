@@ -1128,7 +1128,6 @@ function renderizarConferencia() {
             let listaMestra = listaMestraDoc.data().list;
             const itensConferidos = [];
 
-            // Preparação dos itens conferidos
             cautela.itens.forEach(cItem => {
                 const statusSelect = document.getElementById(`status-${cItem.id}-${cItem.tombamento || 'single'}`);
                 const obsInput = document.getElementById(`obs-${cItem.id}-${cItem.tombamento || 'single'}`);
@@ -1142,7 +1141,6 @@ function renderizarConferencia() {
                     obs_recebimento: obsFinal
                 });
 
-                // Atualização da Lista Mestra (Estoque)
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
@@ -1150,7 +1148,6 @@ function renderizarConferencia() {
                         const idCautelaItem = cItem.id_base || cItem.id;
 
                         if (idMestra === idCautelaItem) {
-                            // Log de vida do item no estoque
                             const logHistorico = {
                                 evento: "CONFIRMAÇÃO_RECEBIMENTO",
                                 id_doc: CAUTELA_ID,
@@ -1163,27 +1160,30 @@ function renderizarConferencia() {
                             if (!mItem.historico_vida) mItem.historico_vida = [];
                             mItem.historico_vida.push(logHistorico);
 
+                            // --- CORREÇÃO CIRÚRGICA: ADICIONADO cItem.quantidade ---
                             const objetoCautelaAtualizado = {
                                 id: CAUTELA_ID,
                                 emitente: cData.emitente,
                                 destinatario: meuNomeCompleto,
                                 data: cData.timestamp_emissao ? cData.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : dataAtual,
                                 status_item: statusFinal,
-                                obs_item: obsFinal
+                                obs_item: obsFinal,
+                                quantidade: cItem.quantidade // Garante que 4un não virem 1un no estoque
                             };
 
                             if (cItem.tombamento && mItem.tombamentos) {
                                 mItem.tombamentos = mItem.tombamentos.map(t => {
-                                    if (t.tomb === cItem.tombamento) {
-                                        t.cautela = objetoCautelaAtualizado;
-                                    }
+                                    if (t.tomb === cItem.tombamento) t.cautela = objetoCautelaAtualizado;
                                     return t;
                                 });
                             } else if (!cItem.tombamento && mItem.cautelas) {
-                                mItem.cautelas = mItem.cautelas.map(c => {
-                                    if (c.id === CAUTELA_ID) return objetoCautelaAtualizado;
-                                    return c;
-                                });
+                                // Busca a cautela rascunho pelo ID e atualiza, ou adiciona se não existir
+                                const idxC = mItem.cautelas.findIndex(c => c.id === CAUTELA_ID);
+                                if (idxC !== -1) {
+                                    mItem.cautelas[idxC] = objetoCautelaAtualizado;
+                                } else {
+                                    mItem.cautelas.push(objetoCautelaAtualizado);
+                                }
                             }
                         }
                         return mItem;
@@ -1191,7 +1191,6 @@ function renderizarConferencia() {
                 }));
             });
 
-            // --- INSERÇÃO DO LOG NO HISTÓRICO DA CAUTELA ---
             const logMovimentacao = {
                 data: dataAtual,
                 descricao: `✅ Recebido S/A pelo destinatário: ${meuNomeCompleto}`,
@@ -1203,7 +1202,6 @@ function renderizarConferencia() {
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
                 itens: itensConferidos,
                 militar_completo_receptor: meuNomeCompleto,
-                // Aqui adicionamos o log ao histórico da cautela
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logMovimentacao)
             });
 
