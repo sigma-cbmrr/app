@@ -7478,12 +7478,15 @@ async function findUidByName(nomeCompleto) {
 }
 		async function loadCautelaPendencies() {
     const container = document.getElementById('admin-gestor-cards-container');
-    if (!container) return;
+    if (!container || !currentUserData) return;
 
     try {
-        console.log("=== INICIANDO BUSCA DE PENDÊNCIAS ===");
+        console.log("=== BUSCANDO PENDÊNCIAS DE CAUTELA ===");
         
-        // Buscamos TODAS as cautelas ativas do sistema sem nenhum filtro de unidade
+        // 1. Obtém os IDs das listas que pertencem à unidade do gestor
+        const unitListIds = await getUnitListIds();
+        
+        // 2. Query simplificada por Status (evita erro de múltiplos filtros 'in')
         let query = db.collection('cautelas_abertas')
                       .where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
         
@@ -7494,46 +7497,63 @@ async function findUidByName(nomeCompleto) {
         snap.forEach(doc => {
             const data = doc.data();
             
-            // Debug no console para você ver o que está acontecendo
-            if (data.pendencias_ativas && data.pendencias_ativas.length > 0) {
-                console.log("Cautela com pendência encontrada:", doc.id, "Itens:", data.pendencias_ativas.length);
+            // 3. Filtro de Unidade: O gestor vê se a cautela pertence ao seu setor/unidade
+            const pertenceAoSetor = currentUserData.role === 'admin' || unitListIds.includes(data.local_origem_id);
+
+            if (pertenceAoSetor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
                 
-                totalPendenciasTroca += data.pendencias_ativas.length;
-                cautelasComPendencia.push({ 
-                    id: doc.id, 
-                    ...data, 
-                    pendencias: data.pendencias_ativas 
-                });
+                // 4. Captura todas as pendências ativas desta cautela
+                // Removido o filtro de UID específico para que a gestão seja compartilhada na unidade
+                const pendenciasFiltradas = data.pendencias_ativas; 
+
+                if (pendenciasFiltradas.length > 0) {
+                    totalPendenciasTroca += pendenciasFiltradas.length;
+                    cautelasComPendencia.push({ 
+                        id: doc.id, 
+                        ...data, 
+                        pendencias: pendenciasFiltradas 
+                    });
+                    console.log(`Cautela ${doc.id} tem ${pendenciasFiltradas.length} item(ns) pendente(s).`);
+                }
             }
         });
 
-        console.log("Total de pendências localizadas no sistema:", totalPendenciasTroca);
+        console.log("Total de itens para troca localizados:", totalPendenciasTroca);
 
         const cardExistente = document.getElementById('card-pendencia-cautela-ativa');
         
+        // Se não houver pendências, remove o card (limpeza após resolução)
         if (totalPendenciasTroca === 0) {
             if (cardExistente) cardExistente.remove();
-            console.log("Nenhuma pendência ativa no banco.");
             return;
         }
 
+        // 5. Montagem do Card Laranja
         let cardHtml = `
             <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
-                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px;"
+                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
                  onclick="abrirGestaoPendenciasCautela('${encodeURIComponent(JSON.stringify(cautelasComPendencia))}')">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <h3 style="color: #e65100; margin: 0;"><i class="fas fa-exclamation-circle"></i> MODO DEBUG: Pendências</h3>
-                        <p style="margin: 5px 0 0 0; font-size: 0.85em;">Localizadas: ${totalPendenciasTroca}</p>
+                        <h3 style="color: #e65100; margin: 0; font-size: 1.1em;"><i class="fas fa-exclamation-circle"></i> Pendências de Cautelas Ativas</h3>
+                        <p style="margin: 5px 0 0 0; font-size: 0.85em; color: #666;">Existem itens aguardando substituição ou recolhimento.</p>
                     </div>
+                    <div class="count-value" style="color: #e65100; font-size: 2em; font-weight: bold;">${totalPendenciasTroca}</div>
                 </div>
-            </div>`;
+                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(230, 81, 0, 0.2); color: #e65100; font-size: 0.8em; font-weight: bold; text-transform: uppercase;">
+                    Clique para gerenciar
+                </div>
+            </div>
+        `;
 
-        if (cardExistente) cardExistente.outerHTML = cardHtml;
-        else container.insertAdjacentHTML('afterbegin', cardHtml);
+        if (cardExistente) {
+            cardExistente.outerHTML = cardHtml;
+        } else {
+            container.insertAdjacentHTML('afterbegin', cardHtml);
+        }
 
     } catch (e) {
-        console.error("Erro no Debug:", e);
+        console.error("Erro ao carregar pendências de cautela:", e);
     }
 }
 	async function abrirGestaoPendenciasCautela(cautelasJson) {
@@ -7636,85 +7656,105 @@ async function findUidByName(nomeCompleto) {
     if (!pendenciaSendoResolvida) return;
     
     const p = pendenciaSendoResolvida;
-    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"? \n\nO item será removido da carga do militar e retornará ao estoque como AVARIADO.`);
+    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"? \n\nO item será removido da carga do militar e liberado no estoque como AVARIADO.`);
     
     if (!confirmacao) return;
 
     try {
+        // 1. Referências e Dados Iniciais
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
-        const doc = await cautelaRef.get();
-        if (!doc.exists) return alert("Erro: Cautela não encontrada.");
+        const estoqueRef = db.collection('custodia_atual').doc(p.localId);
 
-        const data = doc.data();
-        let novosItens = [...data.itens];
-        
-        // 1. Lógica de remoção/ajuste do item na cautela
+        const [docCautela, docEstoque] = await Promise.all([
+            cautelaRef.get(),
+            estoqueRef.get()
+        ]);
+
+        if (!docCautela.exists) return alert("Erro: Cautela não encontrada.");
+        if (!docEstoque.exists) return alert("Erro: Lista mestra (estoque) não encontrada.");
+
+        const dataCautela = docCautela.data();
+        const dataEstoque = docEstoque.data();
+
+        // 2. AJUSTE NA CARGA DA CAUTELA (O que o militar deve)
+        let novosItensCautela = [...dataCautela.itens];
+        const indexParaAjustar = p.itemIndex;
+
         if (p.itemTomb) {
-            // Se tem tombamento, remove o objeto inteiro usando o index original
-            novosItens.splice(p.itemIndex, 1);
+            novosItensCautela.splice(indexParaAjustar, 1);
         } else {
-            // Se for item de quantidade, subtrai a quantidade recolhida
-            if (novosItens[p.itemIndex] && novosItens[p.itemIndex].quantidade > p.qtdProblema) {
-                novosItens[p.itemIndex].quantidade -= p.qtdProblema;
+            if (novosItensCautela[indexParaAjustar] && novosItensCautela[indexParaAjustar].quantidade > p.qtdProblema) {
+                novosItensCautela[indexParaAjustar].quantidade -= p.qtdProblema;
             } else {
-                novosItens.splice(p.itemIndex, 1);
+                novosItensCautela.splice(indexParaAjustar, 1);
             }
         }
 
-        // 2. Remove a pendência resolvida do array pendencias_ativas
-        const novasPendencias = (data.pendencias_ativas || []).filter(item => item.id_solicitacao !== p.solicitacaoId);
+        // 3. LIMPEZA NA LISTA MESTRA (Remover carimbo do item no estoque)
+        let itensEstoqueAtualizados = [...(dataEstoque.itens || [])];
+        if (p.itemTomb) {
+            itensEstoqueAtualizados = itensEstoqueAtualizados.map(item => {
+                if (item.tombamento === p.itemTomb) {
+                    return { 
+                        ...item, 
+                        status_cautela: "DISPONÍVEL", // Limpa o carimbo visual
+                        cautela_id: null,             // Remove o vínculo com a cautela
+                        situacao: "AVARIADO"         // Marca como estragado
+                    };
+                }
+                return item;
+            });
+        }
 
-        // 3. Cria o Log de encerramento
+        // 4. FILTRAR AS PENDÊNCIAS (Preservar as outras solicitações)
+        const novasPendencias = (dataCautela.pendencias_ativas || []).filter(item => 
+            item.id_solicitacao !== p.solicitacaoId
+        );
+
+        // 5. LOG E BATCH UPDATE
         const novoLog = {
             data: new Date().toLocaleString('pt-BR'),
-            descricao: `✅ RECOLHIMENTO EFETUADO: Material "${p.itemNome}" recolhido por avaria. Baixa efetuada na carga do militar.`,
+            descricao: `✅ RECOLHIMENTO: "${p.itemNome}" recolhido por avaria. Item removido da carga e retornado ao estoque como avariado.`,
             militar: currentUserData.nome_militar_completo
         };
 
-        // 4. Executa a atualização no Firebase (Atomic Batch)
         const batch = db.batch();
         
-        // Atualiza a Cautela
+        // Atualiza Cautela
         batch.update(cautelaRef, {
-            itens: novosItens,
+            itens: novosItensCautela,
             pendencias_ativas: novasPendencias,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
         });
 
-        // 5. Registrar a avaria no estoque (custodia_atual)
-        const estoqueRef = db.collection('custodia_atual').doc(p.localId);
-        const logAvaria = {
-            nome: p.itemNome,
-            tombamento: p.itemTomb || null,
-            quantidade: p.qtdProblema,
-            status: "AVARIA",
-            data_recolhimento: new Date(),
-            cautela_origem: p.cautelaId,
-            relato_militar: p.motivo || "Não informado"
-        };
-
+        // Atualiza Lista Mestra (Limpa poluição e registra avaria)
         batch.update(estoqueRef, {
-            itens_avariados: firebase.firestore.FieldValue.arrayUnion(logAvaria)
+            itens: itensEstoqueAtualizados,
+            itens_avariados: firebase.firestore.FieldValue.arrayUnion({
+                nome: p.itemNome,
+                tombamento: p.itemTomb || null,
+                quantidade: p.qtdProblema,
+                status: "AVARIA",
+                data_recolhimento: new Date(),
+                cautela_origem: p.cautelaId,
+                relato_militar: p.motivo || "Não informado"
+            })
         });
 
-        // Executa todas as gravações
         await batch.commit();
 
-        alert("Recolhimento processado com sucesso!");
+        alert("Recolhimento concluído com sucesso! O material foi liberado da cautela.");
         
-        // FECHAMENTO E LIMPEZA
+        // Finalização da UI
         document.getElementById('modalDecisaoGestor').style.display = 'none';
         pendenciaSendoResolvida = null;
-
-        // Oculta a tabela antiga para evitar cliques em dados obsoletos
         const wrapper = document.getElementById('ca-table-wrapper');
         if (wrapper) wrapper.style.display = 'none';
 
-        // Recarrega os dados do Dashboard e reconstrói o Card Laranja com o novo contador
         await loadCaaData(); 
 
     } catch (e) {
-        console.error("Erro ao processar recolhimento:", e);
+        console.error("Erro no recolhimento:", e);
         alert("Erro técnico ao processar baixa.");
     }
 }
