@@ -7483,65 +7483,64 @@ async function findUidByName(nomeCompleto) {
     try {
         const meuUid = firebase.auth().currentUser.uid;
         
-        // Busca cautelas que tenham o array de pendências E onde o gestor alvo seja o usuário logado
-        // Nota: Como o Firebase não filtra arrays complexos facilmente sem índices pesados, 
-        // buscamos as cautelas ativas da unidade e filtramos na memória para garantir estabilidade.
-        
+        // 1. Buscamos as unidades que este gestor gerencia
         const unitListIds = await getUnitListIds();
-        if (unitListIds.length === 0 && currentUserData.role !== 'admin') return;
-
-        let query = db.collection('cautelas_abertas').where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
         
-        // Se não for admin, filtra pela unidade (via IDs das listas que o gestor comanda)
-        if (currentUserData.role !== 'admin') {
-            query = query.where('local_origem_id', 'in', unitListIds);
-        }
-
+        // 2. Query simplificada: Apenas por Status (evita o erro de múltiplos 'in')
+        let query = db.collection('cautelas_abertas')
+                      .where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
+        
         const snap = await query.get();
         let totalPendenciasTroca = 0;
         let cautelasComPendencia = [];
 
         snap.forEach(doc => {
             const data = doc.data();
-            if (data.pendencias_ativas && data.pendencias_ativas.length > 0) {
-                // Filtra para mostrar apenas o que é destinado a este gestor específico (ou todos se for admin)
+            
+            // 3. Filtro de Unidade manual (se não for admin)
+            const pertenceAoGestor = currentUserData.role === 'admin' || unitListIds.includes(data.local_origem_id);
+
+            if (pertenceAoGestor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
+                // 4. Filtra apenas pendências destinadas a este gestor específico
                 const pendenciasFiltradas = data.pendencias_ativas.filter(p => 
                     p.gestor_alvo_uid === meuUid || currentUserData.role === 'admin'
                 );
 
                 if (pendenciasFiltradas.length > 0) {
                     totalPendenciasTroca += pendenciasFiltradas.length;
-                    cautelasComPendencia.push({ id: doc.id, ...data, pendencias: pendenciasFiltradas });
+                    cautelasComPendencia.push({ 
+                        id: doc.id, 
+                        ...data, 
+                        pendencias: pendenciasFiltradas 
+                    });
                 }
             }
         });
 
-        // Se não houver nada, remove o card se ele existir
         const cardExistente = document.getElementById('card-pendencia-cautela-ativa');
         if (totalPendenciasTroca === 0) {
             if (cardExistente) cardExistente.remove();
             return;
         }
 
-        // Criar ou Atualizar o Card
+        // 5. Renderização do Card (Mantida)
         let cardHtml = `
             <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
-                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer;"
+                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
                  onclick="abrirGestaoPendenciasCautela('${encodeURIComponent(JSON.stringify(cautelasComPendencia))}')">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <h3 style="color: #e65100; margin: 0;"><i class="fas fa-exclamation-circle"></i> Pendências de Cautelas Ativas</h3>
-                        <p style="margin: 5px 0 0 0; font-size: 0.85em; color: #666;">Existem solicitações de troca ou reparo aguardando sua análise.</p>
+                        <h3 style="color: #e65100; margin: 0; font-size: 1.1em;"><i class="fas fa-exclamation-circle"></i> Pendências de Cautelas Ativas</h3>
+                        <p style="margin: 5px 0 0 0; font-size: 0.85em; color: #666;">Trocas ou reparos aguardando sua análise.</p>
                     </div>
-                    <div class="count-value" style="color: #e65100; font-size: 2.5em;">${totalPendenciasTroca}</div>
+                    <div class="count-value" style="color: #e65100; font-size: 2em; font-weight: bold;">${totalPendenciasTroca}</div>
                 </div>
-                <div class="card-footer" style="border-top: 1px solid rgba(230, 81, 0, 0.2); color: #e65100;">
-                    <strong>Clique para gerenciar as substituições</strong>
+                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(230, 81, 0, 0.2); color: #e65100; font-size: 0.8em; font-weight: bold; text-transform: uppercase;">
+                    Clique para resolver
                 </div>
             </div>
         `;
 
-        // Insere o card no início do container de cards
         if (cardExistente) {
             cardExistente.outerHTML = cardHtml;
         } else {
