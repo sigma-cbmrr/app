@@ -7668,24 +7668,24 @@ async function findUidByName(nomeCompleto) {
             estoqueRef.get()
         ]);
 
-        if (!docCautela.exists || !docEstoque.exists) return alert("Documentos não encontrados.");
+        if (!docCautela.exists || !docEstoque.exists) return alert("Erro: Documentos não localizados.");
 
         const dataCautela = docCautela.data();
         const dataEstoque = docEstoque.data();
 
-        // --- 1. FILTRAGEM DAS PENDÊNCIAS (CORREÇÃO DO CARD QUE SOME) ---
-        // Comparamos o id_solicitacao garantindo que ambos sejam strings
-        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
+        // --- 1. FILTRAGEM ULTRA-SEGURA (Evita sumir com o card) ---
+        const pendenciasAtuais = dataCautela.pendencias_ativas || [];
+        
+        // Usamos String() em ambos os lados para garantir que "123" seja igual a 123
+        const pendenciasRestantes = pendenciasAtuais.filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
-        // --- 2. AJUSTE DA CARGA NA CAUTELA ---
-        let novosItensCautela = [...dataCautela.itens];
+        // --- 2. AJUSTE DA CARGA (Remove ou subtrai do militar) ---
+        let novosItensCautela = [...(dataCautela.itens || [])];
         if (p.itemTomb) {
-            // Se tem tombamento, removemos o item específico
             novosItensCautela = novosItensCautela.filter(it => it.tombamento !== p.itemTomb);
         } else {
-            // Se for single/quantidade, subtraímos a quantidade informada na pendência
             const idx = novosItensCautela.findIndex(it => it.id === p.itemId);
             if (idx !== -1) {
                 if (novosItensCautela[idx].quantidade > p.qtdProblema) {
@@ -7696,43 +7696,39 @@ async function findUidByName(nomeCompleto) {
             }
         }
 
-        // --- 3. ATUALIZAÇÃO DO ESTOQUE (CORREÇÃO DO CARIMBO) ---
+        // --- 3. ATUALIZAÇÃO DO CARIMBO NO ESTOQUE (Lista Mestra) ---
         let itensEstoqueAtualizados = [...(dataEstoque.itens || [])];
-        
         if (p.itemTomb) {
-            // Para MULTI: localiza pelo tombamento e marca avaria
             itensEstoqueAtualizados = itensEstoqueAtualizados.map(it => {
                 if (it.tombamento === p.itemTomb) {
                     return { 
                         ...it, 
                         status_cautela: "DISPONÍVEL", 
                         cautela_id: null, 
-                        situacao: "AVARIADO", 
+                        situacao: "AVARIADO", // Novo carimbo
                         motivo_avaria: p.motivo,
-                        relatado_por: dataCautela.destinatario_original_nome
+                        relatado_por: dataCautela.destinatario_original_nome || "Militar",
+                        data_avaria: new Date().toLocaleString('pt-BR')
                     };
                 }
                 return it;
             });
-        } else {
-            // Para SINGLE: Como não tem tombamento único, marcamos no log de avarias
-            // O item físico (quantidade) já "saiu" da carga do militar no passo 2.
         }
 
         const batch = db.batch();
 
-        // Update Cautela
+        // Grava as alterações na Cautela (Mantendo as outras pendências vivas)
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: pendenciasRestantes,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: new Date().toLocaleString('pt-BR'),
-                descricao: `✅ RECOLHIMENTO: ${p.itemNome} recolhido (Avaria).`,
+                descricao: `✅ RECOLHIMENTO: ${p.itemNome} (${p.itemTomb || 'Single'}) recolhido por avaria.`,
                 militar: currentUserData.nome_militar_completo
             })
         });
 
-        // Update Estoque (Aqui injetamos o carimbo de avaria no array itens)
+        // Grava a despoluição e o estado de avaria no estoque
         batch.update(estoqueRef, {
             itens: itensEstoqueAtualizados,
             itens_avariados: firebase.firestore.FieldValue.arrayUnion({
@@ -7747,16 +7743,19 @@ async function findUidByName(nomeCompleto) {
 
         await batch.commit();
 
-        alert("Recolhimento processado com sucesso.");
-        document.getElementById('modalDecisaoGestor').style.display = 'none';
+        alert("Recolhimento processado. Se houverem outras pendências, o card continuará visível.");
         
-        // Reset da UI
-        if (document.getElementById('ca-table-wrapper')) document.getElementById('ca-table-wrapper').style.display = 'none';
-        await loadCaaData();
+        // Fecha o modal e limpa a tabela para forçar o recarregamento do card
+        document.getElementById('modalDecisaoGestor').style.display = 'none';
+        const wrapper = document.getElementById('ca-table-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
+        
+        pendenciaSendoResolvida = null;
+        await loadCaaData(); 
 
     } catch (e) {
-        console.error("Erro Crítico:", e);
-        alert("Erro ao processar baixa no banco de dados.");
+        console.error("Erro no processamento:", e);
+        alert("Erro técnico ao salvar dados.");
     }
 }
 		
