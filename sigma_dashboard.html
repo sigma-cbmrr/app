@@ -7665,11 +7665,11 @@ async function findUidByName(nomeCompleto) {
         
         // 1. Lógica de remoção/ajuste do item na cautela
         if (p.itemTomb) {
-            // Se tem tombamento, remove o objeto inteiro do array de itens
+            // Se tem tombamento, remove o objeto inteiro usando o index original
             novosItens.splice(p.itemIndex, 1);
         } else {
-            // Se for item single (quantidade), subtrai a quantidade recolhida
-            if (novosItens[p.itemIndex].quantidade > p.qtdProblema) {
+            // Se for item de quantidade, subtrai a quantidade recolhida
+            if (novosItens[p.itemIndex] && novosItens[p.itemIndex].quantidade > p.qtdProblema) {
                 novosItens[p.itemIndex].quantidade -= p.qtdProblema;
             } else {
                 novosItens.splice(p.itemIndex, 1);
@@ -7677,7 +7677,7 @@ async function findUidByName(nomeCompleto) {
         }
 
         // 2. Remove a pendência resolvida do array pendencias_ativas
-        const novasPendencias = data.pendencias_ativas.filter(item => item.id_solicitacao !== p.solicitacaoId);
+        const novasPendencias = (data.pendencias_ativas || []).filter(item => item.id_solicitacao !== p.solicitacaoId);
 
         // 3. Cria o Log de encerramento
         const novoLog = {
@@ -7696,8 +7696,7 @@ async function findUidByName(nomeCompleto) {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
         });
 
-        // 5. Opcional: Registrar a avaria no estoque (custodia_atual)
-        // Aqui buscamos o documento do armário/estoque de origem
+        // 5. Registrar a avaria no estoque (custodia_atual)
         const estoqueRef = db.collection('custodia_atual').doc(p.localId);
         const logAvaria = {
             nome: p.itemNome,
@@ -7706,20 +7705,28 @@ async function findUidByName(nomeCompleto) {
             status: "AVARIA",
             data_recolhimento: new Date(),
             cautela_origem: p.cautelaId,
-            relato_militar: p.motivo
+            relato_militar: p.motivo || "Não informado"
         };
 
         batch.update(estoqueRef, {
             itens_avariados: firebase.firestore.FieldValue.arrayUnion(logAvaria)
         });
 
+        // Executa todas as gravações
         await batch.commit();
 
         alert("Recolhimento processado com sucesso!");
-        document.getElementById('modalDecisaoGestor').style.display = 'none';
         
-        // Recarrega os dados para atualizar o Card e a Tabela
-        loadCaaData(); 
+        // FECHAMENTO E LIMPEZA
+        document.getElementById('modalDecisaoGestor').style.display = 'none';
+        pendenciaSendoResolvida = null;
+
+        // Oculta a tabela antiga para evitar cliques em dados obsoletos
+        const wrapper = document.getElementById('ca-table-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
+
+        // Recarrega os dados do Dashboard e reconstrói o Card Laranja com o novo contador
+        await loadCaaData(); 
 
     } catch (e) {
         console.error("Erro ao processar recolhimento:", e);
