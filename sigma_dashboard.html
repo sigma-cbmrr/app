@@ -7478,13 +7478,12 @@ async function findUidByName(nomeCompleto) {
 }
 		async function loadCautelaPendencies() {
     const container = document.getElementById('admin-gestor-cards-container');
-    if (!container || !currentUserData) return;
+    if (!container) return;
 
     try {
-        // 1. Buscamos as unidades que este gestor gerencia
-        const unitListIds = await getUnitListIds();
+        console.log("=== INICIANDO BUSCA DE PENDÊNCIAS ===");
         
-        // 2. Query simplificada por Status
+        // Buscamos TODAS as cautelas ativas do sistema sem nenhum filtro de unidade
         let query = db.collection('cautelas_abertas')
                       .where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
         
@@ -7495,60 +7494,46 @@ async function findUidByName(nomeCompleto) {
         snap.forEach(doc => {
             const data = doc.data();
             
-            // 3. Filtro de Unidade: O gestor vê se a cautela pertence à unidade dele
-            const pertenceAoGestor = currentUserData.role === 'admin' || unitListIds.includes(data.local_origem_id);
-
-            if (pertenceAoGestor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
+            // Debug no console para você ver o que está acontecendo
+            if (data.pendencias_ativas && data.pendencias_ativas.length > 0) {
+                console.log("Cautela com pendência encontrada:", doc.id, "Itens:", data.pendencias_ativas.length);
                 
-                // MODIFICAÇÃO: Removemos o filtro de UID específico (p.gestor_alvo_uid === meuUid)
-                // Agora, qualquer gestor da unidade visualiza as pendências daquela cautela.
-                const pendenciasFiltradas = data.pendencias_ativas; 
-
-                if (pendenciasFiltradas.length > 0) {
-                    totalPendenciasTroca += pendenciasFiltradas.length;
-                    cautelasComPendencia.push({ 
-                        id: doc.id, 
-                        ...data, 
-                        pendencias: pendenciasFiltradas 
-                    });
-                }
+                totalPendenciasTroca += data.pendencias_ativas.length;
+                cautelasComPendencia.push({ 
+                    id: doc.id, 
+                    ...data, 
+                    pendencias: data.pendencias_ativas 
+                });
             }
         });
 
+        console.log("Total de pendências localizadas no sistema:", totalPendenciasTroca);
+
         const cardExistente = document.getElementById('card-pendencia-cautela-ativa');
         
-        // Se não houver pendências reais no banco, remove o card imediatamente
         if (totalPendenciasTroca === 0) {
             if (cardExistente) cardExistente.remove();
+            console.log("Nenhuma pendência ativa no banco.");
             return;
         }
 
-        // 5. Renderização do Card
         let cardHtml = `
             <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
-                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
+                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px;"
                  onclick="abrirGestaoPendenciasCautela('${encodeURIComponent(JSON.stringify(cautelasComPendencia))}')">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <h3 style="color: #e65100; margin: 0; font-size: 1.1em;"><i class="fas fa-exclamation-circle"></i> Pendências de Cautelas Ativas</h3>
-                        <p style="margin: 5px 0 0 0; font-size: 0.85em; color: #666;">Trocas ou reparos aguardando sua análise.</p>
+                        <h3 style="color: #e65100; margin: 0;"><i class="fas fa-exclamation-circle"></i> MODO DEBUG: Pendências</h3>
+                        <p style="margin: 5px 0 0 0; font-size: 0.85em;">Localizadas: ${totalPendenciasTroca}</p>
                     </div>
-                    <div class="count-value" style="color: #e65100; font-size: 2em; font-weight: bold;">${totalPendenciasTroca}</div>
                 </div>
-                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(230, 81, 0, 0.2); color: #e65100; font-size: 0.8em; font-weight: bold; text-transform: uppercase;">
-                    Clique para resolver
-                </div>
-            </div>
-        `;
+            </div>`;
 
-        if (cardExistente) {
-            cardExistente.outerHTML = cardHtml;
-        } else {
-            container.insertAdjacentHTML('afterbegin', cardHtml);
-        }
+        if (cardExistente) cardExistente.outerHTML = cardHtml;
+        else container.insertAdjacentHTML('afterbegin', cardHtml);
 
     } catch (e) {
-        console.error("Erro ao carregar pendências de cautela:", e);
+        console.error("Erro no Debug:", e);
     }
 }
 	async function abrirGestaoPendenciasCautela(cautelasJson) {
