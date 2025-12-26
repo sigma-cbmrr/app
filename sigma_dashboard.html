@@ -7481,12 +7481,10 @@ async function findUidByName(nomeCompleto) {
     if (!container || !currentUserData) return;
 
     try {
-        const meuUid = firebase.auth().currentUser.uid;
-        
         // 1. Buscamos as unidades que este gestor gerencia
         const unitListIds = await getUnitListIds();
         
-        // 2. Query simplificada: Apenas por Status (evita o erro de múltiplos 'in')
+        // 2. Query simplificada por Status
         let query = db.collection('cautelas_abertas')
                       .where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
         
@@ -7497,14 +7495,14 @@ async function findUidByName(nomeCompleto) {
         snap.forEach(doc => {
             const data = doc.data();
             
-            // 3. Filtro de Unidade manual (se não for admin)
+            // 3. Filtro de Unidade: O gestor vê se a cautela pertence à unidade dele
             const pertenceAoGestor = currentUserData.role === 'admin' || unitListIds.includes(data.local_origem_id);
 
             if (pertenceAoGestor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
-                // 4. Filtra apenas pendências destinadas a este gestor específico
-                const pendenciasFiltradas = data.pendencias_ativas.filter(p => 
-                    p.gestor_alvo_uid === meuUid || currentUserData.role === 'admin'
-                );
+                
+                // MODIFICAÇÃO: Removemos o filtro de UID específico (p.gestor_alvo_uid === meuUid)
+                // Agora, qualquer gestor da unidade visualiza as pendências daquela cautela.
+                const pendenciasFiltradas = data.pendencias_ativas; 
 
                 if (pendenciasFiltradas.length > 0) {
                     totalPendenciasTroca += pendenciasFiltradas.length;
@@ -7518,12 +7516,14 @@ async function findUidByName(nomeCompleto) {
         });
 
         const cardExistente = document.getElementById('card-pendencia-cautela-ativa');
+        
+        // Se não houver pendências reais no banco, remove o card imediatamente
         if (totalPendenciasTroca === 0) {
             if (cardExistente) cardExistente.remove();
             return;
         }
 
-        // 5. Renderização do Card (Mantida)
+        // 5. Renderização do Card
         let cardHtml = `
             <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
                  style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
