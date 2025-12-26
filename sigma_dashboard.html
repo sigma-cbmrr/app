@@ -6067,6 +6067,83 @@ async function loadActiveCautelas() {
         console.error("Erro no modal de detalhes:", e);
     }
 }
+		async function iniciarFluxoSubstituicao() {
+    const cautelaId = document.getElementById('modal-cautela-id').textContent;
+    cautelaIdAtualParaReporte = cautelaId;
+
+    try {
+        const doc = await db.collection('cautelas_abertas').doc(cautelaId).get();
+        if (!doc.exists) return;
+
+        const data = doc.data();
+        itensDaCautelaAtual = data.itens || [];
+
+        // Preencher o select com os itens da cautela
+        const select = document.getElementById('select-item-defeito');
+        select.innerHTML = itensDaCautelaAtual.map((item, index) => {
+            const idDoc = item.tombamento ? `(Tomb: ${item.tombamento})` : `(${item.quantidade} un)`;
+            return `<option value="${index}">${item.nome} ${idDoc}</option>`;
+        }).join('');
+
+        document.getElementById('modalReportarItem').style.display = 'flex';
+    } catch (e) {
+        console.error("Erro ao carregar itens para reporte:", e);
+    }
+}
+
+async function salvarRelatoDefeito() {
+    const itemIndex = document.getElementById('select-item-defeito').value;
+    const motivo = document.getElementById('texto-motivo-defeito').value;
+    const itemSelecionado = itensDaCautelaAtual[itemIndex];
+
+    if (!motivo.trim()) return alert("Por favor, descreva o problema.");
+
+    const user = firebase.auth().currentUser;
+    const dataAtual = new Date();
+    const dataFormatada = dataAtual.toLocaleDateString('pt-BR') + " " + dataAtual.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+
+    try {
+        const batch = db.batch();
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaIdAtualParaReporte);
+
+        // 1. Criar o objeto de pendência dentro da cautela
+        const pendencia = {
+            item_nome: itemSelecionado.nome,
+            item_tombamento: itemSelecionado.tombamento || null,
+            item_index: parseInt(itemIndex),
+            motivo: motivo,
+            solicitante_nome: currentUserData.nome_militar_completo,
+            solicitante_uid: user.uid,
+            timestamp: dataAtual,
+            status: "PENDENTE"
+        };
+
+        // 2. Criar o Log de Histórico
+        const novoLog = {
+            data: dataFormatada,
+            descricao: `⚠️ PROBLEMA REPORTADO: Item "${itemSelecionado.nome}" - Motivo: ${motivo}`,
+            militar: currentUserData.nome_militar_completo
+        };
+
+        // Atualizar a cautela com a pendência e o histórico
+        batch.update(cautelaRef, {
+            pendencia_troca: pendencia, // Isso fará o card do gestor aparecer
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
+        });
+
+        await batch.commit();
+
+        alert("Problema reportado com sucesso! O gestor foi notificado para realizar a troca.");
+        document.getElementById('modalReportarItem').style.display = 'none';
+        
+        // Atualiza o modal de detalhes para mostrar o novo log
+        showCautelaDetails(cautelaIdAtualParaReporte);
+
+    } catch (e) {
+        console.error("Erro ao salvar relato:", e);
+        alert("Erro ao enviar reporte.");
+    }
+}
 		
 function iniciarRecebimentoCautela(cautelaId) {
     // 1. Fecha o modal de detalhes
@@ -7273,83 +7350,7 @@ async function findUidByName(nomeCompleto) {
         alert("Erro: " + error.message);
     }
 }
-		async function iniciarFluxoSubstituicao() {
-    const cautelaId = document.getElementById('modal-cautela-id').textContent;
-    cautelaIdAtualParaReporte = cautelaId;
-
-    try {
-        const doc = await db.collection('cautelas_abertas').doc(cautelaId).get();
-        if (!doc.exists) return;
-
-        const data = doc.data();
-        itensDaCautelaAtual = data.itens || [];
-
-        // Preencher o select com os itens da cautela
-        const select = document.getElementById('select-item-defeito');
-        select.innerHTML = itensDaCautelaAtual.map((item, index) => {
-            const idDoc = item.tombamento ? `(Tomb: ${item.tombamento})` : `(${item.quantidade} un)`;
-            return `<option value="${index}">${item.nome} ${idDoc}</option>`;
-        }).join('');
-
-        document.getElementById('modalReportarItem').style.display = 'flex';
-    } catch (e) {
-        console.error("Erro ao carregar itens para reporte:", e);
-    }
-}
-
-async function salvarRelatoDefeito() {
-    const itemIndex = document.getElementById('select-item-defeito').value;
-    const motivo = document.getElementById('texto-motivo-defeito').value;
-    const itemSelecionado = itensDaCautelaAtual[itemIndex];
-
-    if (!motivo.trim()) return alert("Por favor, descreva o problema.");
-
-    const user = firebase.auth().currentUser;
-    const dataAtual = new Date();
-    const dataFormatada = dataAtual.toLocaleDateString('pt-BR') + " " + dataAtual.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
-
-    try {
-        const batch = db.batch();
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaIdAtualParaReporte);
-
-        // 1. Criar o objeto de pendência dentro da cautela
-        const pendencia = {
-            item_nome: itemSelecionado.nome,
-            item_tombamento: itemSelecionado.tombamento || null,
-            item_index: parseInt(itemIndex),
-            motivo: motivo,
-            solicitante_nome: currentUserData.nome_militar_completo,
-            solicitante_uid: user.uid,
-            timestamp: dataAtual,
-            status: "PENDENTE"
-        };
-
-        // 2. Criar o Log de Histórico
-        const novoLog = {
-            data: dataFormatada,
-            descricao: `⚠️ PROBLEMA REPORTADO: Item "${itemSelecionado.nome}" - Motivo: ${motivo}`,
-            militar: currentUserData.nome_militar_completo
-        };
-
-        // Atualizar a cautela com a pendência e o histórico
-        batch.update(cautelaRef, {
-            pendencia_troca: pendencia, // Isso fará o card do gestor aparecer
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
-        });
-
-        await batch.commit();
-
-        alert("Problema reportado com sucesso! O gestor foi notificado para realizar a troca.");
-        document.getElementById('modalReportarItem').style.display = 'none';
-        
-        // Atualiza o modal de detalhes para mostrar o novo log
-        showCautelaDetails(cautelaIdAtualParaReporte);
-
-    } catch (e) {
-        console.error("Erro ao salvar relato:", e);
-        alert("Erro ao enviar reporte.");
-    }
-}
+		
     </script>
 </body>
 </html>
