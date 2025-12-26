@@ -7566,7 +7566,7 @@ async function findUidByName(nomeCompleto) {
         cautela.pendencias.forEach(p => {
             const tr = tbody.insertRow();
             
-            // Coluna Material
+            // 1. Coluna Material
             const tdMaterial = tr.insertCell();
             tdMaterial.innerHTML = `
                 <strong>${p.item_nome}</strong><br>
@@ -7574,11 +7574,11 @@ async function findUidByName(nomeCompleto) {
                 <small class="status-badge badge-cautela">${cautela.id}</small>
             `;
 
-            // Coluna Status
+            // 2. Coluna Status
             const tdStatus = tr.insertCell();
             tdStatus.innerHTML = `<span class="status-badge badge-pendente">AGUARDANDO TROCA</span>`;
 
-            // Coluna Alteração (Onde você já vê o motivo)
+            // 3. Coluna Alteração (Motivo visível na tabela)
             const tdAlteracao = tr.insertCell();
             tdAlteracao.style.textAlign = "left";
             tdAlteracao.innerHTML = `
@@ -7588,12 +7588,26 @@ async function findUidByName(nomeCompleto) {
                 </div>
             `;
 
-            // Coluna Solicitante
+            // 4. Coluna Solicitante e Data (CORREÇÃO DO INVALID DATE)
             const tdMilitar = tr.insertCell();
-            const dataPed = p.timestamp?.toDate ? p.timestamp.toDate().toLocaleString('pt-BR') : new Date(p.timestamp).toLocaleString('pt-BR');
-            tdMilitar.innerHTML = `<small><b>${p.solicitante_nome}</b><br>${dataPed}</small>`;
+            let dataFormatada = "Data indisponível";
+            
+            if (p.timestamp) {
+                // Se for objeto Timestamp do Firebase que passou pelo JSON vira {seconds, nanoseconds}
+                if (p.timestamp.seconds) {
+                    dataFormatada = new Date(p.timestamp.seconds * 1000).toLocaleString('pt-BR');
+                } 
+                // Se já for uma string ou Date padrão
+                else {
+                    const d = new Date(p.timestamp);
+                    if (!isNaN(d.getTime())) {
+                        dataFormatada = d.toLocaleString('pt-BR');
+                    }
+                }
+            }
+            tdMilitar.innerHTML = `<small><b>${p.solicitante_nome}</b><br>${dataFormatada}</small>`;
 
-            // --- CORREÇÃO AQUI: INCLUINDO 'MOTIVO' NO DATA ---
+            // 5. Preparação dos dados para o Modal (CORREÇÃO DO MOTIVO)
             const btnData = encodeURIComponent(JSON.stringify({
                 cautelaId: cautela.id,
                 solicitacaoId: p.id_solicitacao,
@@ -7602,7 +7616,7 @@ async function findUidByName(nomeCompleto) {
                 itemTomb: p.item_tombamento,
                 qtdProblema: p.quantidade,
                 localId: cautela.local_origem_id,
-                motivo: p.motivo // <-- Esta linha faz o dado viajar até o modal
+                motivo: p.motivo // Passando o motivo para o modal
             }));
 
             const tdAcao = tr.insertCell();
