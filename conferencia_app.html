@@ -1128,6 +1128,7 @@ function renderizarConferencia() {
             let listaMestra = listaMestraDoc.data().list;
             const itensConferidos = [];
 
+            // Preparação dos itens conferidos
             cautela.itens.forEach(cItem => {
                 const statusSelect = document.getElementById(`status-${cItem.id}-${cItem.tombamento || 'single'}`);
                 const obsInput = document.getElementById(`obs-${cItem.id}-${cItem.tombamento || 'single'}`);
@@ -1141,6 +1142,7 @@ function renderizarConferencia() {
                     obs_recebimento: obsFinal
                 });
 
+                // Atualização da Lista Mestra (Estoque)
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
@@ -1148,6 +1150,7 @@ function renderizarConferencia() {
                         const idCautelaItem = cItem.id_base || cItem.id;
 
                         if (idMestra === idCautelaItem) {
+                            // Log de vida do item no estoque
                             const logHistorico = {
                                 evento: "CONFIRMAÇÃO_RECEBIMENTO",
                                 id_doc: CAUTELA_ID,
@@ -1178,9 +1181,7 @@ function renderizarConferencia() {
                                 });
                             } else if (!cItem.tombamento && mItem.cautelas) {
                                 mItem.cautelas = mItem.cautelas.map(c => {
-                                    if (c.id === CAUTELA_ID) {
-                                        return objetoCautelaAtualizado;
-                                    }
+                                    if (c.id === CAUTELA_ID) return objetoCautelaAtualizado;
                                     return c;
                                 });
                             }
@@ -1190,11 +1191,20 @@ function renderizarConferencia() {
                 }));
             });
 
+            // --- INSERÇÃO DO LOG NO HISTÓRICO DA CAUTELA ---
+            const logMovimentacao = {
+                data: dataAtual,
+                descricao: `✅ Recebido S/A pelo destinatário: ${meuNomeCompleto}`,
+                militar: meuNomeCompleto
+            };
+
             transaction.update(cautelaRef, {
                 status: 'RECEBIDA',
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
                 itens: itensConferidos,
-                militar_completo_receptor: meuNomeCompleto
+                militar_completo_receptor: meuNomeCompleto,
+                // Aqui adicionamos o log ao histórico da cautela
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logMovimentacao)
             });
 
             transaction.update(listaMestraRef, { list: listaMestra });
