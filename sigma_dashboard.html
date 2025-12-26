@@ -2468,26 +2468,19 @@
     </div>
 </div>
 </div>
-	<div id="modalReportarItem" class="modal-overlay" style="display:none; z-index: 30000;"> <div class="modal-content" style="max-width: 500px;">
-        <h3 style="color: #800020;"><i class="fas fa-exclamation-triangle"></i> Reportar Problema</h3>
+	<div id="modalReportarItem" class="modal-overlay" style="display:none; z-index: 30000;">
+    <div class="modal-content" style="max-width: 600px;">
+        <h3 style="color: #800020;"><i class="fas fa-exclamation-triangle"></i> Reportar Problemas nos Itens</h3>
+        <p style="font-size: 0.85em; color: #666; margin-bottom: 15px;">Selecione os itens danificados e descreva o que houve com cada um:</p>
         
-        <label>Selecione o item com defeito:</label>
-        <select id="select-item-defeito" style="width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 5px; border: 1px solid #ddd;" onchange="toggleQtdReporte(this)"></select>
-
-        <div id="div-qtd-reporte" style="display:none; margin-bottom: 15px;">
-            <label>Quantidade Danificada/Defeituosa:</label>
-            <input type="number" id="qtd-item-defeito" min="1" value="1" style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid #ddd;">
-            <small id="max-qtd-info" style="color: #666;"></small>
-        </div>
-
-        <label>Descreva o problema/motivo da troca:</label>
-        <textarea id="texto-motivo-defeito" placeholder="Ex: Lanterna com lente quebrada após queda em serviço." style="width: 100%; height: 80px; padding: 10px; border-radius: 5px; border: 1px solid #ddd;"></textarea>
+        <div id="lista-itens-reporte" style="max-height: 350px; overflow-y: auto; border: 1px solid #eee; padding: 10px; border-radius: 8px; background: #fafafa;">
+            </div>
 
         <div class="modal-actions" style="margin-top: 20px;">
-            <button class="btn-modern-action" style="background-color: #f57c00;" onclick="salvarRelatoDefeito()">
-                <i class="fas fa-paper-plane"></i> Enviar para o Gestor
+            <button class="btn-modern-action" style="background-color: #f57c00;" onclick="salvarRelatosMultiplos()">
+                <i class="fas fa-paper-plane"></i> Enviar Pendências ao Gestor
             </button>
-            <button class="modal-btn-cancel" onclick="document.getElementById('modalReportarItem').style.display='none'">Cancelar</button>
+            <button class="modal-btn-cancel" onclick="fecharModalReporte()">Cancelar</button>
         </div>
     </div>
 </div>
@@ -6073,22 +6066,9 @@ async function loadActiveCautelas() {
     }
 }
 		// Função para mostrar/esconder campo de quantidade no modal de reporte
-function toggleQtdReporte(selectElement) {
-    const index = selectElement.value;
-    const item = itensDaCautelaAtual[index];
-    const divQtd = document.getElementById('div-qtd-reporte');
-    const inputQtd = document.getElementById('qtd-item-defeito');
-    const infoMax = document.getElementById('max-qtd-info');
-
-    if (item && !item.tombamento) { // É item Single
-        divQtd.style.display = 'block';
-        inputQtd.max = item.quantidade;
-        inputQtd.value = 1;
-        infoMax.innerText = `Máximo em sua posse: ${item.quantidade} un.`;
-    } else {
-        divQtd.style.display = 'none';
-        inputQtd.value = 1;
-    }
+function fecharModalReporte() {
+    document.getElementById('modalReportarItem').style.display = 'none';
+    showCautelaDetails(cautelaIdAtualParaReporte); // Reabre o detalhe ao cancelar
 }
 
 async function iniciarFluxoSubstituicao() {
@@ -6099,84 +6079,90 @@ async function iniciarFluxoSubstituicao() {
         const doc = await db.collection('cautelas_abertas').doc(cautelaId).get();
         if (!doc.exists) return;
 
-        const data = doc.data();
-        itensDaCautelaAtual = data.itens || [];
+        itensDaCautelaAtual = doc.data().itens || [];
+        const container = document.getElementById('lista-itens-reporte');
+        
+        // Renderiza cada item com um checkbox e um campo de observação escondido
+        container.innerHTML = itensDaCautelaAtual.map((item, index) => `
+            <div style="margin-bottom: 10px; padding: 10px; border-bottom: 1px solid #ddd; background: #fff;">
+                <label style="display: flex; align-items: center; cursor: pointer; font-weight: bold;">
+                    <input type="checkbox" class="check-item-reporte" data-index="${index}" style="margin-right: 10px;" onchange="toggleObsInput(${index})">
+                    ${item.nome} ${item.tombamento ? `(Tomb: ${item.tombamento})` : `(${item.quantidade} un)`}
+                </label>
+                <div id="div-obs-${index}" style="display: none; margin-top: 8px;">
+                    ${!item.tombamento ? `
+                        <label style="font-size: 0.8em;">Qtd com defeito:</label>
+                        <input type="number" id="qtd-obs-${index}" value="1" min="1" max="${item.quantidade}" style="width: 60px; padding: 2px; margin-bottom: 5px; display: block;">
+                    ` : `<input type="hidden" id="qtd-obs-${index}" value="1">`}
+                    <textarea id="text-obs-${index}" placeholder="O que aconteceu com este item?" style="width: 100%; height: 50px; font-size: 0.85em; padding: 5px; border-radius: 4px; border: 1px solid #ccc;"></textarea>
+                </div>
+            </div>
+        `).join('');
 
-        const select = document.getElementById('select-item-defeito');
-        select.innerHTML = itensDaCautelaAtual.map((item, index) => {
-            const info = item.tombamento ? `(Tomb: ${item.tombamento})` : `(${item.quantidade} un)`;
-            return `<option value="${index}">${item.nome} ${info}</option>`;
-        }).join('');
-
-        // 🛑 CORREÇÃO 1: Esconde o modal de detalhes para não ficar por trás
         document.getElementById('cautelaDetailsModal').style.display = 'none';
-
-        // Dispara a lógica de quantidade para o primeiro item da lista
-        toggleQtdReporte(select);
-
         document.getElementById('modalReportarItem').style.display = 'flex';
-    } catch (e) {
-        console.error("Erro:", e);
-    }
+    } catch (e) { console.error(e); }
 }
 
-async function salvarRelatoDefeito() {
-    const itemIndex = document.getElementById('select-item-defeito').value;
-    const motivo = document.getElementById('texto-motivo-defeito').value;
-    const qtdReportada = parseInt(document.getElementById('qtd-item-defeito').value) || 1;
-    const itemSelecionado = itensDaCautelaAtual[itemIndex];
+function toggleObsInput(index) {
+    const div = document.getElementById(`div-obs-${index}`);
+    const isChecked = document.querySelector(`.check-item-reporte[data-index="${index}"]`).checked;
+    div.style.display = isChecked ? 'block' : 'none';
+}
 
-    if (!motivo.trim()) return alert("Por favor, descreva o problema.");
-    
-    // Validação de quantidade para itens single
-    if (!itemSelecionado.tombamento && (qtdReportada < 1 || qtdReportada > itemSelecionado.quantidade)) {
-        return alert("Quantidade inválida.");
-    }
+async function salvarRelatosMultiplos() {
+    const checks = document.querySelectorAll('.check-item-reporte:checked');
+    if (checks.length === 0) return alert("Selecione pelo menos um item.");
 
-    const user = firebase.auth().currentUser;
+    let pendencias = [];
+    let logsParaAdicionar = [];
     const dataAtual = new Date();
     const dataFormatada = dataAtual.toLocaleString('pt-BR');
 
-    try {
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaIdAtualParaReporte);
+    for (let check of checks) {
+        const idx = check.getAttribute('data-index');
+        const item = itensDaCautelaAtual[idx];
+        const motivo = document.getElementById(`text-obs-${idx}`).value;
+        const qtd = parseInt(document.getElementById(`qtd-obs-${idx}`).value) || 1;
 
-        const pendencia = {
-            item_nome: itemSelecionado.nome,
-            item_tombamento: itemSelecionado.tombamento || null,
-            item_id_base: itemSelecionado.id_base || itemSelecionado.id,
-            item_index: parseInt(itemIndex),
-            quantidade: itemSelecionado.tombamento ? 1 : qtdReportada, // Quantidade do relato
+        if (!motivo.trim()) {
+            alert(`Por favor, descreva o problema do item: ${item.nome}`);
+            return;
+        }
+
+        pendencias.push({
+            item_nome: item.nome,
+            item_tombamento: item.tombamento || null,
+            item_index: parseInt(idx),
+            quantidade: qtd,
             motivo: motivo,
-            solicitante_nome: currentUserData.nome_militar_completo,
-            solicitante_uid: user.uid,
-            timestamp: dataAtual,
-            status: "PENDENTE"
-        };
-
-        const descLog = itemSelecionado.tombamento 
-            ? `⚠️ PROBLEMA: ${itemSelecionado.nome} (Tomb: ${itemSelecionado.tombamento}) - Motivo: ${motivo}`
-            : `⚠️ PROBLEMA: ${qtdReportada}un de ${itemSelecionado.nome} - Motivo: ${motivo}`;
-
-        const novoLog = {
-            data: dataFormatada,
-            descricao: descLog,
-            militar: currentUserData.nome_militar_completo
-        };
-
-        await cautelaRef.update({
-            pendencia_troca: pendencia,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
+            status: "PENDENTE",
+            timestamp: dataAtual
         });
 
-        alert("Relato enviado com sucesso!");
-        document.getElementById('modalReportarItem').style.display = 'none';
+        logsParaAdicionar.push({
+            data: dataFormatada,
+            descricao: `⚠️ PROBLEMA REPORTADO: ${qtd}un de ${item.nome} - Motivo: ${motivo}`,
+            militar: currentUserData.nome_militar_completo
+        });
+    }
+
+    try {
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaIdAtualParaReporte);
         
-        // 🛑 CORREÇÃO 2: Reabre o modal de detalhes para o usuário ver o log atualizado
+        // Salvamos como um ARRAY de pendências agora
+        await cautelaRef.update({
+            pendencias_ativas: firebase.firestore.FieldValue.arrayUnion(...pendencias),
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(...logsParaAdicionar)
+        });
+
+        alert("Todos os problemas foram reportados ao gestor!");
+        document.getElementById('modalReportarItem').style.display = 'none';
         showCautelaDetails(cautelaIdAtualParaReporte);
 
     } catch (e) {
-        console.error("Erro:", e);
-        alert("Erro ao salvar.");
+        console.error(e);
+        alert("Erro ao salvar relatos.");
     }
 }
 		
