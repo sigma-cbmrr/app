@@ -6084,54 +6084,88 @@ async function iniciarFluxoSubstituicao() {
 
     try {
         const doc = await db.collection('cautelas_abertas').doc(cautelaId).get();
-        if (!doc.exists) return;
+        if (!doc.exists) return alert("Erro: Cautela não encontrada.");
 
         const data = doc.data();
         itensDaCautelaAtual = data.itens || [];
-        const unidadeDaCautela = data.unidade_destino || currentUserData.unidade; // Pega a unidade vinculada
+
+        // --- NOVO: IDENTIFICAÇÃO DA UNIDADE VIA ROTA ---
+        let unidadeAlvo = data.unidade_destino || "";
+
+        // Se a cautela não tem a unidade gravada, buscamos pelo mapeamento do local_origem_id
+        if (!unidadeAlvo && data.local_origem_id) {
+            const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+            const rotas = rotasDoc.data() || {};
+            if (rotas[data.local_origem_id]) {
+                unidadeAlvo = rotas[data.local_origem_id].unidade;
+                console.log("Unidade identificada via local_origem_id:", unidadeAlvo);
+            }
+        }
+
+        // Fallback final: usa a unidade do usuário logado se tudo falhar
+        if (!unidadeAlvo) {
+            unidadeAlvo = currentUserData.unidade;
+            console.log("Usando unidade do usuário logado como fallback:", unidadeAlvo);
+        }
 
         const container = document.getElementById('lista-itens-reporte');
         
-        // 1. Renderiza a lista de itens
+        // 1. Renderiza a lista de itens para seleção
         container.innerHTML = itensDaCautelaAtual.map((item, index) => `
             <div style="margin-bottom: 10px; padding: 10px; border-bottom: 1px solid #ddd; background: #fff; border-radius:6px;">
                 <label style="display: flex; align-items: center; cursor: pointer; font-weight: bold;">
                     <input type="checkbox" class="check-item-reporte" data-index="${index}" style="margin-right: 10px;" onchange="toggleObsInput(${index})">
-                    ${item.nome} ${item.tombamento ? `(Tomb: ${item.tombamento})` : `(${item.quantidade} un)`}
+                    ${item.nome} ${item.tombamento ? `<span style="color:#800020; margin-left:5px;">[Tomb: ${item.tombamento}]</span>` : `<span style="color:#666; margin-left:5px;">(${item.quantidade} un)</span>`}
                 </label>
-                <div id="div-obs-${index}" style="display: none; margin-top: 8px;">
+                <div id="div-obs-${index}" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
                     ${!item.tombamento ? `
-                        <label style="font-size: 0.8em; color:#d90f23;">Qtd danificada:</label>
-                        <input type="number" id="qtd-obs-${index}" value="1" min="1" max="${item.quantidade}" style="width: 60px; padding: 2px; margin-bottom: 5px;">
+                        <label style="font-size: 0.8em; color:#d90f23; font-weight:bold;">QTD COM DEFEITO:</label>
+                        <input type="number" id="qtd-obs-${index}" value="1" min="1" max="${item.quantidade}" style="width: 100%; padding: 5px; margin-bottom: 8px; border: 1px solid #ccc; border-radius:4px;">
                     ` : `<input type="hidden" id="qtd-obs-${index}" value="1">`}
-                    <textarea id="text-obs-${index}" placeholder="Descreva o defeito..." style="width: 100%; height: 50px; font-size: 0.85em; padding: 5px; border: 1px solid #ccc;"></textarea>
+                    <label style="font-size: 0.8em; font-weight:bold;">MOTIVO DO RELATO:</label>
+                    <textarea id="text-obs-${index}" placeholder="Descreva o que houve com este item..." style="width: 100%; height: 50px; font-size: 0.85em; padding: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"></textarea>
                 </div>
             </div>
         `).join('');
 
-        // 2. Busca os Gestores da Unidade
+        // 2. Busca os Gestores da Unidade mapeada
         const selectGestor = document.getElementById('select-gestor-alvo');
+        selectGestor.innerHTML = '<option value="" disabled selected>Buscando gestores da unidade...</option>';
+
         const gestoresSnap = await db.collection('usuarios')
-            .where('unidade', '==', unidadeDaCautela)
-            .where('role', 'in', ['gestor', 'admin'])
+            .where('unidade', '==', unidadeAlvo)
             .get();
 
-        if (gestoresSnap.empty) {
-            selectGestor.innerHTML = '<option value="" disabled selected>Nenhum gestor encontrado nesta unidade</option>';
-        } else {
-            let options = '<option value="" disabled selected>Selecione o Gestor...</option>';
-            gestoresSnap.forEach(gDoc => {
-                const gData = gDoc.data();
+        let options = '<option value="" disabled selected>Selecione o Gestor...</option>';
+        let encontrouAlguem = false;
+
+        gestoresSnap.forEach(gDoc => {
+            const gData = gDoc.data();
+            // Filtramos a role no código para evitar necessidade de índices compostos complexos no início
+            if (gData.role === 'gestor' || gData.role === 'admin') {
                 options += `<option value="${gDoc.id}">${gData.nome_militar_completo}</option>`;
+                encontrouAlguem = true;
+            }
+        });
+
+        // Caso a unidade não tenha gestores próprios, oferecemos os Admins Gerais do sistema
+        if (!encontrouAlguem) {
+            const adminsGerais = await db.collection('usuarios').where('role', '==', 'admin').get();
+            adminsGerais.forEach(aDoc => {
+                options += `<option value="${aDoc.id}">${aDoc.data().nome_militar_completo} (Admin Geral)</option>`;
+                encontrouAlguem = true;
             });
-            selectGestor.innerHTML = options;
         }
 
+        selectGestor.innerHTML = encontrouAlguem ? options : '<option value="" disabled selected>Nenhum gestor/admin disponível</option>';
+
+        // Troca de Modais
         document.getElementById('cautelaDetailsModal').style.display = 'none';
         document.getElementById('modalReportarItem').style.display = 'flex';
+
     } catch (e) { 
         console.error("Erro no fluxo de substituição:", e);
-        alert("Erro ao carregar dados para reporte.");
+        alert("Erro ao carregar dados para reporte. Verifique o console.");
     }
 }
 
