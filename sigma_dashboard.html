@@ -7632,6 +7632,85 @@ async function findUidByName(nomeCompleto) {
 
     document.getElementById('modalDecisaoGestor').style.display = 'flex';
 }
+		async function executarRecolhimentoApenas() {
+    if (!pendenciaSendoResolvida) return;
+    
+    const p = pendenciaSendoResolvida;
+    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"? \n\nO item será removido da carga do militar e retornará ao estoque como AVARIADO.`);
+    
+    if (!confirmacao) return;
+
+    try {
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const doc = await cautelaRef.get();
+        if (!doc.exists) return alert("Erro: Cautela não encontrada.");
+
+        const data = doc.data();
+        let novosItens = [...data.itens];
+        
+        // 1. Lógica de remoção/ajuste do item na cautela
+        if (p.itemTomb) {
+            // Se tem tombamento, remove o objeto inteiro do array de itens
+            novosItens.splice(p.itemIndex, 1);
+        } else {
+            // Se for item single (quantidade), subtrai a quantidade recolhida
+            if (novosItens[p.itemIndex].quantidade > p.qtdProblema) {
+                novosItens[p.itemIndex].quantidade -= p.qtdProblema;
+            } else {
+                novosItens.splice(p.itemIndex, 1);
+            }
+        }
+
+        // 2. Remove a pendência resolvida do array pendencias_ativas
+        const novasPendencias = data.pendencias_ativas.filter(item => item.id_solicitacao !== p.solicitacaoId);
+
+        // 3. Cria o Log de encerramento
+        const novoLog = {
+            data: new Date().toLocaleString('pt-BR'),
+            descricao: `✅ RECOLHIMENTO EFETUADO: Material "${p.itemNome}" recolhido por avaria. Baixa efetuada na carga do militar.`,
+            militar: currentUserData.nome_militar_completo
+        };
+
+        // 4. Executa a atualização no Firebase (Atomic Batch)
+        const batch = db.batch();
+        
+        // Atualiza a Cautela
+        batch.update(cautelaRef, {
+            itens: novosItens,
+            pendencias_ativas: novasPendencias,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
+        });
+
+        // 5. Opcional: Registrar a avaria no estoque (custodia_atual)
+        // Aqui buscamos o documento do armário/estoque de origem
+        const estoqueRef = db.collection('custodia_atual').doc(p.localId);
+        const logAvaria = {
+            nome: p.itemNome,
+            tombamento: p.itemTomb || null,
+            quantidade: p.qtdProblema,
+            status: "AVARIA",
+            data_recolhimento: new Date(),
+            cautela_origem: p.cautelaId,
+            relato_militar: p.motivo
+        };
+
+        batch.update(estoqueRef, {
+            itens_avariados: firebase.firestore.FieldValue.arrayUnion(logAvaria)
+        });
+
+        await batch.commit();
+
+        alert("Recolhimento processado com sucesso!");
+        document.getElementById('modalDecisaoGestor').style.display = 'none';
+        
+        // Recarrega os dados para atualizar o Card e a Tabela
+        loadCaaData(); 
+
+    } catch (e) {
+        console.error("Erro ao processar recolhimento:", e);
+        alert("Erro técnico ao processar baixa.");
+    }
+}
 		
     </script>
 </body>
