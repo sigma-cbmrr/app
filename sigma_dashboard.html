@@ -7656,12 +7656,11 @@ async function findUidByName(nomeCompleto) {
     if (!pendenciaSendoResolvida) return;
     
     const p = pendenciaSendoResolvida;
-    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"? \n\nO item será removido da carga do militar e liberado no estoque como AVARIADO.`);
+    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"? \n\nO item sairá da carga do militar e ficará marcado como AVARIADO no estoque.`);
     
     if (!confirmacao) return;
 
     try {
-        // 1. Referências e Dados Iniciais
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const estoqueRef = db.collection('custodia_atual').doc(p.localId);
 
@@ -7670,13 +7669,14 @@ async function findUidByName(nomeCompleto) {
             estoqueRef.get()
         ]);
 
-        if (!docCautela.exists) return alert("Erro: Cautela não encontrada.");
-        if (!docEstoque.exists) return alert("Erro: Lista mestra (estoque) não encontrada.");
+        if (!docCautela.exists || !docEstoque.exists) {
+            return alert("Erro: Documentos não encontrados.");
+        }
 
         const dataCautela = docCautela.data();
         const dataEstoque = docEstoque.data();
 
-        // 2. AJUSTE NA CARGA DA CAUTELA (O que o militar deve)
+        // 1. AJUSTE NA CARGA DA CAUTELA
         let novosItensCautela = [...dataCautela.itens];
         const indexParaAjustar = p.itemIndex;
 
@@ -7690,44 +7690,45 @@ async function findUidByName(nomeCompleto) {
             }
         }
 
-        // 3. LIMPEZA NA LISTA MESTRA (Remover carimbo do item no estoque)
+        // 2. MARCAÇÃO DE AVARIA NA LISTA MESTRA (Carimbo para o próximo conferente)
         let itensEstoqueAtualizados = [...(dataEstoque.itens || [])];
         if (p.itemTomb) {
             itensEstoqueAtualizados = itensEstoqueAtualizados.map(item => {
                 if (item.tombamento === p.itemTomb) {
                     return { 
                         ...item, 
-                        status_cautela: "DISPONÍVEL", // Limpa o carimbo visual
-                        cautela_id: null,             // Remove o vínculo com a cautela
-                        situacao: "AVARIADO"         // Marca como estragado
+                        status_cautela: "DISPONÍVEL",
+                        cautela_id: null,
+                        situacao: "AVARIADO",         // O novo "carimbo"
+                        motivo_avaria: p.motivo,      // Relato que aparecerá na conferência
+                        relatado_por: dataCautela.nome_militar_completo || "Solicitante", 
+                        data_avaria: new Date().toLocaleString('pt-BR')
                     };
                 }
                 return item;
             });
         }
 
-        // 4. FILTRAR AS PENDÊNCIAS (Preservar as outras solicitações)
+        // 3. FILTRAR AS PENDÊNCIAS
         const novasPendencias = (dataCautela.pendencias_ativas || []).filter(item => 
             item.id_solicitacao !== p.solicitacaoId
         );
 
-        // 5. LOG E BATCH UPDATE
+        // 4. LOG E BATCH UPDATE
         const novoLog = {
             data: new Date().toLocaleString('pt-BR'),
-            descricao: `✅ RECOLHIMENTO: "${p.itemNome}" recolhido por avaria. Item removido da carga e retornado ao estoque como avariado.`,
+            descricao: `✅ RECOLHIMENTO EFETUADO: "${p.itemNome}" recolhido. Motivo: ${p.motivo}`,
             militar: currentUserData.nome_militar_completo
         };
 
         const batch = db.batch();
         
-        // Atualiza Cautela
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: novasPendencias,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
         });
 
-        // Atualiza Lista Mestra (Limpa poluição e registra avaria)
         batch.update(estoqueRef, {
             itens: itensEstoqueAtualizados,
             itens_avariados: firebase.firestore.FieldValue.arrayUnion({
@@ -7736,26 +7737,22 @@ async function findUidByName(nomeCompleto) {
                 quantidade: p.qtdProblema,
                 status: "AVARIA",
                 data_recolhimento: new Date(),
-                cautela_origem: p.cautelaId,
                 relato_militar: p.motivo || "Não informado"
             })
         });
 
         await batch.commit();
 
-        alert("Recolhimento concluído com sucesso! O material foi liberado da cautela.");
-        
-        // Finalização da UI
+        alert("Recolhimento concluído!");
         document.getElementById('modalDecisaoGestor').style.display = 'none';
         pendenciaSendoResolvida = null;
-        const wrapper = document.getElementById('ca-table-wrapper');
-        if (wrapper) wrapper.style.display = 'none';
+        if (document.getElementById('ca-table-wrapper')) document.getElementById('ca-table-wrapper').style.display = 'none';
 
         await loadCaaData(); 
 
     } catch (e) {
         console.error("Erro no recolhimento:", e);
-        alert("Erro técnico ao processar baixa.");
+        alert("Erro ao processar.");
     }
 }
 		
