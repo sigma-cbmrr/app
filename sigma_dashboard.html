@@ -6664,6 +6664,14 @@ async function getLastConferente(localOrigem) {
             if (data.status !== 'RECEBIDA') {
                 throw new Error("A cautela não está em sua posse confirmada para ser devolvida.");
             }
+
+            // --- 📝 PREPARAÇÃO DO LOG DE MOVIMENTAÇÃO ---
+            const novoLog = {
+                data: firebase.firestore.Timestamp.now(),
+                mensagem: `Devolução iniciada: Material enviado por ${militarCompleto} para conferência de retorno de ${ultimoConferenteNome}.`,
+                tipo: "TRANSICAO_DEVOLUCAO",
+                autor: militarCompleto
+            };
             
             // Se passar por todas as travas, executa a atualização
             transaction.update(cautelaRef, { 
@@ -6674,7 +6682,10 @@ async function getLastConferente(localOrigem) {
                 militar_completo_reversor: militarCompleto,
                 
                 destinatario_uid: ucUid, 
-                destinatario: ultimoConferenteNome 
+                destinatario: ultimoConferenteNome,
+
+                // Adiciona o log ao histórico da cautela
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
             });
         });
 
@@ -7829,18 +7840,17 @@ async function abrirGestaoPendenciasCautela() {
 
         const dataCautela = docCautela.data();
         const batch = db.batch();
+        const militarRelator = dataCautela.destinatario || dataCautela.destinatario_original_nome || "Militar";
 
         // --- 1. PREPARAR DADOS DA CAUTELA PARA TRANSFERÊNCIA ---
-        // Pegamos os dados do militar que estavam no item antigo
         const dadosMilitar = {
-            destinatario: dataCautela.destinatario || dataCautela.destinatario_original_nome,
+            destinatario: militarRelator,
             id: p.cautelaId,
             data: new Date().toLocaleString('pt-BR'),
             status: "ABERTA"
         };
 
         // --- 2. ATUALIZAR COLEÇÃO 'cautelas_abertas' ---
-        // Troca o tombamento antigo pelo novo dentro do array de itens da cautela
         const itensCautelaAtualizados = (dataCautela.itens || []).map(it => {
             if (it.tombamento === p.itemTomb) {
                 return { ...it, tombamento: tombamentoNovo, obs: `Substituído em ${dadosMilitar.data}` };
@@ -7848,23 +7858,29 @@ async function abrirGestaoPendenciasCautela() {
             return it;
         });
         
-        // Remove a pendência da lista do Gestor
         const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
+        // 📝 NOVO: REGISTRO NO HISTÓRICO DA CAUTELA (O LOG QUE VOCÊ PEDIU)
+        const logTrocaCautela = {
+            data: firebase.firestore.Timestamp.now(),
+            mensagem: `Troca Física: Item ${p.itemTomb} substituído pelo ${tombamentoNovo} por motivo de avaria.`,
+            tipo: "SUBSTITUICAO_ITEM",
+            autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
+        };
+
         batch.update(cautelaRef, { 
             itens: itensCautelaAtualizados, 
-            pendencias_ativas: pendenciasRestantes 
+            pendencias_ativas: pendenciasRestantes,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTrocaCautela)
         });
 
         // --- 3. ATUALIZAR ESTOQUE (custodia_atual) ---
         const itensEstoque = docEstoque.data().itens.map(it => {
-            // Trata o item antigo (marca como AVARIADO)
             if (it.tombamento === p.itemTomb || (it.tombamentos && it.tombamentos.find(t => t.tomb === p.itemTomb))) {
-                return transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, dadosMilitar.destinatario);
+                return transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, militarRelator);
             }
-            // Trata o item novo (injeta a CAUTELA)
             if (it.tombamento === tombamentoNovo || (it.tombamentos && it.tombamentos.find(t => t.tomb === tombamentoNovo))) {
                 return injetarCautelaNoItem(it, tombamentoNovo, dadosMilitar);
             }
@@ -7878,16 +7894,14 @@ async function abrirGestaoPendenciasCautela() {
                 ...setor,
                 itens: (setor.itens || []).map(it => {
                     if (it.tombamento === p.itemTomb || it.tombamento === tombamentoNovo) {
-                         // Aplica a mesma lógica de avaria no antigo e cautela no novo
                          let tempItem = it;
-                         if (it.tombamento === p.itemTomb) tempItem = transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, dadosMilitar.destinatario);
+                         if (it.tombamento === p.itemTomb) tempItem = transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, militarRelator);
                          if (it.tombamento === tombamentoNovo) tempItem = injetarCautelaNoItem(it, tombamentoNovo, dadosMilitar);
                          return tempItem;
                     }
-                    // Se for multi, percorre os sub-itens
                     if (it.tombamentos) {
                         it.tombamentos = it.tombamentos.map(t => {
-                            if (t.tomb === p.itemTomb) return transformarEmAvariado(t, p.itemTomb, p.cautelaId, p.motivo, dadosMilitar.destinatario);
+                            if (t.tomb === p.itemTomb) return transformarEmAvariado(t, p.itemTomb, p.cautelaId, p.motivo, militarRelator);
                             if (t.tomb === tombamentoNovo) return injetarCautelaNoItem(t, tombamentoNovo, dadosMilitar);
                             return t;
                         });
@@ -7899,7 +7913,7 @@ async function abrirGestaoPendenciasCautela() {
         }
 
         await batch.commit();
-        alert(`Troca concluída! ${p.itemTomb} (Avariado) -> ${tombamentoNovo} (Cautelado).`);
+        alert(`✅ Troca concluída!\n${p.itemTomb} (Avariado) foi substituído pelo ${tombamentoNovo}.`);
         location.reload();
 
     } catch (e) {
