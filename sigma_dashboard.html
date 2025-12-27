@@ -7671,30 +7671,22 @@ async function abrirGestaoPendenciasCautela() {
     try {
         const data = JSON.parse(decodeURIComponent(dataJson));
         
-        // --- BLINDAGEM DO UID ---
-        // Se por algum motivo o uidItem não veio no JSON, 
-        // nós o reconstruímos aqui para evitar o erro de 'split' no próximo passo.
+        // --- PROTEÇÃO CONTRA UNDEFINED ---
+        // Se o uidItem não existir, tentamos construir ou pegar de campos alternativos
         if (!data.uidItem) {
-            data.uidItem = data.idItem || data.id_base || "";
-            // Se ainda assim estiver vazio, mas tivermos o tombamento, 
-            // tentamos manter o que for possível para o split não quebrar.
-            if (!data.uidItem && data.itemTomb) {
-                console.warn("Aviso: UID não encontrado, usando apenas tombamento como referência.");
-            }
+            // Tenta p.id_item (da tabela) ou reconstrói usando id_base
+            data.uidItem = data.id_item || data.id_base || (data.itemTomb ? `DNA-FALTOU-${data.itemTomb}` : "NULL-DNA");
         }
 
-        pendenciaSendoResolvida = data; // Armazena para as funções de troca/recolhimento
+        pendenciaSendoResolvida = data; 
 
-        const p = data;
         const infoBox = document.getElementById('info-item-decisao');
-        
         if (infoBox) {
-            // Monta o resumo para o gestor
             infoBox.innerHTML = `
-                <div style="line-height: 1.6;">
-                    <strong>Material:</strong> ${p.itemNome} ${p.itemTomb ? `(Tomb: ${p.itemTomb})` : `(${p.qtdProblema} un)`}<br>
-                    <strong>Motivo relatado:</strong> <span style="color:#d90f23; font-weight:bold;">${p.motivo || "Não informado"}</span><br>
-                    <strong>Cautela Origem:</strong> <small class="status-badge" style="background:#eee; color:#333;">${p.cautelaId}</small>
+                <div style="line-height: 1.5;">
+                    <strong>Material:</strong> ${data.itemNome || "Item S/N"} 
+                    ${data.itemTomb ? `<br><small>Tomb: ${data.itemTomb}</small>` : ""}<br>
+                    <strong>Motivo:</strong> <span style="color:#d90f23;">${data.motivo || "Não informado"}</span>
                 </div>
             `;
         }
@@ -7703,7 +7695,7 @@ async function abrirGestaoPendenciasCautela() {
 
     } catch (error) {
         console.error("Erro ao processar dados da pendência:", error);
-        alert("Não foi possível carregar os detalhes desta pendência.");
+        alert("Erro ao carregar detalhes do item.");
     }
 }
 		async function executarRecolhimentoApenas() {
@@ -8073,16 +8065,25 @@ async function abrirSeletorGlobalSubstituicao() {
     container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Vasculhando estoque disponível...</div>`;
 
     try {
-        // --- LÓGICA DE DNA (Segmentos de ID) ---
-        // Extrai os dois primeiros blocos (Ex: 56911524-65986249)
-        const partes = (p.uidItem || p.idItem || p.id_base || "").split('-');
-        const dnaBusca = partes.slice(0, 2).join('-');
+        // --- BLINDAGEM CONTRA UNDEFINED ---
+        // Pegamos a primeira fonte de ID válida disponível
+        const idReferencia = p.uidItem || p.idItem || p.id_base || "";
+        
+        if (!idReferencia) {
+            throw new Error("ID do item não encontrado nos dados da pendência.");
+        }
+
+        // --- LÓGICA DE DNA ---
+        const partes = idReferencia.split('-');
+        // Se o ID tiver menos de 2 partes, o DNA é ele mesmo. Se tiver mais, pegamos os 2 primeiros blocos.
+        const dnaBusca = partes.length >= 2 ? partes.slice(0, 2).join('-') : idReferencia;
+
+        console.log("Iniciando busca global. DNA alvo:", dnaBusca);
 
         const snapshot = await db.collection('listas_conferencia').get();
         let htmlAcumulado = '';
         let totalEncontrado = 0;
 
-        // Função Auxiliar de Interface (Interna para evitar conflitos)
         const montarCardHTML = (local, identificador, idReal, listaId) => {
             return `
                 <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
@@ -8107,16 +8108,15 @@ async function abrirSeletorGlobalSubstituicao() {
             if (dadosLista.list) {
                 dadosLista.list.forEach(setor => {
                     setor.itens.forEach(item => {
-                        
-                        // Verifica se o item pertence à mesma "família" (DNA)
+                        // Compara se o ID do item no banco começa com o DNA de busca
                         if (item.id && item.id.startsWith(dnaBusca)) {
                             
-                            // --- CASO 1: ITEM MULTI (EPR, etc) ---
+                            // CASO 1: ITEM MULTI
                             if (item.tipo === 'multi' && item.tombamentos) {
                                 item.tombamentos.forEach(t => {
                                     const idCompleto = `${item.id}-${t.tomb}`;
                                     const disponivel = !t.cautela && t.situacao !== 'AVARIADO';
-                                    const naoEhOProprioDefeituoso = idCompleto !== p.uidItem;
+                                    const naoEhOProprioDefeituoso = idCompleto !== idReferencia;
 
                                     if (disponivel && naoEhOProprioDefeituoso) {
                                         totalEncontrado++;
@@ -8125,14 +8125,12 @@ async function abrirSeletorGlobalSubstituicao() {
                                 });
                             } 
                             
-                            // --- CASO 2: ITEM SINGLE (Pé de Cabra, etc) ---
+                            // CASO 2: ITEM SINGLE
                             else if (item.tipo === 'single') {
-                                // Soma a quantidade já comprometida em cautelas
                                 const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
                                 const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
 
-                                // Se houver saldo físico e não for o item exato que está pedindo substituição
-                                if (saldoDisponivel > 0 && item.id !== p.uidItem) {
+                                if (saldoDisponivel > 0 && item.id !== idReferencia) {
                                     totalEncontrado++;
                                     htmlAcumulado += montarCardHTML(nomeLocal, `Disponível: ${saldoDisponivel} un`, item.id, docLista.id);
                                 }
@@ -8148,7 +8146,7 @@ async function abrirSeletorGlobalSubstituicao() {
                 <div style="text-align:center; padding:20px; color:#666;">
                     <i class="fas fa-search fa-2x"></i><br><br>
                     Nenhum reserva compatível encontrado para o DNA: <br><b>${dnaBusca}</b><br>
-                    <small style="display:block; margin-top:10px;">Verifique se os itens não possuem o campo "cautela" preenchido no banco de dados.</small>
+                    <small style="display:block; margin-top:10px;">Verifique se os itens não estão cautelados em outras listas.</small>
                 </div>`;
         } else {
             container.innerHTML = htmlAcumulado;
@@ -8156,7 +8154,10 @@ async function abrirSeletorGlobalSubstituicao() {
 
     } catch (e) {
         console.error("Erro na busca global:", e);
-        container.innerHTML = `<div style="color:red; padding:20px;">Erro técnico: ${e.message}</div>`;
+        container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">
+            <i class="fas fa-exclamation-circle"></i><br>
+            Erro ao processar DNA: ${e.message}
+        </div>`;
     }
 }
 		
