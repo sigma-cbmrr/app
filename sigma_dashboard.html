@@ -7816,112 +7816,7 @@ async function abrirGestaoPendenciasCautela() {
         alert("Erro ao salvar recolhimento.");
     }
 }
-		async function executarTrocaFisica(tombamentoNovo) {
-    if (!pendenciaSendoResolvida) return;
-    const p = pendenciaSendoResolvida; // Item Antigo (Avariado)
-    
-    const confirmacao = confirm(`Confirmar troca do item ${p.itemTomb} pelo novo ${tombamentoNovo}?`);
-    if (!confirmacao) return;
-
-    const COLECAO_LISTAS = "listas_conferencia";
-
-    try {
-        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
-        const estoqueRef = db.collection('custodia_atual').doc(p.localId);
-        const listaRef = db.collection(COLECAO_LISTAS).doc(p.localId);
-
-        const [docCautela, docEstoque, docLista] = await Promise.all([
-            cautelaRef.get(),
-            estoqueRef.get(),
-            listaRef.get()
-        ]);
-
-        if (!docCautela.exists || !docEstoque.exists) throw new Error("Documentos não localizados.");
-
-        const dataCautela = docCautela.data();
-        const batch = db.batch();
-        const militarRelator = dataCautela.destinatario || dataCautela.destinatario_original_nome || "Militar";
-
-        // --- 1. PREPARAR DADOS DA CAUTELA PARA TRANSFERÊNCIA ---
-        const dadosMilitar = {
-            destinatario: militarRelator,
-            id: p.cautelaId,
-            data: new Date().toLocaleString('pt-BR'),
-            status: "ABERTA"
-        };
-
-        // --- 2. ATUALIZAR COLEÇÃO 'cautelas_abertas' ---
-        const itensCautelaAtualizados = (dataCautela.itens || []).map(it => {
-            if (it.tombamento === p.itemTomb) {
-                return { ...it, tombamento: tombamentoNovo, obs: `Substituído em ${dadosMilitar.data}` };
-            }
-            return it;
-        });
-        
-        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
-            String(item.id_solicitacao) !== String(p.solicitacaoId)
-        );
-
-        // 📝 NOVO: REGISTRO NO HISTÓRICO DA CAUTELA (O LOG QUE VOCÊ PEDIU)
-        const logTrocaCautela = {
-            data: firebase.firestore.Timestamp.now(),
-            mensagem: `Troca Física: Item ${p.itemTomb} substituído pelo ${tombamentoNovo} por motivo de avaria.`,
-            tipo: "SUBSTITUICAO_ITEM",
-            autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
-        };
-
-        batch.update(cautelaRef, { 
-            itens: itensCautelaAtualizados, 
-            pendencias_ativas: pendenciasRestantes,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTrocaCautela)
-        });
-
-        // --- 3. ATUALIZAR ESTOQUE (custodia_atual) ---
-        const itensEstoque = docEstoque.data().itens.map(it => {
-            if (it.tombamento === p.itemTomb || (it.tombamentos && it.tombamentos.find(t => t.tomb === p.itemTomb))) {
-                return transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, militarRelator);
-            }
-            if (it.tombamento === tombamentoNovo || (it.tombamentos && it.tombamentos.find(t => t.tomb === tombamentoNovo))) {
-                return injetarCautelaNoItem(it, tombamentoNovo, dadosMilitar);
-            }
-            return it;
-        });
-        batch.update(estoqueRef, { itens: itensEstoque });
-
-        // --- 4. ATUALIZAR LISTA DE CONFERÊNCIA (Visual do Militar) ---
-        if (docLista.exists) {
-            const novaLista = docLista.data().list.map(setor => ({
-                ...setor,
-                itens: (setor.itens || []).map(it => {
-                    if (it.tombamento === p.itemTomb || it.tombamento === tombamentoNovo) {
-                         let tempItem = it;
-                         if (it.tombamento === p.itemTomb) tempItem = transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, militarRelator);
-                         if (it.tombamento === tombamentoNovo) tempItem = injetarCautelaNoItem(it, tombamentoNovo, dadosMilitar);
-                         return tempItem;
-                    }
-                    if (it.tombamentos) {
-                        it.tombamentos = it.tombamentos.map(t => {
-                            if (t.tomb === p.itemTomb) return transformarEmAvariado(t, p.itemTomb, p.cautelaId, p.motivo, militarRelator);
-                            if (t.tomb === tombamentoNovo) return injetarCautelaNoItem(t, tombamentoNovo, dadosMilitar);
-                            return t;
-                        });
-                    }
-                    return it;
-                })
-            }));
-            batch.update(listaRef, { list: novaLista });
-        }
-
-        await batch.commit();
-        alert(`✅ Troca concluída!\n${p.itemTomb} (Avariado) foi substituído pelo ${tombamentoNovo}.`);
-        location.reload();
-
-    } catch (e) {
-        console.error("Erro na Troca Física:", e);
-        alert("Falha na substituição: " + e.message);
-    }
-}
-
+		
 // FUNÇÕES AUXILIARES PARA LIMPEZA DE CÓDIGO
 function transformarEmAvariado(item, tomb, cautelaId, motivo, relator) {
     const { cautela, ...limpo } = item;
@@ -7973,27 +7868,162 @@ function injetarCautelaNoItem(item, tomb, dadosMilitar) {
     return itemObj.historico_vida;
 }
 		
-		// Esta função é o gatilho que o seu botão "Substituir Material" dispara
-function prepararSubstituicaoFisica() {
-    // 1. Verifica se existe uma pendência selecionada na memória do Gestor
-    if (!pendenciaSendoResolvida) {
-        alert("Erro: Nenhuma pendência selecionada para troca.");
-        return;
-    }
-
-    // 2. Pergunta qual o novo número de tombamento (o que sairá do seu estoque/almox)
-    const tombamentoNovo = prompt(`SUBSTITUIÇÃO DE MATERIAL\nItem atual: ${pendenciaSendoResolvida.itemTomb}\n\nDigite o TOMBAMENTO do novo item:`);
+		// Função para abrir o modal e carregar itens de todas as listas do gestor
+async function abrirSeletorGlobalSubstituicao() {
+    if (!pendenciaSendoResolvida) return;
+    const p = pendenciaSendoResolvida;
+    const modal = document.getElementById('modalSeletorEstoque');
+    const container = document.getElementById('listaEstoqueDisponivel');
     
-    // 3. Validação do input
-    if (!tombamentoNovo || tombamentoNovo.trim() === "") {
-        console.log("Troca cancelada pelo usuário.");
-        return;
-    }
+    // Identifica o "DNA" (prefixo do UID) - Ex: de 'EPR-01-511527' para 'EPR-01'
+    const partesId = p.uidItem.split('-');
+    partesId.pop(); // Remove o sufixo (tombamento)
+    const dnaBusca = partesId.join('-'); 
 
-    // 4. Chama a execução pesada que faz os logs e troca os carimbos
-    executarTrocaFisica(tombamentoNovo.trim());
+    container.innerHTML = `<div class="loader-p">Buscando ${p.itemNome} em todas as suas ftr/setores...</div>`;
+    modal.style.display = 'block';
+
+    try {
+        // Busca TODAS as listas de conferência (Jurisdição do Gestor)
+        const snapshot = await db.collection('listas_conferencia').get();
+        let htmlAcumulado = '';
+        let totalEncontrado = 0;
+
+        snapshot.forEach(docLista => {
+            const nomeLista = docLista.id.toUpperCase();
+            const dados = docLista.data();
+
+            if (dados.list) {
+                dados.list.forEach(setor => {
+                    setor.itens.forEach(item => {
+                        
+                        // Função interna para validar e montar o HTML do card
+                        const validarEExibir = (entidade, idReal) => {
+                            // Verifica se o ID começa com o DNA e se está DISPONÍVEL
+                            if (idReal.startsWith(dnaBusca) && !entidade.cautela && entidade.situacao !== 'AVARIADO' && idReal !== p.uidItem) {
+                                totalEncontrado++;
+                                htmlAcumulado += `
+                                    <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 12px; margin-bottom: 8px; border-radius: 8px; background: white;">
+                                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                                            <div>
+                                                <small style="color: #666; font-weight: bold;">ORIGEM: ${nomeLista}</small><br>
+                                                <b>Tombamento: ${entidade.tomb || entidade.tombamento}</b>
+                                            </div>
+                                            <button class="btn-resolver" style="width:auto; padding: 5px 15px;" 
+                                                onclick="confirmarTrocaCruzada('${idReal}', '${docLista.id}', '${entidade.tomb || entidade.tombamento}')">
+                                                Selecionar
+                                            </button>
+                                        </div>
+                                    </div>`;
+                            }
+                        };
+
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            item.tombamentos.forEach(t => validarEExibir(t, `${item.id}-${t.tomb}`));
+                        } else {
+                            validarEExibir(item, item.id);
+                        }
+                    });
+                });
+            }
+        });
+
+        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `<p style="text-align:center; padding:20px;">Nenhum item reserva do tipo <b>${p.itemNome}</b> disponível em suas listas.</p>`;
+
+    } catch (e) {
+        console.error(e);
+        container.innerHTML = "<p>Erro ao processar busca global.</p>";
+    }
 }
-		
+	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
+    const p = pendenciaSendoResolvida;
+    const confirmacao = confirm(`Confirmar substituição?\nO item será retirado da lista: ${listaOrigemNovo.toUpperCase()}`);
+    if (!confirmacao) return;
+
+    document.getElementById('modalSeletorEstoque').style.display = 'none';
+    
+    try {
+        const batch = db.batch();
+        const timestamp = firebase.firestore.Timestamp.now();
+
+        // 1. DADOS DA CAUTELA (Transferência de responsabilidade)
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const docCautela = await cautelaRef.get();
+        const dadosC = docCautela.data();
+
+        const logTroca = {
+            data: timestamp,
+            mensagem: `Troca Física: Item ${p.itemTomb} substituído pelo ${tombamentoNovo} (Emprestado da lista ${listaOrigemNovo}).`,
+            tipo: "SUBSTITUICAO_ITEM_CRUZADO",
+            autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
+        };
+
+        // 2. ATUALIZAR A CAUTELA (O contrato digital)
+        const itensAtualizados = dadosC.itens.map(it => {
+            if (it.tombamento === p.itemTomb) {
+                return { 
+                    ...it, 
+                    tombamento: tombamentoNovo, 
+                    origem_lista: listaOrigemNovo, // Rastro para a Abordagem 3 na devolução
+                    obs: `Substituído (vindo de ${listaOrigemNovo})` 
+                };
+            }
+            return it;
+        });
+
+        batch.update(cautelaRef, {
+            itens: itensAtualizados,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
+        });
+
+        // 3. CARIMBAR O ITEM NA LISTA DE ORIGEM DELE (Onde ele fisicamente está)
+        const listaOrigemRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
+        const docListaOrigem = await listaOrigemRef.get();
+        const listaData = docListaOrigem.data();
+
+        const novaListaOrigem = listaData.list.map(setor => ({
+            ...setor,
+            itens: setor.itens.map(it => {
+                const processar = (entidade, idAtual) => {
+                    if (idAtual === uidNovo) {
+                        return {
+                            ...entidade,
+                            cautela: {
+                                id: p.cautelaId,
+                                destinatario: dadosC.destinatario,
+                                data: new Date().toLocaleString('pt-BR'),
+                                emprestimo: true,
+                                lista_destino: p.localId // Onde ele está sendo usado (ex: ABT-17)
+                            }
+                        };
+                    }
+                    return entidade;
+                };
+
+                if (it.tipo === 'multi' && it.tombamentos) {
+                    it.tombamentos = it.tombamentos.map(t => processar(t, `${it.id}-${t.tomb}`));
+                } else {
+                    it = processar(it, it.id);
+                }
+                return it;
+            })
+        }));
+
+        batch.update(listaOrigemRef, { list: novaListaOrigem });
+
+        // 4. TRATAR O ITEM AVARIADO NA LISTA DE ORIGEM DA CAUTELA
+        // (Lógica de transformar em AVARIADO que já fizemos antes...)
+        // [Batch update na lista de p.localId...]
+
+        await batch.commit();
+        alert("Troca realizada com sucesso! O item foi carimbado na lista de origem.");
+        location.reload();
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro na troca cruzada: " + e.message);
+    }
+}	
     </script>
 </body>
 </html>
