@@ -6627,6 +6627,12 @@ async function getLastConferente(localOrigem) {
 }
             async function iniciarDevolucaoCautela(cautelaId, ultimoConferenteNome) {
     const btnDevolver = document.getElementById('btn-devolver-cautela');
+    
+    // 1. CONFIRMAÇÃO INICIAL COM O USUÁRIO
+    const confirmacaoUsuario = confirm(`A CAUTELA SERÁ ENVIADA PARA DEVOLUÇÃO A "${ultimoConferenteNome}". CONFIRMA?`);
+    if (!confirmacaoUsuario) return; // Cancela se o usuário clicar em "Cancelar"
+
+    // Esconde o modal e desativa o botão após a confirmação
     document.getElementById('cautelaDetailsModal').style.display = 'none'; 
     if (btnDevolver) btnDevolver.disabled = true;
 
@@ -6643,20 +6649,30 @@ async function getLastConferente(localOrigem) {
 
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
-            if (!cautelaDoc.exists || cautelaDoc.data().status !== 'RECEBIDA') {
+            
+            if (!cautelaDoc.exists) throw new Error("Documento não localizado.");
+            
+            const data = cautelaDoc.data();
+
+            // --- 🛑 TRAVA DE SEGURANÇA: ITENS EM ANÁLISE 🛑 ---
+            const pendencias = data.pendencias_ativas || [];
+            if (pendencias.length > 0) {
+                const listaItens = pendencias.map(p => p.itemNome).join(', ');
+                throw new Error(`BLOQUEIO: Existem itens em análise pelo Gestor: (${listaItens}).\n\nResolva as pendências antes de devolver.`);
+            }
+
+            if (data.status !== 'RECEBIDA') {
                 throw new Error("A cautela não está em sua posse confirmada para ser devolvida.");
             }
             
+            // Se passar por todas as travas, executa a atualização
             transaction.update(cautelaRef, { 
                 status: 'DEVOLUÇÃO', 
                 timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
                 
-                // Quem está devolvendo (Usuário B)
                 reversor_uid: firebase.auth().currentUser.uid,
                 militar_completo_reversor: militarCompleto,
                 
-                // 🛑 A POSSE DIGITAL PULA PARA O USUÁRIO C 🛑
-                // Atualizamos o 'destinatario_uid' para que o Dashboard do Usuário C mostre o card
                 destinatario_uid: ucUid, 
                 destinatario: ultimoConferenteNome 
             });
@@ -6668,7 +6684,7 @@ async function getLastConferente(localOrigem) {
 
     } catch (error) {
         console.error("Erro ao iniciar devolução:", error);
-        alert(`Erro: ${error.message}`);
+        alert(`${error.message}`);
         if (btnDevolver) btnDevolver.disabled = false;
     }
 }
