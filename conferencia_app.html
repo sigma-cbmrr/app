@@ -913,14 +913,11 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
     
-    // Feedback visual imediato
     btn.textContent = "SALVANDO SUA CONFERÊNCIA..."; 
     btn.disabled = true;
 
     try {
         const p = userInfo;
-        
-        // Busca o nome institucional completo (igual ao carimbo)
         const militarInfoEl = document.getElementById('militar-info');
         const conferenteCompleto = militarInfoEl ? 
             militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : 
@@ -933,7 +930,6 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
         let itensCaa = []; 
         let totalCaa = 0;
 
-        // --- REFERÊNCIA À FONTE DE DADOS GLOBAL ---
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
         const novaListaMestra = fonteDeDados.map(setor => {
@@ -944,13 +940,22 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                     const processarEntidade = (entidade, uid, nomeParaRelatorio) => {
                         const statusLocal = window.itemStatus[uid];
                         
-                        // Se não houve ação neste item, retorna ele como está
-                        if (!statusLocal || statusLocal.status === 'pending') return entidade;
-
+                        // Se não houve ação, retorna como está, mas garante arrays básicos
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // --- 1. TRATAMENTO DE RESOLVIDOS ---
+                        // --- 1. SINCRONIZAÇÃO DE ESTADO DE AVARIA (A "CURA") ---
+                        // Se o item estava AVARIADO mas não há mais essa marca no dadosConferencia (limpo pelo resolverID)
+                        // ou se o status local indica que foi resolvido.
+                        if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
+                            entidade.situacao = 'DISPONÍVEL';
+                            delete entidade.id_cautela_origem;
+                            delete entidade.motivo_avaria;
+                        }
+
+                        if (!statusLocal || statusLocal.status === 'pending') return entidade;
+
+                        // --- 2. TRATAMENTO DE RESOLVIDOS (Pendências Comuns) ---
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -978,14 +983,10 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                             });
                         }
 
-                        // --- 2. TRATAMENTO DE NOVOS (IMPORTANTE) ---
-                        // Como a função 'salvarNovoID' já injetou o objeto TEMP- no dadosConferencia, 
-                        // aqui nós apenas limpamos o prefixo TEMP- para virar um ID definitivo PEND-
+                        // --- 3. TRATAMENTO DE NOVOS ---
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id.startsWith('TEMP-')) {
                                 const novoIdDefinitivo = p.id.replace('TEMP-', 'PEND-');
-                                
-                                // Registra no histórico de vida
                                 entidade.historico_vida.push({
                                     evento: "NOVA_PENDENCIA",
                                     id_pendencia: novoIdDefinitivo,
@@ -993,20 +994,21 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                                     data: p.data_criacao,
                                     detalhes: `${p.quantidade}un - ${p.descricao}`
                                 });
-                                
                                 return { ...p, id: novoIdDefinitivo };
                             }
                             return p;
                         });
 
-                        // --- 3. PREPARAÇÃO PARA RELATÓRIO ---
-                        const temAlteracao = entidade.pendencias_ids.length > 0;
+                        // --- 4. PREPARAÇÃO PARA RELATÓRIO ---
+                        // Consideramos alteração se houver pendências OU se o item ainda estiver AVARIADO
+                        const temAlteracao = entidade.pendencias_ids.length > 0 || entidade.situacao === 'AVARIADO';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         
                         const dadosRelatorio = {
                             id: uid,
                             nomeCompleto: nomeParaRelatorio,
                             status: statusFinal,
+                            situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                             pendencias_ids: [...entidade.pendencias_ids],
                             quantidade: entidade.quantidadeEsperada || 1,
                             setor: setor.nome,
@@ -1033,11 +1035,25 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
         });
 
         // --- GRAVAÇÃO NO FIREBASE ---
-        // 1. Atualiza a Lista Mestra (Onde vivem os itens e tombamentos)
-        await db.collection(COLECAO_LISTAS).doc(LISTA_ID).update({ list: novaListaMestra });
+        const batch = db.batch();
 
-        // 2. Registra o Relatório de Conferência (O histórico que o gestor consulta)
-        await db.collection('resultados_conferencias').add({
+        // 1. Atualiza a Lista Ativa (A prancheta que o militar lê)
+        const listaRef = db.collection(COLECAO_LISTAS).doc(LISTA_ID);
+        batch.update(listaRef, { list: novaListaMestra });
+
+        // 2. Atualiza a Custódia Atual (Onde fica o responsável do momento)
+        const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
+        batch.set(custodiaRef, {
+            lista_id: LISTA_ID,
+            local_nome: localNome,
+            conferente_uid: p.uid,
+            conferente_completo: conferenteCompleto,
+            timestamp_ultima_conferencia: timestampAgora
+        }, { merge: true });
+
+        // 3. Adiciona o Relatório Histórico
+        const relatorioRef = db.collection('resultados_conferencias').doc();
+        batch.set(relatorioRef, {
             local: localNome,
             lista_id: LISTA_ID,
             conferente_uid: p.uid,
@@ -1049,17 +1065,10 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
             itensRelatorio: itensRelatorio
         });
 
-        // 3. Atualiza a Custódia (Quem é o atual responsável pelo local)
-        await db.collection('custodia_atual').doc(LISTA_ID).set({
-            lista_id: LISTA_ID,
-            local_nome: localNome,
-            conferente_uid: p.uid,
-            conferente_completo: conferenteCompleto,
-            timestamp_ultima_conferencia: timestampAgora
-        });
+        await batch.commit();
 
-        alert("✅ Conferência Finalizada!\nConfira seu dashboard.");
-        limparRascunho();
+        alert("✅ Conferência Finalizada com Sucesso!");
+        if (typeof limparRascunho === "function") limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
 
     } catch (e) {
