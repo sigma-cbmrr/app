@@ -8041,6 +8041,82 @@ async function abrirSeletorGlobalSubstituicao() {
         alert("Erro na troca cruzada: " + e.message);
     }
 }	
+	async function prepararSubstituicaoFisica() {
+    // 1. Verifica se há uma pendência selecionada na memória
+    if (!pendenciaSendoResolvida) {
+        alert("Erro: Nenhuma pendência selecionada.");
+        return;
+    }
+
+    const p = pendenciaSendoResolvida;
+    const modalSeletor = document.getElementById('modalSeletorEstoque');
+    const container = document.getElementById('listaEstoqueDisponivel');
+
+    // 2. Fecha o modal anterior e abre o seletor
+    document.getElementById('modalDecisaoGestor').style.display = 'none';
+    modalSeletor.style.display = 'flex';
+    container.innerHTML = '<div style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Buscando itens compatíveis...</div>';
+
+    try {
+        // 3. Identifica o DNA (prefixo) do item. Ex: "EPR-MAS-01" de "EPR-MAS-01-TOMB123"
+        // Ajuste o separador '-' conforme o padrão do seu UID
+        const partesId = p.uidItem.split('-');
+        partesId.pop(); // Remove o último segmento (tombamento)
+        const dnaBusca = partesId.join('-'); 
+
+        // 4. Busca em TODAS as listas de conferência
+        const snapshot = await db.collection('listas_conferencia').get();
+        let htmlAcumulado = '';
+        let totalEncontrado = 0;
+
+        snapshot.forEach(docLista => {
+            const nomeLista = docLista.id.toUpperCase();
+            const dados = docLista.data();
+
+            if (dados.list) {
+                dados.list.forEach(setor => {
+                    setor.itens.forEach(item => {
+                        
+                        const validarEExibir = (entidade, idReal) => {
+                            // Só mostra se: Tiver o mesmo DNA, NÃO tiver cautela, NÃO estiver avariado e NÃO for o mesmo item
+                            if (idReal.startsWith(dnaBusca) && !entidade.cautela && entidade.situacao !== 'AVARIADO' && idReal !== p.uidItem) {
+                                totalEncontrado++;
+                                htmlAcumulado += `
+                                    <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 12px; border-radius: 8px; background: white; display: flex; justify-content: space-between; align-items: center;">
+                                        <div>
+                                            <small style="color: #666; font-weight: bold;">LOCAL: ${nomeLista}</small><br>
+                                            <b style="color: #333;">Tombamento: ${entidade.tomb || entidade.tombamento}</b>
+                                        </div>
+                                        <button class="btn-resolver" style="width:auto; padding: 8px 15px; background-color: #1b8a3e;" 
+                                            onclick="confirmarTrocaCruzada('${idReal}', '${docLista.id}', '${entidade.tomb || entidade.tombamento}')">
+                                            Selecionar
+                                        </div>
+                                    </div>`;
+                            }
+                        };
+
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            item.tombamentos.forEach(t => validarEExibir(t, `${item.id}-${t.tomb}`));
+                        } else {
+                            validarEExibir(item, item.id);
+                        }
+                    });
+                });
+            }
+        });
+
+        if (totalEncontrado === 0) {
+            container.innerHTML = `<div style="text-align:center; padding:20px; color:#666;">Nenhum item reserva do tipo <b>${p.itemNome}</b> encontrado em outras listas.</div>`;
+        } else {
+            container.innerHTML = htmlAcumulado;
+        }
+
+    } catch (e) {
+        console.error("Erro na busca global:", e);
+        container.innerHTML = `<div style="color:red; padding:20px;">Erro ao carregar estoque: ${e.message}</div>`;
+    }
+}
+		
     </script>
 </body>
 </html>
