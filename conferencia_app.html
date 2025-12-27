@@ -1684,7 +1684,32 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let acaoConcluida = false;
 
+    // --- NOVA LÓGICA: TRATAMENTO DE RESOLUÇÃO DE AVARIA ---
+    const isResolvendoAvaria = String(pendenciaId).startsWith('AVARIA-');
+
     function executarBaixaNoObjeto(obj) {
+        // SE FOR RESOLUÇÃO DE AVARIA DE CAUTELA
+        if (isResolvendoAvaria) {
+            if (!obj.historico_vida) obj.historico_vida = [];
+            
+            obj.historico_vida.push({
+                tipo: "RESOLUÇÃO_AVARIA_CAUTELA",
+                data: new Date().toLocaleDateString('pt-BR'),
+                resolvido_por: nomeResolutor,
+                justificativa: justificativa,
+                cautela_origem: pendenciaId.replace('AVARIA-', '')
+            });
+
+            // "CURA" O ITEM: Remove o estado de avaria
+            obj.situacao = "DISPONÍVEL"; 
+            obj.status = "OK";
+            delete obj.id_cautela_origem;
+            delete obj.motivo_avaria;
+            
+            return true;
+        }
+
+        // SE FOR PENDÊNCIA COMUM (Lógica original mantida)
         if (!obj.pendencias_ids) return false;
         const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
         if (index === -1) return false;
@@ -1716,6 +1741,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         return true;
     }
 
+    // Navegação na fonte de dados para achar o item/tombamento pelo UID
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             if (String(item.id) === String(uid)) {
@@ -1733,28 +1759,26 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     if (acaoConcluida) {
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         window.itemStatus[uid].status = 'C/A';
+        
+        // Se resolveu a avaria, removemos também dos ids_mantidos se estiver lá
+        if (window.itemStatus[uid].ids_mantidos) {
+            window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => id !== pendenciaId);
+        }
+
         renderizarConferencia();
         updateOverallStatus();
-        // --- ADICIONANDO O FOCO E SCROLL ---
-        setTimeout(() => {
-            // Procura o elemento pelo UID (ID do item ou ID-TOMB)
-            let elItem = document.querySelector(`[data-id="${uid}"]`);
-            
-            // Se não achou e for tombamento, procura pelo container do tombamento
-            if (!elItem && uid.includes('-')) {
-                elItem = document.querySelector(`.tombamento-container[data-id="${uid}"]`);
-            }
 
+        // Feedback visual de sucesso
+        setTimeout(() => {
+            let elItem = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (elItem) {
                 elItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Destaque visual rápido
-                elItem.style.backgroundColor = "#e8f5e9"; // Verde bem clarinho
+                elItem.style.backgroundColor = "#e8f5e9"; 
                 setTimeout(() => { elItem.style.backgroundColor = ""; }, 1000);
             }
         }, 300);
     }
 }
-
 function setItemStatusID(btn, status, uid) {
     const container = btn.closest('.tombamento-container') || btn.closest('.item-conferencia');
     const setor = btn.closest('.setor');
