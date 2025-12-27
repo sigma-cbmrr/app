@@ -7668,11 +7668,12 @@ async function abrirGestaoPendenciasCautela() {
         const dataEstoque = docEstoque.data();
 
         // --- 1. FILTRAGEM SEGURA DAS PENDÊNCIAS ---
-        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
+        const pendenciasAtuais = dataCautela.pendencias_ativas || [];
+        const pendenciasRestantes = pendenciasAtuais.filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
-        // --- 2. AJUSTE DA CARGA NA CAUTELA ---
+        // --- 2. AJUSTE DA CARGA NA CAUTELA (O que o militar deve) ---
         let novosItensCautela = [...(dataCautela.itens || [])];
         if (p.itemTomb) {
             novosItensCautela = novosItensCautela.filter(it => it.tombamento !== p.itemTomb);
@@ -7687,29 +7688,30 @@ async function abrirGestaoPendenciasCautela() {
             }
         }
 
-        // --- 3. ATUALIZAÇÃO DO ESTOQUE (REMOÇÃO DO CARIMBO E MARCAÇÃO DE AVARIA) ---
+        // --- 3. ATUALIZAÇÃO DO ESTOQUE (MUDANÇA DO CARIMBO NA VIATURA) ---
         let itensEstoqueAtualizados = [...(dataEstoque.itens || [])];
         
         itensEstoqueAtualizados = itensEstoqueAtualizados.map(it => {
-            // Caminho para item MULTI (Tombamento)
+            // Caso MATERIAL COM TOMBAMENTO (EPR, etc)
             if (p.itemTomb && it.tombamento === p.itemTomb) {
-                const { cautela, ...itemLimpo } = it; // Remove fisicamente o objeto 'cautela'
+                // Removemos o objeto cautela para o carimbo azul sumir
+                const { cautela, ...itemLimpo } = it; 
                 return { 
                     ...itemLimpo, 
                     status_cautela: "DISPONÍVEL", 
-                    situacao: "AVARIADO", 
+                    situacao: "AVARIADO", // Isso ativa o carimbo VERMELHO
                     motivo_avaria: p.motivo,
                     relatado_por: dataCautela.destinatario_original_nome || "Militar",
                     data_avaria: new Date().toLocaleString('pt-BR')
                 };
             }
-            // Caminho para item SINGLE (ID do material)
+            // Caso MATERIAL COLETIVO/SINGLE (Pé de Cabra, etc)
             if (!p.itemTomb && it.id === p.itemId) {
                 const cautelasLimpas = (it.cautelas || []).filter(c => c.id !== p.cautelaId);
                 return { 
                     ...it, 
-                    cautelas: cautelasLimpas, // Remove a cautela do array
-                    situacao: "AVARIADO", 
+                    cautelas: cautelasLimpas,
+                    situacao: "AVARIADO", // Isso ativa o carimbo VERMELHO
                     motivo_avaria: p.motivo,
                     relatado_por: dataCautela.destinatario_original_nome || "Militar",
                     data_avaria: new Date().toLocaleString('pt-BR')
@@ -7720,6 +7722,7 @@ async function abrirGestaoPendenciasCautela() {
 
         const batch = db.batch();
 
+        // Atualiza a Cautela do Militar
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: pendenciasRestantes,
@@ -7730,8 +7733,10 @@ async function abrirGestaoPendenciasCautela() {
             })
         });
 
+        // Atualiza o Estoque da Viatura (Carimbos)
         batch.update(estoqueRef, {
             itens: itensEstoqueAtualizados,
+            // Mantém o histórico no array de avarias para consulta posterior
             itens_avariados: firebase.firestore.FieldValue.arrayUnion({
                 nome: p.itemNome,
                 tombamento: p.itemTomb || "S/T",
@@ -7744,11 +7749,16 @@ async function abrirGestaoPendenciasCautela() {
 
         await batch.commit();
 
-        alert("Recolhimento processado com sucesso.");
+        alert("Recolhimento processado com sucesso!");
+        
+        // --- 4. RESET DA INTERFACE ---
         document.getElementById('modalDecisaoGestor').style.display = 'none';
-        if (document.getElementById('ca-table-wrapper')) document.getElementById('ca-table-wrapper').style.display = 'none';
+        const wrapper = document.getElementById('ca-table-wrapper');
+        if (wrapper) wrapper.style.display = 'none';
         
         pendenciaSendoResolvida = null;
+        
+        // Recarrega os dados para atualizar os cards do dashboard
         await loadCaaData(); 
 
     } catch (e) {
