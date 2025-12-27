@@ -7789,6 +7789,180 @@ async function abrirGestaoPendenciasCautela() {
         alert("Erro ao salvar recolhimento.");
     }
 }
+		async function executarTrocaFisica(tombamentoNovo) {
+    if (!pendenciaSendoResolvida) return;
+    const p = pendenciaSendoResolvida; // Item Antigo (Avariado)
+    
+    const confirmacao = confirm(`Confirmar troca do item ${p.itemTomb} pelo novo ${tombamentoNovo}?`);
+    if (!confirmacao) return;
+
+    const COLECAO_LISTAS = "listas_conferencia";
+
+    try {
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const estoqueRef = db.collection('custodia_atual').doc(p.localId);
+        const listaRef = db.collection(COLECAO_LISTAS).doc(p.localId);
+
+        const [docCautela, docEstoque, docLista] = await Promise.all([
+            cautelaRef.get(),
+            estoqueRef.get(),
+            listaRef.get()
+        ]);
+
+        if (!docCautela.exists || !docEstoque.exists) throw new Error("Documentos não localizados.");
+
+        const dataCautela = docCautela.data();
+        const batch = db.batch();
+
+        // --- 1. PREPARAR DADOS DA CAUTELA PARA TRANSFERÊNCIA ---
+        // Pegamos os dados do militar que estavam no item antigo
+        const dadosMilitar = {
+            destinatario: dataCautela.destinatario || dataCautela.destinatario_original_nome,
+            id: p.cautelaId,
+            data: new Date().toLocaleString('pt-BR'),
+            status: "ABERTA"
+        };
+
+        // --- 2. ATUALIZAR COLEÇÃO 'cautelas_abertas' ---
+        // Troca o tombamento antigo pelo novo dentro do array de itens da cautela
+        const itensCautelaAtualizados = (dataCautela.itens || []).map(it => {
+            if (it.tombamento === p.itemTomb) {
+                return { ...it, tombamento: tombamentoNovo, obs: `Substituído em ${dadosMilitar.data}` };
+            }
+            return it;
+        });
+        
+        // Remove a pendência da lista do Gestor
+        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
+            String(item.id_solicitacao) !== String(p.solicitacaoId)
+        );
+
+        batch.update(cautelaRef, { 
+            itens: itensCautelaAtualizados, 
+            pendencias_ativas: pendenciasRestantes 
+        });
+
+        // --- 3. ATUALIZAR ESTOQUE (custodia_atual) ---
+        const itensEstoque = docEstoque.data().itens.map(it => {
+            // Trata o item antigo (marca como AVARIADO)
+            if (it.tombamento === p.itemTomb || (it.tombamentos && it.tombamentos.find(t => t.tomb === p.itemTomb))) {
+                return transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, dadosMilitar.destinatario);
+            }
+            // Trata o item novo (injeta a CAUTELA)
+            if (it.tombamento === tombamentoNovo || (it.tombamentos && it.tombamentos.find(t => t.tomb === tombamentoNovo))) {
+                return injetarCautelaNoItem(it, tombamentoNovo, dadosMilitar);
+            }
+            return it;
+        });
+        batch.update(estoqueRef, { itens: itensEstoque });
+
+        // --- 4. ATUALIZAR LISTA DE CONFERÊNCIA (Visual do Militar) ---
+        if (docLista.exists) {
+            const novaLista = docLista.data().list.map(setor => ({
+                ...setor,
+                itens: (setor.itens || []).map(it => {
+                    if (it.tombamento === p.itemTomb || it.tombamento === tombamentoNovo) {
+                         // Aplica a mesma lógica de avaria no antigo e cautela no novo
+                         let tempItem = it;
+                         if (it.tombamento === p.itemTomb) tempItem = transformarEmAvariado(it, p.itemTomb, p.cautelaId, p.motivo, dadosMilitar.destinatario);
+                         if (it.tombamento === tombamentoNovo) tempItem = injetarCautelaNoItem(it, tombamentoNovo, dadosMilitar);
+                         return tempItem;
+                    }
+                    // Se for multi, percorre os sub-itens
+                    if (it.tombamentos) {
+                        it.tombamentos = it.tombamentos.map(t => {
+                            if (t.tomb === p.itemTomb) return transformarEmAvariado(t, p.itemTomb, p.cautelaId, p.motivo, dadosMilitar.destinatario);
+                            if (t.tomb === tombamentoNovo) return injetarCautelaNoItem(t, tombamentoNovo, dadosMilitar);
+                            return t;
+                        });
+                    }
+                    return it;
+                })
+            }));
+            batch.update(listaRef, { list: novaLista });
+        }
+
+        await batch.commit();
+        alert(`Troca concluída! ${p.itemTomb} (Avariado) -> ${tombamentoNovo} (Cautelado).`);
+        location.reload();
+
+    } catch (e) {
+        console.error("Erro na Troca Física:", e);
+        alert("Falha na substituição: " + e.message);
+    }
+}
+
+// FUNÇÕES AUXILIARES PARA LIMPEZA DE CÓDIGO
+function transformarEmAvariado(item, tomb, cautelaId, motivo, relator) {
+    const { cautela, ...limpo } = item;
+    
+    // Gera o log para o item que quebrou
+    const historicoAtualizado = gerarLogMovimentacao(item, "SUBSTITUIÇÃO_SAÍDA", 
+        `Item retirado de carga devido à avaria. Substituído pelo novo tombamento. Motivo: ${motivo}`);
+
+    return { 
+        ...limpo, 
+        situacao: "AVARIADO",
+        id_cautela_origem: cautelaId,
+        motivo_avaria: motivo,
+        relatado_por: relator,
+        data_avaria: new Date().toLocaleString('pt-BR'),
+        historico_vida: historicoAtualizado 
+    };
+}
+
+function injetarCautelaNoItem(item, tomb, dadosMilitar) {
+    // Gera o log para o item bom que está entrando
+    const historicoAtualizado = gerarLogMovimentacao(item, "SUBSTITUIÇÃO_ENTRADA", 
+        `Item inserido na cautela ${dadosMilitar.id} em substituição ao item avariado anterior.`);
+
+    return { 
+        ...item, 
+        situacao: "DISPONÍVEL",
+        status_cautela: "ABERTA",
+        historico_vida: historicoAtualizado,
+        cautela: {
+            id: dadosMilitar.id,
+            destinatario: dadosMilitar.destinatario,
+            data: dadosMilitar.data,
+            quantidade: 1
+        }
+    };
+}
+		function gerarLogMovimentacao(itemObj, evento, detalhes) {
+    if (!itemObj.historico_vida) itemObj.historico_vida = [];
+    
+    itemObj.historico_vida.push({
+        data: new Date().toLocaleString('pt-BR'),
+        evento: evento,
+        autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
+        detalhes: detalhes,
+        timestamp: Date.now()
+    });
+    
+    return itemObj.historico_vida;
+}
+		
+		// Esta função é o gatilho que o seu botão "Substituir Material" dispara
+function prepararSubstituicaoFisica() {
+    // 1. Verifica se existe uma pendência selecionada na memória do Gestor
+    if (!pendenciaSendoResolvida) {
+        alert("Erro: Nenhuma pendência selecionada para troca.");
+        return;
+    }
+
+    // 2. Pergunta qual o novo número de tombamento (o que sairá do seu estoque/almox)
+    const tombamentoNovo = prompt(`SUBSTITUIÇÃO DE MATERIAL\nItem atual: ${pendenciaSendoResolvida.itemTomb}\n\nDigite o TOMBAMENTO do novo item:`);
+    
+    // 3. Validação do input
+    if (!tombamentoNovo || tombamentoNovo.trim() === "") {
+        console.log("Troca cancelada pelo usuário.");
+        return;
+    }
+
+    // 4. Chama a execução pesada que faz os logs e troca os carimbos
+    executarTrocaFisica(tombamentoNovo.trim());
+}
 		
     </script>
 </body>
