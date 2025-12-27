@@ -7667,13 +7667,12 @@ async function abrirGestaoPendenciasCautela() {
         const dataCautela = docCautela.data();
         const dataEstoque = docEstoque.data();
 
-        // --- 1. FILTRAGEM SEGURA DAS PENDÊNCIAS ---
-        const pendenciasAtuais = dataCautela.pendencias_ativas || [];
-        const pendenciasRestantes = pendenciasAtuais.filter(item => 
+        // 1. FILTRAGEM DAS PENDÊNCIAS (Para manter o card se houver outros itens)
+        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
-        // --- 2. AJUSTE DA CARGA NA CAUTELA (O que o militar deve) ---
+        // 2. REMOÇÃO DA CARGA NA CAUTELA DO MILITAR
         let novosItensCautela = [...(dataCautela.itens || [])];
         if (p.itemTomb) {
             novosItensCautela = novosItensCautela.filter(it => it.tombamento !== p.itemTomb);
@@ -7688,82 +7687,75 @@ async function abrirGestaoPendenciasCautela() {
             }
         }
 
-        // --- 3. ATUALIZAÇÃO DO ESTOQUE (MUDANÇA DO CARIMBO NA VIATURA) ---
+        // 3. ATUALIZAÇÃO DO ESTOQUE (LIMPEZA DO HISTÓRICO VIDA)
         let itensEstoqueAtualizados = [...(dataEstoque.itens || [])];
         
         itensEstoqueAtualizados = itensEstoqueAtualizados.map(it => {
-            // Caso MATERIAL COM TOMBAMENTO (EPR, etc)
+            // Lógica para itens com Tombamento (EPR, etc)
             if (p.itemTomb && it.tombamento === p.itemTomb) {
-                // Removemos o objeto cautela para o carimbo azul sumir
+                // REMOVEMOS O CARIMBO AZUL E LIMPAMOS O HISTÓRICO ATIVO
                 const { cautela, ...itemLimpo } = it; 
+                
                 return { 
                     ...itemLimpo, 
                     status_cautela: "DISPONÍVEL", 
-                    situacao: "AVARIADO", // Isso ativa o carimbo VERMELHO
+                    situacao: "AVARIADO", 
                     motivo_avaria: p.motivo,
                     relatado_por: dataCautela.destinatario_original_nome || "Militar",
-                    data_avaria: new Date().toLocaleString('pt-BR')
+                    data_avaria: new Date().toLocaleString('pt-BR'),
+                    // LIMPAMOS O HISTÓRICO VIDA PARA NÃO GERAR CARIMBO FANTASMA
+                    historico_vida: [] 
                 };
             }
-            // Caso MATERIAL COLETIVO/SINGLE (Pé de Cabra, etc)
-            if (!p.itemTomb && it.id === p.itemId) {
-                const cautelasLimpas = (it.cautelas || []).filter(c => c.id !== p.cautelaId);
-                return { 
-                    ...it, 
-                    cautelas: cautelasLimpas,
-                    situacao: "AVARIADO", // Isso ativa o carimbo VERMELHO
-                    motivo_avaria: p.motivo,
-                    relatado_por: dataCautela.destinatario_original_nome || "Militar",
-                    data_avaria: new Date().toLocaleString('pt-BR')
-                };
+            
+            // Lógica para sub-itens (se estiverem dentro do array de tombamentos)
+            if (it.tombamentos) {
+                it.tombamentos = it.tombamentos.map(t => {
+                    if (t.tomb === p.itemTomb) {
+                        const { cautela, ...tombLimpo } = t;
+                        return { 
+                            ...tombLimpo, 
+                            situacao: "AVARIADO", 
+                            status_cautela: "DISPONÍVEL",
+                            historico_vida: [] // Mata a herança de status
+                        };
+                    }
+                    return t;
+                });
             }
             return it;
         });
 
         const batch = db.batch();
 
-        // Atualiza a Cautela do Militar
+        // Salva na Cautela
         batch.update(cautelaRef, {
             itens: novosItensCautela,
-            pendencias_ativas: pendenciasRestantes,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
-                data: new Date().toLocaleString('pt-BR'),
-                descricao: `✅ RECOLHIMENTO: ${p.itemNome} recolhido por avaria.`,
-                militar: currentUserData.nome_militar_completo
-            })
+            pendencias_ativas: pendenciasRestantes
         });
 
-        // Atualiza o Estoque da Viatura (Carimbos)
+        // Salva no Estoque (Viatura)
         batch.update(estoqueRef, {
             itens: itensEstoqueAtualizados,
-            // Mantém o histórico no array de avarias para consulta posterior
             itens_avariados: firebase.firestore.FieldValue.arrayUnion({
                 nome: p.itemNome,
                 tombamento: p.itemTomb || "S/T",
-                quantidade: p.qtdProblema,
-                status: "AVARIA",
                 data_recolhimento: new Date(),
-                relato_militar: p.motivo
+                relato: p.motivo
             })
         });
 
         await batch.commit();
 
-        alert("Recolhimento processado com sucesso!");
+        alert("Recolhimento concluído. O item foi marcado como AVARIADO no estoque.");
         
-        // --- 4. RESET DA INTERFACE ---
+        // Reset Interface
         document.getElementById('modalDecisaoGestor').style.display = 'none';
-        const wrapper = document.getElementById('ca-table-wrapper');
-        if (wrapper) wrapper.style.display = 'none';
-        
-        pendenciaSendoResolvida = null;
-        
-        // Recarrega os dados para atualizar os cards do dashboard
         await loadCaaData(); 
 
     } catch (e) {
         console.error("Erro no processamento:", e);
-        alert("Erro técnico ao salvar dados.");
+        alert("Erro ao salvar recolhimento.");
     }
 }
 		
