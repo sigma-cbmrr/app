@@ -7598,7 +7598,6 @@ async function loadCautelaPendencies() {
 }
 
 async function abrirGestaoPendenciasCautela() {
-    // LÊ DIRETO DO CACHE GLOBAL PARA EVITAR ERRO DE PARSE
     const cautelas = cachePendenciasCautela;
     const wrapper = document.getElementById('ca-table-wrapper');
     const tbody = document.getElementById('ca-list-body');
@@ -7631,7 +7630,7 @@ async function abrirGestaoPendenciasCautela() {
             tdAlteracao.innerHTML = `
                 <div style="font-size:0.9em;">
                     <b style="color:#d90f23;">Motivo:</b> ${p.motivo}<br>
-                    <b style="color:#666;">Qtd:</b> ${p.quantidade} un.
+                    <b style="color:#666;">Tomb:</b> ${p.item_tombamento || 'N/A'}
                 </div>
             `;
 
@@ -7639,27 +7638,21 @@ async function abrirGestaoPendenciasCautela() {
             const tdMilitar = tr.insertCell();
             let dataFormatada = "Data indisponível";
             if (p.timestamp) {
-                if (p.timestamp.seconds) {
-                    dataFormatada = new Date(p.timestamp.seconds * 1000).toLocaleString('pt-BR');
-                } else {
-                    const d = new Date(p.timestamp);
-                    if (!isNaN(d.getTime())) {
-                        dataFormatada = d.toLocaleString('pt-BR');
-                    }
-                }
+                const d = p.timestamp.seconds ? new Date(p.timestamp.seconds * 1000) : new Date(p.timestamp);
+                if (!isNaN(d.getTime())) dataFormatada = d.toLocaleString('pt-BR');
             }
             tdMilitar.innerHTML = `<small><b>${p.solicitante_nome}</b><br>${dataFormatada}</small>`;
 
-            // 5. Preparação dos dados para o Modal
+            // 5. Preparação dos dados - AQUI GARANTIMOS O UID PARA O SPLIT
             const btnData = encodeURIComponent(JSON.stringify({
                 cautelaId: cautela.id,
                 solicitacaoId: p.id_solicitacao,
                 itemNome: p.item_nome,
-                itemIndex: p.item_index,
                 itemTomb: p.item_tombamento,
-                qtdProblema: p.quantidade,
                 localId: cautela.local_origem_id,
-                motivo: p.motivo
+                motivo: p.motivo,
+                // Se o p.id_item não vier completo (DNA-TOMB), tentamos pegar do id_base ou construir
+                uidItem: p.id_item || `${p.id_base}-${p.item_tombamento}`
             }));
 
             const tdAcao = tr.insertCell();
@@ -7675,20 +7668,43 @@ async function abrirGestaoPendenciasCautela() {
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 		function abrirDecisaoGestor(dataJson) {
-    const data = JSON.parse(decodeURIComponent(dataJson));
-    pendenciaSendoResolvida = data; // Armazena para as próximas funções
+    try {
+        const data = JSON.parse(decodeURIComponent(dataJson));
+        
+        // --- BLINDAGEM DO UID ---
+        // Se por algum motivo o uidItem não veio no JSON, 
+        // nós o reconstruímos aqui para evitar o erro de 'split' no próximo passo.
+        if (!data.uidItem) {
+            data.uidItem = data.idItem || data.id_base || "";
+            // Se ainda assim estiver vazio, mas tivermos o tombamento, 
+            // tentamos manter o que for possível para o split não quebrar.
+            if (!data.uidItem && data.itemTomb) {
+                console.warn("Aviso: UID não encontrado, usando apenas tombamento como referência.");
+            }
+        }
 
-    const p = data;
-    const infoBox = document.getElementById('info-item-decisao');
-    
-    // Monta o resumo para o gestor não se perder
-    infoBox.innerHTML = `
-        <strong>Material:</strong> ${p.itemNome} ${p.itemTomb ? `(Tomb: ${p.itemTomb})` : `(${p.qtdProblema} un)`}<br>
-        <strong>Motivo relatado:</strong> <span style="color:#d90f23;">${p.motivo || "Não informado"}</span><br>
-        <strong>Cautela:</strong> ${p.cautelaId}
-    `;
+        pendenciaSendoResolvida = data; // Armazena para as funções de troca/recolhimento
 
-    document.getElementById('modalDecisaoGestor').style.display = 'flex';
+        const p = data;
+        const infoBox = document.getElementById('info-item-decisao');
+        
+        if (infoBox) {
+            // Monta o resumo para o gestor
+            infoBox.innerHTML = `
+                <div style="line-height: 1.6;">
+                    <strong>Material:</strong> ${p.itemNome} ${p.itemTomb ? `(Tomb: ${p.itemTomb})` : `(${p.qtdProblema} un)`}<br>
+                    <strong>Motivo relatado:</strong> <span style="color:#d90f23; font-weight:bold;">${p.motivo || "Não informado"}</span><br>
+                    <strong>Cautela Origem:</strong> <small class="status-badge" style="background:#eee; color:#333;">${p.cautelaId}</small>
+                </div>
+            `;
+        }
+
+        document.getElementById('modalDecisaoGestor').style.display = 'flex';
+
+    } catch (error) {
+        console.error("Erro ao processar dados da pendência:", error);
+        alert("Não foi possível carregar os detalhes desta pendência.");
+    }
 }
 		async function executarRecolhimentoApenas() {
     if (!pendenciaSendoResolvida) return;
