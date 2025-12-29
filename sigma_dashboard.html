@@ -8076,40 +8076,34 @@ async function abrirSeletorGlobalSubstituicao() {
     const modalSeletor = document.getElementById('modalSeletorEstoque');
     const container = document.getElementById('listaEstoqueDisponivel');
 
-    // Transição de modais
     document.getElementById('modalDecisaoGestor').style.display = 'none';
     modalSeletor.style.display = 'flex';
-    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Vasculhando estoque disponível...</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Analisando saldo de itens e tombamentos...</div>`;
 
     try {
-        // --- BLINDAGEM CONTRA UNDEFINED ---
-        // Pegamos a primeira fonte de ID válida disponível
+        // --- LOGICA DE DNA REFORÇADA ---
         const idReferencia = p.uidItem || p.idItem || p.id_base || "";
-        
-        if (!idReferencia) {
-            throw new Error("ID do item não encontrado nos dados da pendência.");
-        }
-
-        // --- LÓGICA DE DNA ---
         const partes = idReferencia.split('-');
-        // Se o ID tiver menos de 2 partes, o DNA é ele mesmo. Se tiver mais, pegamos os 2 primeiros blocos.
-        const dnaBusca = partes.length >= 2 ? partes.slice(0, 2).join('-') : idReferencia;
-
-        console.log("Iniciando busca global. DNA alvo:", dnaBusca);
+        
+        // Se for o Pé de Cabra (2 partes), o DNA é o ID todo. 
+        // Se for EPR (3 partes), pegamos as 2 primeiras.
+        let dnaBusca = partes.length > 2 ? partes.slice(0, 2).join('-') : idReferencia;
+        
+        console.log("Iniciando busca global para DNA:", dnaBusca);
 
         const snapshot = await db.collection('listas_conferencia').get();
         let htmlAcumulado = '';
         let totalEncontrado = 0;
 
-        const montarCardHTML = (local, identificador, idReal, listaId) => {
+        const montarCardHTML = (local, identificador, idReal, listaId, saldo) => {
             return `
                 <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                     <div>
                         <div style="font-size: 0.75em; color: #1b8a3e; font-weight: bold; margin-bottom: 4px;">
                             <i class="fas fa-map-marker-alt"></i> LOCAL: ${local}
                         </div>
-                        <b style="color: #333;">${identificador}</b><br>
-                        <small style="color: #999; font-size:0.7em;">ID: ${idReal}</small>
+                        <b style="color: #333; font-size: 1.1em;">${identificador}</b><br>
+                        <small style="color: #666;">Saldo disponível: ${saldo} un</small>
                     </div>
                     <button class="btn-resolver" style="width:auto; padding: 10px 15px; background-color: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
                         onclick="confirmarTrocaCruzada('${idReal}', '${listaId}', '${identificador}')">
@@ -8125,32 +8119,33 @@ async function abrirSeletorGlobalSubstituicao() {
             if (dadosLista.list) {
                 dadosLista.list.forEach(setor => {
                     setor.itens.forEach(item => {
-                        // Compara se o ID do item no banco começa com o DNA de busca
+                        
+                        // Verifica match de DNA
                         if (item.id && item.id.startsWith(dnaBusca)) {
                             
-                            // CASO 1: ITEM MULTI
-                            if (item.tipo === 'multi' && item.tombamentos) {
-                                item.tombamentos.forEach(t => {
-                                    const idCompleto = `${item.id}-${t.tomb}`;
-                                    const disponivel = !t.cautela && t.situacao !== 'AVARIADO';
-                                    const naoEhOProprioDefeituoso = idCompleto !== idReferencia;
-
-                                    if (disponivel && naoEhOProprioDefeituoso) {
-                                        totalEncontrado++;
-                                        htmlAcumulado += montarCardHTML(nomeLocal, `Tomb: ${t.tomb}`, idCompleto, docLista.id);
-                                    }
-                                });
-                            } 
-                            
-                            // CASO 2: ITEM SINGLE
-                            else if (item.tipo === 'single') {
+                            // --- CASO ITEM SINGLE (Ex: Pé de Cabra) ---
+                            // Itens single geralmente não tem array de tombamentos preenchido com objetos de situação
+                            if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0 || typeof item.tombamentos[0] === 'string') {
+                                
                                 const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
                                 const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
 
-                                if (saldoDisponivel > 0 && item.id !== idReferencia) {
+                                // Regra: Se houver saldo e não for a mesma viatura de origem da avaria
+                                if (saldoDisponivel > 0 && docLista.id !== p.localId) {
                                     totalEncontrado++;
-                                    htmlAcumulado += montarCardHTML(nomeLocal, `Disponível: ${saldoDisponivel} un`, item.id, docLista.id);
+                                    htmlAcumulado += montarCardHTML(nomeLocal, item.nome, item.id, docLista.id, saldoDisponivel);
                                 }
+                            } 
+                            // --- CASO ITEM MULTI (Ex: EPR) ---
+                            else if (item.tipo === 'multi' && Array.isArray(item.tombamentos)) {
+                                item.tombamentos.forEach(t => {
+                                    const idCompleto = `${item.id}-${t.tomb}`;
+                                    // Disponível se não houver cautela e não estiver avariado
+                                    if (!t.cautela && t.situacao !== 'AVARIADO' && idCompleto !== idReferencia) {
+                                        totalEncontrado++;
+                                        htmlAcumulado += montarCardHTML(nomeLocal, `Tomb: ${t.tomb}`, idCompleto, docLista.id, 1);
+                                    }
+                                });
                             }
                         }
                     });
@@ -8158,23 +8153,15 @@ async function abrirSeletorGlobalSubstituicao() {
             }
         });
 
-        if (totalEncontrado === 0) {
-            container.innerHTML = `
-                <div style="text-align:center; padding:20px; color:#666;">
-                    <i class="fas fa-search fa-2x"></i><br><br>
-                    Nenhum reserva compatível encontrado para o DNA: <br><b>${dnaBusca}</b><br>
-                    <small style="display:block; margin-top:10px;">Verifique se os itens não estão cautelados em outras listas.</small>
-                </div>`;
-        } else {
-            container.innerHTML = htmlAcumulado;
-        }
+        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `
+            <div style="text-align:center; padding:20px; color:#666;">
+                <i class="fas fa-search-minus fa-2x"></i><br><br>
+                Nenhum item reserva compatível com DNA <b>${dnaBusca}</b> encontrado em outras listas.
+            </div>`;
 
     } catch (e) {
         console.error("Erro na busca global:", e);
-        container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">
-            <i class="fas fa-exclamation-circle"></i><br>
-            Erro ao processar DNA: ${e.message}
-        </div>`;
+        container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">Erro técnico: ${e.message}</div>`;
     }
 }
 		
