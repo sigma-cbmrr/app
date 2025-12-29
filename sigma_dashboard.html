@@ -7657,7 +7657,7 @@ async function abrirGestaoPendenciasCautela() {
 
             const tdAcao = tr.insertCell();
             tdAcao.innerHTML = `
-                <button class="btn-modern-action" style="background-color: #f57c00; padding: 5px 10px;" onclick="abrirDecisaoGestor('${btnData}')">
+                <button class="btn-modern-action" style="background-color: #f57c00; padding: 5px 10px;" onclick="('${btnData}')">
                     <i class="fas fa-tools"></i> Resolver
                 </button>
             `;
@@ -7671,11 +7671,18 @@ async function abrirGestaoPendenciasCautela() {
     try {
         const data = JSON.parse(decodeURIComponent(dataJson));
         
-        // --- PROTEÇÃO CONTRA UNDEFINED ---
-        // Se o uidItem não existir, tentamos construir ou pegar de campos alternativos
-        if (!data.uidItem) {
-            // Tenta p.id_item (da tabela) ou reconstrói usando id_base
-            data.uidItem = data.id_item || data.id_base || (data.itemTomb ? `DNA-FALTOU-${data.itemTomb}` : "NULL-DNA");
+        // --- LÓGICA DE RECUPERAÇÃO DE EMERGÊNCIA ---
+        // Se o item não tem ID (inserção manual), tentamos atribuir um DNA temporário pelo nome
+        if (!data.uidItem || data.uidItem.includes('undefined')) {
+            console.warn("⚠️ Pendência sem ID. Tentando recuperar pelo nome...");
+            
+            if (data.itemNome.includes("PÉ DE CABRA")) {
+                data.uidItem = "56911524-65986249";
+                data.id_base = "56911524-65986249";
+            } else if (data.itemNome.includes("EPR SCOTT")) {
+                data.uidItem = "56911524-64012364-" + (data.itemTomb || "S/T");
+                data.id_base = "56911524-64012364";
+            }
         }
 
         pendenciaSendoResolvida = data; 
@@ -7683,19 +7690,17 @@ async function abrirGestaoPendenciasCautela() {
         const infoBox = document.getElementById('info-item-decisao');
         if (infoBox) {
             infoBox.innerHTML = `
-                <div style="line-height: 1.5;">
-                    <strong>Material:</strong> ${data.itemNome || "Item S/N"} 
-                    ${data.itemTomb ? `<br><small>Tomb: ${data.itemTomb}</small>` : ""}<br>
-                    <strong>Motivo:</strong> <span style="color:#d90f23;">${data.motivo || "Não informado"}</span>
+                <div style="line-height: 1.6;">
+                    <strong>Material:</strong> ${data.itemNome}<br>
+                    <strong>Tombamento:</strong> ${data.itemTomb || 'S/T'}<br>
+                    <small style="color:#666;">DNA Detectado: ${data.id_base || 'Manual'}</small>
                 </div>
             `;
         }
 
         document.getElementById('modalDecisaoGestor').style.display = 'flex';
-
-    } catch (error) {
-        console.error("Erro ao processar dados da pendência:", error);
-        alert("Erro ao carregar detalhes do item.");
+    } catch (e) {
+        console.error("Erro ao abrir modal:", e);
     }
 }
 		async function executarRecolhimentoApenas() {
