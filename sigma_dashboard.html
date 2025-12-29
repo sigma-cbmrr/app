@@ -8109,16 +8109,13 @@ async function abrirSeletorGlobalSubstituicao() {
 
     document.getElementById('modalDecisaoGestor').style.display = 'none';
     modalSeletor.style.display = 'flex';
-    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Analisando...</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Buscando itens compatíveis no estoque...</div>`;
 
     try {
         const idReferencia = p.uidItem || p.idItem || p.id_base || "";
         const partes = idReferencia.split('-');
         let dnaBusca = partes.length > 2 ? partes.slice(0, 2).join('-') : idReferencia;
         
-        console.log("%c--- DEBUG BUSCA GLOBAL ---", "color: blue; font-weight: bold;");
-        console.log("DNA Alvo:", dnaBusca);
-
         const snapshot = await db.collection('listas_conferencia').get();
         let htmlAcumulado = '';
         let totalEncontrado = 0;
@@ -8131,50 +8128,52 @@ async function abrirSeletorGlobalSubstituicao() {
                 dadosLista.list.forEach(setor => {
                     setor.itens.forEach(item => {
                         
-                        // LOG DE TODOS OS ITENS QUE ELE ESTÁ ANALISANDO
-                        if (item.id && item.id.includes(dnaBusca.split('-')[0])) {
-                            console.log(`Analisando item: ${item.nome} | ID: ${item.id}`);
-                        }
-
+                        // Verifica se o ID do item começa com o DNA procurado
                         if (item.id && item.id.startsWith(dnaBusca)) {
-                            // TESTE PARA ITENS SINGLE (Pé de Cabra)
+                            
+                            // --- LÓGICA PARA ITEM SINGLE (Ex: Pé de Cabra) ---
                             if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0) {
                                 const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
                                 const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
 
-                                console.log(`  > [SINGLE] Saldo: ${saldoDisponivel} | Diferente da VTR?: ${docLista.id !== p.localId}`);
-
-                                if (saldoDisponivel > 0 && docLista.id !== p.localId) {
+                                // Agora aceita o item mesmo sendo da mesma VTR, desde que haja saldo disponível
+                                if (saldoDisponivel > 0) {
                                     totalEncontrado++;
+                                    const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (ESTOQUE LOCAL)` : nomeLocal;
+                                    
                                     htmlAcumulado += `
-                                        <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                                             <div>
-                                                <small style="color: #1b8a3e; font-weight: bold;">LOCAL: ${nomeLocal}</small><br>
-                                                <b>${item.nome}</b><br>
-                                                <small>Disponível: ${saldoDisponivel} un</small>
+                                                <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
+                                                <b style="color: #333;">${item.nome}</b><br>
+                                                <small style="color: #666;">Saldo disponível: ${saldoDisponivel} un</small>
                                             </div>
-                                            <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px;" 
+                                            <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
                                                 onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}')">
                                                 Selecionar
                                             </button>
                                         </div>`;
                                 }
                             } 
-                            // TESTE PARA ITENS MULTI (EPR)
+                            // --- LÓGICA PARA ITEM MULTI (Ex: EPR) ---
                             else {
                                 item.tombamentos.forEach(t => {
                                     const idCompleto = `${item.id}-${t.tomb}`;
                                     const disponivel = !t.cautela && t.situacao !== 'AVARIADO';
                                     
+                                    // Não mostra o próprio item que está com defeito na lista
                                     if (disponivel && idCompleto !== idReferencia) {
                                         totalEncontrado++;
+                                        const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (RESERVA)` : nomeLocal;
+
                                         htmlAcumulado += `
-                                            <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                            <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                                                 <div>
-                                                    <small style="color: #1b8a3e; font-weight: bold;">LOCAL: ${nomeLocal}</small><br>
-                                                    <b>Tomb: ${t.tomb}</b>
+                                                    <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
+                                                    <b style="color: #333;">Tombamento: ${t.tomb}</b><br>
+                                                    <small style="color: #666;">${item.nome}</small>
                                                 </div>
-                                                <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px;" 
+                                                <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
                                                     onclick="confirmarTrocaCruzada('${idCompleto}', '${docLista.id}', '${t.tomb}')">
                                                     Selecionar
                                                 </button>
@@ -8188,10 +8187,19 @@ async function abrirSeletorGlobalSubstituicao() {
             }
         });
 
-        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `<div style="text-align:center; padding:20px;">Nenhum compatível para DNA: ${dnaBusca}</div>`;
+        if (totalEncontrado === 0) {
+            container.innerHTML = `
+                <div style="text-align:center; padding:20px; color:#666;">
+                    <i class="fas fa-search-minus fa-2x"></i><br><br>
+                    Nenhum item compatível (reserva ou saldo) encontrado para o DNA: <b>${dnaBusca}</b>.
+                </div>`;
+        } else {
+            container.innerHTML = htmlAcumulado;
+        }
 
     } catch (e) {
-        console.error("Erro na busca:", e);
+        console.error("Erro na busca global:", e);
+        container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">Erro ao processar busca: ${e.message}</div>`;
     }
 }	
     </script>
