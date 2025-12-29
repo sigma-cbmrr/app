@@ -7979,16 +7979,34 @@ async function abrirSeletorGlobalSubstituicao() {
 }
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
-    const confirmacao = confirm(`Confirmar substituição física?\n\nO item será retirado de: ${listaOrigemNovo.toUpperCase()}\nPara substituir na: ${p.localId.toUpperCase()}`);
-    if (!confirmacao) return;
+    let qtdParaMovimentar = 1;
 
-    document.getElementById('modalSeletorEstoque').style.display = 'none';
-    
     try {
+        // --- 0. LÓGICA DE QUANTIDADE PARA ITENS SINGLE ---
+        // Se o uidNovo não tem 3 partes (segmentos), tratamos como Single
+        const partesID = uidNovo.split('-');
+        const ehSingle = partesID.length <= 2;
+
+        if (ehSingle) {
+            const inputQtd = prompt(`Quantas unidades de ${tombamentoNovo} deseja enviar?\n(Origem: ${listaOrigemNovo.toUpperCase()})`, "1");
+            if (inputQtd === null) return; // Cancelou o prompt
+            
+            qtdParaMovimentar = parseInt(inputQtd);
+            if (isNaN(qtdParaMovimentar) || qtdParaMovimentar <= 0) {
+                alert("Quantidade inválida.");
+                return;
+            }
+        }
+
+        const confirmacao = confirm(`Confirmar substituição física?\n\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}\nRetirar de: ${listaOrigemNovo.toUpperCase()}\nPara: ${p.localId.toUpperCase()}`);
+        if (!confirmacao) return;
+
+        document.getElementById('modalSeletorEstoque').style.display = 'none';
+        
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 1. DADOS DA CAUTELA (Contrato Digital)
+        // 1. DADOS DA CAUTELA (Contrato Digital - Receptora)
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
         if (!docCautela.exists) throw new Error("Cautela receptora não encontrada.");
@@ -7996,7 +8014,7 @@ async function abrirSeletorGlobalSubstituicao() {
 
         const logTroca = {
             data: timestamp,
-            mensagem: `Substituição: Item ${p.itemTomb || 'S/T'} trocado pelo ${tombamentoNovo} (Vindo da lista ${listaOrigemNovo}).`,
+            mensagem: `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo} vindo de ${listaOrigemNovo}.`,
             tipo: "SUBSTITUICAO_CRUZADA",
             autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
         };
@@ -8006,10 +8024,10 @@ async function abrirSeletorGlobalSubstituicao() {
             if (ehOItem) {
                 return { 
                     ...it, 
-                    tombamento: tombamentoNovo, 
+                    tombamento: ehSingle ? it.tombamento : tombamentoNovo, // Single mantém nome, Multi troca tomb
                     id_original_substituido: p.uidItem,
                     origem_lista: listaOrigemNovo, 
-                    obs: `Substituído em ${new Date().toLocaleDateString()} (Ex-Tomb: ${p.itemTomb || 'S/T'})` 
+                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})` 
                 };
             }
             return it;
@@ -8020,7 +8038,7 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
         });
 
-        // 2. ATUALIZAR LISTA DOADORA (Dar baixa no item/saldo)
+        // 2. ATUALIZAR LISTA DOADORA (Dar baixa no saldo/carimbar tombamento)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         const doadoraData = docDoadora.data();
@@ -8028,7 +8046,7 @@ async function abrirSeletorGlobalSubstituicao() {
         const novaListaDoadora = doadoraData.list.map(setor => ({
             ...setor,
             itens: setor.itens.map(it => {
-                // Lógica para MULTI (Tombamento específico)
+                // Lógica para MULTI
                 if (it.tipo === 'multi' && it.tombamentos) {
                     it.tombamentos = it.tombamentos.map(t => {
                         if (`${it.id}-${t.tomb}` === uidNovo) {
@@ -8046,12 +8064,12 @@ async function abrirSeletorGlobalSubstituicao() {
                         return t;
                     });
                 } 
-                // Lógica para SINGLE (Pé de Cabra, etc)
+                // Lógica para SINGLE (Pé de Cabra)
                 else if (it.id === uidNovo) {
                     it.cautelas = it.cautelas || [];
                     it.cautelas.push({
                         id: p.cautelaId,
-                        quantidade: 1,
+                        quantidade: qtdParaMovimentar,
                         destinatario: dadosC.destinatario,
                         data: new Date().toLocaleString('pt-BR'),
                         tipo: "SUBSTITUICAO_EMPRESTIMO"
@@ -8062,7 +8080,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }));
         batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        // 3. MARCAR AVARIADO NA LISTA RECEPTORA
+        // 3. MARCAR AVARIADO NA LISTA RECEPTORA (Local do problema)
         const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
         const docReceptora = await listaReceptoraRef.get();
         if (docReceptora.exists) {
@@ -8092,7 +8110,7 @@ async function abrirSeletorGlobalSubstituicao() {
         batch.update(cautelaRef, { pendencias: pendenciasLimpas });
 
         await batch.commit();
-        alert("✅ Substituição Cruzada Concluída!");
+        alert(`✅ Substituição Concluída!\n\nMovimentadas ${qtdParaMovimentar} unidades.`);
         location.reload();
 
     } catch (e) {
