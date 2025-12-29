@@ -7982,7 +7982,6 @@ async function abrirSeletorGlobalSubstituicao() {
     const confirmacao = confirm(`Confirmar substituição física?\n\nO item será retirado de: ${listaOrigemNovo.toUpperCase()}\nPara substituir na: ${p.localId.toUpperCase()}`);
     if (!confirmacao) return;
 
-    // Fecha o seletor para dar feedback de processamento
     document.getElementById('modalSeletorEstoque').style.display = 'none';
     
     try {
@@ -8002,16 +8001,13 @@ async function abrirSeletorGlobalSubstituicao() {
             autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
         };
 
-        // Atualizar os itens no contrato da cautela (Troca de tombamento/ID)
         const itensAtualizados = dadosC.itens.map(it => {
-            // Verifica se é o item avariado (pelo tombamento ou pelo ID base se for single)
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base && !p.itemTomb);
-            
             if (ehOItem) {
                 return { 
                     ...it, 
                     tombamento: tombamentoNovo, 
-                    id_original_substituido: p.uidItem, // Rastro para auditoria
+                    id_original_substituido: p.uidItem,
                     origem_lista: listaOrigemNovo, 
                     obs: `Substituído em ${new Date().toLocaleDateString()} (Ex-Tomb: ${p.itemTomb || 'S/T'})` 
                 };
@@ -8024,7 +8020,7 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
         });
 
-        // 2. CARIMBAR O ITEM DOADOR NA LISTA DE ONDE ELE SAIU
+        // 2. ATUALIZAR LISTA DOADORA (Dar baixa no item/saldo)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         const doadoraData = docDoadora.data();
@@ -8032,34 +8028,41 @@ async function abrirSeletorGlobalSubstituicao() {
         const novaListaDoadora = doadoraData.list.map(setor => ({
             ...setor,
             itens: setor.itens.map(it => {
-                const processarDoador = (entidade, idAtual) => {
-                    if (idAtual === uidNovo) {
-                        return {
-                            ...entidade,
-                            cautela: {
-                                id: p.cautelaId,
-                                destinatario: dadosC.destinatario,
-                                data: new Date().toLocaleString('pt-BR'),
-                                emprestimo: true,
-                                local_uso: p.localId // Ex: ABT-17
-                            }
-                        };
-                    }
-                    return entidade;
-                };
-
+                // Lógica para MULTI (Tombamento específico)
                 if (it.tipo === 'multi' && it.tombamentos) {
-                    it.tombamentos = it.tombamentos.map(t => processarDoador(t, `${it.id}-${t.tomb}`));
-                } else {
-                    it = processarDoador(it, it.id);
+                    it.tombamentos = it.tombamentos.map(t => {
+                        if (`${it.id}-${t.tomb}` === uidNovo) {
+                            return {
+                                ...t,
+                                cautela: {
+                                    id: p.cautelaId,
+                                    destinatario: dadosC.destinatario,
+                                    data: new Date().toLocaleString('pt-BR'),
+                                    emprestimo: true,
+                                    local_uso: p.localId
+                                }
+                            };
+                        }
+                        return t;
+                    });
+                } 
+                // Lógica para SINGLE (Pé de Cabra, etc)
+                else if (it.id === uidNovo) {
+                    it.cautelas = it.cautelas || [];
+                    it.cautelas.push({
+                        id: p.cautelaId,
+                        quantidade: 1,
+                        destinatario: dadosC.destinatario,
+                        data: new Date().toLocaleString('pt-BR'),
+                        tipo: "SUBSTITUICAO_EMPRESTIMO"
+                    });
                 }
                 return it;
             })
         }));
         batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        // 3. MARCAR O ITEM AVARIADO COMO "AVARIADO" NA LISTA RECEPTORA (ABT-17)
-        // Isso evita que o item quebrado conste como "OK" ou "S/A" no inventário da VTR
+        // 3. MARCAR AVARIADO NA LISTA RECEPTORA
         const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
         const docReceptora = await listaReceptoraRef.get();
         if (docReceptora.exists) {
@@ -8073,7 +8076,6 @@ async function abrirSeletorGlobalSubstituicao() {
                         }
                         return entidade;
                     };
-
                     if (it.tipo === 'multi' && it.tombamentos) {
                         it.tombamentos = it.tombamentos.map(t => marcarAvariado(t, `${it.id}-${t.tomb}`));
                     } else {
@@ -8085,15 +8087,12 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaReceptoraRef, { list: novaListaReceptora });
         }
 
-        // 4. FINALIZAR A PENDÊNCIA NO CONTRATO
-        // Remove ou marca a pendência como resolvida no array de pendências da cautela
+        // 4. LIMPAR PENDÊNCIA
         const pendenciasLimpas = dadosC.pendencias.filter(pend => pend.id_solicitacao !== p.solicitacaoId);
         batch.update(cautelaRef, { pendencias: pendenciasLimpas });
 
-        
-
         await batch.commit();
-        alert("✅ Substituição Cruzada Concluída!\n\n1. Contrato atualizado com novo tombamento.\n2. Item doador carimbado como 'Empréstimo'.\n3. Item antigo marcado como 'Avariado' na lista.");
+        alert("✅ Substituição Cruzada Concluída!");
         location.reload();
 
     } catch (e) {
