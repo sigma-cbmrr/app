@@ -8102,50 +8102,26 @@ async function abrirSeletorGlobalSubstituicao() {
     }
 }	
 	async function prepararSubstituicaoFisica() {
-    if (!pendenciaSendoResolvida) {
-        alert("Erro: Dados da pendência não localizados.");
-        return;
-    }
-
+    if (!pendenciaSendoResolvida) return;
     const p = pendenciaSendoResolvida;
     const modalSeletor = document.getElementById('modalSeletorEstoque');
     const container = document.getElementById('listaEstoqueDisponivel');
 
     document.getElementById('modalDecisaoGestor').style.display = 'none';
     modalSeletor.style.display = 'flex';
-    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Analisando saldo de itens e tombamentos...</div>`;
+    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Analisando...</div>`;
 
     try {
-        // --- LOGICA DE DNA REFORÇADA ---
         const idReferencia = p.uidItem || p.idItem || p.id_base || "";
         const partes = idReferencia.split('-');
-        
-        // Se for o Pé de Cabra (2 partes), o DNA é o ID todo. 
-        // Se for EPR (3 partes), pegamos as 2 primeiras.
         let dnaBusca = partes.length > 2 ? partes.slice(0, 2).join('-') : idReferencia;
         
-        console.log("Iniciando busca global para DNA:", dnaBusca);
+        console.log("%c--- DEBUG BUSCA GLOBAL ---", "color: blue; font-weight: bold;");
+        console.log("DNA Alvo:", dnaBusca);
 
         const snapshot = await db.collection('listas_conferencia').get();
         let htmlAcumulado = '';
         let totalEncontrado = 0;
-
-        const montarCardHTML = (local, identificador, idReal, listaId, saldo) => {
-            return `
-                <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                    <div>
-                        <div style="font-size: 0.75em; color: #1b8a3e; font-weight: bold; margin-bottom: 4px;">
-                            <i class="fas fa-map-marker-alt"></i> LOCAL: ${local}
-                        </div>
-                        <b style="color: #333; font-size: 1.1em;">${identificador}</b><br>
-                        <small style="color: #666;">Saldo disponível: ${saldo} un</small>
-                    </div>
-                    <button class="btn-resolver" style="width:auto; padding: 10px 15px; background-color: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
-                        onclick="confirmarTrocaCruzada('${idReal}', '${listaId}', '${identificador}')">
-                        Selecionar
-                    </button>
-                </div>`;
-        };
 
         snapshot.forEach(docLista => {
             const dadosLista = docLista.data();
@@ -8155,30 +8131,54 @@ async function abrirSeletorGlobalSubstituicao() {
                 dadosLista.list.forEach(setor => {
                     setor.itens.forEach(item => {
                         
-                        // Verifica match de DNA
+                        // LOG DE TODOS OS ITENS QUE ELE ESTÁ ANALISANDO
+                        if (item.id && item.id.includes(dnaBusca.split('-')[0])) {
+                            console.log(`Analisando item: ${item.nome} | ID: ${item.id}`);
+                        }
+
                         if (item.id && item.id.startsWith(dnaBusca)) {
-                            
-                            // --- CASO ITEM SINGLE (Ex: Pé de Cabra) ---
-                            // Itens single geralmente não tem array de tombamentos preenchido com objetos de situação
-                            if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0 || typeof item.tombamentos[0] === 'string') {
-                                
+                            // TESTE PARA ITENS SINGLE (Pé de Cabra)
+                            if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0) {
                                 const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
                                 const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
 
-                                // Regra: Se houver saldo e não for a mesma viatura de origem da avaria
+                                console.log(`  > [SINGLE] Saldo: ${saldoDisponivel} | Diferente da VTR?: ${docLista.id !== p.localId}`);
+
                                 if (saldoDisponivel > 0 && docLista.id !== p.localId) {
                                     totalEncontrado++;
-                                    htmlAcumulado += montarCardHTML(nomeLocal, item.nome, item.id, docLista.id, saldoDisponivel);
+                                    htmlAcumulado += `
+                                        <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                            <div>
+                                                <small style="color: #1b8a3e; font-weight: bold;">LOCAL: ${nomeLocal}</small><br>
+                                                <b>${item.nome}</b><br>
+                                                <small>Disponível: ${saldoDisponivel} un</small>
+                                            </div>
+                                            <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px;" 
+                                                onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}')">
+                                                Selecionar
+                                            </button>
+                                        </div>`;
                                 }
                             } 
-                            // --- CASO ITEM MULTI (Ex: EPR) ---
-                            else if (item.tipo === 'multi' && Array.isArray(item.tombamentos)) {
+                            // TESTE PARA ITENS MULTI (EPR)
+                            else {
                                 item.tombamentos.forEach(t => {
                                     const idCompleto = `${item.id}-${t.tomb}`;
-                                    // Disponível se não houver cautela e não estiver avariado
-                                    if (!t.cautela && t.situacao !== 'AVARIADO' && idCompleto !== idReferencia) {
+                                    const disponivel = !t.cautela && t.situacao !== 'AVARIADO';
+                                    
+                                    if (disponivel && idCompleto !== idReferencia) {
                                         totalEncontrado++;
-                                        htmlAcumulado += montarCardHTML(nomeLocal, `Tomb: ${t.tomb}`, idCompleto, docLista.id, 1);
+                                        htmlAcumulado += `
+                                            <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                                <div>
+                                                    <small style="color: #1b8a3e; font-weight: bold;">LOCAL: ${nomeLocal}</small><br>
+                                                    <b>Tomb: ${t.tomb}</b>
+                                                </div>
+                                                <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px;" 
+                                                    onclick="confirmarTrocaCruzada('${idCompleto}', '${docLista.id}', '${t.tomb}')">
+                                                    Selecionar
+                                                </button>
+                                            </div>`;
                                     }
                                 });
                             }
@@ -8188,18 +8188,12 @@ async function abrirSeletorGlobalSubstituicao() {
             }
         });
 
-        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `
-            <div style="text-align:center; padding:20px; color:#666;">
-                <i class="fas fa-search-minus fa-2x"></i><br><br>
-                Nenhum item reserva compatível com DNA <b>${dnaBusca}</b> encontrado em outras listas.
-            </div>`;
+        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `<div style="text-align:center; padding:20px;">Nenhum compatível para DNA: ${dnaBusca}</div>`;
 
     } catch (e) {
-        console.error("Erro na busca global:", e);
-        container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">Erro técnico: ${e.message}</div>`;
+        console.error("Erro na busca:", e);
     }
-}
-		
+}	
     </script>
 </body>
 </html>
