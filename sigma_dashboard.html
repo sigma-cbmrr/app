@@ -7979,35 +7979,41 @@ async function abrirSeletorGlobalSubstituicao() {
 }
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
-    const confirmacao = confirm(`Confirmar substituição?\nO item será retirado da lista: ${listaOrigemNovo.toUpperCase()}`);
+    const confirmacao = confirm(`Confirmar substituição física?\n\nO item será retirado de: ${listaOrigemNovo.toUpperCase()}\nPara substituir na: ${p.localId.toUpperCase()}`);
     if (!confirmacao) return;
 
+    // Fecha o seletor para dar feedback de processamento
     document.getElementById('modalSeletorEstoque').style.display = 'none';
     
     try {
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 1. DADOS DA CAUTELA (Transferência de responsabilidade)
+        // 1. DADOS DA CAUTELA (Contrato Digital)
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
+        if (!docCautela.exists) throw new Error("Cautela receptora não encontrada.");
         const dadosC = docCautela.data();
 
         const logTroca = {
             data: timestamp,
-            mensagem: `Troca Física: Item ${p.itemTomb} substituído pelo ${tombamentoNovo} (Emprestado da lista ${listaOrigemNovo}).`,
-            tipo: "SUBSTITUICAO_ITEM_CRUZADO",
+            mensagem: `Substituição: Item ${p.itemTomb || 'S/T'} trocado pelo ${tombamentoNovo} (Vindo da lista ${listaOrigemNovo}).`,
+            tipo: "SUBSTITUICAO_CRUZADA",
             autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
         };
 
-        // 2. ATUALIZAR A CAUTELA (O contrato digital)
+        // Atualizar os itens no contrato da cautela (Troca de tombamento/ID)
         const itensAtualizados = dadosC.itens.map(it => {
-            if (it.tombamento === p.itemTomb) {
+            // Verifica se é o item avariado (pelo tombamento ou pelo ID base se for single)
+            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base && !p.itemTomb);
+            
+            if (ehOItem) {
                 return { 
                     ...it, 
                     tombamento: tombamentoNovo, 
-                    origem_lista: listaOrigemNovo, // Rastro para a Abordagem 3 na devolução
-                    obs: `Substituído (vindo de ${listaOrigemNovo})` 
+                    id_original_substituido: p.uidItem, // Rastro para auditoria
+                    origem_lista: listaOrigemNovo, 
+                    obs: `Substituído em ${new Date().toLocaleDateString()} (Ex-Tomb: ${p.itemTomb || 'S/T'})` 
                 };
             }
             return it;
@@ -8018,15 +8024,15 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
         });
 
-        // 3. CARIMBAR O ITEM NA LISTA DE ORIGEM DELE (Onde ele fisicamente está)
-        const listaOrigemRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
-        const docListaOrigem = await listaOrigemRef.get();
-        const listaData = docListaOrigem.data();
+        // 2. CARIMBAR O ITEM DOADOR NA LISTA DE ONDE ELE SAIU
+        const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
+        const docDoadora = await listaDoadoraRef.get();
+        const doadoraData = docDoadora.data();
 
-        const novaListaOrigem = listaData.list.map(setor => ({
+        const novaListaDoadora = doadoraData.list.map(setor => ({
             ...setor,
             itens: setor.itens.map(it => {
-                const processar = (entidade, idAtual) => {
+                const processarDoador = (entidade, idAtual) => {
                     if (idAtual === uidNovo) {
                         return {
                             ...entidade,
@@ -8035,7 +8041,7 @@ async function abrirSeletorGlobalSubstituicao() {
                                 destinatario: dadosC.destinatario,
                                 data: new Date().toLocaleString('pt-BR'),
                                 emprestimo: true,
-                                lista_destino: p.localId // Onde ele está sendo usado (ex: ABT-17)
+                                local_uso: p.localId // Ex: ABT-17
                             }
                         };
                     }
@@ -8043,27 +8049,56 @@ async function abrirSeletorGlobalSubstituicao() {
                 };
 
                 if (it.tipo === 'multi' && it.tombamentos) {
-                    it.tombamentos = it.tombamentos.map(t => processar(t, `${it.id}-${t.tomb}`));
+                    it.tombamentos = it.tombamentos.map(t => processarDoador(t, `${it.id}-${t.tomb}`));
                 } else {
-                    it = processar(it, it.id);
+                    it = processarDoador(it, it.id);
                 }
                 return it;
             })
         }));
+        batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        batch.update(listaOrigemRef, { list: novaListaOrigem });
+        // 3. MARCAR O ITEM AVARIADO COMO "AVARIADO" NA LISTA RECEPTORA (ABT-17)
+        // Isso evita que o item quebrado conste como "OK" ou "S/A" no inventário da VTR
+        const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
+        const docReceptora = await listaReceptoraRef.get();
+        if (docReceptora.exists) {
+            const receptoraData = docReceptora.data();
+            const novaListaReceptora = receptoraData.list.map(setor => ({
+                ...setor,
+                itens: setor.itens.map(it => {
+                    const marcarAvariado = (entidade, idAtual) => {
+                        if (idAtual === p.uidItem) {
+                            return { ...entidade, situacao: "AVARIADO", status_conferencia: "AVARIADO" };
+                        }
+                        return entidade;
+                    };
 
-        // 4. TRATAR O ITEM AVARIADO NA LISTA DE ORIGEM DA CAUTELA
-        // (Lógica de transformar em AVARIADO que já fizemos antes...)
-        // [Batch update na lista de p.localId...]
+                    if (it.tipo === 'multi' && it.tombamentos) {
+                        it.tombamentos = it.tombamentos.map(t => marcarAvariado(t, `${it.id}-${t.tomb}`));
+                    } else {
+                        it = marcarAvariado(it, it.id);
+                    }
+                    return it;
+                })
+            }));
+            batch.update(listaReceptoraRef, { list: novaListaReceptora });
+        }
+
+        // 4. FINALIZAR A PENDÊNCIA NO CONTRATO
+        // Remove ou marca a pendência como resolvida no array de pendências da cautela
+        const pendenciasLimpas = dadosC.pendencias.filter(pend => pend.id_solicitacao !== p.solicitacaoId);
+        batch.update(cautelaRef, { pendencias: pendenciasLimpas });
+
+        
 
         await batch.commit();
-        alert("Troca realizada com sucesso! O item foi carimbado na lista de origem.");
+        alert("✅ Substituição Cruzada Concluída!\n\n1. Contrato atualizado com novo tombamento.\n2. Item doador carimbado como 'Empréstimo'.\n3. Item antigo marcado como 'Avariado' na lista.");
         location.reload();
 
     } catch (e) {
-        console.error(e);
-        alert("Erro na troca cruzada: " + e.message);
+        console.error("Erro na Troca Cruzada:", e);
+        alert("❌ Erro ao processar: " + e.message);
     }
 }	
 	async function prepararSubstituicaoFisica() {
