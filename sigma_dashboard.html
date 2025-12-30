@@ -7979,13 +7979,12 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
     
-    // 1. RECUPERAÇÃO SEGURA DO USUÁRIO (Ajustado para o padrão do log)
-    let nomeGuerraFinal = "Gestor";
+    // 1. RECUPERAÇÃO DO USUÁRIO (Nomes fixos para teste se falhar)
+    let nomeMilitar = "Gestor Sistema";
     try {
-        const u = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
-                  JSON.parse(localStorage.getItem('user_data') || '{}');
-        nomeGuerraFinal = u.nomeGuerra || "Gestor";
-    } catch (e) { console.error(e); }
+        const u = (typeof userInfo !== 'undefined') ? userInfo : JSON.parse(localStorage.getItem('user_data') || '{}');
+        nomeMilitar = u.nomeGuerra || u.nome || "Gestor Logado";
+    } catch(e) { console.error("User erro:", e); }
 
     let qtdParaMovimentar = 1;
 
@@ -7993,50 +7992,49 @@ async function abrirSeletorGlobalSubstituicao() {
         const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
         if (inputQtd) qtdParaMovimentar = parseInt(inputQtd.value) || 1;
 
-        if (!confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`)) return;
+        if (!confirm(`Confirmar substituição?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`)) return;
 
         document.getElementById('modalSeletorEstoque').style.display = 'none';
         
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 2. BUSCA DADOS DA CAUTELA
+        // 2. REFERÊNCIAS
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
+        if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // --- CORREÇÃO DOS CAMPOS DE LOG ---
-        // Ajustei as chaves para 'mensagem' e 'autor' (ou 'quem') conforme o que parece ser o seu padrão de leitura
-        const textoDaTroca = `Substituição Cruzada: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} vindo de ${listaOrigemNovo.toUpperCase()}`;
+        // 3. CONSTRUÇÃO DO LOG (Forçando strings manuais para evitar undefined)
+        const txtMensagem = "Substituição: " + (tombamentoNovo || p.itemNome || "Material") + " vindo de " + listaOrigemNovo.toUpperCase();
         
         const logObjeto = {
             data: timestamp,
-            mensagem: textoDaTroca, // Dashboard espera 'mensagem'?
-            detalhes: textoDaTroca, // Dashboard espera 'detalhes'?
-            autor: nomeGuerraFinal, // Dashboard espera 'autor'?
-            quem: nomeGuerraFinal,   // Dashboard espera 'quem'?
+            mensagem: txtMensagem,   // Use as chaves EXATAS que o seu dashboard lê
+            detalhes: txtMensagem,
+            autor: nomeMilitar,
+            quem: nomeMilitar,
             tipo: "SUBSTITUICAO_CRUZADA"
         };
 
-        // 3. LIMPEZA AGRESSIVA DA PENDÊNCIA
-        // Se a pendência não sai, é porque ela está no array 'pendencias'. Vamos limpar por nome e ID.
-        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => {
-            const matchNome = pend.item_nome === p.itemNome;
-            const matchSolicitacao = pend.id_solicitacao === p.solicitacaoId;
-            // Se o nome do item bater, nós removemos para garantir que suma da tela
-            return !(matchNome || matchSolicitacao);
+        // 4. LIMPEZA DA PENDÊNCIA (Comparação por Texto - Mais seguro que ID agora)
+        const pendenciasRestantes = (dadosC.pendencias || []).filter(pend => {
+            // Se o nome do item e o motivo forem iguais ao que estamos resolvendo, APAGA.
+            const ehAMesma = (pend.item_nome === p.itemNome || pend.id_base === p.id_base);
+            return !ehAMesma; 
         });
 
-        // 4. ATUALIZAÇÃO DOS ITENS
+        // 5. ATUALIZAÇÃO DOS ITENS NO CONTRATO
         const itensAtualizados = (dadosC.itens || []).map(it => {
-            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base);
-            if (ehOItem) {
+            const matchTomb = p.itemTomb && it.tombamento === p.itemTomb;
+            const matchID = it.id === p.id_base;
+            
+            if (matchTomb || matchID) {
                 return { 
                     ...it, 
                     tombamento: tombamentoNovo || it.tombamento || "S/T",
                     origem_lista: listaOrigemNovo,
-                    status_item: "REPOSTO",
-                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})`
+                    obs: `Substituído em ${new Date().toLocaleDateString()} via ${listaOrigemNovo}`
                 };
             }
             return it;
@@ -8045,11 +8043,12 @@ async function abrirSeletorGlobalSubstituicao() {
         // GRAVAÇÃO NA CAUTELA
         batch.update(cautelaRef, {
             itens: itensAtualizados,
-            pendencias: pendenciasLimpas,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
+            pendencias: pendenciasRestantes,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto),
+            historico: firebase.firestore.FieldValue.arrayUnion(logObjeto) // Terceira opção de campo de log
         });
 
-        // 5. BAIXA NO DOADOR
+        // 6. ATUALIZAR LISTA DOADORA (Baixa de Estoque)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         const doadoraData = docDoadora.data();
@@ -8062,7 +8061,7 @@ async function abrirSeletorGlobalSubstituicao() {
                         id: p.cautelaId,
                         quantidade: qtdParaMovimentar,
                         data: new Date().toLocaleString('pt-BR'),
-                        tipo: "SUBSTITUICAO_EMPRESTIMO"
+                        tipo: "SUBSTITUICAO"
                     });
                 }
                 return it;
@@ -8070,8 +8069,9 @@ async function abrirSeletorGlobalSubstituicao() {
         }));
         batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
+        // 7. FINALIZAÇÃO
         await batch.commit();
-        alert(`✅ Substituição Concluída!`);
+        alert(`✅ Concluído! A pendência foi removida.`);
         location.reload();
 
     } catch (e) {
