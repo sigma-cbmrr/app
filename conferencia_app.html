@@ -389,26 +389,56 @@ function updateSetorStatus(setorEl) {
     updateOverallStatus();
 
     const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
-    const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
+    
+    // Captura todos os itens de conferência dentro do setor
+    const itensNoSetor = currentSetor.querySelectorAll('.item-conferencia');
+    
+    let concluidos = 0;
+
+    itensNoSetor.forEach(item => {
+        const id = item.getAttribute('data-id');
+        const isSingle = item.getAttribute('data-type') === 'single';
+        const temStatusVisual = item.classList.contains('status-ok') || item.classList.contains('status-alert');
+        
+        if (isSingle) {
+            // LÓGICA CIRÚRGICA: Para item Single, não basta a classe visual. 
+            // Ele precisa ter o sinalizador 'interacao_humana' no window.itemStatus
+            // Isso garante que o conferente clicou em Manter, Resolvido, S/A ou +Alt nesta sessão.
+            const statusMemoria = window.itemStatus[id];
+            if (temStatusVisual && statusMemoria && statusMemoria.interacao_humana === true) {
+                concluidos++;
+            }
+        } else {
+            // Para itens Multi (tombamentos), mantemos a lógica original de classe visual
+            if (temStatusVisual) {
+                concluidos++;
+            }
+        }
+    });
 
     if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
         setTimeout(() => {
             autoAdvanceSetor(currentSetor); 
         }, 550);
     } else {
-        // Busca todos os alvos (Tombamentos ou Itens Singles)
+        // Lógica de Scroll para o próximo alvo não resolvido
         const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
-        
-        // CORREÇÃO AQUI: Busca o ID direto do data-id que colocamos no HTML
         const indexAtual = todosAlvos.findIndex(el => el.getAttribute('data-id') === currentItemId);
 
         const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
             const id = el.getAttribute('data-id');
+            const type = el.getAttribute('data-type');
             const stNormal = window.itemStatus[id]?.status;
             const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
+            const interacao = window.itemStatus[id]?.interacao_humana;
             
-            // Retorna o primeiro que não estiver OK ou CIENTE
-            const jaResolvido = (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+            // Um alvo é considerado "já resolvido" se:
+            // Se for single: tem status E interação humana
+            // Se for tombamento: tem status OK/CA ou Ciente
+            const jaResolvido = (type === 'single') 
+                ? (interacao === true && (stNormal === 'ok' || stNormal === 'C/A'))
+                : (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+                
             return !jaResolvido;
         });
 
@@ -1619,7 +1649,6 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
-                        // Guarda referência do elemento HTML para atualizar o pai
                         elementoPaiAlvo = document.querySelector(`[data-id="${item.id}"]`);
                     }
                 });
@@ -1628,10 +1657,11 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     });
 
     if (itemEncontrado) {
-        window.itemStatus[uid] = { status: 'C/A' };
+        // 🛑 MARCAÇÃO CIRÚRGICA: Registra interação e define status
+        window.itemStatus[uid] = { status: 'C/A', interacao_humana: true };
+        
         renderizarConferencia();
         
-        // 🛑 MODIFICAÇÃO CIRÚRGICA: Força o item pai a ficar vermelho imediatamente
         if (elementoPaiAlvo) {
             updateItemMainStatusDisplay(elementoPaiAlvo);
         }
@@ -1648,32 +1678,25 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
 }
 
 function manterID(pendenciaId, uid) {
-    // 1. Inicializa o status do item na memória se não existir
     if (!window.itemStatus[uid]) {
         window.itemStatus[uid] = { status: 'pending' };
     }
     
-    // 2. Inicializa o array de IDs mantidos
     if (!window.itemStatus[uid].ids_mantidos) {
         window.itemStatus[uid].ids_mantidos = [];
     }
     
-    // 3. Adiciona o ID se ele ainda não estiver na lista (evita duplicatas)
     if (!window.itemStatus[uid].ids_mantidos.includes(pendenciaId)) {
         window.itemStatus[uid].ids_mantidos.push(pendenciaId);
     }
     
-    // 4. Marca o item como Conferido com Alteração (C/A)
     window.itemStatus[uid].status = 'C/A';
+    // 🛑 MARCAÇÃO CIRÚRGICA: Registra que o conferente interagiu com este item
+    window.itemStatus[uid].interacao_humana = true;
 
-    // 5. ESSENCIAL: Dispara a re-renderização completa da tela
-    // Isso fará com que o montarPendenciaHtml veja o ID no array 'ids_mantidos'
     renderizarConferencia();
-    
-    // 6. Atualiza contadores globais e avanços automáticos
     updateOverallStatus();
     
-    // Opcional: Feedback visual de scroll
     setTimeout(() => {
         const el = document.getElementById(`card-${pendenciaId}`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1688,14 +1711,11 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let acaoConcluida = false;
 
-    // --- NOVA LÓGICA: TRATAMENTO DE RESOLUÇÃO DE AVARIA ---
     const isResolvendoAvaria = String(pendenciaId).startsWith('AVARIA-');
 
     function executarBaixaNoObjeto(obj) {
-        // SE FOR RESOLUÇÃO DE AVARIA DE CAUTELA
         if (isResolvendoAvaria) {
             if (!obj.historico_vida) obj.historico_vida = [];
-            
             obj.historico_vida.push({
                 tipo: "RESOLUÇÃO_AVARIA_CAUTELA",
                 data: new Date().toLocaleDateString('pt-BR'),
@@ -1703,17 +1723,13 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
                 justificativa: justificativa,
                 cautela_origem: pendenciaId.replace('AVARIA-', '')
             });
-
-            // "CURA" O ITEM: Remove o estado de avaria
             obj.situacao = "DISPONÍVEL"; 
             obj.status = "OK";
             delete obj.id_cautela_origem;
             delete obj.motivo_avaria;
-            
             return true;
         }
 
-        // SE FOR PENDÊNCIA COMUM (Lógica original mantida)
         if (!obj.pendencias_ids) return false;
         const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
         if (index === -1) return false;
@@ -1745,7 +1761,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         return true;
     }
 
-    // Navegação na fonte de dados para achar o item/tombamento pelo UID
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             if (String(item.id) === String(uid)) {
@@ -1763,8 +1778,9 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     if (acaoConcluida) {
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         window.itemStatus[uid].status = 'C/A';
+        // 🛑 MARCAÇÃO CIRÚRGICA: Registra que o conferente interagiu com este item
+        window.itemStatus[uid].interacao_humana = true;
         
-        // Se resolveu a avaria, removemos também dos ids_mantidos se estiver lá
         if (window.itemStatus[uid].ids_mantidos) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => id !== pendenciaId);
         }
@@ -1772,7 +1788,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         renderizarConferencia();
         updateOverallStatus();
 
-        // Feedback visual de sucesso
         setTimeout(() => {
             let elItem = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (elItem) {
@@ -1784,7 +1799,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     }
 }
 function setItemStatusID(btn, status, uid) {
-    // 1. Identifica os elementos de contexto
     const container = btn.closest('.tombamento-container') || btn.closest('.item-conferencia');
     const setor = btn.closest('.setor');
     const itemPai = btn.closest('.item-conferencia');
@@ -1792,15 +1806,13 @@ function setItemStatusID(btn, status, uid) {
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
     if (status === 'ok') {
-        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'ok' };
+        // 🛑 MARCAÇÃO CIRÚRGICA: Registra interação no clique do S/A
+        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'ok', interacao_humana: true };
 
-        // Visual do botão clicado
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        // 🛑 GATILHO: Atualiza o material (Pai) e o contador do Setor
         if (itemPai) {
-            // Se for multi, roda a lógica de grupo; se for single, pinta direto
             if (itemPai.classList.contains('item-has-tombamentos')) {
                 updateItemMainStatusDisplay(itemPai);
             } else {
@@ -1811,25 +1823,20 @@ function setItemStatusID(btn, status, uid) {
             }
         }
     } else if (status === 'cautela_ciente') {
-        // ... (sua lógica de cautela ciente mantida) ...
-        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'cautela_ciente', cautela_confirmada: true };
+        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'cautela_ciente', cautela_confirmada: true, interacao_humana: true };
         btn.innerHTML = '<i class="fas fa-check"></i> Ciente registrado';
         btn.disabled = true;
         btn.style.backgroundColor = "#1b8a3e";
         
-        // Após marcar ciência, re-renderiza para atualizar o Pai
         setTimeout(() => {
             renderizarConferencia();
             updateOverallStatus();
         }, 400);
     }
 
-    // 2. ATUALIZAÇÕES GLOBAIS
     updateOverallStatus();
     if (setor) updateSetorStatus(setor);
 
-    // 3. 🚀 DISPARO DO AVANÇO (USANDO SUAS ORIGINAIS)
-    // Passamos o elemento HTML do setor e o ID do item que acabamos de clicar
     if (setor && typeof checkSetorCompletion === 'function') { 
         checkSetorCompletion(setor, uid);
     }
