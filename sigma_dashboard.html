@@ -7978,8 +7978,16 @@ async function abrirSeletorGlobalSubstituicao() {
 }
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
-    const usuarioAtivo = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
-                         JSON.parse(localStorage.getItem('user_data') || '{"postoGraduacao":"","nomeGuerra":"Gestor"}');
+    
+    // 1. RECUPERAÇÃO SEGURA DO USUÁRIO
+    let nomeAutor = "Gestor";
+    try {
+        const u = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
+                  JSON.parse(localStorage.getItem('user_data') || '{}');
+        if (u.nomeGuerra) {
+            nomeAutor = `${u.postoGraduacao || ''} ${u.nomeGuerra}`.trim();
+        }
+    } catch (e) { console.error("Erro ao identificar usuário:", e); }
 
     let qtdParaMovimentar = 1;
 
@@ -7993,7 +8001,7 @@ async function abrirSeletorGlobalSubstituicao() {
             }
         }
 
-        const confirmacao = confirm(`Confirmar substituição?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`);
+        const confirmacao = confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`);
         if (!confirmacao) return;
 
         document.getElementById('modalSeletorEstoque').style.display = 'none';
@@ -8001,70 +8009,62 @@ async function abrirSeletorGlobalSubstituicao() {
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 1. DADOS DA CAUTELA (Receptora)
+        // 2. BUSCA DADOS DA CAUTELA (Receptora)
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
         if (!docCautela.exists) throw new Error("Cautela receptora não encontrada.");
         const dadosC = docCautela.data();
 
-        // LOG DE MOVIMENTAÇÃO
-        const logTroca = {
+        // CONSTRUÇÃO DO LOG (Sem undefined)
+        const textoLog = `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} vindo de ${listaOrigemNovo.toUpperCase()}`;
+        const logObjeto = {
             data: timestamp,
-            mensagem: `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'S/T'} vindo de ${listaOrigemNovo}.`,
+            mensagem: textoLog,
             tipo: "SUBSTITUICAO_CRUZADA",
-            autor: `${usuarioAtivo.postoGraduacao || ''} ${usuarioAtivo.nomeGuerra || 'Gestor'}`.trim()
+            autor: nomeAutor
         };
 
-        const itensAtualizados = dadosC.itens.map(it => {
+        // Atualização dos itens no contrato
+        const itensAtualizados = (dadosC.itens || []).map(it => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base && !p.itemTomb);
             if (ehOItem) {
-                // Blindagem contra undefined:
                 return { 
                     ...it, 
-                    tombamento: (inputQtd ? it.tombamento : tombamentoNovo) || "S/T",
+                    tombamento: (inputQtd ? it.tombamento : tombamentoNovo) || it.tombamento || "S/T",
                     id_original_substituido: p.uidItem || "MANUAL",
-                    origem_lista: listaOrigemNovo || "DESCONHECIDO", 
-                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})` 
+                    origem_lista: listaOrigemNovo || "EXTERNO", 
+                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})`.trim() 
                 };
             }
             return it;
         });
 
-        batch.update(cautelaRef, {
-            itens: itensAtualizados,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
+        // 3. LIMPEZA DA PENDÊNCIA (O que faz sumir do Dashboard)
+        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => {
+            // Remove se o ID da solicitação bater OU se for o mesmo item base avariado
+            return pend.id_solicitacao !== p.solicitacaoId && pend.id_base !== p.id_base;
         });
 
-        // 2. ATUALIZAR LISTA DOADORA
+        batch.update(cautelaRef, {
+            itens: itensAtualizados,
+            pendencias: pendenciasLimpas,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
+        });
+
+        // 4. ATUALIZAR LISTA DOADORA (Baixa no Saldo)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         const doadoraData = docDoadora.data();
 
         const novaListaDoadora = doadoraData.list.map(setor => ({
             ...setor,
-            itens: setor.itens.map(it => {
-                if (it.tipo === 'multi' && it.tombamentos) {
-                    it.tombamentos = it.tombamentos.map(t => {
-                        if (`${it.id}-${t.tomb}` === uidNovo) {
-                            return {
-                                ...t,
-                                cautela: {
-                                    id: p.cautelaId,
-                                    destinatario: dadosC.destinatario || "N/A",
-                                    data: new Date().toLocaleString('pt-BR'),
-                                    emprestimo: true,
-                                    local_uso: p.localId || "N/A"
-                                }
-                            };
-                        }
-                        return t;
-                    });
-                } else if (it.id === uidNovo) {
+            itens: (setor.itens || []).map(it => {
+                if (it.id === uidNovo) {
                     it.cautelas = it.cautelas || [];
                     it.cautelas.push({
                         id: p.cautelaId,
                         quantidade: qtdParaMovimentar,
-                        destinatario: dadosC.destinatario || "N/A",
+                        destinatario: dadosC.destinatario || "Viatura",
                         data: new Date().toLocaleString('pt-BR'),
                         tipo: "SUBSTITUICAO_EMPRESTIMO"
                     });
@@ -8074,21 +8074,17 @@ async function abrirSeletorGlobalSubstituicao() {
         }));
         batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        // 3. MARCAR AVARIADO NA LISTA RECEPTORA
+        // 5. MARCAR AVARIADO NA LISTA RECEPTORA (Onde quebrou)
         const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
         const docReceptora = await listaReceptoraRef.get();
         if (docReceptora.exists) {
             const receptoraData = docReceptora.data();
             const novaListaReceptora = receptoraData.list.map(setor => ({
                 ...setor,
-                itens: setor.itens.map(it => {
+                itens: (setor.itens || []).map(it => {
                     const marcarAvariado = (entidade, idAtual) => {
                         if (idAtual === p.uidItem) {
-                            return { 
-                                ...entidade, 
-                                situacao: "AVARIADO", 
-                                status_conferencia: "AVARIADO" 
-                            };
+                            return { ...entidade, situacao: "AVARIADO", status_conferencia: "AVARIADO" };
                         }
                         return entidade;
                     };
@@ -8103,12 +8099,8 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaReceptoraRef, { list: novaListaReceptora });
         }
 
-        // 4. LIMPAR PENDÊNCIA
-        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => pend.id_solicitacao !== p.solicitacaoId);
-        batch.update(cautelaRef, { pendencias: pendenciasLimpas });
-
         await batch.commit();
-        alert(`✅ Sucesso! Movimentadas ${qtdParaMovimentar} unidades.`);
+        alert(`✅ Substituição concluída com sucesso!`);
         location.reload();
 
     } catch (e) {
