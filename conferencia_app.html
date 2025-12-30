@@ -182,62 +182,75 @@
     }
 
     function updateOverallStatus() {
+    // 1. Identifica todos os itens de conferência na tela
     const itensPai = document.querySelectorAll('.item-conferencia');
     const totalGeral = itensPai.length;
     let concluidosGeral = 0;
 
+    // 2. Conta quantos itens principais estão finalizados (Verde ou Vermelho)
     itensPai.forEach(item => {
         if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
             concluidosGeral++;
         }
     });
 
-    // Atualiza o Botão Finalizar
+    // 3. Atualiza o Botão Finalizar
     const btn = document.getElementById('btn-finalizar');
     if (btn) {
-        let buttonPrefix = MODO_OPERACAO === 'devolucao' ? 'FINALIZAR DEVOLUÇÃO' : 'FINALIZAR CONFERÊNCIA';
+        // Verifica se a variável MODO_OPERACAO existe para evitar erro de referência
+        const modo = (typeof MODO_OPERACAO !== 'undefined') ? MODO_OPERACAO : 'conferencia';
+        let buttonPrefix = modo === 'devolucao' ? 'FINALIZAR DEVOLUÇÃO' : 'FINALIZAR CONFERÊNCIA';
+        
         btn.textContent = `${buttonPrefix} (${concluidosGeral}/${totalGeral} ITENS)`;
-        btn.disabled = !(totalGeral > 0 && concluidosGeral >= totalGeral);
-        btn.style.backgroundColor = btn.disabled ? '#d90f23' : '#1b8a3e';
-        btn.style.opacity = btn.disabled ? '0.6' : '1';
+        
+        // Habilita apenas se todos os itens foram conferidos
+        const todosConcluidos = totalGeral > 0 && concluidosGeral >= totalGeral;
+        btn.disabled = !todosConcluidos;
+        
+        // Estilização dinâmica do botão
+        btn.style.backgroundColor = btn.disabled ? '#a0a0a0' : '#1b8a3e';
+        btn.style.cursor = btn.disabled ? 'not-allowed' : 'pointer';
+        btn.style.opacity = btn.disabled ? '0.7' : '1';
     }
 
-    // Atualiza os Setores com a lógica de "Extrato"
+    // 4. Atualiza os badges dos Setores
     document.querySelectorAll('.setor').forEach(s => {
+        // Busca o total definido no atributo do elemento
         const totalNoSetor = parseInt(s.getAttribute('data-total-items')) || 0;
-        const itensConcluidos = s.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert');
-        const numConcluidos = itensConcluidos.length;
+        // Conta itens concluídos dentro DESTE setor específico
+        const itensConcluidosSetor = s.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert');
+        const numConcluidos = itensConcluidosSetor.length;
         
-        // Conta especificamente quantos têm alteração (classe status-alert)
+        // Conta alterações para decidir entre exibir "S/A" ou "X C/A"
         const numAlteracoes = s.querySelectorAll('.item-conferencia.status-alert').length;
         
         const statusDiv = s.querySelector('.setor-status');
         if (statusDiv) {
-            // Estilo base do "Selo"
-            statusDiv.style.padding = "2px 8px";
-            statusDiv.style.borderRadius = "4px";
+            // Estilo base do Badge
+            statusDiv.style.padding = "2px 10px";
+            statusDiv.style.borderRadius = "20px"; // Mais arredondado para visual moderno
             statusDiv.style.fontWeight = "bold";
             statusDiv.style.fontSize = "0.85em";
-            statusDiv.style.color = "#ffffff";
-            statusDiv.style.display = "inline-block"; // Garante que o fundo apareça corretamente
+            statusDiv.style.display = "inline-block";
 
             if (numConcluidos >= totalNoSetor && totalNoSetor > 0) {
-                // LIMPEZA CRÍTICA: Remove o texto "2/2" antes de definir o novo
-                statusDiv.innerText = ""; 
-                
+                // SETOR CONCLUÍDO
                 if (numAlteracoes > 0) {
                     statusDiv.innerText = `${numAlteracoes} C/A`;
                     statusDiv.style.backgroundColor = "#d90f23"; // Vermelho
+                    statusDiv.style.color = "#ffffff";
                 } else {
                     statusDiv.innerText = "S/A";
                     statusDiv.style.backgroundColor = "#1b8a3e"; // Verde
+                    statusDiv.style.color = "#ffffff";
                 }
             } else {
-                // SETOR EM ANDAMENTO: Exibe Contador padrão
+                // SETOR EM ANDAMENTO (Contador 0/X)
                 statusDiv.innerText = `${numConcluidos}/${totalNoSetor}`;
-                statusDiv.style.backgroundColor = "transparent";
-                statusDiv.style.color = "#ffffff";
+                statusDiv.style.backgroundColor = "rgba(0,0,0,0.1)"; // Fundo sutil
+                statusDiv.style.color = "#ffffff"; // Mantive branco assumindo que o fundo do header é escuro
             }
+            // Armazena o progresso para outras funções se necessário
             statusDiv.dataset.completed = numConcluidos;
         }
     });
@@ -533,6 +546,7 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
+    // --- SUB-FUNÇÃO: MONTAGEM DE CARDS DE PENDÊNCIA/CAUTELA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
         const cautelaUid = `CAUTELA-${uid}`;
@@ -540,109 +554,112 @@ function renderizarConferencia() {
         const statusCautela = window.itemStatus[cautelaUid] || {};
         const isCiente = statusCautela.status === 'cautela_ciente' || statusCautela.cautela_confirmada === true;
 
-        // --- 1. LÓGICA DE PENDÊNCIA POR AVARIA (PROVINDA DE RECOLHIMENTO) ---
-        // Se o item está avariado, injetamos um card de pendência que permite "Manter" ou "Resolver"
-        // --- 1. LÓGICA DE PENDÊNCIA POR AVARIA (PROVINDA DE RECOLHIMENTO) ---
-// --- 1. LÓGICA DE PENDÊNCIA POR AVARIA (PROVINDA DE RECOLHIMENTO) ---
-if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
-    const idAvaria = `AVARIA-${itemOuTomb.id_cautela_origem || 'S-N'}`;
-    const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(idAvaria);
-    
-    let acoesAvariaHtml = '';
-    if (jaFoiMantido) {
-        acoesAvariaHtml = `
-            <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;">
-                <i class="fas fa-check-double"></i> MANTIDO NESTA CONFERÊNCIA
-            </div>`;
-    } else {
-        acoesAvariaHtml = `
-            <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
-                <button type="button" class="btn-manter" style="flex:1" onclick="manterID('${idAvaria}', '${uid}')">
-                    <i class="fas fa-check-double"></i> Manter
-                </button>
-                <button type="button" class="btn-resolver" style="flex:1" onclick="abrirModalResolver('${idAvaria}', '${uid}', 1, 'Reparo de item avariado vindo de cautela')">
-                    <i class="fas fa-magic"></i> Resolvido
-                </button>
-            </div>`;
-    }
+        // 1. LÓGICA DE AVARIA (RECOLHIMENTO)
+        if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
+            const idAvaria = `AVARIA-${itemOuTomb.id_cautela_origem || 'S-N'}`;
+            const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(idAvaria);
+            
+            let acoesAvariaHtml = jaFoiMantido ? `
+                <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;">
+                    <i class="fas fa-check-double"></i> MANTIDO NESTA CONFERÊNCIA
+                </div>` : `
+                <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button type="button" class="btn-manter" style="flex:1" onclick="manterID('${idAvaria}', '${uid}')">
+                        <i class="fas fa-check-double"></i> Manter
+                    </button>
+                    <button type="button" class="btn-resolver" style="flex:1" onclick="abrirModalResolver('${idAvaria}', '${uid}', 1, 'Reparo de item avariado vindo de cautela')">
+                        <i class="fas fa-magic"></i> Resolvido
+                    </button>
+                </div>`;
 
-    htmlAcumulado += `
-        <div class="pendencia-id-card status-avaria" style="border-left: 4px solid #d90f23; background-color: #fff5f5; padding: 12px; margin-bottom: 8px; border-radius: 8px; text-align: left; border: 1px solid #ffcccc;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #d90f23; margin-bottom: 8px; border-bottom: 1px solid #ffcccc; padding-bottom: 4px; font-weight: bold;">
-                <span><i class="fas fa-exclamation-triangle"></i> AVARIA RELATADA EM [${itemOuTomb.id_cautela_origem || 'N/D'}]</span>
-                <span>${itemOuTomb.data_avaria || ''}</span>
-            </div>
-            <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
-                <i class="fas fa-comment-dots" style="width: 18px; color: #666;"></i> Motivo: <b>${itemOuTomb.motivo_avaria || 'Não informado'}</b>
-            </div>
-            <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;">
-                <i class="fas fa-user-edit" style="width: 18px; color: #666;"></i> Relatado por: <b>${itemOuTomb.relatado_por || 'Destinatário'}</b>
-            </div>
-            ${acoesAvariaHtml}
-        </div>`;
-}        // --- 2. CARIMBOS DE CAUTELA (Mantidos, mas não aparecem se situacao for AVARIADO via CSS ou Lógica) ---
+            htmlAcumulado += `
+                <div class="pendencia-id-card status-avaria" style="border-left: 4px solid #d90f23; background-color: #fff5f5; padding: 12px; margin-bottom: 8px; border-radius: 8px; border: 1px solid #ffcccc;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #d90f23; margin-bottom: 8px; border-bottom: 1px solid #ffcccc; padding-bottom: 4px; font-weight: bold;">
+                        <span><i class="fas fa-exclamation-triangle"></i> AVARIA RELATADA EM [${itemOuTomb.id_cautela_origem || 'N/D'}]</span>
+                        <span>${itemOuTomb.data_avaria || ''}</span>
+                    </div>
+                    <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
+                        <i class="fas fa-comment-dots" style="width: 18px; color: #666;"></i> Motivo: <b>${itemOuTomb.motivo_avaria || 'Não informado'}</b>
+                    </div>
+                    ${acoesAvariaHtml}
+                </div>`;
+        }
+
+        // 2. CARIMBOS DE CAUTELA (CORREÇÃO DA QUANTIDADE SINGLE)
         if (itemOuTomb.situacao !== 'AVARIADO') {
             let listaDeCautelas = [];
-            if (itemOuTomb.cautela) listaDeCautelas = [itemOuTomb.cautela];
-            else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) listaDeCautelas = itemOuTomb.cautelas;
+            
+            // PRIORIDADE: Se for Single, usa o array 'cautelas'. Se for Multi, usa o objeto 'cautela'.
+            if (Array.isArray(itemOuTomb.cautelas) && itemOuTomb.cautelas.length > 0) {
+                listaDeCautelas = itemOuTomb.cautelas;
+            } else if (itemOuTomb.cautela) {
+                listaDeCautelas = [itemOuTomb.cautela];
+            }
 
             listaDeCautelas.forEach(c => {
                 const dataExibicao = c.data || "Data N/D";
+                // Captura a quantidade real (importante para seus itens de 4un)
+                const qtdEfetiva = Number(c.quantidade) || 1;
+
                 htmlAcumulado += `
                     <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 12px; margin-bottom: 8px; border-radius: 5px; text-align: left;">
                         <div style="font-weight: bold; color: #f57c00; font-size: 0.8em; margin-bottom: 8px; border-bottom: 1px solid rgba(245, 124, 0, 0.2); padding-bottom: 4px; cursor: pointer; display: flex; align-items: center; gap: 5px;" onclick="verExtratoCautela('${c.id}')">
                             <i class="fas fa-eye"></i> ${c.id || 'CAUTELA'} em ${dataExibicao}
                         </div>
                         <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
-                            <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade: <b>${c.quantidade || 1} un.</b>
+                            <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade Cautelada: <b style="color:#d90f23; font-size: 1.1em;">${qtdEfetiva} un.</b>
                         </div>
                         <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;">
-                            <i class="fas fa-user" style="width: 18px; color: #666;"></i> Detentor: <b>${c.destinatario}</b>
+                            <i class="fas fa-user" style="width: 18px; color: #666;"></i> Detentor: <b>${c.destinatario || 'N/D'}</b>
                         </div>
                         ${isCiente ? `
                             <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 6px; margin-top: 4px; font-style: italic;">
                                 <i class="fas fa-check-double"></i> Ciente nesta conferência
-                            </div>
-                        ` : `
+                            </div>` : `
                             <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px; font-size: 0.8em;" onclick="setItemStatusID(this, 'cautela_ciente', '${cautelaUid}')">Ciente</button>
                         `}
                     </div>`;
             });
         }
 
-        // --- 3. PENDÊNCIAS RELATADAS (NORMAIS) ---
+        // 3. PENDÊNCIAS RELATADAS (MANUAIS/FALTA/QUEBRA)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
                 const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
-                let acoesHtml = '';
-                let botoesGestaoHtml = '';
+                let acoesHtml = isTemp ? `
+                    <div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>` : (jaFoiMantido ? `
+                    <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;"><i class="fas fa-check-double"></i> MANTIDO NESTA CONFERÊNCIA</div>` : `
+                    <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
+                        <button type="button" class="btn-manter" style="flex:1" onclick="manterID('${p.id}', '${uid}')"><i class="fas fa-check-double"></i> Manter</button>
+                        <button type="button" class="btn-resolver" style="flex:1" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')"><i class="fas fa-magic"></i> Resolvido</button>
+                    </div>`);
 
-                if (isTemp) {
-                    botoesGestaoHtml = `<div style="display:flex; align-items:center; gap:8px;"><span onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" style="cursor:pointer; color:#2196F3; font-size:1.1em; padding:5px;"><i class="fas fa-edit"></i></span><span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;"><i class="fas fa-trash-alt"></i></span></div>`;
-                    acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
-                } else if (jaFoiMantido) {
-                    acoesHtml = `<div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;"><i class="fas fa-check-double"></i> MANTIDO NESTA CONFERÊNCIA</div>`;
-                } else {
-                    acoesHtml = `<div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;"><button type="button" class="btn-manter" style="flex:1" onclick="manterID('${p.id}', '${uid}')"><i class="fas fa-check-double"></i> Manter</button><button type="button" class="btn-resolver" style="flex:1" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')"><i class="fas fa-magic"></i> Resolvido</button></div>`;
-                }
-
-                htmlAcumulado += `<div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 12px; margin-bottom: 10px; background-color: #fff; text-align: left;"><div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;"><span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? '<b>LANÇAMENTO ATUAL</b>' : '<b>Relatado por:</b> ' + p.autor_nome}</span><div style="display:flex; align-items:center; gap:8px;"><span>${p.data_criacao}</span>${botoesGestaoHtml}</div></div><div style="font-size: 0.85em; color: #333; margin-bottom: 4px;"><i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade: <strong style="color: #d90f23;">${p.quantidade} un.</strong></div><div style="font-size: 0.85em; color: #333; margin-bottom: 8px;"><i class="fas fa-comment-dots" style="width: 18px; color: #666;"></i> Descrição: <b>${p.descricao}</b></div>${acoesHtml}</div>`;
+                htmlAcumulado += `
+                    <div class="pendencia-id-card" style="border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 12px; margin-bottom: 10px; background-color: #fff;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
+                            <span><i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i> ${isTemp ? '<b>LANÇAMENTO ATUAL</b>' : '<b>Relatado por:</b> ' + p.autor_nome}</span>
+                            <span>${p.data_criacao || ''}</span>
+                        </div>
+                        <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;"><i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade: <strong style="color: #d90f23;">${p.quantidade} un.</strong></div>
+                        <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;"><i class="fas fa-comment-dots" style="width: 18px; color: #666;"></i> Descrição: <b>${p.descricao}</b></div>
+                        ${acoesHtml}
+                    </div>`;
             });
         }
         return htmlAcumulado;
     };
 
-    // --- LOOP DE RENDERIZAÇÃO DOS SETORES ---
+    // --- LOOP PRINCIPAL DE RENDERIZAÇÃO ---
     fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0); 
         let htmlItens = ''; 
-        let totalItensNoSetor = setor.itens.length; 
         
         setor.itens.forEach(item => {
             const nomeEscapado = item.nome.replace(/'/g, "\\'");
             const itemId = item.id;
 
+            // CASO A: ITEM MULTI (Tombamentos individuais)
             if (item.tipo === 'multi' && item.tombamentos) {
                 let htmlTombamentos = '';
                 let confCount = 0, altCount = 0;
@@ -654,35 +671,26 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                     const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
                     const isCiente = statusC === 'cautela_ciente';
 
-                    if (statusU === 'S/A' || statusU === 'C/A' || statusU === 'KEEP' || isCiente) {
-                        confCount++;
-                        if (statusU === 'C/A' || statusU === 'KEEP' || isCiente) altCount++;
-                    }
+                    if (statusU === 'ok' || statusU === 'C/A' || statusU === 'KEEP' || isCiente) confCount++;
+                    if (statusU === 'C/A' || statusU === 'KEEP' || isCiente) altCount++;
 
-                    // Se estiver avariado, os botões S/A e Alteração somem
                     let botoesTombamento = (t.situacao === 'AVARIADO') ? '' : `
                     <div class="tombamento-options" style="display: flex; gap: 5px;">
-                        ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${(statusU === 'S/A' || statusU === 'ok') ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                        ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${(statusU === 'ok') ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
                         <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alteração</button>
                     </div>`;
 
                     htmlTombamentos += `
-                        <div class="tombamento-container" data-id="${uid}" data-tomb="${t.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4; border-color: #1b8a3e;' : ''}">
+                        <div class="tombamento-container" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4; border-color: #1b8a3e;' : ''}">
                             <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
                                 <span>Tomb.: <b>${t.tomb}</b></span>
                                 ${botoesTombamento}
                             </div>
-                            <div class="alerts-wrapper">
-                                ${montarPendenciaHtml(uid, t)} 
-                            </div>
+                            <div class="alerts-wrapper">${montarPendenciaHtml(uid, t)}</div>
                         </div>`;
                 });
 
-                let classeMulti = '';
-                if (confCount === item.tombamentos.length) {
-                    classeMulti = altCount > 0 ? 'status-alert' : 'status-ok';
-                }
-
+                let classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
                 htmlItens += `<div class="item-conferencia item-has-tombamentos ${classeMulti}" data-id="${itemId}">
                     <div class="item-header">
                         <span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}"></span>
@@ -690,27 +698,34 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                     </div>
                     ${htmlTombamentos}
                 </div>`;
-            } else {
-                // Lógica de itens SINGLE mantida...
-                // (Omitido por brevidade, mas segue o mesmo padrão de injetar o montarPendenciaHtml)
+            } 
+            // CASO B: ITEM SINGLE (Saldos e Quantidades)
+            else {
                 const hasPendencia = (item.pendencias_ids && item.pendencias_ids.length > 0) || item.situacao === 'AVARIADO';
                 const currentStatus = window.itemStatus[itemId]?.status;
+                
                 const totalEsp = Number(item.quantidadeEsperada) || 0;
+                // SOMA DAS CAUTELAS GARANTIDA COMO NÚMERO
                 const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+                
                 const saldoReal = totalEsp - totalCaut - totalPend;
                 const corSaldo = saldoReal < totalEsp ? '#d90f23' : '#1b8a3e';
 
-                let classeSingle = (currentStatus === 'S/A') ? 'status-ok' : (hasPendencia ? 'status-alert' : '');
+                let classeSingle = (currentStatus === 'ok') ? 'status-ok' : (hasPendencia ? 'status-alert' : '');
 
-                htmlItens += `<div class="item-conferencia ${classeSingle}" data-type="single" data-id="${itemId}">
+                htmlItens += `
+                <div class="item-conferencia ${classeSingle}" data-type="single" data-id="${itemId}">
                     <div class="item-header">
                         <span class="status-icon ${classeSingle === 'status-ok' ? 'ok' : (classeSingle === 'status-alert' ? 'alert' : '')}"></span>
-                        <div style="display:flex; flex-direction:column"><span class="item-label">${item.nome}</span><span style="font-size:0.85em; color:${corSaldo}; font-weight:bold;">DISPONÍVEL: ${saldoReal} de ${totalEsp}</span></div>
+                        <div style="display:flex; flex-direction:column">
+                            <span class="item-label">${item.nome}</span>
+                            <span style="font-size:0.85em; color:${corSaldo}; font-weight:bold;">DISPONÍVEL: ${saldoReal} de ${totalEsp}</span>
+                        </div>
                     </div>
                     ${item.situacao !== 'AVARIADO' ? `
                     <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                        ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${currentStatus === 'S/A' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>` : ''}
+                        ${!hasPendencia ? `<button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>` : ''}
                         <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${saldoReal})">+ Alteração</button>
                     </div>` : ''}
                     <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(itemId, item)}</div>
@@ -718,7 +733,17 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
             }
         });
         
-        htmlSetores += `<div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}"><div class="setor-header" onclick="toggleSetor(this)"><div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${totalItensNoSetor}</div></div><span class="arrow">${isFirstSetor ? '▼' : '►'}</span></div><div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div></div>`;
+        htmlSetores += `
+            <div class="setor" data-id="${setor.id || setor.nome}">
+                <div class="setor-header" onclick="toggleSetor(this)">
+                    <div class="setor-info">
+                        <span>${setor.nome}</span>
+                        <div class="setor-status">0/${setor.itens.length}</div>
+                    </div>
+                    <span class="arrow">${isFirstSetor ? '▼' : '►'}</span>
+                </div>
+                <div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div>
+            </div>`;
     });
 
     const btnFin = document.getElementById('btn-finalizar');
@@ -941,22 +966,32 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                     const processarEntidade = (entidade, uid, nomeParaRelatorio) => {
                         const statusLocal = window.itemStatus[uid];
                         
-                        // Se não houve ação, retorna como está, mas garante arrays básicos
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // --- 1. SINCRONIZAÇÃO DE ESTADO DE AVARIA (A "CURA") ---
-                        // Se o item estava AVARIADO mas não há mais essa marca no dadosConferencia (limpo pelo resolverID)
-                        // ou se o status local indica que foi resolvido.
+                        // --- 1. SINCRONIZAÇÃO DE ESTADO DE AVARIA ---
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
-                        if (!statusLocal || statusLocal.status === 'pending') return entidade;
+                        if (!statusLocal || statusLocal.status === 'pending') {
+                            // Mesmo sem ação, precisamos registrar este item no relatório final
+                            const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
+                            itensRelatorio.push({
+                                id: uid,
+                                nomeCompleto: nomeParaRelatorio,
+                                status: 'S/A',
+                                situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
+                                quantidade: qtdFix,
+                                setor: setor.nome,
+                                obs: ""
+                            });
+                            return entidade;
+                        }
 
-                        // --- 2. TRATAMENTO DE RESOLVIDOS (Pendências Comuns) ---
+                        // --- 2. TRATAMENTO DE RESOLVIDOS ---
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -1000,18 +1035,20 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
                             return p;
                         });
 
-                        // --- 4. PREPARAÇÃO PARA RELATÓRIO ---
-                        // Consideramos alteração se houver pendências OU se o item ainda estiver AVARIADO
-                        const temAlteracao = entidade.pendencias_ids.length > 0 || entidade.situacao === 'AVARIADO';
+                        // --- 4. PREPARAÇÃO PARA RELATÓRIO (CORRIGIDA) ---
+                        const temAlteracao = entidade.pendencias_ids.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         
+                        // 🛑 CORREÇÃO DA QUANTIDADE: Tenta os dois campos possíveis
+                        const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
+
                         const dadosRelatorio = {
                             id: uid,
                             nomeCompleto: nomeParaRelatorio,
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                             pendencias_ids: [...entidade.pendencias_ids],
-                            quantidade: entidade.quantidadeEsperada || 1,
+                            quantidade: quantidadeReal, 
                             setor: setor.nome,
                             obs: entidade.pendencias_ids.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
@@ -1038,11 +1075,9 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
         // --- GRAVAÇÃO NO FIREBASE ---
         const batch = db.batch();
 
-        // 1. Atualiza a Lista Ativa (A prancheta que o militar lê)
         const listaRef = db.collection(COLECAO_LISTAS).doc(LISTA_ID);
         batch.update(listaRef, { list: novaListaMestra });
 
-        // 2. Atualiza a Custódia Atual (Onde fica o responsável do momento)
         const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
         batch.set(custodiaRef, {
             lista_id: LISTA_ID,
@@ -1052,7 +1087,6 @@ if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
             timestamp_ultima_conferencia: timestampAgora
         }, { merge: true });
 
-        // 3. Adiciona o Relatório Histórico
         const relatorioRef = db.collection('resultados_conferencias').doc();
         batch.set(relatorioRef, {
             local: localNome,
@@ -1794,22 +1828,21 @@ function setItemStatusID(btn, status, uid) {
     const setor = btn.closest('.setor');
     const itemPai = btn.closest('.item-conferencia');
 
-    // Inicializa o objeto se não existir para evitar erros
+    // Inicializa o objeto se não existir
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
     if (status === 'ok') {
-        // 1. Atualiza o banco de dados local preservando outros estados
+        // 1. ATUALIZAÇÃO (CORREÇÃO: Gravando 'ok' para bater com a renderização)
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
-            status: 'S/A' 
+            status: 'ok' // Mudado de 'S/A' para 'ok' para consistência com renderizarConferencia
         };
 
         // 2. Feedback visual nos botões
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        // 3. ATUALIZAÇÃO DE CLASSE (Crítico para o contador funcionar)
-        // Se for um item single, aplicamos a classe status-ok imediatamente
+        // 3. ATUALIZAÇÃO DE CLASSE
         if (itemPai && itemPai.getAttribute('data-type') === 'single') {
             itemPai.classList.add('status-ok');
             itemPai.classList.remove('status-alert');
@@ -1817,37 +1850,46 @@ function setItemStatusID(btn, status, uid) {
             if (icon) icon.className = 'status-icon ok';
         }
 
-        // 4. Se for parte de um item Multi, chama a função que reavalia o "Pai"
+        // 4. Se for Multi, reavalia o cabeçalho do item
         if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
-            updateItemMainStatusDisplay(itemPai);
+            if (typeof updateItemMainStatusDisplay === 'function') {
+                updateItemMainStatusDisplay(itemPai);
+            }
         }
 
     } else if (status === 'cautela_ciente') {
-        // PRESERVAÇÃO CRÍTICA: Mantém IDs mantidos ao marcar ciência
+        // Obtenção da quantidade se for um item de cautela (para não perder o valor no estado)
+        // Buscamos o valor que já estava no card para persistir
+        const qtdNoCard = container.querySelector('b[style*="color:#d90f23"]')?.textContent.replace(/\D/g, '') || 1;
+
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
-            status: 'cautela_ciente' 
+            status: 'cautela_ciente',
+            quantidade: parseInt(qtdNoCard), // Salva a quantidade real no estado
+            cautela_confirmada: true
         };
         
-        // Feedback visual imediato no botão
+        // Feedback visual imediato
         btn.innerHTML = '<i class="fas fa-check"></i> Ciente registrado';
         btn.disabled = true;
         btn.style.backgroundColor = "#1b8a3e";
         
         setTimeout(() => {
-            // SALVA SCROLL ANTES DE REDESENHAR
             const scrollPos = window.scrollY;
-            renderizarConferencia();
-            // RESTAURA SCROLL APÓS REDESENHAR
+            if (typeof renderizarConferencia === 'function') {
+                renderizarConferencia();
+            }
             window.scrollTo(0, scrollPos);
             updateOverallStatus();
         }, 400);
     }
 
-    // 5. Atualiza contadores globais e de setor
-    updateOverallStatus();
+    // 5. Atualiza contadores globais
+    if (typeof updateOverallStatus === 'function') {
+        updateOverallStatus();
+    }
 
-    if (setor) { 
+    if (setor && typeof checkSetorCompletion === 'function') { 
         checkSetorCompletion(setor, uid);
     }
 }
