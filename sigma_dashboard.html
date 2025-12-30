@@ -7686,11 +7686,11 @@ async function abrirGestaoPendenciasCautela() {
 }
 		function abrirDecisaoGestor(dataJson) {
     try {
-        // 1. Decodifica o JSON que vem do botão da tabela
         const data = JSON.parse(decodeURIComponent(dataJson));
-        console.log("Dados recebidos da tabela:", data);
+        console.log("Dados brutos da pendência:", data);
 
-        // 2. REPARO DE DNA PARA ITENS MANUAIS (Mantendo sua lógica de segurança)
+        // 🛑 CORREÇÃO CIRÚRGICA: Garantir que o objeto tenha o ID completo e a QTD do relato
+        // Se vier do Pé de Cabra manual, forçamos o ID exato que está na Lista Mestra
         if (!data.uidItem || data.uidItem.includes('undefined')) {
             if (data.itemNome.toUpperCase().includes("PÉ DE CABRA")) {
                 data.uidItem = "56911524-65986249";
@@ -7701,17 +7701,17 @@ async function abrirGestaoPendenciasCautela() {
             }
         }
 
-        // 3. Salva na variável global para as funções de execução (recolhimento/troca)
+        // 🛑 GARANTIA DE QUANTIDADE: Se o campo 'quantidade' estiver vazio, 
+        // usamos o 'itemQtd' ou padrão 1. A função de troca PRECISA disso.
+        data.quantidade = data.quantidade || data.itemQtd || 1;
+
         pendenciaSendoResolvida = data; 
 
-        // 4. LÓGICA DE IDENTIFICAÇÃO DINÂMICA (Single vs Multi)
-        // Se não tem tombamento ou é S/T, exibimos a quantidade
         const ehItemSingle = !data.itemTomb || data.itemTomb === "S/T";
         const identificadorHtml = ehItemSingle 
-            ? `<b>Quantidade:</b> ${data.quantidade || data.itemQtd || 1} un.` 
+            ? `<b>Quantidade relatada:</b> ${data.quantidade} un.` 
             : `<b>Tombamento:</b> ${data.itemTomb}`;
 
-        // 5. Preenche o visual do Modal de Decisão
         const infoBox = document.getElementById('info-item-decisao');
         if (infoBox) {
             infoBox.innerHTML = `
@@ -7725,15 +7725,12 @@ async function abrirGestaoPendenciasCautela() {
             `;
         }
 
-        // 6. Exibe o modal
         const modal = document.getElementById('modalDecisaoGestor');
-        if (modal) {
-            modal.style.display = 'flex';
-        }
+        if (modal) modal.style.display = 'flex';
 
     } catch (e) {
         console.error("Erro crítico ao abrir modal de decisão:", e);
-        alert("Erro ao processar dados da pendência. Verifique o console.");
+        alert("Erro ao processar dados da pendência.");
     }
 }
 		async function executarRecolhimentoApenas() {
@@ -8043,51 +8040,51 @@ async function abrirSeletorGlobalSubstituicao() {
         // 🛑 3. ATUALIZAÇÃO DA LISTA MESTRA DE ORIGEM (REFORÇADA COM DNA BASE)
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
+        
         if (docOrigemAvaria.exists) {
             const listData = docOrigemAvaria.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    // Lógica de match por DNA (Primeira parte do ID antes do hífen)
-                    const idListaCurto = String(it.id).split('-')[0];
-                    const idPendenciaCurto = String(p.id_base || p.uidItem || "").split('-')[0];
+                    // COMPARAÇÃO TRIPLA: ID exato OU DNA do ID OU Nome exato
+                    const idMestra = String(it.id);
+                    const idPendencia = String(p.id_base || p.uidItem || "");
+                    const nomeMestra = String(it.nome).toUpperCase().trim();
+                    const nomePendencia = String(p.itemNome).toUpperCase().trim();
 
-                    if (it.id === p.uidItem || it.id === p.id_base || idListaCurto === idPendenciaCurto) {
+                    const matchId = (idMestra === idPendencia);
+                    const matchDna = (idMestra.split('-')[0] === idPendencia.split('-')[0]);
+                    const matchNome = (nomeMestra === nomePendencia);
+
+                    // Se o nome bater e o DNA do ID bater, não tem erro: é o item certo
+                    if (matchId || (matchDna && matchNome)) {
                         
                         // A. Remove carimbo de cautela (Laranja)
                         if (it.cautelas) {
                             it.cautelas = it.cautelas.filter(c => c.id !== p.cautelaId);
                         }
                         
-                        // B. CRIA CARIMBO DE PENDÊNCIA (Vermelho) PARA O AVARIADO
+                        // B. Cria o carimbo de Pendência (Vermelho)
                         const novaPendenciaAvaria = {
                             id: "AVARIA-" + Date.now(),
-                            quantidade: qtdParaMovimentar,
-                            descricao: `MATERIAL AVARIADO: Recolhido de ${dadosC.destinatario_original_nome} via Troca Cruzada. Motivo: ${p.motivo}`,
+                            quantidade: parseInt(p.quantidade) || 1,
+                            descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
                             autor_nome: nomeAutor,
                             data_criacao: dataFormatada,
                             status_gestao: "MANUTENCAO",
-                            tipo: "PENDENCIA" // Garante a cor vermelha no App
+                            tipo: "PENDENCIA" 
                         };
 
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         
-                        // Evita duplicidade de carimbo de avaria para o mesmo evento
+                        // Evita duplicidade
                         const jaExiste = it.pendencias_ids.some(pen => pen.descricao.includes(p.cautelaId));
                         if (!jaExiste) {
                             it.pendencias_ids.push(novaPendenciaAvaria);
+                            // 🛑 FORÇA O STATUS DA CONFERÊNCIA PARA RECONHECER A MUDANÇA
+                            it.status_conferencia = "AVARIADO";
                         }
 
-                        if (it.tombamentos) {
-                            it.tombamentos = it.tombamentos.map(t => {
-                                if (t.tomb === p.itemTomb) {
-                                    delete t.cautela;
-                                    t.situacao = "AVARIADO";
-                                }
-                                return t;
-                            });
-                        }
-
-                        // C. Registra no histórico de vida do item físico
+                        // C. Registra no histórico de vida
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "RECOLHIDO_AVARIADO",
