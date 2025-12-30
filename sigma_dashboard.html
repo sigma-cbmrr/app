@@ -7978,19 +7978,13 @@ async function abrirSeletorGlobalSubstituicao() {
 }
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
-    
-    // --- CORREÇÃO: Recuperação segura do userInfo ---
-    // Tenta usar a variável global; se falhar, tenta buscar no localStorage; 
-    // se falhar novamente, usa um objeto padrão para não travar o log.
     const usuarioAtivo = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
                          JSON.parse(localStorage.getItem('user_data') || '{"postoGraduacao":"","nomeGuerra":"Gestor"}');
 
     let qtdParaMovimentar = 1;
 
     try {
-        // --- 0. CAPTURA DE QUANTIDADE PELO MODAL ---
         const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
-        
         if (inputQtd) {
             qtdParaMovimentar = parseInt(inputQtd.value);
             if (isNaN(qtdParaMovimentar) || qtdParaMovimentar <= 0) {
@@ -7999,7 +7993,7 @@ async function abrirSeletorGlobalSubstituicao() {
             }
         }
 
-        const confirmacao = confirm(`Confirmar substituição física?\n\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}\nOrigem: ${listaOrigemNovo.toUpperCase()}`);
+        const confirmacao = confirm(`Confirmar substituição?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`);
         if (!confirmacao) return;
 
         document.getElementById('modalSeletorEstoque').style.display = 'none';
@@ -8007,16 +8001,16 @@ async function abrirSeletorGlobalSubstituicao() {
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 1. DADOS DA CAUTELA (Contrato Digital - Receptora)
+        // 1. DADOS DA CAUTELA (Receptora)
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
         if (!docCautela.exists) throw new Error("Cautela receptora não encontrada.");
         const dadosC = docCautela.data();
 
-        // Usando usuarioAtivo recuperado para o log
+        // LOG DE MOVIMENTAÇÃO
         const logTroca = {
             data: timestamp,
-            mensagem: `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo} vindo de ${listaOrigemNovo}.`,
+            mensagem: `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'S/T'} vindo de ${listaOrigemNovo}.`,
             tipo: "SUBSTITUICAO_CRUZADA",
             autor: `${usuarioAtivo.postoGraduacao || ''} ${usuarioAtivo.nomeGuerra || 'Gestor'}`.trim()
         };
@@ -8024,11 +8018,12 @@ async function abrirSeletorGlobalSubstituicao() {
         const itensAtualizados = dadosC.itens.map(it => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base && !p.itemTomb);
             if (ehOItem) {
+                // Blindagem contra undefined:
                 return { 
                     ...it, 
-                    tombamento: inputQtd ? it.tombamento : tombamentoNovo,
-                    id_original_substituido: p.uidItem,
-                    origem_lista: listaOrigemNovo, 
+                    tombamento: (inputQtd ? it.tombamento : tombamentoNovo) || "S/T",
+                    id_original_substituido: p.uidItem || "MANUAL",
+                    origem_lista: listaOrigemNovo || "DESCONHECIDO", 
                     obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})` 
                 };
             }
@@ -8055,10 +8050,10 @@ async function abrirSeletorGlobalSubstituicao() {
                                 ...t,
                                 cautela: {
                                     id: p.cautelaId,
-                                    destinatario: dadosC.destinatario,
+                                    destinatario: dadosC.destinatario || "N/A",
                                     data: new Date().toLocaleString('pt-BR'),
                                     emprestimo: true,
-                                    local_uso: p.localId
+                                    local_uso: p.localId || "N/A"
                                 }
                             };
                         }
@@ -8069,7 +8064,7 @@ async function abrirSeletorGlobalSubstituicao() {
                     it.cautelas.push({
                         id: p.cautelaId,
                         quantidade: qtdParaMovimentar,
-                        destinatario: dadosC.destinatario,
+                        destinatario: dadosC.destinatario || "N/A",
                         data: new Date().toLocaleString('pt-BR'),
                         tipo: "SUBSTITUICAO_EMPRESTIMO"
                     });
@@ -8089,7 +8084,11 @@ async function abrirSeletorGlobalSubstituicao() {
                 itens: setor.itens.map(it => {
                     const marcarAvariado = (entidade, idAtual) => {
                         if (idAtual === p.uidItem) {
-                            return { ...entidade, situacao: "AVARIADO", status_conferencia: "AVARIADO" };
+                            return { 
+                                ...entidade, 
+                                situacao: "AVARIADO", 
+                                status_conferencia: "AVARIADO" 
+                            };
                         }
                         return entidade;
                     };
@@ -8105,15 +8104,15 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         // 4. LIMPAR PENDÊNCIA
-        const pendenciasLimpas = dadosC.pendencias.filter(pend => pend.id_solicitacao !== p.solicitacaoId);
+        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => pend.id_solicitacao !== p.solicitacaoId);
         batch.update(cautelaRef, { pendencias: pendenciasLimpas });
 
         await batch.commit();
-        alert(`✅ Substituição Concluída!\n\nForam movimentadas ${qtdParaMovimentar} unidades.`);
+        alert(`✅ Sucesso! Movimentadas ${qtdParaMovimentar} unidades.`);
         location.reload();
 
     } catch (e) {
-        console.error("Erro na Troca Cruzada:", e);
+        console.error("Erro Crítico no Batch:", e);
         alert("❌ Erro ao processar: " + e.message);
     }
 }
