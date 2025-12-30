@@ -181,120 +181,131 @@
 }
 
     function updateOverallStatus() {
-    // 1. Identifica todos os itens de conferência na tela
+    // 1. Identifica todos os materiais (itens pais) na tela
     const itensPai = document.querySelectorAll('.item-conferencia');
     const totalGeral = itensPai.length;
     let concluidosGeral = 0;
 
-    // 2. Conta quantos itens principais estão finalizados (Verde ou Vermelho)
+    // 2. Conta quantos materiais estão com o check [✓] (Verde) ou Alerta [C/A] (Vermelho)
     itensPai.forEach(item => {
         if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
             concluidosGeral++;
         }
     });
 
-    // 3. Atualiza o Botão Finalizar
+    // 3. Atualização do Botão Finalizar
     const btn = document.getElementById('btn-finalizar');
     if (btn) {
-        // Verifica se a variável MODO_OPERACAO existe para evitar erro de referência
-        const modo = (typeof MODO_OPERACAO !== 'undefined') ? MODO_OPERACAO : 'conferencia';
-        let buttonPrefix = modo === 'devolucao' ? 'FINALIZAR DEVOLUÇÃO' : 'FINALIZAR CONFERÊNCIA';
+        // Detecção robusta do modo de operação
+        const urlParams = new URLSearchParams(window.location.search);
+        const modo = urlParams.get('modo') || (typeof MODO_OPERACAO !== 'undefined' ? MODO_OPERACAO : 'recebimento');
         
+        let buttonPrefix = 'FINALIZAR CONFERÊNCIA';
+        if (modo === 'devolucao_final') buttonPrefix = 'FINALIZAR RECEBIMENTO DE DEVOLUÇÃO';
+        else if (!!urlParams.get('cautelaId')) buttonPrefix = 'FINALIZAR RECEBIMENTO';
+
         btn.textContent = `${buttonPrefix} (${concluidosGeral}/${totalGeral} ITENS)`;
         
-        // Habilita apenas se todos os itens foram conferidos
-        const todosConcluidos = totalGeral > 0 && concluidosGeral >= totalGeral;
+        // Habilita apenas se TODOS os materiais da tela foram processados
+        const todosConcluidos = totalGeral > 0 && concluidosGeral === totalGeral;
         btn.disabled = !todosConcluidos;
         
-        // Estilização dinâmica do botão
-        btn.style.backgroundColor = btn.disabled ? '#a0a0a0' : '#1b8a3e';
-        btn.style.cursor = btn.disabled ? 'not-allowed' : 'pointer';
-        btn.style.opacity = btn.disabled ? '0.7' : '1';
+        // Estilo visual dinâmico do botão
+        if (btn.disabled) {
+            btn.style.backgroundColor = '#a0a0a0';
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'not-allowed';
+            btn.style.boxShadow = 'none';
+        } else {
+            btn.style.backgroundColor = '#1b8a3e'; // Verde de sucesso
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.style.boxShadow = '0 4px 8px rgba(27, 138, 62, 0.4)';
+        }
     }
 
-    // 4. Atualiza os badges dos Setores
+    // 4. Atualiza os badges de progresso dos Setores (0/X)
     document.querySelectorAll('.setor').forEach(s => {
-        // Busca o total definido no atributo do elemento
-        const totalNoSetor = parseInt(s.getAttribute('data-total-items')) || 0;
-        // Conta itens concluídos dentro DESTE setor específico
-        const itensConcluidosSetor = s.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert');
-        const numConcluidos = itensConcluidosSetor.length;
+        // Busca os itens específicos deste setor
+        const itensNoSetor = s.querySelectorAll('.item-conferencia');
+        const totalNoSetor = itensNoSetor.length;
         
-        // Conta alterações para decidir entre exibir "S/A" ou "X C/A"
+        // Conta concluidos dentro deste setor
+        const concluidosNoSetor = Array.from(itensNoSetor).filter(item => 
+            item.classList.contains('status-ok') || item.classList.contains('status-alert')
+        ).length;
+        
+        // Conta quantos destes concluídos são alertas (vermelhos)
         const numAlteracoes = s.querySelectorAll('.item-conferencia.status-alert').length;
         
         const statusDiv = s.querySelector('.setor-status');
         if (statusDiv) {
-            // Estilo base do Badge
-            statusDiv.style.padding = "2px 10px";
-            statusDiv.style.borderRadius = "20px"; // Mais arredondado para visual moderno
+            // Estilo visual base do Badge
+            statusDiv.style.borderRadius = "20px";
             statusDiv.style.fontWeight = "bold";
-            statusDiv.style.fontSize = "0.85em";
             statusDiv.style.display = "inline-block";
+            statusDiv.style.minWidth = "45px";
 
-            if (numConcluidos >= totalNoSetor && totalNoSetor > 0) {
-                // SETOR CONCLUÍDO
+            if (totalNoSetor > 0 && concluidosNoSetor === totalNoSetor) {
+                // SETOR TOTALMENTE CONCLUÍDO
                 if (numAlteracoes > 0) {
                     statusDiv.innerText = `${numAlteracoes} C/A`;
-                    statusDiv.style.backgroundColor = "#d90f23"; // Vermelho
-                    statusDiv.style.color = "#ffffff";
+                    statusDiv.style.backgroundColor = "#d90f23"; // Vermelho se houver problemas
                 } else {
                     statusDiv.innerText = "S/A";
-                    statusDiv.style.backgroundColor = "#1b8a3e"; // Verde
-                    statusDiv.style.color = "#ffffff";
+                    statusDiv.style.backgroundColor = "#1b8a3e"; // Verde se estiver perfeito
                 }
+                statusDiv.style.color = "#ffffff";
             } else {
-                // SETOR EM ANDAMENTO (Contador 0/X)
-                statusDiv.innerText = `${numConcluidos}/${totalNoSetor}`;
-                statusDiv.style.backgroundColor = "rgba(0,0,0,0.1)"; // Fundo sutil
-                statusDiv.style.color = "#ffffff"; // Mantive branco assumindo que o fundo do header é escuro
+                // SETOR EM ANDAMENTO
+                statusDiv.innerText = `${concluidosNoSetor}/${totalNoSetor}`;
+                statusDiv.style.backgroundColor = "rgba(0,0,0,0.1)"; // Cinza neutro
+                statusDiv.style.color = "#333";
             }
-            // Armazena o progresso para outras funções se necessário
-            statusDiv.dataset.completed = numConcluidos;
+            statusDiv.dataset.completed = concluidosNoSetor;
         }
     });
 }
         function updateSetorStatus(setorEl) { 
     if (!setorEl) return;
 
-    const itemsPai = setorEl.querySelectorAll('.item-conferencia'); 
-    let completed = 0;
-    let total = itemsPai.length; // O total é o número de materiais (ex: 1 EPR, 1 Pé de Cabra)
+    // Seleciona todos os itens (materiais) dentro deste setor
+    const itensPai = setorEl.querySelectorAll('.item-conferencia'); 
+    let concluidos = 0;
+    let total = itensPai.length; 
 
-    itemsPai.forEach(item => { 
-        // Verifica se o item pai (material) ganhou a classe de concluído
-        // As funções updateItemMainStatusDisplay e setItemStatusID já aplicam essas classes
+    itensPai.forEach(item => { 
+        // Um item é considerado concluído se tiver a classe status-ok ou status-alert
         if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
-            completed++;
+            concluidos++;
         }
     }); 
 
-    // Atualiza os atributos de dados do setor
+    // Atualiza o atributo de dados para uso interno
     setorEl.dataset.totalItems = total; 
     
+    // Procura o elemento que exibe o texto (0/15)
     const st = setorEl.querySelector('.setor-status'); 
     if (st) {
-        st.dataset.completed = completed; 
+        st.dataset.completed = concluidos; 
         
-        if (completed === total && total > 0) { 
-            // SETOR 100% CONCLUÍDO
-            // Verifica se houve alguma alteração (C/A) no setor para decidir o texto
-            const temAlteracaoNoSetor = setorEl.querySelectorAll('.item-conferencia.status-alert').length > 0;
+        if (concluidos === total && total > 0) { 
+            // Se tudo estiver pronto, verifica se há algum alerta (vermelho) no setor
+            const temAlerta = setorEl.querySelectorAll('.item-conferencia.status-alert').length > 0;
             
-            if (temAlteracaoNoSetor) {
-                const totalAlertas = setorEl.querySelectorAll('.item-conferencia.status-alert').length;
-                st.textContent = `${totalAlertas} C/A`;
-                st.style.backgroundColor = "#d90f23"; // Vermelho se houver erro
+            if (temAlerta) {
+                st.textContent = 'CONCLUÍDO C/ ALT';
+                st.style.backgroundColor = "#d90f23"; // Badge vermelho
             } else {
                 st.textContent = 'S/A';
-                st.style.backgroundColor = "#1b8a3e"; // Verde se tudo S/A
+                st.style.backgroundColor = "#1b8a3e"; // Badge verde
             }
             st.classList.add('ok'); 
         } else { 
-            // SETOR EM ANDAMENTO
-            st.textContent = `${completed}/${total}`; 
+            // Exibição padrão do progresso
+            st.textContent = `${concluidos}/${total}`; 
             st.classList.remove('ok');
-            st.style.backgroundColor = ""; // Reseta para a cor padrão do CSS
+            st.style.backgroundColor = "#666"; // Cinza neutro
         } 
     }
 }
