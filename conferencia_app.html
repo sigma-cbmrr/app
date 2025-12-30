@@ -294,19 +294,21 @@
         function updateItemMainStatusDisplay(item) { 
     if (!item || item.dataset.type === 'single') return; 
     
+    // Captura o ID base do material (ex: alfa_abt17_id_item)
     const itemIdBase = item.getAttribute('data-id'); 
     const tombs = item.querySelectorAll('.tombamento-container'); 
     let conf = 0, alt = 0; 
 
     tombs.forEach(t => { 
-        const nTomb = t.getAttribute('data-tomb'); // Lê do atributo novo
+        // Agora o data-tomb existe, então a leitura funciona!
+        const nTomb = t.getAttribute('data-tomb');
         const uidOriginal = `${itemIdBase}-${nTomb}`;
         const uidCautela = `CAUTELA-${uidOriginal}`;
 
         const s = window.itemStatus[uidOriginal]?.status; 
         const sCautela = window.itemStatus[uidCautela]?.status; 
 
-        // Padronizado para entender 'ok'
+        // Checagem universal de conclusão
         if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
             conf++; 
             if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
@@ -314,9 +316,15 @@
     }); 
 
     const icon = item.querySelector('.status-icon'); 
+    
+    // Reset de classes antes de reavaliar
     item.classList.remove('status-ok', 'status-alert');
-    if (icon) icon.className = 'status-icon'; 
+    if (icon) {
+        icon.classList.remove('ok', 'alert');
+        icon.className = 'status-icon'; // Reset para o padrão dashed
+    }
 
+    // Se a quantidade de conferidos for igual ao total de tombamentos na tela
     if (conf === tombs.length && tombs.length > 0) { 
         if (alt > 0) { 
             if (icon) icon.classList.add('alert'); 
@@ -327,7 +335,7 @@
         } 
     } 
     
-    // Força a atualização do progresso visual do setor
+    // Força a atualização do contador do setor (badge 0/X)
     const setorEl = item.closest('.setor');
     if (setorEl) updateSetorStatus(setorEl);
 }
@@ -641,29 +649,32 @@ function renderizarConferencia() {
                 let htmlTombamentos = '';
                 let confCount = 0, altCount = 0;
 
-                item.tombamentos.forEach(t => {
-                    const uid = `${itemId}-${t.tomb}`;
-const pndHtml = montarPendenciaHtml(uid, t);
-const hasCarimboAtivo = pndHtml.length > 0;
-const statusU = window.itemStatus[uid]?.status;
-const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
+               item.tombamentos.forEach(t => {
+    const uid = `${itemId}-${t.tomb}`;
+    const pndHtml = montarPendenciaHtml(uid, t);
+    const hasCarimboAtivo = pndHtml.length > 0;
+    const statusU = window.itemStatus[uid]?.status;
+    const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
 
-htmlTombamentos += `
-    <div class="tombamento-container" 
-         data-id="${uid}" 
-         data-tomb="${t.tomb}" 
-         style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
-        <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>Tomb.: <b>${t.tomb}</b></span>
-            ${!hasCarimboAtivo ? `
-            <div class="tombamento-options">
-                <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
-                <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
-            </div>` : ''}
-        </div>
-        <div class="alerts-wrapper">${pndHtml}</div>
-    </div>`;
-                });
+    if (statusU === 'ok' || statusU === 'C/A' || statusC === 'cautela_ciente') confCount++;
+    if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
+
+    htmlTombamentos += `
+        <div class="tombamento-container" 
+             data-id="${uid}" 
+             data-tomb="${t.tomb}" 
+             style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+            <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
+                <span>Tomb.: <b>${t.tomb}</b></span>
+                ${!hasCarimboAtivo ? `
+                <div class="tombamento-options">
+                    <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
+                    <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
+                </div>` : ''}
+            </div>
+            <div class="alerts-wrapper">${pndHtml}</div>
+        </div>`;
+});
 
                 const classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
                 htmlItens += `<div class="item-conferencia ${classeMulti}" data-id="${itemId}">
