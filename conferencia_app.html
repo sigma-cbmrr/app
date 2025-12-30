@@ -1184,13 +1184,19 @@ function renderizarConferencia() {
 
             let listaMestra = listaMestraDoc.data().list;
             const itensConferidos = [];
+            
+            // --- 🛑 CONSTRUÇÃO DO EXTRATO DETALHADO 🛑 ---
+            let temQualquerAlteracao = false;
+            let linhasExtrato = [];
 
-            cautela.itens.forEach(cItem => {
-                const statusSelect = document.getElementById(`status-${cItem.id}-${cItem.tombamento || 'single'}`);
-                const obsInput = document.getElementById(`obs-${cItem.id}-${cItem.tombamento || 'single'}`);
+            cautela.itens.forEach((cItem, index) => {
+                const uidBusca = cItem.tombamento ? `${cItem.id_base || cItem.id}-${cItem.tombamento}` : (cItem.id_base || cItem.id);
+                const statusLocal = window.itemStatus[uidBusca];
                 
-                const statusFinal = statusSelect ? statusSelect.value : 'S/A';
-                const obsFinal = obsInput ? obsInput.value.trim() : '';
+                const statusFinal = statusLocal?.status === 'ok' ? 'S/A' : 'C/A';
+                const obsFinal = statusLocal?.obs || '';
+                
+                if (statusFinal === 'C/A') temQualquerAlteracao = true;
 
                 itensConferidos.push({
                     ...cItem,
@@ -1198,6 +1204,12 @@ function renderizarConferencia() {
                     obs_recebimento: obsFinal
                 });
 
+                // Monta a linha do extrato para este item
+                const identificador = cItem.tombamento ? `(Tomb.: ${cItem.tombamento})` : `(QTD: ${cItem.quantidade}UN)`;
+                const relatoItem = statusFinal === 'ok' ? 'S/A' : (obsFinal || 'C/A sem obs.');
+                linhasExtrato.push(`${index + 1}. ${cItem.nome} ${identificador}: ${relatoItem}`);
+
+                // Atualização da Lista Mestra (Estoque)
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
@@ -1217,7 +1229,6 @@ function renderizarConferencia() {
                             if (!mItem.historico_vida) mItem.historico_vida = [];
                             mItem.historico_vida.push(logHistorico);
 
-                            // --- CORREÇÃO CIRÚRGICA: ADICIONADO cItem.quantidade ---
                             const objetoCautelaAtualizado = {
                                 id: CAUTELA_ID,
                                 emitente: cData.emitente,
@@ -1225,7 +1236,7 @@ function renderizarConferencia() {
                                 data: cData.timestamp_emissao ? cData.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : dataAtual,
                                 status_item: statusFinal,
                                 obs_item: obsFinal,
-                                quantidade: cItem.quantidade // Garante que 4un não virem 1un no estoque
+                                quantidade: cItem.quantidade
                             };
 
                             if (cItem.tombamento && mItem.tombamentos) {
@@ -1234,13 +1245,9 @@ function renderizarConferencia() {
                                     return t;
                                 });
                             } else if (!cItem.tombamento && mItem.cautelas) {
-                                // Busca a cautela rascunho pelo ID e atualiza, ou adiciona se não existir
                                 const idxC = mItem.cautelas.findIndex(c => c.id === CAUTELA_ID);
-                                if (idxC !== -1) {
-                                    mItem.cautelas[idxC] = objetoCautelaAtualizado;
-                                } else {
-                                    mItem.cautelas.push(objetoCautelaAtualizado);
-                                }
+                                if (idxC !== -1) mItem.cautelas[idxC] = objetoCautelaAtualizado;
+                                else mItem.cautelas.push(objetoCautelaAtualizado);
                             }
                         }
                         return mItem;
@@ -1248,9 +1255,14 @@ function renderizarConferencia() {
                 }));
             });
 
+            // Finaliza o Título e o Corpo do Log
+            const icone = temQualquerAlteracao ? '⚠️' : '✅';
+            const tituloLog = `${icone} Recebido ${temQualquerAlteracao ? 'C/A' : 'S/A'} pelo destinatário: ${meuNomeCompleto}`;
+            const descricaoCompleta = `${tituloLog}\n${linhasExtrato.join('\n')}`;
+
             const logMovimentacao = {
                 data: dataAtual,
-                descricao: `✅ Recebido S/A pelo destinatário: ${meuNomeCompleto}`,
+                descricao: descricaoCompleta,
                 militar: meuNomeCompleto
             };
 
@@ -1366,23 +1378,41 @@ function renderizarConferencia() {
             let listaMestra = listaMestraDoc.data().list;
             const itensDevolvidos = [];
 
-            cautela.itens.forEach(cItem => {
-                const statusLocal = window.itemStatus[cItem.id_base || cItem.id] || window.itemStatus[`${cItem.id_base || cItem.id}-${cItem.tombamento}`];
+            // --- 🛑 CONSTRUÇÃO DO EXTRATO DETALHADO DE DEVOLUÇÃO 🛑 ---
+            let temQualquerAlteracao = false;
+            let linhasExtrato = [];
+
+            cautela.itens.forEach((cItem, index) => {
+                const uidBusca = cItem.tombamento ? `${cItem.id_base || cItem.id}-${cItem.tombamento}` : (cItem.id_base || cItem.id);
+                const statusLocal = window.itemStatus[uidBusca];
+                
                 const statusFinal = statusLocal?.status === 'ok' ? 'S/A' : 'C/A';
                 const obsFinal = statusLocal?.obs || "";
+
+                if (statusFinal === 'C/A') temQualquerAlteracao = true;
 
                 itensDevolvidos.push({
                     ...cItem, status_devolucao: statusFinal, obs_devolucao: obsFinal
                 });
 
+                // Monta a linha do extrato para o histórico
+                const identificador = cItem.tombamento ? `(Tomb.: ${cItem.tombamento})` : `(QTD: ${cItem.quantidade}UN)`;
+                const relatoItem = statusFinal === 'S/A' ? 'S/A' : (obsFinal || 'C/A sem obs.');
+                linhasExtrato.push(`${index + 1}. ${cItem.nome} ${identificador}: ${relatoItem}`);
+
+                // Reinclui o material no Estoque (Lista Mestra)
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
                         if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
                             if (!mItem.historico_vida) mItem.historico_vida = [];
                             mItem.historico_vida.push({
-                                evento: "RETORNO_DEVOLUCAO", id_doc: CAUTELA_ID, quem: meuNomeCompleto,
-                                data: dataAtual, estado_retorno: statusFinal, detalhes: obsFinal || "Retorno sem observações."
+                                evento: "RETORNO_DEVOLUCAO", 
+                                id_doc: CAUTELA_ID, 
+                                quem: meuNomeCompleto,
+                                data: dataAtual, 
+                                estado_retorno: statusFinal, 
+                                detalhes: statusFinal === 'C/A' ? `Retorno com avaria: ${obsFinal}` : "Retorno em perfeito estado (S/A)."
                             });
 
                             if (cItem.tombamento && mItem.tombamentos) {
@@ -1399,12 +1429,25 @@ function renderizarConferencia() {
                 }));
             });
 
+            // Finaliza o Título e o Corpo do Log de Movimentação
+            const icone = temQualquerAlteracao ? '⚠️' : '✅';
+            const tituloLog = `${icone} Devolução recebida ${temQualquerAlteracao ? 'C/A' : 'S/A'} pelo detentor: ${meuNomeCompleto}`;
+            const descricaoCompleta = `${tituloLog}\n${linhasExtrato.join('\n')}`;
+
+            const logMovimentacao = {
+                data: dataAtual,
+                descricao: descricaoCompleta,
+                militar: meuNomeCompleto
+            };
+
             transaction.update(cautelaRef, { 
                 status: 'CONCLUÍDA', 
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
                 receptor_final_completo: meuNomeCompleto, 
-                itens: itensDevolvidos 
+                itens: itensDevolvidos,
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logMovimentacao)
             });
+
             transaction.update(listaMestraRef, { list: listaMestra });
         });
 
