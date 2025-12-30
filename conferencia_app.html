@@ -370,38 +370,49 @@
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
+    // Garante que os números e badges globais estejam atualizados antes de decidir o foco
     updateOverallStatus();
 
-    // Mapeia todos os itens que podem receber foco
+    // Mapeia todos os elementos que podem receber o foco (tombamentos ou itens únicos)
     const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
     
-    // 1. Localiza o índice do item atual pelo data-id
+    // 1. Localiza o índice do alvo atual pelo data-id
     const indexAtual = todosAlvos.findIndex(el => el.getAttribute('data-id') === currentItemId);
 
-    // 2. Busca o PRÓXIMO alvo que NÃO esteja concluído
+    // 2. Busca o PRÓXIMO alvo pendente
     const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
         const id = el.getAttribute('data-id');
         const stNormal = window.itemStatus[id]?.status;
-        const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
+        const statusCautela = window.itemStatus[`CAUTELA-${id}`];
         
-        // Regra: Se está 'ok', 'C/A' ou 'ciente', já está concluído. PULA.
-        const jaConcluido = (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+        // Verifica se a cautela foi confirmada (pelo status ou pela flag booleana)
+        const isCiente = statusCautela?.status === 'cautela_ciente' || statusCautela?.cautela_confirmada === true;
+
+        // Regra: Se está 'ok', 'C/A', 'KEEP' ou 'ciente', pula porque já terminou.
+        const jaConcluido = (stNormal === 'ok' || stNormal === 'S/A' || stNormal === 'C/A' || stNormal === 'KEEP' || isCiente);
         return !jaConcluido;
     });
 
     if (proximoAlvo) {
+        // Rola suavemente para o próximo tombamento pendente
         setTimeout(() => {
             proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            proximoAlvo.style.transition = "box-shadow 0.3s";
-            proximoAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.4)";
+            
+            // Feedback visual verde sutil para guiar o olho do usuário
+            proximoAlvo.style.transition = "box-shadow 0.3s ease";
+            proximoAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.5)";
             setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
         }, 300);
     } else {
-        // Se não há mais nada no setor, verifica se deve fechar o acordeão
+        // Se não há próximo alvo NO SETOR, verifica se o setor como um todo foi finalizado
         const totalNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
         const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
-        if (concluidos >= totalNoSetor) {
-            setTimeout(() => { autoAdvanceSetor(currentSetor); }, 500);
+
+        // Se o número de itens pais concluídos atingiu o total do setor, retrai e avança
+        if (concluidos >= totalNoSetor && totalNoSetor > 0) {
+            setTimeout(() => { 
+                autoAdvanceSetor(currentSetor); 
+            }, 500);
         }
     }
 }
@@ -447,6 +458,8 @@
 }
 
         function autoAdvanceSetor(currentSetorElement) {
+    if (!currentSetorElement) return;
+    
     const todosSetores = Array.from(document.querySelectorAll('.setor'));
     const currentIndex = todosSetores.indexOf(currentSetorElement);
     
@@ -461,22 +474,25 @@
     if (currentIndex !== -1 && currentIndex < todosSetores.length - 1) {
         const nextSetorEl = todosSetores[currentIndex + 1];
         
-        // Limpeza de segurança: Garante que nenhum outro setor fique aberto
+        // Limpeza de segurança robusta: Garante que NENHUM outro setor fique aberto
         document.querySelectorAll('.setor-content.expanded').forEach(el => {
             el.classList.remove('expanded');
-            const arrow = el.previousElementSibling.querySelector('.arrow');
+            // Busca a seta dentro do setor pai, independente da ordem dos elementos
+            const pai = el.closest('.setor');
+            const arrow = pai ? pai.querySelector('.arrow') : null;
             if (arrow) arrow.textContent = '►';
         });
 
         const nextContent = nextSetorEl.querySelector('.setor-content');
         const nextArrow = nextSetorEl.querySelector('.arrow');
         
+        // Expande o próximo
         if (nextContent) nextContent.classList.add('expanded');
         if (nextArrow) nextArrow.textContent = '▼';
         
-        // Scroll suave para o topo do novo setor (compensando o header fixo se houver)
+        // Scroll suave ajustado para Header Fixo
         setTimeout(() => {
-            const yOffset = -70; // Ajuste este valor se o seu header fixo for maior
+            const yOffset = -80; // Aumentado para 80 para dar mais "respiro" no topo
             const y = nextSetorEl.getBoundingClientRect().top + window.pageYOffset + yOffset;
             window.scrollTo({ top: y, behavior: 'smooth' });
         }, 150);
@@ -487,8 +503,9 @@
         if (btnFin) {
             setTimeout(() => {
                 btnFin.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Efeito visual opcional para mostrar que o botão está liberado
+                // Feedback visual de "Botão Liberado"
                 if (!btnFin.disabled) {
+                    btnFin.style.transition = "transform 0.3s ease";
                     btnFin.style.transform = "scale(1.05)";
                     setTimeout(() => btnFin.style.transform = "scale(1)", 300);
                 }
