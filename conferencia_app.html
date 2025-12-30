@@ -820,6 +820,19 @@ function renderizarConferencia() {
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
     const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
     
+    // --- MODIFICAÇÃO CIRÚRGICA: CAPTURA E EXIBIÇÃO IMEDIATA DO CONFERENTE ---
+    const urlParamsLocal = new URLSearchParams(window.location.search);
+    userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
+    userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
+    userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
+    userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
+
+    const elHeader = document.getElementById('militar-info');
+    if (elHeader) {
+        elHeader.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
+    }
+    // -----------------------------------------------------------------------
+
     if (!ID_ALVO) return;
         
     const loadingMsg = document.getElementById('loading-message');
@@ -830,8 +843,7 @@ function renderizarConferencia() {
         if (!doc.exists) throw new Error("Documento não encontrado.");
         
         const data = doc.data();
-        const urlParams = new URLSearchParams(window.location.search);
-        const isDevolucaoFinal = urlParams.get('modo') === 'devolucao_final';
+        const isDevolucaoFinal = urlParamsLocal.get('modo') === 'devolucao_final';
         
         if (isCautela) {
             dadosConferencia = adaptarCautelaParaRender(data);
@@ -840,19 +852,13 @@ function renderizarConferencia() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
-                    
-                    // 🛡️ CORREÇÃO DE TIPO (DNA): Se o tombamento for igual ao nome, força SINGLE
+                    // CORREÇÃO DE TIPO (DNA): Se o tombamento for igual ao nome, força SINGLE
                     const tombamentoInvalido = item.tombamentos && item.tombamentos.some(t => t.tomb === item.nome || t.tomb === "S/T");
                     if (tombamentoInvalido || item.tipo === 'single') {
                         item.tipo = 'single';
-                        // Garante que a quantidadeEsperada seja lida corretamente (as 4 unidades)
                         item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     }
-
-                    // 🛡️ TRAVA DE VISUALIZAÇÃO (Modo Devolução)
-                    // Não apagamos os dados, apenas marcamos para a renderização ignorar o HTML
                     item._ocultarCarimbo = isDevolucaoFinal;
-
                     return item;
                 })
             }));
@@ -860,7 +866,6 @@ function renderizarConferencia() {
 
         window.dadosConferencia = dadosConferencia;
         
-        // ... (resto da sua lógica de títulos e nomes de local mantida)
         infoLocal = { 
             nome: isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista"),
             posto: isCautela ? `Destinatário: ${data.destinatario || data.destinatario_original_nome}` : (data.posto || "Geral")
@@ -869,7 +874,6 @@ function renderizarConferencia() {
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
 
-        // Dispara a renderização atualizada
         renderizarConferencia(); 
 
         if (typeof updateOverallStatus === "function") updateOverallStatus();
