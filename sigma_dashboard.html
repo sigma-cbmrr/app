@@ -7982,25 +7982,26 @@ async function abrirSeletorGlobalSubstituicao() {
     let qtdParaMovimentar = 1;
 
     try {
-        // --- 0. LÓGICA DE QUANTIDADE PARA ITENS SINGLE ---
-        // Se o uidNovo não tem 3 partes (segmentos), tratamos como Single
-        const partesID = uidNovo.split('-');
-        const ehSingle = partesID.length <= 2;
-
-        if (ehSingle) {
-            const inputQtd = prompt(`Quantas unidades de ${tombamentoNovo} deseja enviar?\n(Origem: ${listaOrigemNovo.toUpperCase()})`, "1");
-            if (inputQtd === null) return; // Cancelou o prompt
-            
-            qtdParaMovimentar = parseInt(inputQtd);
+        // --- 0. CAPTURA DE QUANTIDADE PELO MODAL (Nova Lógica) ---
+        // Tentamos encontrar o input de quantidade que inserimos no card
+        const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
+        
+        if (inputQtd) {
+            qtdParaMovimentar = parseInt(inputQtd.value);
+            // Validação simples de segurança
             if (isNaN(qtdParaMovimentar) || qtdParaMovimentar <= 0) {
-                alert("Quantidade inválida.");
+                alert("Por favor, insira uma quantidade válida.");
                 return;
             }
+        } else {
+            // Se não houver input (caso de itens Multi/Tombamento), o padrão é 1
+            qtdParaMovimentar = 1;
         }
 
         const confirmacao = confirm(`Confirmar substituição física?\n\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}\nRetirar de: ${listaOrigemNovo.toUpperCase()}\nPara: ${p.localId.toUpperCase()}`);
         if (!confirmacao) return;
 
+        // Fecha o modal seletor para dar feedback visual de que começou a gravar
         document.getElementById('modalSeletorEstoque').style.display = 'none';
         
         const batch = db.batch();
@@ -8024,7 +8025,8 @@ async function abrirSeletorGlobalSubstituicao() {
             if (ehOItem) {
                 return { 
                     ...it, 
-                    tombamento: ehSingle ? it.tombamento : tombamentoNovo, // Single mantém nome, Multi troca tomb
+                    // No single mantemos o nome original do contrato, no multi trocamos o tombamento
+                    tombamento: inputQtd ? it.tombamento : tombamentoNovo,
                     id_original_substituido: p.uidItem,
                     origem_lista: listaOrigemNovo, 
                     obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})` 
@@ -8038,7 +8040,7 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
         });
 
-        // 2. ATUALIZAR LISTA DOADORA (Dar baixa no saldo/carimbar tombamento)
+        // 2. ATUALIZAR LISTA DOADORA (Baixa no saldo/Reserva de tombamento)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         const doadoraData = docDoadora.data();
@@ -8046,7 +8048,6 @@ async function abrirSeletorGlobalSubstituicao() {
         const novaListaDoadora = doadoraData.list.map(setor => ({
             ...setor,
             itens: setor.itens.map(it => {
-                // Lógica para MULTI
                 if (it.tipo === 'multi' && it.tombamentos) {
                     it.tombamentos = it.tombamentos.map(t => {
                         if (`${it.id}-${t.tomb}` === uidNovo) {
@@ -8063,9 +8064,7 @@ async function abrirSeletorGlobalSubstituicao() {
                         }
                         return t;
                     });
-                } 
-                // Lógica para SINGLE (Pé de Cabra)
-                else if (it.id === uidNovo) {
+                } else if (it.id === uidNovo) {
                     it.cautelas = it.cautelas || [];
                     it.cautelas.push({
                         id: p.cautelaId,
@@ -8080,7 +8079,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }));
         batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        // 3. MARCAR AVARIADO NA LISTA RECEPTORA (Local do problema)
+        // 3. MARCAR AVARIADO NA LISTA RECEPTORA (Local da origem do defeito)
         const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
         const docReceptora = await listaReceptoraRef.get();
         if (docReceptora.exists) {
@@ -8110,14 +8109,14 @@ async function abrirSeletorGlobalSubstituicao() {
         batch.update(cautelaRef, { pendencias: pendenciasLimpas });
 
         await batch.commit();
-        alert(`✅ Substituição Concluída!\n\nMovimentadas ${qtdParaMovimentar} unidades.`);
+        alert(`✅ Substituição Concluída!\n\nForam movimentadas ${qtdParaMovimentar} unidades.`);
         location.reload();
 
     } catch (e) {
         console.error("Erro na Troca Cruzada:", e);
         alert("❌ Erro ao processar: " + e.message);
     }
-}	
+}
 	async function prepararSubstituicaoFisica() {
     if (!pendenciaSendoResolvida) return;
     const p = pendenciaSendoResolvida;
@@ -8150,28 +8149,34 @@ async function abrirSeletorGlobalSubstituicao() {
                             
                             // --- LÓGICA PARA ITEM SINGLE (Ex: Pé de Cabra) ---
                             if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0) {
-                                const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
-                                const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
+    const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
+    const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
 
-                                // Agora aceita o item mesmo sendo da mesma VTR, desde que haja saldo disponível
-                                if (saldoDisponivel > 0) {
-                                    totalEncontrado++;
-                                    const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (ESTOQUE LOCAL)` : nomeLocal;
-                                    
-                                    htmlAcumulado += `
-                                        <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                                            <div>
-                                                <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
-                                                <b style="color: #333;">${item.nome}</b><br>
-                                                <small style="color: #666;">Saldo disponível: ${saldoDisponivel} un</small>
-                                            </div>
-                                            <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
-                                                onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}')">
-                                                Selecionar
-                                            </button>
-                                        </div>`;
-                                }
-                            } 
+    if (saldoDisponivel > 0) {
+        totalEncontrado++;
+        const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (ESTOQUE LOCAL)` : nomeLocal;
+        
+        htmlAcumulado += `
+            <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <div style="flex: 1;">
+                    <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
+                    <b style="color: #333;">${item.nome}</b><br>
+                    <small style="color: #666;">Saldo: ${saldoDisponivel} un</small>
+                </div>
+                
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="number" id="qtd_subst_${item.id}_${docLista.id}" 
+                        value="1" min="1" max="${saldoDisponivel}" 
+                        style="width: 50px; padding: 8px; border: 1px solid #ccc; border-radius: 5px; text-align: center;">
+                    
+                    <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer;" 
+                        onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}')">
+                        Selecionar
+                    </button>
+                </div>
+            </div>`;
+    }
+}
                             // --- LÓGICA PARA ITEM MULTI (Ex: EPR) ---
                             else {
                                 item.tombamentos.forEach(t => {
