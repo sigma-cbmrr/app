@@ -546,10 +546,13 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
-    // --- 🛑 TRAVA DE SEGURANÇA: IDENTIFICAÇÃO DO MODO DE OPERAÇÃO ---
+    // --- 🛑 TRAVA DE SEGURANÇA E CONTEXTO ---
     const urlParams = new URLSearchParams(window.location.search);
     const isModoDevolucao = urlParams.get('modo') === 'devolucao_final' || 
                             (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao_final');
+    
+    // Identifica se estamos processando um Termo de Cautela ou uma Lista de Estoque
+    const isConferenciaDeCautela = !!urlParams.get('cautelaId');
 
     // --- SUB-FUNÇÃO: MONTAGEM DE CARDS DE PENDÊNCIA/CAUTELA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
@@ -584,8 +587,8 @@ function renderizarConferencia() {
                 </div>`;
         }
 
-        // 2. CARIMBOS DE CAUTELA (OCULTADOS NA DEVOLUÇÃO)
-        if (itemOuTomb.situacao !== 'AVARIADO' && !isModoDevolucao) {
+        // 2. CARIMBOS DE CAUTELA (OCULTADOS NA DEVOLUÇÃO/RECEBIMENTO)
+        if (itemOuTomb.situacao !== 'AVARIADO' && !isModoDevolucao && !isConferenciaDeCautela) {
             let listaDeCautelas = [];
             if (Array.isArray(itemOuTomb.cautelas) && itemOuTomb.cautelas.length > 0) {
                 listaDeCautelas = itemOuTomb.cautelas;
@@ -610,7 +613,7 @@ function renderizarConferencia() {
             });
         }
 
-        // 3. PENDÊNCIAS RELATADAS (MANUAIS)
+        // 3. PENDÊNCIAS RELATADAS
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
@@ -633,8 +636,7 @@ function renderizarConferencia() {
             const nomeEscapado = item.nome.replace(/'/g, "\\'");
             const itemId = item.id;
 
-            // 🛑 CORREÇÃO CRÍTICA: Valida se o item é realmente MULTI ou se é erro de cadastro
-            // Se o primeiro tombamento tem o nome igual ao do item, tratamos como SINGLE.
+            // 🛑 CORREÇÃO: Valida se o item é realmente MULTI ou Erro de Cadastro
             const isErroCadastro = item.tombamentos && item.tombamentos.length > 0 && item.tombamentos[0].tomb === item.nome;
             const isRealMulti = item.tipo === 'multi' && item.tombamentos && !isErroCadastro;
 
@@ -679,7 +681,9 @@ function renderizarConferencia() {
                 const currentStatus = window.itemStatus[itemId]?.status;
                 
                 const totalEsp = Number(item.quantidadeEsperada) || 0;
-                const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                
+                // 🛑 CORREÇÃO DE SALDO: Se for recebimento de cautela, o totalCaut deve ser 0 para não abater o saldo de si mesmo
+                const totalCaut = isConferenciaDeCautela ? 0 : (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 
                 const saldoReal = totalEsp - totalCaut - totalPend;
@@ -768,40 +772,43 @@ function renderizarConferencia() {
 }
     
       function adaptarCautelaParaRender(cautelaData) {
-          if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
+    if (!cautelaData.itens || cautelaData.itens.length === 0) return [];
 
-            const setorCautela = {
-            id: cautelaData.cautela_id,
-            nome: "ITENS CAUTELADOS",
-            itens: cautelaData.itens.map(cItem => {
+    const setorCautela = {
+        id: cautelaData.cautela_id,
+        nome: "MATERIAIS DESTE TERMO",
+        itens: cautelaData.itens.map(cItem => {
             
-            let tipo = cItem.tombamento ? 'multi' : 'single';
+            // Verifica se é um item com tombamento ou apenas quantidade
+            let tipo = (cItem.tombamento && cItem.tombamento !== "" && cItem.tombamento !== cItem.nome) ? 'multi' : 'single';
             let tombamentos = null;
 
+            // Se for multi, cria a estrutura de tombamento único
             if (tipo === 'multi') {
                 tombamentos = [{
                     tomb: cItem.tombamento,
                     id_completo: cItem.id_completo || `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
-                    // O item da cautela já carrega seu próprio estado (JSON) se houver
-                    cautela: cItem.cautela || {
+                    cautela: {
                         id: cautelaData.cautela_id,
                         destinatario: cautelaData.destinatario || cautelaData.destinatario_original_nome,
-                        data: cautelaData.timestamp_emissao ? new Date(cautelaData.timestamp_emissao.seconds * 1000).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')
-                    },
-                    pendencia: cItem.pendencia || null
+                        data: new Date().toLocaleDateString('pt-BR')
+                    }
                 }];
-                cItem.quantidade = 1; 
             }
+
+            // 🛑 AQUI ESTÁ A CHAVE: 
+            // A quantidadeEsperada para a tela de RECEBIMENTO deve ser 
+            // exatamente a quantidade que consta no documento da cautela.
+            const qtdNaCautela = Number(cItem.quantidade) || 1;
 
             return {
                 id: cItem.id_base || cItem.id,
                 nome: cItem.nome,
-                quantidadeEsperada: cItem.quantidade || 1,
+                quantidadeEsperada: qtdNaCautela, // Agora puxa as 4 unidades
                 tipo: tipo,
                 tombamentos: tombamentos,
-                // Preserva o carimbo JSON para itens de quantidade (Single)
-                cautelas: cItem.cautelas || [],
-                pendencia: cItem.pendencia || null
+                cautelas: [], // Limpo para não gerar carimbo laranja na devolução
+                situacao: "DISPONÍVEL" 
             };
         })
     };
