@@ -7747,8 +7747,15 @@ async function abrirGestaoPendenciasCautela() {
 
         const dataCautela = docCautela.data();
         const dataRegistro = new Date().toLocaleString('pt-BR');
-        const militarLogado = (typeof currentUserData !== 'undefined') ? 
-                              `${currentUserData.posto} ${currentUserData.nome_guerra}` : "Gestor";
+
+        // 🛑 CORREÇÃO CIRÚRGICA: Montagem do nome com QUADRO (Ex: CAP QPCBM VIDO)
+        let militarLogado = "Gestor";
+        if (typeof currentUserData !== 'undefined') {
+            const posto = currentUserData.posto || "";
+            const quadro = currentUserData.quadro || "";
+            const nomeGuerra = currentUserData.nome_guerra || "";
+            militarLogado = `${posto} ${quadro} ${nomeGuerra}`.replace(/\s+/g, ' ').trim();
+        }
 
         // 1. PREPARAÇÃO DO LOG PARA O HISTÓRICO DA CAUTELA
         const logRecolhimento = {
@@ -7782,7 +7789,6 @@ async function abrirGestaoPendenciasCautela() {
         }
 
         // 4. ATUALIZAÇÃO DA LISTA DE CONFERÊNCIA (ESTOQUE)
-        // Precisamos marcar o item como AVARIADO para ele não ficar disponível para nova cautela
         const novaListaMestra = docLista.data().list.map(setor => ({
             ...setor,
             itens: (setor.itens || []).map(it => {
@@ -7792,13 +7798,14 @@ async function abrirGestaoPendenciasCautela() {
                 if (idBaseMatch && (it.tipo === 'single' || !it.tombamentos)) {
                     // Remove a cautela do array de cautelas do item single
                     it.cautelas = (it.cautelas || []).filter(c => c.id !== p.cautelaId);
+                    
                     // Adiciona log no histórico de vida do item
                     if (!it.historico_vida) it.historico_vida = [];
                     it.historico_vida.push({
                         evento: "RECOLHIDO_AVARIADO",
                         data: dataRegistro,
                         detalhes: `Recolhido ${p.quantidade} un para manutenção. Motivo: ${p.motivo}`,
-                        quem: militarLogado
+                        quem: militarLogado // Agora com Quadro
                     });
                 }
 
@@ -7809,6 +7816,15 @@ async function abrirGestaoPendenciasCautela() {
                             delete t.cautela; // Tira o nome do militar do tombamento
                             t.situacao = "AVARIADO"; // Trava o item para futuras cautelas
                             t.motivo_recolhimento = p.motivo;
+                            
+                            // Também registra no histórico do item multi se necessário
+                            if (!it.historico_vida) it.historico_vida = [];
+                            it.historico_vida.push({
+                                evento: "RECOLHIDO_AVARIADO",
+                                data: dataRegistro,
+                                detalhes: `Tombamento ${t.tomb} recolhido para manutenção. Motivo: ${p.motivo}`,
+                                quem: militarLogado
+                            });
                         }
                         return t;
                     });
@@ -7820,22 +7836,25 @@ async function abrirGestaoPendenciasCautela() {
         // 5. EXECUÇÃO DO BATCH
         const batch = db.batch();
         
-        // Atualiza a Cautela (Limpa pendência, atualiza carga e add histórico)
+        // Atualiza a Cautela
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: pendenciasRestantes,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logRecolhimento)
         });
 
-        // Atualiza a Lista Mestra (Ajusta saldos e marca avarias)
+        // Atualiza a Lista Mestra
         batch.update(listaRef, { list: novaListaMestra });
 
         await batch.commit();
 
         alert("✅ Recolhimento efetuado!\nO material foi retirado da carga do militar e marcado como 'Avariado' no estoque.");
         
-        document.getElementById('modalDecisaoGestor').style.display = 'none';
-        fecharTabela(); // Fecha a tabela de pendências do gestor
+        if (document.getElementById('modalDecisaoGestor')) {
+            document.getElementById('modalDecisaoGestor').style.display = 'none';
+        }
+        
+        if (typeof fecharTabela === 'function') fecharTabela(); 
         if (typeof loadCaaData === 'function') await loadCaaData(); 
 
     } catch (e) {
@@ -7965,13 +7984,20 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
     
-    // 1. RECUPERAÇÃO SEGURA DO USUÁRIO (Compatível com seu log: militar)
+    // 1. RECUPERAÇÃO SEGURA E COMPLETA DO GESTOR (Incluindo Quadro)
     let nomeAutor = "Gestor";
     try {
         const u = (typeof currentUserData !== 'undefined' && currentUserData) ? currentUserData : 
                   JSON.parse(localStorage.getItem('user_data') || '{}');
-        nomeAutor = `${u.posto || ''} ${u.nome_guerra || 'Gestor'}`.trim();
-    } catch (e) { console.error("Erro user:", e); }
+        
+        const posto = u.posto || u.posto_grad || "";
+        const quadro = u.quadro || u.quadro_mil || "";
+        const nomeGuerra = u.nome_guerra || "";
+        
+        nomeAutor = `${posto} ${quadro} ${nomeGuerra}`.replace(/\s+/g, ' ').trim() || "Gestor";
+    } catch (e) { 
+        console.error("Erro ao recuperar dados do usuário:", e); 
+    }
 
     let qtdParaMovimentar = 1;
 
@@ -7981,10 +8007,11 @@ async function abrirSeletorGlobalSubstituicao() {
 
         if (!confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`)) return;
 
-        document.getElementById('modalSeletorEstoque').style.display = 'none';
+        if (document.getElementById('modalSeletorEstoque')) {
+            document.getElementById('modalSeletorEstoque').style.display = 'none';
+        }
         
         const batch = db.batch();
-        const timestamp = firebase.firestore.Timestamp.now();
         const dataFormatada = new Date().toLocaleString('pt-BR');
 
         // 2. BUSCA DADOS DA CAUTELA
@@ -7993,23 +8020,22 @@ async function abrirSeletorGlobalSubstituicao() {
         if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // 3. CONSTRUÇÃO DO LOG (Chaves: data, descricao, militar - conforme seu showCautelaDetails)
+        // 3. CONSTRUÇÃO DO LOG DETALHADO
         const logObjeto = {
             data: dataFormatada,
-            descricao: `Substituição Cruzada: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} (Origem: ${listaOrigemNovo.toUpperCase()})`,
-            militar: nomeAutor,
+            descricao: `Substituição Cruzada: Item avariado substituído por ${tombamentoNovo || 'Material'} (${qtdParaMovimentar} un). Origem: ${listaOrigemNovo.toUpperCase()}.`,
+            militar: nomeAutor, // Agora com Posto + Quadro + Nome de Guerra
             tipo: "SUBSTITUICAO_CRUZADA"
         };
 
-        // 4. LIMPEZA DA PENDÊNCIA (Usa o campo correto: pendencias_ativas)
+        // 4. LIMPEZA DA PENDÊNCIA (Sai do Dashboard do Gestor)
         const pendenciasLimpas = (dadosC.pendencias_ativas || []).filter(pend => {
-            // Remove se o ID da solicitação bater OU se o index do item bater
-            const matchSolicitacao = pend.id_solicitacao === p.solicitacaoId;
+            const matchSolicitacao = String(pend.id_solicitacao) === String(p.solicitacaoId);
             const matchIndex = pend.item_index === p.item_index;
             return !(matchSolicitacao || matchIndex);
         });
 
-        // 5. ATUALIZAÇÃO DOS ITENS NO CONTRATO
+        // 5. ATUALIZAÇÃO DA CARGA NA CAUTELA (Substitui a informação do item)
         const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
             if (ehOItem) {
@@ -8017,7 +8043,7 @@ async function abrirSeletorGlobalSubstituicao() {
                     ...it, 
                     tombamento: tombamentoNovo || it.tombamento || "S/T",
                     origem_lista: listaOrigemNovo,
-                    obs: `Reposto ${qtdParaMovimentar} un via ${listaOrigemNovo} em ${dataFormatada}`
+                    obs: `Substituído em ${dataFormatada} por ${nomeAutor}. Origem: ${listaOrigemNovo}`
                 };
             }
             return it;
@@ -8025,29 +8051,54 @@ async function abrirSeletorGlobalSubstituicao() {
 
         batch.update(cautelaRef, {
             itens: itensAtualizados,
-            pendencias_ativas: pendenciasLimpas, // LIMPA O CAMPO CORRETO
+            pendencias_ativas: pendenciasLimpas,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
         });
 
-        // 6. BAIXA NO DOADOR (listas_conferencia)
+        // 6. ATUALIZAÇÃO NA LISTA DOADORA (Baixa no estoque de origem)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
+        
         if (docDoadora.exists) {
             const doadoraData = docDoadora.data();
             const novaListaDoadora = doadoraData.list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    if (it.id === uidNovo || (it.tipo === 'multi' && it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
+                    // Verifica se o ID bate ou se algum tombamento do item bate com o UID novo
+                    const idMatch = it.id === uidNovo;
+                    const tombMatch = it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo);
+
+                    if (idMatch || tombMatch) {
+                        // Registro de auditoria no histórico de vida do item que saiu do estoque
+                        if (!it.historico_vida) it.historico_vida = [];
+                        it.historico_vida.push({
+                            evento: "SAIDA_SUBSTITUICAO_CRUZADA",
+                            data: dataFormatada,
+                            detalhes: `Item enviado para Cautela ${p.cautelaId} em substituição de material avariado.`,
+                            quem: nomeAutor
+                        });
+
                         // Se for single
                         if (it.id === uidNovo) {
                             it.cautelas = it.cautelas || [];
-                            it.cautelas.push({ id: p.cautelaId, quantidade: qtdParaMovimentar, data: dataFormatada, tipo: "EMPRESTIMO" });
+                            it.cautelas.push({ 
+                                id: p.cautelaId, 
+                                quantidade: qtdParaMovimentar, 
+                                data: dataFormatada, 
+                                destinatario: dadosC.destinatario_original_nome,
+                                tipo: "EMPRESTIMO_SUBSTITUICAO" 
+                            });
                         } 
                         // Se for multi
-                        else {
+                        else if (it.tombamentos) {
                             it.tombamentos = it.tombamentos.map(t => {
                                 if (`${it.id}-${t.tomb}` === uidNovo) {
-                                    t.cautela = { id: p.cautelaId, destinatario: dadosC.destinatario_original_nome, data: dataFormatada, emprestimo: true };
+                                    t.cautela = { 
+                                        id: p.cautelaId, 
+                                        destinatario: dadosC.destinatario_original_nome, 
+                                        data: dataFormatada, 
+                                        emprestimo: true 
+                                    };
                                 }
                                 return t;
                             });
@@ -8060,12 +8111,12 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert(`✅ Substituição Concluída!`);
+        alert(`✅ Substituição Concluída com Sucesso!`);
         location.reload();
 
     } catch (e) {
-        console.error("Erro Crítico:", e);
-        alert("❌ Erro: " + e.message);
+        console.error("Erro Crítico na Substituição Cruzada:", e);
+        alert("❌ Erro ao processar substituição: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
