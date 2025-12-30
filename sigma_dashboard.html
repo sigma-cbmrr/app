@@ -8040,28 +8040,42 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
         });
 
-        // 3. ATUALIZAÇÃO DA LISTA MESTRA DE ORIGEM (Avariado)
+        // 🛑 3. ATUALIZAÇÃO DA LISTA MESTRA DE ORIGEM (REFORÇADA COM DNA BASE)
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
         if (docOrigemAvaria.exists) {
             const listData = docOrigemAvaria.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    if (it.id === (p.id_base || p.uidItem)) {
-                        // Remove carimbo de cautela (Laranja)
-                        if (it.cautelas) it.cautelas = it.cautelas.filter(c => c.id !== p.cautelaId);
+                    // Lógica de match por DNA (Primeira parte do ID antes do hífen)
+                    const idListaCurto = String(it.id).split('-')[0];
+                    const idPendenciaCurto = String(p.id_base || p.uidItem || "").split('-')[0];
+
+                    if (it.id === p.uidItem || it.id === p.id_base || idListaCurto === idPendenciaCurto) {
                         
-                        // 🛑 CRIA CARIMBO DE PENDÊNCIA (Vermelho) PARA O AVARIADO
+                        // A. Remove carimbo de cautela (Laranja)
+                        if (it.cautelas) {
+                            it.cautelas = it.cautelas.filter(c => c.id !== p.cautelaId);
+                        }
+                        
+                        // B. CRIA CARIMBO DE PENDÊNCIA (Vermelho) PARA O AVARIADO
                         const novaPendenciaAvaria = {
                             id: "AVARIA-" + Date.now(),
                             quantidade: qtdParaMovimentar,
                             descricao: `MATERIAL AVARIADO: Recolhido de ${dadosC.destinatario_original_nome} via Troca Cruzada. Motivo: ${p.motivo}`,
                             autor_nome: nomeAutor,
                             data_criacao: dataFormatada,
-                            status_gestao: "MANUTENCAO"
+                            status_gestao: "MANUTENCAO",
+                            tipo: "PENDENCIA" // Garante a cor vermelha no App
                         };
+
                         if (!it.pendencias_ids) it.pendencias_ids = [];
-                        it.pendencias_ids.push(novaPendenciaAvaria);
+                        
+                        // Evita duplicidade de carimbo de avaria para o mesmo evento
+                        const jaExiste = it.pendencias_ids.some(pen => pen.descricao.includes(p.cautelaId));
+                        if (!jaExiste) {
+                            it.pendencias_ids.push(novaPendenciaAvaria);
+                        }
 
                         if (it.tombamentos) {
                             it.tombamentos = it.tombamentos.map(t => {
@@ -8072,6 +8086,15 @@ async function abrirSeletorGlobalSubstituicao() {
                                 return t;
                             });
                         }
+
+                        // C. Registra no histórico de vida do item físico
+                        if (!it.historico_vida) it.historico_vida = [];
+                        it.historico_vida.push({
+                            evento: "RECOLHIDO_AVARIADO",
+                            data: dataFormatada,
+                            detalhes: `Unidade retornada avariada da Cautela ${p.cautelaId}.`,
+                            quem: nomeAutor
+                        });
                     }
                     return it;
                 })
@@ -8087,16 +8110,17 @@ async function abrirSeletorGlobalSubstituicao() {
             const novaListaDoadora = doadoraData.list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    if (it.id === uidNovo || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
-                        // Apenas registra no Histórico de Vida do item doador
+                    const idListaCurto = String(it.id).split('-')[0];
+                    const idNovoCurto = String(uidNovo).split('-')[0];
+
+                    if (it.id === uidNovo || idListaCurto === idNovoCurto || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "SAIDA_TROCA_CRUZADA",
                             data: dataFormatada,
-                            detalhes: `Item saiu para suprir troca na Cautela ${p.cautelaId}. Carga registrada no documento da cautela.`,
+                            detalhes: `Item saiu para suprir troca na Cautela ${p.cautelaId}.`,
                             quem: nomeAutor
                         });
-                        // 🛑 REMOVIDO: it.cautelas.push ou t.cautela = carimbo
                     }
                     return it;
                 })
@@ -8105,7 +8129,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert(`✅ Troca concluída!\nItem novo enviado e item antigo marcado como PENDÊNCIA (Vermelho) no local de origem.`);
+        alert(`✅ Troca concluída!\nO item avariado virou uma Pendência no local de origem.`);
         location.reload();
 
     } catch (e) {
