@@ -366,34 +366,23 @@
     const arrow = header.querySelector('.arrow');
     const isExpanding = !content.classList.contains('expanded');
 
-    // 1. Se o setor já está aberto, apenas fecha ele
-    if (!isExpanding) {
+    // Fecha todos os outros antes de abrir o novo
+    if (isExpanding) {
+        document.querySelectorAll('.setor-content.expanded').forEach(openContent => {
+            openContent.classList.remove('expanded');
+            // Busca a seta do setor que está sendo fechado
+            const otherArrow = openContent.closest('.setor').querySelector('.arrow');
+            if (otherArrow) otherArrow.textContent = '►';
+        });
+        
+        content.classList.add('expanded');
+        if (arrow) arrow.textContent = '▼';
+    } else {
+        // Se já estava aberto, apenas fecha
         content.classList.remove('expanded');
         if (arrow) arrow.textContent = '►';
-        return;
     }
-
-    // 2. Se for abrir, primeiro fecha TODOS os outros setores que estiverem abertos
-    document.querySelectorAll('.setor-content.expanded').forEach(openContent => {
-        openContent.classList.remove('expanded');
-        // Busca a seta de forma segura subindo até o pai (.setor)
-        const parentSetor = openContent.closest('.setor');
-        const otherArrow = parentSetor ? parentSetor.querySelector('.arrow') : null;
-        if (otherArrow) otherArrow.textContent = '►';
-    });
-
-    // 3. Abre o setor clicado e gira a seta
-    content.classList.add('expanded');
-    if (arrow) arrow.textContent = '▼';
-
-    // 4. Scroll suave para o topo do setor clicado (Opcional, melhora UX no Mobile)
-    setTimeout(() => {
-        const yOffset = -75; 
-        const y = header.getBoundingClientRect().top + window.pageYOffset + yOffset;
-        window.scrollTo({ top: y, behavior: 'smooth' });
-    }, 300);
 }
-
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
@@ -487,57 +476,40 @@
         function autoAdvanceSetor(currentSetorElement) {
     if (!currentSetorElement) return;
     
-    // 1. Re-mapeia todos os setores presentes na tela no momento exato da chamada
     const todosSetores = Array.from(document.querySelectorAll('.setor'));
     const currentIndex = todosSetores.indexOf(currentSetorElement);
     
-    console.log(`Avançando do setor índice: ${currentIndex} de ${todosSetores.length - 1}`);
-
-    // 2. AÇÃO OBRIGATÓRIA: Retrair o setor atual (independente de ser o último ou não)
+    // 1. Fecha o atual e garante que a seta mude
     const currentContent = currentSetorElement.querySelector('.setor-content');
     const currentArrow = currentSetorElement.querySelector('.arrow');
-    
     if (currentContent) currentContent.classList.remove('expanded');
     if (currentArrow) currentArrow.textContent = '►';
 
-    // 3. DECISÃO DE FLUXO: Existe um próximo?
+    // 2. Busca o próximo
     if (currentIndex !== -1 && currentIndex < todosSetores.length - 1) {
-        // --- CASO: EXISTE PRÓXIMO SETOR ---
         const nextSetorEl = todosSetores[currentIndex + 1];
         const nextContent = nextSetorEl.querySelector('.setor-content');
         const nextArrow = nextSetorEl.querySelector('.arrow');
 
-        // Limpeza de segurança: Garante que NENHUM outro setor ficou aberto por erro
-        document.querySelectorAll('.setor-content.expanded').forEach(el => {
-            el.classList.remove('expanded');
-            const pai = el.closest('.setor');
-            if (pai && pai.querySelector('.arrow')) pai.querySelector('.arrow').textContent = '►';
+        // Limpeza Total: Garante que nenhum outro setor (inclusive os anteriores) fique aberto
+        document.querySelectorAll('.setor-content').forEach(c => {
+            if (c !== nextContent) {
+                c.classList.remove('expanded');
+                const seta = c.closest('.setor').querySelector('.arrow');
+                if (seta) seta.textContent = '►';
+            }
         });
 
-        // Abre o próximo setor
+        // Abre o próximo e gira a seta
         if (nextContent) nextContent.classList.add('expanded');
         if (nextArrow) nextArrow.textContent = '▼';
         
-        // Scroll suave para o topo do novo setor
+        // Scroll suave
         setTimeout(() => {
-            const yOffset = -80; 
+            const yOffset = -80;
             const y = nextSetorEl.getBoundingClientRect().top + window.pageYOffset + yOffset;
             window.scrollTo({ top: y, behavior: 'smooth' });
-        }, 150);
-
-    } else {
-        // --- CASO: ERA O ÚLTIMO SETOR ---
-        const btnFin = document.getElementById('btn-finalizar');
-        if (btnFin) {
-            setTimeout(() => {
-                btnFin.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Feedback visual de botão liberado
-                if (!btnFin.disabled) {
-                    btnFin.style.transform = "scale(1.05)";
-                    setTimeout(() => btnFin.style.transform = "scale(1)", 300);
-                }
-            }, 300);
-        }
+        }, 300); // Tempo maior para esperar a animação do CSS começar
     }
 }
         function isElementInViewport(el) { const rect = el.getBoundingClientRect(); return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth)); }
