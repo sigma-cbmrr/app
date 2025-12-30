@@ -294,15 +294,19 @@
         function updateItemMainStatusDisplay(item) { 
     if (item.dataset.type === 'single') return; 
     
+    const itemIdBase = item.getAttribute('data-id'); 
     const tombs = item.querySelectorAll('.tombamento-container'); 
     let conf = 0, alt = 0; 
 
     tombs.forEach(t => { 
-        const uidOriginal = `${item.dataset.id}-${t.dataset.tomb}`;
+        const nTomb = t.getAttribute('data-tomb');
+        const uidOriginal = `${itemIdBase}-${nTomb}`;
         const uidCautela = `CAUTELA-${uidOriginal}`;
+
         const s = window.itemStatus[uidOriginal]?.status; 
         const sCautela = window.itemStatus[uidCautela]?.status; 
 
+        // 🛑 Reconhece 'ok' (S/A), 'C/A', 'KEEP' ou 'cautela_ciente' como CONFERIDO
         if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
             conf++; 
             if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
@@ -322,6 +326,10 @@
             item.classList.add('status-ok'); 
         } 
     } 
+    
+    // Atualiza o contador de progresso do setor (badge 0/X)
+    const setorEl = item.closest('.setor');
+    if (setorEl) updateSetorStatus(setorEl);
 }
         function toggleSetor(header) { 
             const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); 
@@ -338,36 +346,45 @@
     const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
 
     if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
-        setTimeout(() => {
-            autoAdvanceSetor(currentSetor); 
-        }, 550);
+        setTimeout(() => { autoAdvanceSetor(currentSetor); }, 550);
     } else {
         const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
         
         const indexAtual = todosAlvos.findIndex(el => {
-            const id = el.classList.contains('tombamento-container') 
-                ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
-                : el.getAttribute('data-id');
+            let id;
+            if (el.classList.contains('tombamento-container')) {
+                const paiId = el.closest('.item-conferencia').getAttribute('data-id');
+                const tomb = el.getAttribute('data-tomb');
+                id = `${paiId}-${tomb}`;
+            } else {
+                id = el.getAttribute('data-id');
+            }
             return id === currentItemId;
         });
 
         const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
-            const id = el.classList.contains('tombamento-container') 
-                ? `${el.closest('.item-conferencia').getAttribute('data-id')}-${el.getAttribute('data-tomb')}`
-                : el.getAttribute('data-id');
+            let id;
+            if (el.classList.contains('tombamento-container')) {
+                const paiId = el.closest('.item-conferencia').getAttribute('data-id');
+                const tomb = el.getAttribute('data-tomb');
+                id = `${paiId}-${tomb}`;
+            } else {
+                id = el.getAttribute('data-id');
+            }
             
             const stNormal = window.itemStatus[id]?.status;
             const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
             
-            // 🛑 CORREÇÃO: Se stNormal for 'ok', ele NÃO é um alvo pendente. Pula para o próximo.
-            return (!stNormal || stNormal === 'pending') && (stNormal !== 'ok') && (stCautela !== 'cautela_ciente');
+            // 🛑 Pula itens que já estão 'ok' ou 'cautela_ciente'
+            const jaConcluido = (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+            return !jaConcluido;
         });
 
         if (proximoAlvo) {
             setTimeout(() => {
                 proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 proximoAlvo.style.transition = "box-shadow 0.3s";
-                proximoAlvo.style.boxShadow = "0 0 10px rgba(245, 124, 0, 0.5)";
+                proximoAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.4)";
                 setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
             }, 300);
         }
@@ -650,17 +667,19 @@ function renderizarConferencia() {
                     if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
 
                     htmlTombamentos += `
-                        <div class="tombamento-container" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
-                            <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>Tomb.: <b>${t.tomb}</b></span>
-                                ${!hasCarimboAtivo ? `
-                                <div class="tombamento-options">
-                                    <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
-                                    <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
-                                </div>` : ''}
-                            </div>
-                            <div class="alerts-wrapper">${pndHtml}</div>
-                        </div>`;
+    <div class="tombamento-container" 
+         data-tomb="${t.tomb}" 
+         style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+        <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Tomb.: <b>${t.tomb}</b></span>
+            ${!hasCarimboAtivo ? `
+            <div class="tombamento-options">
+                <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
+                <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
+            </div>` : ''}
+        </div>
+        <div class="alerts-wrapper">${pndHtml}</div>
+    </div>`;
                 });
 
                 const classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
