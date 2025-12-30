@@ -618,6 +618,7 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
     
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
+// --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
     const antigos = mainContent.querySelectorAll('.setor'); 
@@ -627,7 +628,6 @@ function renderizarConferencia() {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
     const urlParams = new URLSearchParams(window.location.search);
-    // Identifica se estamos em modo de recebimento de cautela ou devolução
     const isConferenciaDeCautela = !!urlParams.get('cautelaId');
 
     const montarPendenciaHtml = (uid, itemOuTomb) => {
@@ -637,7 +637,6 @@ function renderizarConferencia() {
         const statusCautela = window.itemStatus[cautelaUid] || {};
         const isCiente = statusCautela.status === 'cautela_ciente' || statusCautela.cautela_confirmada === true;
 
-        // 🛑 LÓGICA CIRÚRGICA: Se for conferência de cautela/recebimento, ignoramos os carimbos laranjas
         if (!isConferenciaDeCautela) {
             let listaDeCautelas = [];
             if (itemOuTomb.cautela) listaDeCautelas = [itemOuTomb.cautela];
@@ -667,7 +666,6 @@ function renderizarConferencia() {
             });
         }
 
-        // Mantém as pendências (carimbos vermelhos) sempre visíveis para decisão do conferente
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
@@ -737,9 +735,12 @@ function renderizarConferencia() {
                 item.tombamentos.forEach(t => {
                     const uid = `${itemId}-${t.tomb}`;
                     const pndHtml = montarPendenciaHtml(uid, t);
-                    const hasPendencia = (t.pendencias_ids && t.pendencias_ids.length > 0); 
-                    // 🛑 Nota: No modo Cautela, a hasPendencia ignora o carimbo laranja pela regra da montarPendenciaHtml
                     
+                    // 🛑 CORREÇÃO CIRÚRGICA: Oculta o S/A se houver Pendência OU se houver Cautela
+                    const hasPendenciaReal = (t.pendencias_ids && t.pendencias_ids.length > 0);
+                    const hasCautelaReal = (!!t.cautela && !isConferenciaDeCautela);
+                    const ocultarSA = hasPendenciaReal || hasCautelaReal;
+
                     const statusU = window.itemStatus[uid]?.status;
                     const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
                     const isCiente = statusC === 'cautela_ciente' || window.itemStatus[`CAUTELA-${uid}`]?.cautela_confirmada === true;
@@ -754,11 +755,13 @@ function renderizarConferencia() {
                             <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
                                 <span>Tomb.: <b>${t.tomb}</b></span>
                                 <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                    ${!hasPendencia ? `
+                                    
+                                    ${!ocultarSA ? `
                                     <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" 
                                             onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
                                     ` : ''}
-                                    <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" 
+
+                                    <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" 
                                             onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">
                                             <span class="d-pc-inline">+ Alteração</span>
                                             <span class="d-pc-none">+ Alt</span>
@@ -784,8 +787,11 @@ function renderizarConferencia() {
                 const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 const saldoDisponivel = totalOriginal - totalCaut - totalPend;
-                const temAlteracao = (totalCaut + totalPend) > 0;
-                const corSaldo = temAlteracao ? '#d90f23' : '#1b8a3e';
+                
+                // 🛑 CORREÇÃO CIRÚRGICA: Oculta o S/A se houver Pendência OU se houver Cautela (Single)
+                const hasPendenciaReal = (item.pendencias_ids && item.pendencias_ids.length > 0);
+                const hasCautelaReal = (item.cautelas && item.cautelas.length > 0 && !isConferenciaDeCautela);
+                const ocultarSA = hasPendenciaReal || hasCautelaReal;
 
                 const currentStatus = window.itemStatus[itemId]?.status;
                 const statusC = window.itemStatus[`CAUTELA-${itemId}`]?.status;
@@ -799,17 +805,19 @@ function renderizarConferencia() {
                             <span class="status-icon ${classeSingle === 'status-ok' ? 'ok' : (classeSingle === 'status-alert' ? 'alert' : '')}"></span>
                             <div style="display:flex; flex-direction:column">
                                 <span class="item-label">${item.nome}</span>
-                                <span style="font-size:0.82em; color:${corSaldo}; font-weight:bold;">
+                                <span style="font-size:0.82em; color:${(hasPendenciaReal || hasCautelaReal) ? '#d90f23' : '#1b8a3e'}; font-weight:bold;">
                                     DISPONÍVEL: ${saldoDisponivel} de ${totalOriginal}
                                 </span>
                             </div>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                            ${!temAlteracao ? `
+                            
+                            ${!ocultarSA ? `
                             <button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" 
                                     onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>
                             ` : ''}
-                            <button type="button" class="action-button ca-alert ${temAlteracao ? 'active' : ''}" 
+
+                            <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" 
                                     onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${saldoDisponivel})">
                                     <span class="d-pc-inline">+ Alteração</span>
                                     <span class="d-pc-none">+ Alt</span>
