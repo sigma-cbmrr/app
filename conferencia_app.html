@@ -855,11 +855,7 @@ function renderizarConferencia() {
         
         const data = doc.data();
         
-        // --- 🛑 DETECÇÃO DE MODO DE OPERAÇÃO ---
-        const urlParams = new URLSearchParams(window.location.search);
-        const isDevolucaoFinal = urlParams.get('modo') === 'devolucao_final';
-        
-        // 🛑 PROCESSAMENTO DOS DADOS 🛑
+        // 🛑 PROCESSAMENTO DOS DADOS (VERSÃO CORRIGIDA PARA MANTER SALDOS) 🛑
         if (isCautela) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
@@ -867,26 +863,12 @@ function renderizarConferencia() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
+                    // MANTEMOS O ARRAY DE CAUTELAS AQUI.
+                    // Isso permite que a 'renderizarConferencia' calcule:
+                    // SALDO = Total Esperado - Cautelas
                     
-                    // --- 🛡️ TRAVA ANTI-CARIMBO PARA RECEBIMENTO DE DEVOLUÇÃO ---
-                    // Se estivermos recebendo o material de volta, limpamos os carimbos
-                    // da memória de renderização para que o militar não veja o card laranja.
-                    if (isDevolucaoFinal) {
-                        if (item.cautelas) item.cautelas = []; 
-                        if (item.cautela) delete item.cautela;
-                        
-                        // Limpa carimbos de dentro dos tombamentos (Itens Multi)
-                        if (item.tombamentos) {
-                            item.tombamentos = item.tombamentos.map(t => {
-                                if (t.cautela) delete t.cautela;
-                                return t;
-                            });
-                        }
-                    }
-
                     if (item.tipo === 'single') {
-                        // Cálculo de saldo para conferência visual
-                        // O saldo real será calculado na renderizarConferencia
+                        // Cálculo preventivo de soma (apenas para debug/verificação se necessário)
                         const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                     }
                     return item;
@@ -894,7 +876,7 @@ function renderizarConferencia() {
             }));
         }
 
-        // --- VÍNCULO GLOBAL (CRÍTICO PARA O SIMULADOR) ---
+        // --- VÍNCULO GLOBAL ---
         window.dadosConferencia = dadosConferencia;
         
         const nomeLocal = isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista de Conferência");
@@ -941,7 +923,7 @@ function renderizarConferencia() {
         
         if (loadingMsg) loadingMsg.innerHTML = "Renderizando itens...";
         
-        // Dispara a renderização com os dados globais sincronizados e "limpos"
+        // Dispara a renderização (a lógica de ocultar o carimbo agora fica nela!)
         renderizarConferencia(); 
 
         if (typeof updateHeaderInfo === "function") try { updateHeaderInfo(); } catch(e) {}
