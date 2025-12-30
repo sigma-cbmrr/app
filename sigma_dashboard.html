@@ -7726,143 +7726,118 @@ async function abrirGestaoPendenciasCautela() {
     if (!pendenciaSendoResolvida) return;
     
     const p = pendenciaSendoResolvida;
-    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"?`);
+    const confirmacao = confirm(`Deseja confirmar o recolhimento definitivo de "${p.itemNome}" para manutenção?\n\nIsso removerá a carga do militar e marcará o item como AVARIADO.`);
     if (!confirmacao) return;
 
-    // Nome da coleção que descobrimos ser a "Prancheta" do militar
     const COLECAO_LISTAS = "listas_conferencia"; 
 
     try {
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
-        const estoqueRef = db.collection('custodia_atual').doc(p.localId);
         const listaRef = db.collection(COLECAO_LISTAS).doc(p.localId);
 
-        const [docCautela, docEstoque, docLista] = await Promise.all([
+        const [docCautela, docLista] = await Promise.all([
             cautelaRef.get(),
-            estoqueRef.get(),
             listaRef.get()
         ]);
 
-        if (!docCautela.exists || !docEstoque.exists) return alert("Erro: Documentos não localizados.");
+        if (!docCautela.exists || !docLista.exists) return alert("Erro: Documentos não localizados para processar baixa.");
 
         const dataCautela = docCautela.data();
-        const dataEstoque = docEstoque.data();
-
-        // 1. DADOS DE ORIGEM PARA O CARIMBO
-        const militarRelator = dataCautela.destinatario || dataCautela.destinatario_original_nome || "Militar";
         const dataRegistro = new Date().toLocaleString('pt-BR');
+        const militarLogado = (typeof currentUserData !== 'undefined') ? 
+                              `${currentUserData.posto} ${currentUserData.nome_guerra}` : "Gestor";
 
-        // 2. FILTRAGEM DAS PENDÊNCIAS NO GESTOR
+        // 1. PREPARAÇÃO DO LOG PARA O HISTÓRICO DA CAUTELA
+        const logRecolhimento = {
+            data: dataRegistro,
+            descricao: `Recolhimento: Item ${p.itemNome} (${p.itemTomb || 'S/T'}) retirado de carga e enviado para manutenção. Motivo: ${p.motivo}`,
+            militar: militarLogado,
+            tipo: "RECOLHIMENTO_AVARIA"
+        };
+
+        // 2. FILTRAGEM DAS PENDÊNCIAS (Para sumir do dashboard)
         const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
-        // 3. REMOÇÃO DA CARGA NA CAUTELA
+        // 3. ATUALIZAÇÃO DOS ITENS NA CAUTELA (Reduzir ou Remover carga)
         let novosItensCautela = [...(dataCautela.itens || [])];
         if (p.itemTomb) {
+            // Multi: Remove a linha do tombamento específico
             novosItensCautela = novosItensCautela.filter(it => it.tombamento !== p.itemTomb);
         } else {
-            const idx = novosItensCautela.findIndex(it => it.id === p.itemId);
+            // Single: Busca pelo ID e reduz a quantidade
+            const idx = novosItensCautela.findIndex(it => it.id === p.uidItem || it.id === p.id_base);
             if (idx !== -1) {
-                if (novosItensCautela[idx].quantidade > p.qtdProblema) {
-                    novosItensCautela[idx].quantidade -= p.qtdProblema;
+                const qtdRelatada = Number(p.quantidade) || 1;
+                if (novosItensCautela[idx].quantidade > qtdRelatada) {
+                    novosItensCautela[idx].quantidade -= qtdRelatada;
                 } else {
                     novosItensCautela.splice(idx, 1);
                 }
             }
         }
 
-        // 4. ATUALIZAÇÃO DO ESTOQUE (Mestre)
-        let itensEstoqueAtualizados = [...(dataEstoque.itens || [])];
-        itensEstoqueAtualizados = itensEstoqueAtualizados.map(it => {
-            if (p.itemTomb && it.tombamento === p.itemTomb) {
-                const { cautela, ...itemLimpo } = it; 
-                return { 
-                    ...itemLimpo, 
-                    status_cautela: "DISPONÍVEL", 
-                    situacao: "AVARIADO", 
-                    id_cautela_origem: p.cautelaId, // EXIGIDO PELO CARIMBO
-                    motivo_avaria: p.motivo,       // EXIGIDO PELO CARIMBO
-                    relatado_por: militarRelator,  // EXIGIDO PELO CARIMBO
-                    data_avaria: dataRegistro,
-                    historico_vida: [] 
-                };
-            }
-            if (it.tombamentos) {
-                it.tombamentos = it.tombamentos.map(t => {
-                    if (t.tomb === p.itemTomb) {
-                        const { cautela, ...tombLimpo } = t;
-                        return { 
-                            ...tombLimpo, 
-                            situacao: "AVARIADO", 
-                            status_cautela: "DISPONÍVEL",
-                            id_cautela_origem: p.cautelaId,
-                            motivo_avaria: p.motivo,
-                            relatado_por: militarRelator,
-                            data_avaria: dataRegistro,
-                            historico_vida: [] 
-                        };
-                    }
-                    return t;
-                });
-            }
-            return it;
-        });
+        // 4. ATUALIZAÇÃO DA LISTA DE CONFERÊNCIA (ESTOQUE)
+        // Precisamos marcar o item como AVARIADO para ele não ficar disponível para nova cautela
+        const novaListaMestra = docLista.data().list.map(setor => ({
+            ...setor,
+            itens: (setor.itens || []).map(it => {
+                const idBaseMatch = it.id === (p.id_base || p.uidItem);
 
+                // Caso Item SINGLE
+                if (idBaseMatch && (it.tipo === 'single' || !it.tombamentos)) {
+                    // Remove a cautela do array de cautelas do item single
+                    it.cautelas = (it.cautelas || []).filter(c => c.id !== p.cautelaId);
+                    // Adiciona log no histórico de vida do item
+                    if (!it.historico_vida) it.historico_vida = [];
+                    it.historico_vida.push({
+                        evento: "RECOLHIDO_AVARIADO",
+                        data: dataRegistro,
+                        detalhes: `Recolhido ${p.quantidade} un para manutenção. Motivo: ${p.motivo}`,
+                        quem: militarLogado
+                    });
+                }
+
+                // Caso Item MULTI
+                if (it.tombamentos) {
+                    it.tombamentos = it.tombamentos.map(t => {
+                        if (t.tomb === p.itemTomb) {
+                            delete t.cautela; // Tira o nome do militar do tombamento
+                            t.situacao = "AVARIADO"; // Trava o item para futuras cautelas
+                            t.motivo_recolhimento = p.motivo;
+                        }
+                        return t;
+                    });
+                }
+                return it;
+            })
+        }));
+
+        // 5. EXECUÇÃO DO BATCH
         const batch = db.batch();
-
-        // Camada Cautela
+        
+        // Atualiza a Cautela (Limpa pendência, atualiza carga e add histórico)
         batch.update(cautelaRef, {
             itens: novosItensCautela,
-            pendencias_ativas: pendenciasRestantes
+            pendencias_ativas: pendenciasRestantes,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logRecolhimento)
         });
 
-        // Camada Estoque
-        batch.update(estoqueRef, {
-            itens: itensEstoqueAtualizados,
-            itens_avariados: firebase.firestore.FieldValue.arrayUnion({
-                nome: p.itemNome,
-                tombamento: p.itemTomb || "S/T",
-                data_recolhimento: new Date(),
-                relato: p.motivo,
-                cautela_origem: p.cautelaId
-            })
-        });
-
-        // Camada Lista de Conferência (Onde o F5 busca os dados)
-        if (docLista.exists) {
-            const novaLista = docLista.data().list.map(setor => ({
-                ...setor,
-                itens: (setor.itens || []).map(it => {
-                    if (it.tombamento === p.itemTomb) {
-                        const { cautela, ...limpo } = it;
-                        return { ...limpo, situacao: "AVARIADO", id_cautela_origem: p.cautelaId, motivo_avaria: p.motivo, relatado_por: militarRelator, data_avaria: dataRegistro };
-                    }
-                    if (it.tombamentos) {
-                        it.tombamentos = it.tombamentos.map(t => {
-                            if (t.tomb === p.itemTomb) {
-                                const { cautela, ...tLimpo } = t;
-                                return { ...tLimpo, situacao: "AVARIADO", id_cautela_origem: p.cautelaId, motivo_avaria: p.motivo, relatado_por: militarRelator, data_avaria: dataRegistro };
-                            }
-                            return t;
-                        });
-                    }
-                    return it;
-                })
-            }));
-            batch.update(listaRef, { list: novaLista });
-        }
+        // Atualiza a Lista Mestra (Ajusta saldos e marca avarias)
+        batch.update(listaRef, { list: novaListaMestra });
 
         await batch.commit();
 
-        alert("Recolhimento concluído. Carimbo de Avaria gerado com sucesso.");
+        alert("✅ Recolhimento efetuado!\nO material foi retirado da carga do militar e marcado como 'Avariado' no estoque.");
         
         document.getElementById('modalDecisaoGestor').style.display = 'none';
-        await loadCaaData(); 
+        fecharTabela(); // Fecha a tabela de pendências do gestor
+        if (typeof loadCaaData === 'function') await loadCaaData(); 
 
     } catch (e) {
-        console.error("Erro no processamento:", e);
-        alert("Erro ao salvar recolhimento.");
+        console.error("Erro no recolhimento:", e);
+        alert("❌ Erro ao processar recolhimento: " + e.message);
     }
 }
 		
