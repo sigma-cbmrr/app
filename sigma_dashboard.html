@@ -7690,8 +7690,7 @@ async function abrirGestaoPendenciasCautela() {
         const data = JSON.parse(decodeURIComponent(dataJson));
         console.log("Dados recebidos da tabela:", data);
 
-        // 2. REPARO DE DNA PARA ITENS MANUAIS (O pulo do gato)
-        // Se o uidItem estiver vindo como undefined ou null, forçamos o ID correto
+        // 2. REPARO DE DNA PARA ITENS MANUAIS (Mantendo sua lógica de segurança)
         if (!data.uidItem || data.uidItem.includes('undefined')) {
             if (data.itemNome.toUpperCase().includes("PÉ DE CABRA")) {
                 data.uidItem = "56911524-65986249";
@@ -7702,23 +7701,35 @@ async function abrirGestaoPendenciasCautela() {
             }
         }
 
-        // 3. Salva na variável global para as funções seguintes
+        // 3. Salva na variável global para as funções de execução (recolhimento/troca)
         pendenciaSendoResolvida = data; 
 
-        // 4. Preenche o visual do Modal de Decisão
+        // 4. LÓGICA DE IDENTIFICAÇÃO DINÂMICA (Single vs Multi)
+        // Se não tem tombamento ou é S/T, exibimos a quantidade
+        const ehItemSingle = !data.itemTomb || data.itemTomb === "S/T";
+        const identificadorHtml = ehItemSingle 
+            ? `<b>Quantidade:</b> ${data.quantidade || data.itemQtd || 1} un.` 
+            : `<b>Tombamento:</b> ${data.itemTomb}`;
+
+        // 5. Preenche o visual do Modal de Decisão
         const infoBox = document.getElementById('info-item-decisao');
         if (infoBox) {
             infoBox.innerHTML = `
-                <div style="line-height: 1.6; text-align: left;">
-                    <b style="color: #800020;">Material:</b> ${data.itemNome}<br>
-                    <b>Tombamento:</b> ${data.itemTomb || 'S/T'}<br>
-                    <b>Motivo:</b> <span style="color:red">${data.motivo || 'Avaria relatada'}</span><br>
+                <div style="line-height: 1.6; text-align: left; background: #fff; padding: 10px; border-radius: 4px; border: 1px solid #ddd;">
+                    <b style="color: #800020; font-size: 1.1em;">${data.itemNome}</b><br>
+                    <div style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 5px;">
+                        ${identificadorHtml}<br>
+                        <b>Motivo:</b> <span style="color:red; font-weight: bold;">${data.motivo || 'Avaria relatada'}</span>
+                    </div>
                 </div>
             `;
         }
 
-        // 5. Exibe o modal
-        document.getElementById('modalDecisaoGestor').style.display = 'flex';
+        // 6. Exibe o modal
+        const modal = document.getElementById('modalDecisaoGestor');
+        if (modal) {
+            modal.style.display = 'flex';
+        }
 
     } catch (e) {
         console.error("Erro crítico ao abrir modal de decisão:", e);
@@ -7984,28 +7995,22 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
     
-    // 1. RECUPERAÇÃO SEGURA E COMPLETA DO GESTOR (Incluindo Quadro)
     let nomeAutor = "Gestor";
     try {
         const u = (typeof currentUserData !== 'undefined' && currentUserData) ? currentUserData : 
                   JSON.parse(localStorage.getItem('user_data') || '{}');
-        
         const posto = u.posto || u.posto_grad || "";
         const quadro = u.quadro || u.quadro_mil || "";
         const nomeGuerra = u.nome_guerra || "";
-        
         nomeAutor = `${posto} ${quadro} ${nomeGuerra}`.replace(/\s+/g, ' ').trim() || "Gestor";
-    } catch (e) { 
-        console.error("Erro ao recuperar dados do usuário:", e); 
-    }
+    } catch (e) { console.error("Erro user:", e); }
 
     let qtdParaMovimentar = 1;
-
     try {
         const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
         if (inputQtd) qtdParaMovimentar = parseInt(inputQtd.value) || 1;
 
-        if (!confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`)) return;
+        if (!confirm(`Confirmar substituição física?\nItem Novo: ${tombamentoNovo}\nSubstituindo Avariado: ${p.itemNome}`)) return;
 
         if (document.getElementById('modalSeletorEstoque')) {
             document.getElementById('modalSeletorEstoque').style.display = 'none';
@@ -8014,28 +8019,20 @@ async function abrirSeletorGlobalSubstituicao() {
         const batch = db.batch();
         const dataFormatada = new Date().toLocaleString('pt-BR');
 
-        // 2. BUSCA DADOS DA CAUTELA
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
         if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // 3. CONSTRUÇÃO DO LOG DETALHADO
+        // 1. LOG DA MOVIMENTAÇÃO NA CAUTELA
         const logObjeto = {
             data: dataFormatada,
-            descricao: `Substituição Cruzada: Item avariado substituído por ${tombamentoNovo || 'Material'} (${qtdParaMovimentar} un). Origem: ${listaOrigemNovo.toUpperCase()}.`,
-            militar: nomeAutor, // Agora com Posto + Quadro + Nome de Guerra
+            descricao: `Troca Cruzada: Item ${p.itemNome} (${p.itemTomb || 'S/T'}) recolhido por avaria. Reposto por ${tombamentoNovo} vindo de ${listaOrigemNovo.toUpperCase()}.`,
+            militar: nomeAutor,
             tipo: "SUBSTITUICAO_CRUZADA"
         };
 
-        // 4. LIMPEZA DA PENDÊNCIA (Sai do Dashboard do Gestor)
-        const pendenciasLimpas = (dadosC.pendencias_ativas || []).filter(pend => {
-            const matchSolicitacao = String(pend.id_solicitacao) === String(p.solicitacaoId);
-            const matchIndex = pend.item_index === p.item_index;
-            return !(matchSolicitacao || matchIndex);
-        });
-
-        // 5. ATUALIZAÇÃO DA CARGA NA CAUTELA (Substitui a informação do item)
+        // 2. ATUALIZAÇÃO DA CARGA DO MILITAR (A cautela agora aponta para o item novo)
         const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
             if (ehOItem) {
@@ -8043,7 +8040,7 @@ async function abrirSeletorGlobalSubstituicao() {
                     ...it, 
                     tombamento: tombamentoNovo || it.tombamento || "S/T",
                     origem_lista: listaOrigemNovo,
-                    obs: `Substituído em ${dataFormatada} por ${nomeAutor}. Origem: ${listaOrigemNovo}`
+                    obs: `Substituído em ${dataFormatada} por ${nomeAutor}. Antigo recolhido por avaria.`
                 };
             }
             return it;
@@ -8051,55 +8048,73 @@ async function abrirSeletorGlobalSubstituicao() {
 
         batch.update(cautelaRef, {
             itens: itensAtualizados,
-            pendencias_ativas: pendenciasLimpas,
+            pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
         });
 
-        // 6. ATUALIZAÇÃO NA LISTA DOADORA (Baixa no estoque de origem)
+        // 3. ATUALIZAÇÃO DA LISTA MESTRA DE ORIGEM (Onde o item estragou)
+        // O item quebrado sai do array 'cautelas' e entra no array 'pendencias_ids' (Carimbo Vermelho)
+        const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
+        const docOrigemAvaria = await listaOrigemAvariaRef.get();
+        if (docOrigemAvaria.exists) {
+            const listData = docOrigemAvaria.data().list.map(setor => ({
+                ...setor,
+                itens: (setor.itens || []).map(it => {
+                    if (it.id === (p.id_base || p.uidItem)) {
+                        // Remove carimbo de cautela (Laranja)
+                        if (it.cautelas) it.cautelas = it.cautelas.filter(c => c.id !== p.cautelaId);
+                        
+                        // Cria Carimbo de Pendência (Vermelho) para o item avariado
+                        const novaPendenciaAvaria = {
+                            id: "AVARIA-" + Date.now(),
+                            quantidade: qtdParaMovimentar,
+                            descricao: `AVARIADO: Recolhido de ${dadosC.destinatario_original_nome}. Motivo: ${p.motivo}`,
+                            autor_nome: nomeAutor,
+                            data_criacao: dataFormatada,
+                            status_gestao: "MANUTENCAO"
+                        };
+                        if (!it.pendencias_ids) it.pendencias_ids = [];
+                        it.pendencias_ids.push(novaPendenciaAvaria);
+
+                        if (it.tombamentos) {
+                            it.tombamentos = it.tombamentos.map(t => {
+                                if (t.tomb === p.itemTomb) {
+                                    delete t.cautela;
+                                    t.situacao = "AVARIADO";
+                                }
+                                return t;
+                            });
+                        }
+                    }
+                    return it;
+                })
+            }));
+            batch.update(listaOrigemAvariaRef, { list: listData });
+        }
+
+        // 4. ATUALIZAÇÃO DA LISTA DOADORA (Onde o item novo saiu)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
-        
         if (docDoadora.exists) {
             const doadoraData = docDoadora.data();
             const novaListaDoadora = doadoraData.list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    // Verifica se o ID bate ou se algum tombamento do item bate com o UID novo
-                    const idMatch = it.id === uidNovo;
-                    const tombMatch = it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo);
+                    if (it.id === uidNovo || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
+                        const carimboCautela = { 
+                            id: p.cautelaId, 
+                            destinatario: dadosC.destinatario_original_nome, 
+                            data: dataFormatada, 
+                            quantidade: qtdParaMovimentar,
+                            tipo: "SUBSTITUICAO" 
+                        };
 
-                    if (idMatch || tombMatch) {
-                        // Registro de auditoria no histórico de vida do item que saiu do estoque
-                        if (!it.historico_vida) it.historico_vida = [];
-                        it.historico_vida.push({
-                            evento: "SAIDA_SUBSTITUICAO_CRUZADA",
-                            data: dataFormatada,
-                            detalhes: `Item enviado para Cautela ${p.cautelaId} em substituição de material avariado.`,
-                            quem: nomeAutor
-                        });
-
-                        // Se for single
                         if (it.id === uidNovo) {
-                            it.cautelas = it.cautelas || [];
-                            it.cautelas.push({ 
-                                id: p.cautelaId, 
-                                quantidade: qtdParaMovimentar, 
-                                data: dataFormatada, 
-                                destinatario: dadosC.destinatario_original_nome,
-                                tipo: "EMPRESTIMO_SUBSTITUICAO" 
-                            });
-                        } 
-                        // Se for multi
-                        else if (it.tombamentos) {
+                            if (!it.cautelas) it.cautelas = [];
+                            it.cautelas.push(carimboCautela);
+                        } else {
                             it.tombamentos = it.tombamentos.map(t => {
-                                if (`${it.id}-${t.tomb}` === uidNovo) {
-                                    t.cautela = { 
-                                        id: p.cautelaId, 
-                                        destinatario: dadosC.destinatario_original_nome, 
-                                        data: dataFormatada, 
-                                        emprestimo: true 
-                                    };
-                                }
+                                if (`${it.id}-${t.tomb}` === uidNovo) t.cautela = carimboCautela;
                                 return t;
                             });
                         }
@@ -8111,12 +8126,12 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert(`✅ Substituição Concluída com Sucesso!`);
+        alert(`✅ Troca concluída!\nItem novo cautelado e item antigo marcado como PENDÊNCIA para manutenção.`);
         location.reload();
 
     } catch (e) {
-        console.error("Erro Crítico na Substituição Cruzada:", e);
-        alert("❌ Erro ao processar substituição: " + e.message);
+        console.error("Erro na Troca Cruzada:", e);
+        alert("❌ Erro: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
@@ -8146,49 +8161,56 @@ async function abrirSeletorGlobalSubstituicao() {
                 dadosLista.list.forEach(setor => {
                     setor.itens.forEach(item => {
                         
-                        // Verifica se o ID do item começa com o DNA procurado
+                        // Verifica se o ID do item começa com o DNA procurado (Material compatível)
                         if (item.id && item.id.startsWith(dnaBusca)) {
                             
-                            // --- LÓGICA PARA ITEM SINGLE (Ex: Pé de Cabra) ---
+                            // --- 🛑 LÓGICA CORRIGIDA PARA ITEM SINGLE (Item 2) ---
                             if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0) {
-    const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (c.quantidade || 0), 0);
-    const saldoDisponivel = (item.quantidadeEsperada || 0) - qtdCautelada;
+                                
+                                // Soma as unidades cauteladas (Laranja)
+                                const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (Number(c.quantidade) || 0), 0);
+                                
+                                // 🛑 NOVO: Soma também as unidades com pendência (Vermelho)
+                                const qtdPendente = (item.pendencias_ids || []).reduce((acc, pen) => acc + (Number(pen.quantidade) || 0), 0);
+                                
+                                // Saldo Real = Total - Cautelados - Estragados/Pendentes
+                                const saldoDisponivel = (Number(item.quantidadeEsperada) || 0) - qtdCautelada - qtdPendente;
 
-    if (saldoDisponivel > 0) {
-        totalEncontrado++;
-        const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (ESTOQUE LOCAL)` : nomeLocal;
-        
-        htmlAcumulado += `
-    <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
-        <div style="flex: 1;">
-            <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
-            <b style="color: #333; font-size: 1.1em;">${item.nome}</b><br>
-            <small style="color: #666;">Saldo disponível: ${saldoDisponivel} un</small>
-        </div>
-        
-        <div style="display: flex; align-items: center; gap: 15px;">
-            <div style="display: flex; flex-direction: column; align-items: center;">
-                <label style="font-size: 0.7em; font-weight: bold; color: #555; margin-bottom: 4px; text-transform: uppercase;">Qtd</label>
-                <input type="number" id="qtd_subst_${item.id}_${docLista.id}" 
-                    value="1" min="1" max="${saldoDisponivel}" 
-                    style="width: 55px; padding: 8px; border: 1px solid #1b8a3e; border-radius: 5px; text-align: center; font-weight: bold; outline: none;">
-            </div>
-            
-            <button class="btn-resolver" style="height: 42px; align-self: flex-end; padding: 0 20px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight: bold; transition: background 0.3s;" 
-                onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}')">
-                Selecionar
-            </button>
-        </div>
-    </div>`;
-    }
-}
-                            // --- LÓGICA PARA ITEM MULTI (Ex: EPR) ---
+                                if (saldoDisponivel > 0) {
+                                    totalEncontrado++;
+                                    const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (ESTOQUE LOCAL)` : nomeLocal;
+                                    
+                                    htmlAcumulado += `
+                                        <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                                            <div style="flex: 1;">
+                                                <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
+                                                <b style="color: #333; font-size: 1.1em;">${item.nome}</b><br>
+                                                <small style="color: #666;">Saldo disponível: <b>${saldoDisponivel} un</b></small>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 15px;">
+                                                <div style="display: flex; flex-direction: column; align-items: center;">
+                                                    <label style="font-size: 0.7em; font-weight: bold; color: #555; margin-bottom: 4px; text-transform: uppercase;">Qtd</label>
+                                                    <input type="number" id="qtd_subst_${item.id}_${docLista.id}" 
+                                                        value="1" min="1" max="${saldoDisponivel}" 
+                                                        style="width: 55px; padding: 8px; border: 1px solid #1b8a3e; border-radius: 5px; text-align: center; font-weight: bold;">
+                                                </div>
+                                                <button class="btn-resolver" style="height: 42px; padding: 0 20px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight: bold;" 
+                                                    onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}')">
+                                                    Selecionar
+                                                </button>
+                                            </div>
+                                        </div>`;
+                                }
+                            }
+                            // --- 🛑 LÓGICA CORRIGIDA PARA ITEM MULTI (Item 2) ---
                             else {
                                 item.tombamentos.forEach(t => {
                                     const idCompleto = `${item.id}-${t.tomb}`;
-                                    const disponivel = !t.cautela && t.situacao !== 'AVARIADO';
                                     
-                                    // Não mostra o próprio item que está com defeito na lista
+                                    // 🛑 NOVO: O item só está disponível se NÃO tiver cautela E NÃO tiver pendência ativa
+                                    const temPendenciaAtiva = (t.pendencias_ids && t.pendencias_ids.length > 0);
+                                    const disponivel = !t.cautela && !temPendenciaAtiva && t.situacao !== 'AVARIADO';
+                                    
                                     if (disponivel && idCompleto !== idReferencia) {
                                         totalEncontrado++;
                                         const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (RESERVA)` : nomeLocal;
@@ -8218,14 +8240,14 @@ async function abrirSeletorGlobalSubstituicao() {
             container.innerHTML = `
                 <div style="text-align:center; padding:20px; color:#666;">
                     <i class="fas fa-search-minus fa-2x"></i><br><br>
-                    Nenhum item compatível (reserva ou saldo) encontrado para o DNA: <b>${dnaBusca}</b>.
+                    Nenhum item compatível e livre de pendências encontrado para: <b>${dnaBusca}</b>.
                 </div>`;
         } else {
             container.innerHTML = htmlAcumulado;
         }
 
     } catch (e) {
-        console.error("Erro na busca global:", e);
+        console.error("Erro na busca global de reposição:", e);
         container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">Erro ao processar busca: ${e.message}</div>`;
     }
 }	
