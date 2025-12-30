@@ -1214,16 +1214,17 @@ function renderizarConferencia() {
 
                 const identificador = cItem.tombamento ? `(Tomb.: ${cItem.tombamento})` : `(QTD: ${cItem.quantidade}UN)`;
                 const relatoItem = isItemOk ? 'S/A' : (obsFinal || 'C/A sem obs.');
-                
-                // Monta a linha com o padrão solicitado
                 linhasExtrato.push(`${index + 1}. ${cItem.nome} ${identificador}: ${relatoItem}`);
 
-                // Atualização da Lista Mestra
+                // --- ATUALIZAÇÃO DA LISTA MESTRA ---
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
                         const idMestra = mItem.id_base || mItem.id;
-                        if (idMestra === (cItem.id_base || cItem.id)) {
+                        const idCautelaItem = cItem.id_base || cItem.id;
+
+                        if (idMestra === idCautelaItem) {
+                            // Registro no histórico de vida do item
                             if (!mItem.historico_vida) mItem.historico_vida = [];
                             mItem.historico_vida.push({
                                 evento: "CONFIRMAÇÃO_RECEBIMENTO",
@@ -1235,21 +1236,33 @@ function renderizarConferencia() {
 
                             const objetoCautelaAtualizado = {
                                 id: CAUTELA_ID,
-                                emitente: cData.emitente,
+                                emitente: cData.emitente || "N/D",
                                 destinatario: meuNomeCompleto,
-                                data: dataAtual,
+                                data: cData.timestamp_emissao ? cData.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : dataAtual,
                                 status_item: statusFinal,
                                 obs_item: obsFinal,
-                                quantidade: cItem.quantidade
+                                quantidade: Number(cItem.quantidade) || 1
                             };
 
-                            if (cItem.tombamento && mItem.tombamentos) {
+                            // 🛑 CORREÇÃO PARA ITEM SINGLE: Atualiza o existente em vez de dar push
+                            if (mItem.tipo === 'single' && mItem.cautelas) {
+                                const idxExistente = mItem.cautelas.findIndex(c => c.id === CAUTELA_ID);
+                                if (idxExistente !== -1) {
+                                    // Se já existe (carimbo de emissão), apenas atualizamos os dados
+                                    mItem.cautelas[idxExistente] = objetoCautelaAtualizado;
+                                } else {
+                                    // Se por algum motivo não existia, aí sim adicionamos
+                                    mItem.cautelas.push(objetoCautelaAtualizado);
+                                }
+                            } 
+                            // PARA ITEM MULTI: A sobrescrita já é segura por natureza
+                            else if (mItem.tipo === 'multi' && mItem.tombamentos) {
                                 mItem.tombamentos = mItem.tombamentos.map(t => {
-                                    if (t.tomb === cItem.tombamento) t.cautela = objetoCautelaAtualizado;
+                                    if (t.tomb === cItem.tombamento) {
+                                        t.cautela = objetoCautelaAtualizado;
+                                    }
                                     return t;
                                 });
-                            } else if (!cItem.tombamento && mItem.cautelas) {
-                                mItem.cautelas.push(objetoCautelaAtualizado);
                             }
                         }
                         return mItem;
@@ -1259,8 +1272,6 @@ function renderizarConferencia() {
 
             const icone = temQualquerAlteracao ? '⚠️' : '✅';
             const tituloLog = `${icone} Recebido ${temQualquerAlteracao ? 'C/A' : 'S/A'} pelo destinatário: ${meuNomeCompleto}`;
-            
-            // 🛑 A MÁGICA DA QUEBRA DE LINHA ACONTECE AQUI (\n)
             const descricaoCompleta = `${tituloLog}\n${linhasExtrato.join('\n')}`;
 
             const logMovimentacao = {
