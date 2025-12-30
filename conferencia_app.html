@@ -255,52 +255,57 @@
     });
 }
         function updateSetorStatus(setorEl) { 
-    const items = setorEl.querySelectorAll('.item-conferencia'); 
-    let completed = 0, total = 0; 
+    if (!setorEl) return;
 
-    items.forEach(item => { 
-        if (item.dataset.type === 'single') { 
-            total++; 
-            const s = window.itemStatus[item.dataset.id]?.status; 
-            // 🛑 CORREÇÃO: Adicionado 'ok'
-            if (s === 'ok' || s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-        } else { 
-            const tombs = item.querySelectorAll('.tombamento-container'); 
-            tombs.forEach(t => { 
-                total++; 
-                const uid = `${item.dataset.id}-${t.dataset.tomb}`;
-                const s = window.itemStatus[uid]?.status; 
-                const sCaut = window.itemStatus[`CAUTELA-${uid}`]?.status;
-                // 🛑 CORREÇÃO: Adicionado 'ok' e 'cautela_ciente'
-                if (s === 'ok' || s === 'S/A' || s === 'C/A' || s === 'KEEP' || sCaut === 'cautela_ciente') completed++;
-            }); 
-        } 
+    const itemsPai = setorEl.querySelectorAll('.item-conferencia'); 
+    let completed = 0;
+    let total = itemsPai.length; // O total é o número de materiais (ex: 1 EPR, 1 Pé de Cabra)
+
+    itemsPai.forEach(item => { 
+        // Verifica se o item pai (material) ganhou a classe de concluído
+        // As funções updateItemMainStatusDisplay e setItemStatusID já aplicam essas classes
+        if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
+            completed++;
+        }
     }); 
 
+    // Atualiza os atributos de dados do setor
     setorEl.dataset.totalItems = total; 
+    
     const st = setorEl.querySelector('.setor-status'); 
     if (st) {
         st.dataset.completed = completed; 
+        
         if (completed === total && total > 0) { 
-            st.textContent = 'OK'; 
+            // SETOR 100% CONCLUÍDO
+            // Verifica se houve alguma alteração (C/A) no setor para decidir o texto
+            const temAlteracaoNoSetor = setorEl.querySelectorAll('.item-conferencia.status-alert').length > 0;
+            
+            if (temAlteracaoNoSetor) {
+                const totalAlertas = setorEl.querySelectorAll('.item-conferencia.status-alert').length;
+                st.textContent = `${totalAlertas} C/A`;
+                st.style.backgroundColor = "#d90f23"; // Vermelho se houver erro
+            } else {
+                st.textContent = 'S/A';
+                st.style.backgroundColor = "#1b8a3e"; // Verde se tudo S/A
+            }
             st.classList.add('ok'); 
         } else { 
+            // SETOR EM ANDAMENTO
             st.textContent = `${completed}/${total}`; 
-            st.classList.remove('ok'); 
+            st.classList.remove('ok');
+            st.style.backgroundColor = ""; // Reseta para a cor padrão do CSS
         } 
     }
 }
-
         function updateItemMainStatusDisplay(item) { 
     if (!item || item.dataset.type === 'single') return; 
     
-    // Captura o ID base do material (ex: alfa_abt17_id_item)
     const itemIdBase = item.getAttribute('data-id'); 
     const tombs = item.querySelectorAll('.tombamento-container'); 
     let conf = 0, alt = 0; 
 
     tombs.forEach(t => { 
-        // Agora o data-tomb existe, então a leitura funciona!
         const nTomb = t.getAttribute('data-tomb');
         const uidOriginal = `${itemIdBase}-${nTomb}`;
         const uidCautela = `CAUTELA-${uidOriginal}`;
@@ -308,34 +313,30 @@
         const s = window.itemStatus[uidOriginal]?.status; 
         const sCautela = window.itemStatus[uidCautela]?.status; 
 
-        // Checagem universal de conclusão
+        // Se estiver ok, C/A ou Ciente, o item individual está "preenchido"
         if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
             conf++; 
+            // Mas se for qualquer coisa diferente de 'ok', ele conta como Alerta (C/A)
             if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
         } 
     }); 
 
     const icon = item.querySelector('.status-icon'); 
-    
-    // Reset de classes antes de reavaliar
     item.classList.remove('status-ok', 'status-alert');
-    if (icon) {
-        icon.classList.remove('ok', 'alert');
-        icon.className = 'status-icon'; // Reset para o padrão dashed
-    }
 
-    // Se a quantidade de conferidos for igual ao total de tombamentos na tela
+    // Só conclui o item pai se TODOS os tombamentos estiverem conferidos
     if (conf === tombs.length && tombs.length > 0) { 
         if (alt > 0) { 
-            if (icon) icon.classList.add('alert'); 
+            if (icon) icon.className = 'status-icon alert'; 
             item.classList.add('status-alert'); 
         } else { 
-            if (icon) icon.classList.add('ok'); 
+            if (icon) icon.className = 'status-icon ok'; 
             item.classList.add('status-ok'); 
         } 
-    } 
+    } else if (icon) {
+        icon.className = 'status-icon'; // Volta para o estado inicial (cinza/dashed) se incompleto
+    }
     
-    // Força a atualização do contador do setor (badge 0/X)
     const setorEl = item.closest('.setor');
     if (setorEl) updateSetorStatus(setorEl);
 }
@@ -650,30 +651,32 @@ function renderizarConferencia() {
                 let confCount = 0, altCount = 0;
 
                item.tombamentos.forEach(t => {
-    const uid = `${itemId}-${t.tomb}`;
-    const pndHtml = montarPendenciaHtml(uid, t);
-    const hasCarimboAtivo = pndHtml.length > 0;
-    const statusU = window.itemStatus[uid]?.status;
-    const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
+    // --- DENTRO DO item.tombamentos.forEach ---
+const uid = `${itemId}-${t.tomb}`;
+const pndHtml = montarPendenciaHtml(uid, t);
+const hasCarimboAtivo = pndHtml.length > 0;
+const statusU = window.itemStatus[uid]?.status;
+const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
 
-    if (statusU === 'ok' || statusU === 'C/A' || statusC === 'cautela_ciente') confCount++;
-    if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
+if (statusU === 'ok' || statusU === 'C/A' || statusC === 'cautela_ciente') confCount++;
+if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
 
-    htmlTombamentos += `
-        <div class="tombamento-container" 
-             data-id="${uid}" 
-             data-tomb="${t.tomb}" 
-             style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
-            <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
-                <span>Tomb.: <b>${t.tomb}</b></span>
-                ${!hasCarimboAtivo ? `
-                <div class="tombamento-options">
-                    <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
-                    <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
-                </div>` : ''}
-            </div>
-            <div class="alerts-wrapper">${pndHtml}</div>
-        </div>`;
+// 🛑 AJUSTE AQUI: Inclusão de data-id e data-tomb para as funções de foco funcionarem
+htmlTombamentos += `
+    <div class="tombamento-container" 
+         data-id="${uid}" 
+         data-tomb="${t.tomb}" 
+         style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+        <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Tomb.: <b>${t.tomb}</b></span>
+            ${!hasCarimboAtivo ? `
+            <div class="tombamento-options">
+                <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
+                <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
+            </div>` : ''}
+        </div>
+        <div class="alerts-wrapper">${pndHtml}</div>
+    </div>`;
 });
 
                 const classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
@@ -1519,10 +1522,8 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     const qtdInformada = parseInt(qtd) || 1;
 
     const militarInfoEl = document.getElementById('militar-info');
-    let nomeAssinatura = "";
-    if (militarInfoEl) {
-        nomeAssinatura = militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim();
-    }
+    let nomeAssinatura = militarInfoEl ? militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : "";
+    
     if (!nomeAssinatura) {
         nomeAssinatura = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     }
@@ -1539,6 +1540,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     };
 
     let itemEncontrado = false;
+    let elementoPaiAlvo = null;
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
     fonteDados.forEach(setor => {
@@ -1553,6 +1555,8 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
+                        // Guarda referência do elemento HTML para atualizar o pai
+                        elementoPaiAlvo = document.querySelector(`[data-id="${item.id}"]`);
                     }
                 });
             }
@@ -1562,8 +1566,14 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     if (itemEncontrado) {
         window.itemStatus[uid] = { status: 'C/A' };
         renderizarConferencia();
+        
+        // 🛑 MODIFICAÇÃO CIRÚRGICA: Força o item pai a ficar vermelho imediatamente
+        if (elementoPaiAlvo) {
+            updateItemMainStatusDisplay(elementoPaiAlvo);
+        }
+
         setTimeout(() => {
-            let el = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-tomb="${uid.split('-')[1]}"]`);
+            let el = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 el.style.backgroundColor = "#fff9c4";
@@ -1722,13 +1732,16 @@ function setItemStatusID(btn, status, uid) {
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
-            updateItemMainStatusDisplay(itemPai);
-        } else if (itemPai && itemPai.getAttribute('data-type') === 'single') {
-            itemPai.classList.add('status-ok');
-            itemPai.classList.remove('status-alert');
-            const icon = itemPai.querySelector('.status-icon');
-            if (icon) icon.className = 'status-icon ok';
+        // Atualiza visualmente o item pai ou o single
+        if (itemPai) {
+            if (itemPai.classList.contains('item-has-tombamentos')) {
+                updateItemMainStatusDisplay(itemPai);
+            } else {
+                itemPai.classList.remove('status-alert');
+                itemPai.classList.add('status-ok');
+                const icon = itemPai.querySelector('.status-icon');
+                if (icon) icon.className = 'status-icon ok';
+            }
         }
     } else if (status === 'cautela_ciente') {
         const qtdNoCard = container.querySelector('b[style*="color:#d90f23"]')?.textContent.replace(/\D/g, '') || 1;
@@ -1749,7 +1762,7 @@ function setItemStatusID(btn, status, uid) {
     }
 
     updateOverallStatus();
-    if (setor) updateSetorStatus(setor); // 🛑 Garante atualização do badge 0/X
+    if (setor) updateSetorStatus(setor);
 
     if (setor && typeof checkSetorCompletion === 'function') { 
         checkSetorCompletion(setor, uid);
