@@ -617,6 +617,7 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
 };
     
 // --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
+// --- 3. FUNÇÃO DE RENDERIZAÇÃO DA TELA ---
 function renderizarConferencia() {
     const mainContent = document.getElementById('main-content');
     const antigos = mainContent.querySelectorAll('.setor'); 
@@ -626,6 +627,7 @@ function renderizarConferencia() {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
     const urlParams = new URLSearchParams(window.location.search);
+    // Identifica se estamos em modo de recebimento de cautela ou devolução
     const isConferenciaDeCautela = !!urlParams.get('cautelaId');
 
     const montarPendenciaHtml = (uid, itemOuTomb) => {
@@ -635,33 +637,37 @@ function renderizarConferencia() {
         const statusCautela = window.itemStatus[cautelaUid] || {};
         const isCiente = statusCautela.status === 'cautela_ciente' || statusCautela.cautela_confirmada === true;
 
-        let listaDeCautelas = [];
-        if (itemOuTomb.cautela) listaDeCautelas = [itemOuTomb.cautela];
-        else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) listaDeCautelas = itemOuTomb.cautelas;
+        // 🛑 LÓGICA CIRÚRGICA: Se for conferência de cautela/recebimento, ignoramos os carimbos laranjas
+        if (!isConferenciaDeCautela) {
+            let listaDeCautelas = [];
+            if (itemOuTomb.cautela) listaDeCautelas = [itemOuTomb.cautela];
+            else if (itemOuTomb.cautelas && Array.isArray(itemOuTomb.cautelas)) listaDeCautelas = itemOuTomb.cautelas;
 
-        listaDeCautelas.forEach(c => {
-            const dataExibicao = c.data || "Data N/D";
-            htmlAcumulado += `
-                <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 12px; margin-bottom: 8px; border-radius: 5px; text-align: left;">
-                    <div style="font-weight: bold; color: #f57c00; font-size: 0.8em; margin-bottom: 8px; border-bottom: 1px solid rgba(245, 124, 0, 0.2); padding-bottom: 4px; cursor: pointer; display: flex; align-items: center; gap: 5px;" onclick="verExtratoCautela('${c.id}')">
-                        <i class="fas fa-eye"></i> ${c.id || 'CAUTELA'} em ${dataExibicao}
-                    </div>
-                    <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
-                        <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade: <b>${c.quantidade || 1} un.</b>
-                    </div>
-                    <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;">
-                        <i class="fas fa-user" style="width: 18px; color: #666;"></i> Detentor: <b>${c.destinatario}</b>
-                    </div>
-                    ${isCiente ? `
-                        <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 6px; margin-top: 4px; font-style: italic;">
-                            <i class="fas fa-check-double"></i> Ciente nesta conferência
+            listaDeCautelas.forEach(c => {
+                const dataExibicao = c.data || "Data N/D";
+                htmlAcumulado += `
+                    <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 12px; margin-bottom: 8px; border-radius: 5px; text-align: left;">
+                        <div style="font-weight: bold; color: #f57c00; font-size: 0.8em; margin-bottom: 8px; border-bottom: 1px solid rgba(245, 124, 0, 0.2); padding-bottom: 4px; cursor: pointer; display: flex; align-items: center; gap: 5px;" onclick="verExtratoCautela('${c.id}')">
+                            <i class="fas fa-eye"></i> ${c.id || 'CAUTELA'} em ${dataExibicao}
                         </div>
-                    ` : `
-                        <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px; font-size: 0.8em;" onclick="setItemStatusID(this, 'cautela_ciente', '${cautelaUid}')">Ciente</button>
-                    `}
-                </div>`;
-        });
+                        <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
+                            <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade: <b>${c.quantidade || 1} un.</b>
+                        </div>
+                        <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;">
+                            <i class="fas fa-user" style="width: 18px; color: #666;"></i> Detentor: <b>${c.destinatario}</b>
+                        </div>
+                        ${isCiente ? `
+                            <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 6px; margin-top: 4px; font-style: italic;">
+                                <i class="fas fa-check-double"></i> Ciente nesta conferência
+                            </div>
+                        ` : `
+                            <button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px; font-size: 0.8em;" onclick="setItemStatusID(this, 'cautela_ciente', '${cautelaUid}')">Ciente</button>
+                        `}
+                    </div>`;
+            });
+        }
 
+        // Mantém as pendências (carimbos vermelhos) sempre visíveis para decisão do conferente
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
@@ -731,7 +737,9 @@ function renderizarConferencia() {
                 item.tombamentos.forEach(t => {
                     const uid = `${itemId}-${t.tomb}`;
                     const pndHtml = montarPendenciaHtml(uid, t);
-                    const hasPendencia = (t.pendencias_ids && t.pendencias_ids.length > 0) || (t.cautela);
+                    const hasPendencia = (t.pendencias_ids && t.pendencias_ids.length > 0); 
+                    // 🛑 Nota: No modo Cautela, a hasPendencia ignora o carimbo laranja pela regra da montarPendenciaHtml
+                    
                     const statusU = window.itemStatus[uid]?.status;
                     const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
                     const isCiente = statusC === 'cautela_ciente' || window.itemStatus[`CAUTELA-${uid}`]?.cautela_confirmada === true;
@@ -746,12 +754,10 @@ function renderizarConferencia() {
                             <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
                                 <span>Tomb.: <b>${t.tomb}</b></span>
                                 <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                    
                                     ${!hasPendencia ? `
                                     <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" 
                                             onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
                                     ` : ''}
-
                                     <button type="button" class="action-button ca-alert ${hasPendencia ? 'active' : ''}" 
                                             onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">
                                             <span class="d-pc-inline">+ Alteração</span>
@@ -799,12 +805,10 @@ function renderizarConferencia() {
                             </div>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                            
                             ${!temAlteracao ? `
                             <button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" 
                                     onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>
                             ` : ''}
-
                             <button type="button" class="action-button ca-alert ${temAlteracao ? 'active' : ''}" 
                                     onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${saldoDisponivel})">
                                     <span class="d-pc-inline">+ Alteração</span>
