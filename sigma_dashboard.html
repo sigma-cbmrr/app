@@ -7978,29 +7978,30 @@ async function abrirSeletorGlobalSubstituicao() {
 }
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
+    
+    // --- CORREÇÃO: Recuperação segura do userInfo ---
+    // Tenta usar a variável global; se falhar, tenta buscar no localStorage; 
+    // se falhar novamente, usa um objeto padrão para não travar o log.
+    const usuarioAtivo = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
+                         JSON.parse(localStorage.getItem('user_data') || '{"postoGraduacao":"","nomeGuerra":"Gestor"}');
+
     let qtdParaMovimentar = 1;
 
     try {
-        // --- 0. CAPTURA DE QUANTIDADE PELO MODAL (Nova Lógica) ---
-        // Tentamos encontrar o input de quantidade que inserimos no card
+        // --- 0. CAPTURA DE QUANTIDADE PELO MODAL ---
         const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
         
         if (inputQtd) {
             qtdParaMovimentar = parseInt(inputQtd.value);
-            // Validação simples de segurança
             if (isNaN(qtdParaMovimentar) || qtdParaMovimentar <= 0) {
                 alert("Por favor, insira uma quantidade válida.");
                 return;
             }
-        } else {
-            // Se não houver input (caso de itens Multi/Tombamento), o padrão é 1
-            qtdParaMovimentar = 1;
         }
 
-        const confirmacao = confirm(`Confirmar substituição física?\n\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}\nRetirar de: ${listaOrigemNovo.toUpperCase()}\nPara: ${p.localId.toUpperCase()}`);
+        const confirmacao = confirm(`Confirmar substituição física?\n\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}\nOrigem: ${listaOrigemNovo.toUpperCase()}`);
         if (!confirmacao) return;
 
-        // Fecha o modal seletor para dar feedback visual de que começou a gravar
         document.getElementById('modalSeletorEstoque').style.display = 'none';
         
         const batch = db.batch();
@@ -8012,11 +8013,12 @@ async function abrirSeletorGlobalSubstituicao() {
         if (!docCautela.exists) throw new Error("Cautela receptora não encontrada.");
         const dadosC = docCautela.data();
 
+        // Usando usuarioAtivo recuperado para o log
         const logTroca = {
             data: timestamp,
             mensagem: `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo} vindo de ${listaOrigemNovo}.`,
             tipo: "SUBSTITUICAO_CRUZADA",
-            autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`
+            autor: `${usuarioAtivo.postoGraduacao || ''} ${usuarioAtivo.nomeGuerra || 'Gestor'}`.trim()
         };
 
         const itensAtualizados = dadosC.itens.map(it => {
@@ -8024,7 +8026,6 @@ async function abrirSeletorGlobalSubstituicao() {
             if (ehOItem) {
                 return { 
                     ...it, 
-                    // No single mantemos o nome original do contrato, no multi trocamos o tombamento
                     tombamento: inputQtd ? it.tombamento : tombamentoNovo,
                     id_original_substituido: p.uidItem,
                     origem_lista: listaOrigemNovo, 
@@ -8039,7 +8040,7 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logTroca)
         });
 
-        // 2. ATUALIZAR LISTA DOADORA (Baixa no saldo/Reserva de tombamento)
+        // 2. ATUALIZAR LISTA DOADORA
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         const doadoraData = docDoadora.data();
@@ -8078,7 +8079,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }));
         batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        // 3. MARCAR AVARIADO NA LISTA RECEPTORA (Local da origem do defeito)
+        // 3. MARCAR AVARIADO NA LISTA RECEPTORA
         const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
         const docReceptora = await listaReceptoraRef.get();
         if (docReceptora.exists) {
