@@ -132,24 +132,24 @@
     const db = firebase.firestore();
     const auth = firebase.auth();
 
+    // --- INICIALIZAÇÃO DE VARIÁVEIS E PARÂMETROS DA URL ---
     const urlParams = new URLSearchParams(window.location.search);
     const LISTA_ID = urlParams.get('id');
+    const CAUTELA_ID = urlParams.get('cautelaId');
     const COLECAO_LISTAS = 'listas_conferencia';
     const COLECAO_CAUTELAS = 'cautelas_abertas';
     
-    let MODO_OPERACAO = 'recebimento'; 
-    let DESTINATARIO_DEVOLUCAO = null; 
-    
-    const CAUTELA_ID = urlParams.get('cautelaId');
-    const modoParam = urlParams.get('modo');
-    const USER_UID = urlParams.get('user_uid');
+    // Captura o modo e destinatário de forma direta
+    let MODO_OPERACAO = urlParams.get('modo') || 'recebimento'; 
+    let DESTINATARIO_DEVOLUCAO = urlParams.get('destinatarioDevolucao'); 
 
-    if (modoParam === 'devolucao') {
-        MODO_OPERACAO = 'devolucao';
-        DESTINATARIO_DEVOLUCAO = urlParams.get('destinatarioDevolucao');
-    } else if (modoParam === 'devolucao_final') {
-        MODO_OPERACAO = 'devolucao_final';
-    }
+    // Objeto de Usuário preenchido na hora (Resolve o problema do "Carregando...")
+    const userInfo = { 
+        postoGraduacao: urlParams.get('posto_grad') || "ND", 
+        quadro: urlParams.get('quadro_mil') || "ND", 
+        nomeGuerra: urlParams.get('nome_guerra') || "ND",
+        uid: urlParams.get('user_uid') || "ND"
+    };
 
     let dadosConferencia = [];
     let isCautela = !!CAUTELA_ID;
@@ -829,7 +829,6 @@ function renderizarConferencia() {
     if (elHeader) {
         elHeader.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
     }
-    // -----------------------------------------------------------------------
 
     if (!ID_ALVO) return;
         
@@ -850,7 +849,6 @@ function renderizarConferencia() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
-                    // CORREÇÃO DE TIPO (DNA): Se o tombamento for igual ao nome, força SINGLE
                     const tombamentoInvalido = item.tombamentos && item.tombamentos.some(t => t.tomb === item.nome || t.tomb === "S/T");
                     if (tombamentoInvalido || item.tipo === 'single') {
                         item.tipo = 'single';
@@ -866,11 +864,26 @@ function renderizarConferencia() {
         
         infoLocal = { 
             nome: isCautela ? `CAUTELA: ${CAUTELA_ID}` : (data.nome_local || "Lista"),
-            posto: isCautela ? `Destinatário: ${data.destinatario || data.destinatario_original_nome}` : (data.posto || "Geral")
+            posto: isCautela ? `Destinatário:` : (data.posto || "Geral")
         };
         
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto} - ${infoLocal.nome}</span>`;
+
+        // 🛑 ATRIBUIÇÃO CIRÚRGICA DO BOTÃO: Define qual função o botão deve executar
+        const btnFinalizar = document.getElementById('btn-finalizar');
+        if (btnFinalizar) {
+            if (isDevolucaoFinal) {
+                // Se for recebimento de devolução
+                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
+            } else if (isCautela) {
+                // Se for recebimento de cautela comum
+                btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
+            } else {
+                // Se for conferência diária de estoque
+                btnFinalizar.onclick = () => finalizarConferencia();
+            }
+        }
 
         renderizarConferencia(); 
 
