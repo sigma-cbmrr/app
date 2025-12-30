@@ -314,7 +314,8 @@
     
     const itemIdBase = item.getAttribute('data-id'); 
     const tombs = item.querySelectorAll('.tombamento-container'); 
-    let conf = 0, alt = 0; 
+    let concluidos = 0; 
+    let temAlteracao = false; 
 
     tombs.forEach(t => { 
         const nTomb = t.getAttribute('data-tomb');
@@ -324,30 +325,39 @@
         const s = window.itemStatus[uidOriginal]?.status; 
         const sCautela = window.itemStatus[uidCautela]?.status; 
 
-        // Se estiver ok, C/A ou Ciente, o item individual está "preenchido"
-        if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
-            conf++; 
-            // Mas se for qualquer coisa diferente de 'ok', ele conta como Alerta (C/A)
-            if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
-        } 
+        // 1. Verifica se este tombamento específico está preenchido
+        // Adicionamos 'C/A', 'KEEP' e 'cautela_ciente' como estados de conclusão
+        const preenchido = (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente');
+        
+        if (preenchido) {
+            concluidos++;
+            // 2. Se qualquer um for diferente de 'ok', marca que o item pai terá alerta
+            if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') {
+                temAlteracao = true;
+            }
+        }
     }); 
 
     const icon = item.querySelector('.status-icon'); 
+    
+    // IMPORTANTE: Reseta tudo antes de validar
     item.classList.remove('status-ok', 'status-alert');
+    if (icon) icon.className = 'status-icon'; 
 
-    // Só conclui o item pai se TODOS os tombamentos estiverem conferidos
-    if (conf === tombs.length && tombs.length > 0) { 
-        if (alt > 0) { 
-            if (icon) icon.className = 'status-icon alert'; 
+    // 🛑 REGRA DE OURO: Só entra aqui se TODOS os tombamentos estiverem concluidos
+    if (concluidos === tombs.length && tombs.length > 0) { 
+        if (temAlteracao) { 
+            // Pelo menos um tombamento é C/A
+            if (icon) icon.classList.add('alert'); 
             item.classList.add('status-alert'); 
         } else { 
-            if (icon) icon.className = 'status-icon ok'; 
+            // Todos são S/A (ok)
+            if (icon) icon.classList.add('ok'); 
             item.classList.add('status-ok'); 
         } 
-    } else if (icon) {
-        icon.className = 'status-icon'; // Volta para o estado inicial (cinza/dashed) se incompleto
-    }
+    } 
     
+    // Atualiza o contador do setor (badge)
     const setorEl = item.closest('.setor');
     if (setorEl) updateSetorStatus(setorEl);
 }
@@ -675,47 +685,57 @@ function renderizarConferencia() {
 
             if (isRealMulti) {
                 let htmlTombamentos = '';
-                let confCount = 0, altCount = 0;
+                let confCount = 0;
+                let temAlertaNoGrupo = false;
 
-               item.tombamentos.forEach(t => {
-    // --- DENTRO DO item.tombamentos.forEach ---
-const uid = `${itemId}-${t.tomb}`;
-const pndHtml = montarPendenciaHtml(uid, t);
-const hasCarimboAtivo = pndHtml.length > 0;
-const statusU = window.itemStatus[uid]?.status;
-const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
+                item.tombamentos.forEach(t => {
+                    const uid = `${itemId}-${t.tomb}`;
+                    const pndHtml = montarPendenciaHtml(uid, t);
+                    const hasCarimboAtivo = pndHtml.length > 0;
+                    
+                    const statusU = window.itemStatus[uid]?.status;
+                    const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
 
-if (statusU === 'ok' || statusU === 'C/A' || statusC === 'cautela_ciente') confCount++;
-if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
+                    // Lógica estrita de conferência individual
+                    const conferido = (statusU === 'ok' || statusU === 'C/A' || statusU === 'KEEP' || statusC === 'cautela_ciente');
+                    const alerta = (statusU === 'C/A' || statusU === 'KEEP' || statusC === 'cautela_ciente');
 
-// 🛑 AJUSTE AQUI: Inclusão de data-id e data-tomb para as funções de foco funcionarem
-htmlTombamentos += `
-    <div class="tombamento-container" 
-         data-id="${uid}" 
-         data-tomb="${t.tomb}" 
-         style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
-        <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>Tomb.: <b>${t.tomb}</b></span>
-            ${!hasCarimboAtivo ? `
-            <div class="tombamento-options">
-                <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
-                <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
-            </div>` : ''}
-        </div>
-        <div class="alerts-wrapper">${pndHtml}</div>
-    </div>`;
-});
+                    if (conferido) confCount++;
+                    if (alerta) temAlertaNoGrupo = true;
 
-                const classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
-                htmlItens += `<div class="item-conferencia ${classeMulti}" data-id="${itemId}">
+                    htmlTombamentos += `
+                        <div class="tombamento-container" 
+                             data-id="${uid}" 
+                             data-tomb="${t.tomb}" 
+                             style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+                            <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>Tomb.: <b>${t.tomb}</b></span>
+                                ${!hasCarimboAtivo ? `
+                                <div class="tombamento-options">
+                                    <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
+                                    <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
+                                </div>` : ''}
+                            </div>
+                            <div class="alerts-wrapper">${pndHtml}</div>
+                        </div>`;
+                });
+
+                // REGRA: Só define a classe do pai se TODOS os tombamentos estiverem preenchidos
+                let classeMulti = '';
+                if (confCount === item.tombamentos.length && item.tombamentos.length > 0) {
+                    classeMulti = temAlertaNoGrupo ? 'status-alert' : 'status-ok';
+                }
+
+                htmlItens += `<div class="item-conferencia ${classeMulti} item-has-tombamentos" data-id="${itemId}" data-type="multi">
                     <div class="item-header">
                         <span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}"></span>
                         <span class="item-label">${item.nome}</span>
                     </div>
                     ${htmlTombamentos}
                 </div>`;
+
             } else {
-                // LÓGICA SINGLE PADRONIZADA (Ex: PÉ DE CABRA)
+                // LÓGICA SINGLE (Ex: PÉ DE CABRA)
                 const pndHtml = montarPendenciaHtml(itemId, item);
                 const hasCarimboAtivo = pndHtml.length > 0;
                 const currentStatus = window.itemStatus[itemId]?.status;
