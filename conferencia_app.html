@@ -546,7 +546,7 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
-    // --- 🛑 CAPTURA ROBUSTA DO MODO DE OPERAÇÃO ---
+    // --- 🛑 TRAVA DE SEGURANÇA: IDENTIFICAÇÃO DO MODO DE OPERAÇÃO ---
     const urlParams = new URLSearchParams(window.location.search);
     const isModoDevolucao = urlParams.get('modo') === 'devolucao_final' || 
                             (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao_final');
@@ -593,7 +593,6 @@ function renderizarConferencia() {
         // 2. CARIMBOS DE CAUTELA (OCULTADOS NO MODO DEVOLUÇÃO)
         if (itemOuTomb.situacao !== 'AVARIADO' && !isModoDevolucao) {
             let listaDeCautelas = [];
-            
             if (Array.isArray(itemOuTomb.cautelas) && itemOuTomb.cautelas.length > 0) {
                 listaDeCautelas = itemOuTomb.cautelas;
             } else if (itemOuTomb.cautela) {
@@ -662,7 +661,10 @@ function renderizarConferencia() {
             const nomeEscapado = item.nome.replace(/'/g, "\\'");
             const itemId = item.id;
 
-            if (item.tipo === 'multi' && item.tombamentos) {
+            // 🛑 LÓGICA DE CORREÇÃO PARA "PÉ DE CABRA" (FORÇANDO SINGLE SE O TOMBAMENTO FOR O NOME)
+            const erroTombamento = item.tipo === 'multi' && item.tombamentos && item.tombamentos.some(t => t.tomb === item.nome);
+            
+            if (item.tipo === 'multi' && item.tombamentos && !erroTombamento) {
                 let htmlTombamentos = '';
                 let confCount = 0, altCount = 0;
 
@@ -702,11 +704,11 @@ function renderizarConferencia() {
                 </div>`;
             } 
             else {
+                // CASO B: ITEM SINGLE (Saldos e Quantidades) - AGORA TRATA TAMBÉM ERROS DE CADASTRO
                 const hasPendencia = (item.pendencias_ids && item.pendencias_ids.length > 0) || item.situacao === 'AVARIADO';
                 const currentStatus = window.itemStatus[itemId]?.status;
                 
                 const totalEsp = Number(item.quantidadeEsperada) || 0;
-                // SOMA DAS CAUTELAS GARANTIDA COMO NÚMERO (Reflete as 4un)
                 const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 
