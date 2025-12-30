@@ -8099,7 +8099,95 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemAvariaRef, { list: listData });
         }
 
-        // 🛑 4. ATUALIZAÇÃO DA LISTA DOADORA (Apenas histórico, sem novo carimbo)
+        async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
+    const p = pendenciaSendoResolvida;
+    const dataFormatada = new Date().toLocaleString('pt-BR');
+    const dataSimples = new Date().toLocaleDateString('pt-BR');
+    
+    let nomeAutor = "Gestor";
+    try {
+        const u = (typeof currentUserData !== 'undefined' && currentUserData) ? currentUserData : 
+                  JSON.parse(localStorage.getItem('user_data') || '{}');
+        nomeAutor = `${u.posto || ''} ${u.quadro || ''} ${u.nome_guerra || 'Gestor'}`.replace(/\s+/g, ' ').trim();
+    } catch (e) { console.error("Erro user:", e); }
+
+    try {
+        const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
+        const qtdParaMovimentar = inputQtd ? parseInt(inputQtd.value) : (parseInt(p.quantidade) || 1);
+
+        if (!confirm(`Confirmar substituição física?\nItem Novo: ${tombamentoNovo}\nSubstituindo Avariado: ${p.itemNome}`)) return;
+
+        if (document.getElementById('modalSeletorEstoque')) {
+            document.getElementById('modalSeletorEstoque').style.display = 'none';
+        }
+        
+        const batch = db.batch();
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const docCautela = await cautelaRef.get();
+        if (!docCautela.exists) throw new Error("Cautela não encontrada.");
+        const dadosC = docCautela.data();
+
+        // 1. ATUALIZAÇÃO DA CARGA NA CAUTELA
+        const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
+            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
+            return ehOItem ? { 
+                ...it, 
+                tombamento: tombamentoNovo || it.tombamento || "S/T",
+                origem_lista: listaOrigemNovo,
+                obs: `Substituído em ${dataFormatada} por ${nomeAutor}.`
+            } : it;
+        });
+
+        batch.update(cautelaRef, {
+            itens: itensAtualizados,
+            pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
+                data: dataFormatada,
+                descricao: `Troca Cruzada: Item ${p.itemNome} recolhido. Reposto por ${tombamentoNovo || 'Material'} de ${listaOrigemNovo.toUpperCase()}.`,
+                militar: nomeAutor
+            })
+        });
+
+        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO (MANTIDO E REFORÇADO)
+        const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
+        const docOrigemAvaria = await listaOrigemAvariaRef.get();
+        
+        if (docOrigemAvaria.exists) {
+            const listData = docOrigemAvaria.data().list.map(setor => ({
+                ...setor,
+                itens: (setor.itens || []).map(it => {
+                    const matchId = (String(it.id) === String(p.uidItem) || String(it.id) === String(p.id_base));
+                    const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
+
+                    if (matchId || matchNome) {
+                        // A. Remove carimbo de cautela antigo
+                        if (it.cautelas) it.cautelas = it.cautelas.filter(c => c.id !== p.cautelaId);
+                        
+                        // B. Injeta Carimbo Vermelho
+                        const novaPendenciaAvaria = {
+                            id: "AVARIA-" + Date.now(),
+                            quantidade: qtdParaMovimentar,
+                            descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
+                            autor_nome: nomeAutor,
+                            data_criacao: dataSimples,
+                            status_gestao: "MANUTENCAO",
+                            tipo: "PENDENCIA" 
+                        };
+
+                        if (!it.pendencias_ids) it.pendencias_ids = [];
+                        const jaGravado = it.pendencias_ids.some(pen => pen.descricao.includes(p.cautelaId));
+                        if (!jaGravado) {
+                            it.pendencias_ids.push(novaPendenciaAvaria);
+                            it.status_conferencia = "AVARIADO";
+                        }
+                    }
+                    return it;
+                })
+            }));
+            batch.update(listaOrigemAvariaRef, { list: listData });
+        }
+
+        // 🛑 4. ATUALIZAÇÃO DA LISTA DOADORA (HISTÓRICO MANTIDO)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
@@ -8115,7 +8203,7 @@ async function abrirSeletorGlobalSubstituicao() {
                         it.historico_vida.push({
                             evento: "SAIDA_TROCA_CRUZADA",
                             data: dataFormatada,
-                            detalhes: `Item saiu para suprir troca na Cautela ${p.cautelaId}.`,
+                            detalhes: `Item saiu para suprir troca na Cautela ${p.cautelaId}. Carga registrada no documento da cautela.`,
                             quem: nomeAutor
                         });
                     }
@@ -8124,6 +8212,16 @@ async function abrirSeletorGlobalSubstituicao() {
             }));
             batch.update(listaDoadoraRef, { list: novaListaDoadora });
         }
+
+        await batch.commit();
+        alert(`✅ Troca concluída!\nO item avariado virou uma Pendência no local de origem.`);
+        location.reload();
+
+    } catch (e) {
+        console.error("Erro na Troca Cruzada:", e);
+        alert("❌ Erro: " + e.message);
+    }
+}
 
         await batch.commit();
         alert(`✅ Troca concluída!\nO item avariado virou uma Pendência no local de origem.`);
