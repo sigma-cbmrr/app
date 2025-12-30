@@ -80,9 +80,7 @@
         <div id="draft-message" class="draft-badge"><strong>Rascunho recuperado:</strong> Você está continuando de onde parou.</div>
         <div id="loading-message" class="loading-message">Inicializando sistema...</div>
         <div id="main-content" style="display: none;">
-            <button id="btn-finalizar" onclick="finalizarConferencia()" disabled>
-    FINALIZAR CONFERÊNCIA (0/X ITENS)
-</button>
+            <button id="btn-finalizar" disabled>FINALIZAR CONFERÊNCIA</button>
         </div>
     </div>
     <div id="modal-nova-pendencia" class="modal-overlay" style="display:none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); align-items: center; justify-content: center; z-index: 20000;">
@@ -886,9 +884,19 @@ function renderizarConferencia() {
     }
 }
      
-        async function finalizarConferencia() {
+       async function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
+
+    // 🛑 TRAVA CIRÚRGICA: Se não há LISTA_ID, estamos em modo Cautela/Devolução
+    if (!LISTA_ID) {
+        console.warn("Redirecionando fluxo: LISTA_ID ausente.");
+        if (typeof finalizarRecebimentoDevolucao === 'function' && CAUTELA_ID) {
+            return finalizarRecebimentoDevolucao(window._dadosCautelaOriginal || dadosConferencia[0]);
+        }
+        alert("Erro: Identificador da lista não encontrado.");
+        return;
+    }
     
     btn.textContent = "SALVANDO SUA CONFERÊNCIA..."; 
     btn.disabled = true;
@@ -906,21 +914,17 @@ function renderizarConferencia() {
         let itensRelatorio = [];
         let itensCaa = []; 
         let totalCaa = 0;
-
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
         const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
                 itens: setor.itens.map(item => {
-                    
                     const processarEntidade = (entidade, uid, nomeParaRelatorio) => {
                         const statusLocal = window.itemStatus[uid];
-                        
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // --- 1. SINCRONIZAÇÃO DE ESTADO DE AVARIA ---
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
@@ -928,21 +932,15 @@ function renderizarConferencia() {
                         }
 
                         if (!statusLocal || statusLocal.status === 'pending') {
-                            // Mesmo sem ação, precisamos registrar este item no relatório final
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
-                                id: uid,
-                                nomeCompleto: nomeParaRelatorio,
-                                status: 'S/A',
+                                id: uid, nomeCompleto: nomeParaRelatorio, status: 'S/A',
                                 situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                                quantidade: qtdFix,
-                                setor: setor.nome,
-                                obs: ""
+                                quantidade: qtdFix, setor: setor.nome, obs: ""
                             });
                             return entidade;
                         }
 
-                        // --- 2. TRATAMENTO DE RESOLVIDOS ---
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -950,19 +948,14 @@ function renderizarConferencia() {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
                                     entidade.historico_vida.push({
                                         evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
-                                        id_pendencia_origem: pendenciaMorta.id,
-                                        quem: res.resolvido_por,
-                                        data: res.data_solucao,
-                                        detalhes: `Resolvido ${res.qtd_resolvida} de ${pendenciaMorta.quantidade}. Desc: ${pendenciaMorta.descricao}`
+                                        id_pendencia_origem: pendenciaMorta.id, quem: res.resolvido_por,
+                                        data: res.data_solucao, detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
                                     });
                                     entidade.pendencias_ids.splice(idx, 1);
-
                                     if (res.qtd_remanescente > 0) {
                                         entidade.pendencias_ids.push({
-                                            ...pendenciaMorta,
-                                            id: "PEND_" + Date.now() + "_RES",
-                                            quantidade: res.qtd_remanescente,
-                                            descricao: pendenciaMorta.descricao + " (SALDO REMANESCENTE)",
+                                            ...pendenciaMorta, id: "PEND_" + Date.now() + "_RES",
+                                            quantidade: res.qtd_remanescente, descricao: pendenciaMorta.descricao + " (SALDO)",
                                             herdado_de: pendenciaMorta.id
                                         });
                                     }
@@ -970,46 +963,30 @@ function renderizarConferencia() {
                             });
                         }
 
-                        // --- 3. TRATAMENTO DE NOVOS ---
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id.startsWith('TEMP-')) {
-                                const novoIdDefinitivo = p.id.replace('TEMP-', 'PEND-');
+                                const novoId = p.id.replace('TEMP-', 'PEND-');
                                 entidade.historico_vida.push({
-                                    evento: "NOVA_PENDENCIA",
-                                    id_pendencia: novoIdDefinitivo,
-                                    quem: p.autor_nome,
-                                    data: p.data_criacao,
-                                    detalhes: `${p.quantidade}un - ${p.descricao}`
+                                    evento: "NOVA_PENDENCIA", id_pendencia: novoId, quem: p.autor_nome,
+                                    data: p.data_criacao, detalhes: `${p.quantidade}un - ${p.descricao}`
                                 });
-                                return { ...p, id: novoIdDefinitivo };
+                                return { ...p, id: novoId };
                             }
                             return p;
                         });
 
-                        // --- 4. PREPARAÇÃO PARA RELATÓRIO (CORRIGIDA) ---
                         const temAlteracao = entidade.pendencias_ids.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
-                        
-                        // 🛑 CORREÇÃO DA QUANTIDADE: Tenta os dois campos possíveis
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
-                        const dadosRelatorio = {
-                            id: uid,
-                            nomeCompleto: nomeParaRelatorio,
-                            status: statusFinal,
+                        const dRel = {
+                            id: uid, nomeCompleto: nomeParaRelatorio, status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                            pendencias_ids: [...entidade.pendencias_ids],
-                            quantidade: quantidadeReal, 
-                            setor: setor.nome,
-                            obs: entidade.pendencias_ids.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
+                            pendencias_ids: [...entidade.pendencias_ids], quantidade: quantidadeReal,
+                            setor: setor.nome, obs: entidade.pendencias_ids.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
-
-                        itensRelatorio.push(dadosRelatorio);
-                        if (temAlteracao) {
-                            itensCaa.push(dadosRelatorio);
-                            totalCaa++;
-                        }
-
+                        itensRelatorio.push(dRel);
+                        if (temAlteracao) { itensCaa.push(dRel); totalCaa++; }
                         return entidade;
                     };
 
@@ -1023,42 +1000,24 @@ function renderizarConferencia() {
             };
         });
 
-        // --- GRAVAÇÃO NO FIREBASE ---
         const batch = db.batch();
-
-        const listaRef = db.collection(COLECAO_LISTAS).doc(LISTA_ID);
-        batch.update(listaRef, { list: novaListaMestra });
-
-        const custodiaRef = db.collection('custodia_atual').doc(LISTA_ID);
-        batch.set(custodiaRef, {
-            lista_id: LISTA_ID,
-            local_nome: localNome,
-            conferente_uid: p.uid,
-            conferente_completo: conferenteCompleto,
-            timestamp_ultima_conferencia: timestampAgora
+        batch.update(db.collection(COLECAO_LISTAS).doc(LISTA_ID), { list: novaListaMestra });
+        batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
+            lista_id: LISTA_ID, local_nome: localNome, conferente_uid: p.uid,
+            conferente_completo: conferenteCompleto, timestamp_ultima_conferencia: timestampAgora
         }, { merge: true });
-
-        const relatorioRef = db.collection('resultados_conferencias').doc();
-        batch.set(relatorioRef, {
-            local: localNome,
-            lista_id: LISTA_ID,
-            conferente_uid: p.uid,
-            conferente: conferenteCompleto,
-            timestamp: timestampAgora,
-            totalItensConferidos: itensRelatorio.length,
-            totalCaa: totalCaa,
-            itensCaa: itensCaa,
-            itensRelatorio: itensRelatorio
+        batch.set(db.collection('resultados_conferencias').doc(), {
+            local: localNome, lista_id: LISTA_ID, conferente_uid: p.uid, conferente: conferenteCompleto,
+            timestamp: timestampAgora, totalItensConferidos: itensRelatorio.length,
+            totalCaa: totalCaa, itensCaa: itensCaa, itensRelatorio: itensRelatorio
         });
 
         await batch.commit();
-
         alert("✅ Conferência Finalizada com Sucesso!");
-        if (typeof limparRascunho === "function") limparRascunho();
+        limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-
     } catch (e) {
-        console.error("Erro fatal na gravação:", e);
+        console.error("Erro fatal:", e);
         alert("Erro ao gravar dados: " + e.message);
         btn.disabled = false;
         btn.textContent = "FINALIZAR CONFERÊNCIA";
@@ -1251,28 +1210,27 @@ function renderizarConferencia() {
         btn.disabled = false;
     }
 }
-        async function finalizarRecebimentoDevolucao(cautela) {
+       async function finalizarRecebimentoDevolucao(cautela) {
     const btn = document.getElementById('btn-finalizar');
     btn.textContent = "PROCESSANDO...";
     btn.disabled = true;
 
-    if (!isCautela || !CAUTELA_ID) {
-        alert("Erro: ID da cautela não encontrado.");
+    // 🛡️ CAPTURA CIRÚRGICA DO ID DA LISTA
+    const listaId = cautela.local_origem_id || urlParams.get('lista_origem');
+
+    if (!CAUTELA_ID || !listaId) {
+        console.error("IDs ausentes:", { CAUTELA_ID, listaId });
+        alert("Erro Crítico: Não foi possível identificar a lista de origem para reintegrar o material.");
+        btn.textContent = "FINALIZAR RECEBIMENTO DA DEVOLUÇÃO";
         btn.disabled = false;
         return;
     }
 
     const userAuth = firebase.auth().currentUser;
-    if (!userAuth) {
-        alert("Erro: Sessão não encontrada. Faça login novamente.");
-        btn.disabled = false;
-        return;
-    }
+    if (!userAuth) { alert("Sessão expirada."); btn.disabled = false; return; }
 
-    const meuUid = userAuth.uid;
     const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     const dataAtual = new Date().toLocaleString('pt-BR');
-    const listaId = cautela.local_origem_id;
 
     try {
         const cautelaRef = db.collection(COLECAO_CAUTELAS).doc(CAUTELA_ID);
@@ -1281,9 +1239,7 @@ function renderizarConferencia() {
         await db.runTransaction(async (transaction) => {
             const cautelaDoc = await transaction.get(cautelaRef);
             if (!cautelaDoc.exists) throw new Error("Cautela não encontrada.");
-
-            const cData = cautelaDoc.data();
-
+            
             const listaMestraDoc = await transaction.get(listaMestraRef);
             if (!listaMestraDoc.exists) throw new Error("Lista Mestra original não encontrada.");
 
@@ -1291,59 +1247,31 @@ function renderizarConferencia() {
             const itensDevolvidos = [];
 
             cautela.itens.forEach(cItem => {
-                const statusSelect = document.getElementById(`status-${cItem.id}-${cItem.tombamento || 'single'}`);
-                const obsInput = document.getElementById(`obs-${cItem.id}-${cItem.tombamento || 'single'}`);
-                
-                const statusFinal = statusSelect ? statusSelect.value : 'S/A';
-                const obsFinal = obsInput ? obsInput.value.trim() : '';
+                const statusLocal = window.itemStatus[cItem.id_base || cItem.id] || window.itemStatus[`${cItem.id_base || cItem.id}-${cItem.tombamento}`];
+                const statusFinal = statusLocal?.status === 'ok' ? 'S/A' : 'C/A';
+                const obsFinal = statusLocal?.obs || "";
 
                 itensDevolvidos.push({
-                    ...cItem,
-                    status_devolucao: statusFinal,
-                    obs_devolucao: obsFinal
+                    ...cItem, status_devolucao: statusFinal, obs_devolucao: obsFinal
                 });
 
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
-                        const idMestra = mItem.id_base || mItem.id;
-                        const idCautelaItem = cItem.id_base || cItem.id;
-
-                        if (idMestra === idCautelaItem) {
-                            const logHistorico = {
-                                evento: "RETORNO_DEVOLUCAO",
-                                id_doc: CAUTELA_ID,
-                                quem: meuNomeCompleto,
-                                data: dataAtual,
-                                estado_retorno: statusFinal,
-                                detalhes: statusFinal === 'C/A' ? `Item devolvido com alteração: ${obsFinal}` : "Item devolvido em perfeito estado (S/A)."
-                            };
-
+                        if ((mItem.id_base || mItem.id) === (cItem.id_base || cItem.id)) {
                             if (!mItem.historico_vida) mItem.historico_vida = [];
-                            mItem.historico_vida.push(logHistorico);
-
-                            if (statusFinal === 'C/A') {
-                                mItem.pendencia = {
-                                    tipo: "C/A",
-                                    obs: `[DEVOLUÇÃO ${CAUTELA_ID}] ${obsFinal}`,
-                                    quem: meuNomeCompleto,
-                                    data: dataAtual
-                                };
-                            } else {
-                                delete mItem.pendencia;
-                            }
+                            mItem.historico_vida.push({
+                                evento: "RETORNO_DEVOLUCAO", id_doc: CAUTELA_ID, quem: meuNomeCompleto,
+                                data: dataAtual, estado_retorno: statusFinal, detalhes: obsFinal || "Retorno sem observações."
+                            });
 
                             if (cItem.tombamento && mItem.tombamentos) {
                                 mItem.tombamentos = mItem.tombamentos.map(t => {
-                                    if (t.tomb === cItem.tombamento) {
-                                        delete t.cautela;
-                                    }
+                                    if (t.tomb === cItem.tombamento) delete t.cautela;
                                     return t;
                                 });
                             } else if (!cItem.tombamento && mItem.cautelas) {
-                                mItem.cautelas = (mItem.cautelas || []).filter(c => 
-                                    (c.id !== CAUTELA_ID && c.cautela_id !== CAUTELA_ID)
-                                );
+                                mItem.cautelas = mItem.cautelas.filter(c => c.id !== CAUTELA_ID);
                             }
                         }
                         return mItem;
@@ -1352,29 +1280,24 @@ function renderizarConferencia() {
             });
 
             transaction.update(cautelaRef, { 
-                status: 'CONCLUÍDA',
+                status: 'CONCLUÍDA', 
                 timestamp_conclusao: firebase.firestore.FieldValue.serverTimestamp(),
-                receptor_final_completo: meuNomeCompleto,
-                destinatario_uid: meuUid,
-                itens: itensDevolvidos
+                receptor_final_completo: meuNomeCompleto, 
+                itens: itensDevolvidos 
             });
-
             transaction.update(listaMestraRef, { list: listaMestra });
         });
 
-        alert(`✅ Devolução finalizada! Material reintegrado ao estoque e histórico atualizado.`);
+        alert("✅ Devolução finalizada e estoque atualizado!");
         limparRascunho();
         window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        
     } catch (error) {
-        console.error("Erro ao finalizar devolução:", error);
+        console.error("Erro na transação:", error);
         alert(`Erro: ${error.message}`);
-        btn.textContent = "FINALIZAR RECEBIMENTO DA DEVOLUÇÃO";
         btn.disabled = false;
+        btn.textContent = "FINALIZAR RECEBIMENTO DA DEVOLUÇÃO";
     }
 }
-    // --- NOVAS FUNÇÕES DE CONTROLE DE IDS ÚNICOS ---
-
 // --- NOVAS FUNÇÕES DE CONTROLE DE IDS ÚNICOS ---
 
 function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
