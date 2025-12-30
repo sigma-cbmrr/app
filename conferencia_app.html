@@ -255,62 +255,78 @@
     });
 }
         function updateSetorStatus(setorEl) { 
-            const items = setorEl.querySelectorAll('.item-conferencia'); 
-            let completed = 0, total = 0; 
-            items.forEach(item => { 
-                if (item.dataset.type === 'single') { 
-                    total++; const s = window.itemStatus[item.dataset.id]?.status; 
-                    if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-                } else { 
-                    const tombs = item.querySelectorAll('.tombamento-container'); 
-                    tombs.forEach(t => { 
-                        total++; const s = window.itemStatus[`${item.dataset.id}-${t.dataset.tomb}`]?.status; 
-                        if (s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
-                    }); 
-                } 
+    const items = setorEl.querySelectorAll('.item-conferencia'); 
+    let completed = 0, total = 0; 
+
+    items.forEach(item => { 
+        if (item.dataset.type === 'single') { 
+            total++; 
+            const s = window.itemStatus[item.dataset.id]?.status; 
+            // 🛑 CORREÇÃO: Adicionado 'ok'
+            if (s === 'ok' || s === 'S/A' || s === 'C/A' || s === 'KEEP') completed++;
+        } else { 
+            const tombs = item.querySelectorAll('.tombamento-container'); 
+            tombs.forEach(t => { 
+                total++; 
+                const uid = `${item.dataset.id}-${t.dataset.tomb}`;
+                const s = window.itemStatus[uid]?.status; 
+                const sCaut = window.itemStatus[`CAUTELA-${uid}`]?.status;
+                // 🛑 CORREÇÃO: Adicionado 'ok' e 'cautela_ciente'
+                if (s === 'ok' || s === 'S/A' || s === 'C/A' || s === 'KEEP' || sCaut === 'cautela_ciente') completed++;
             }); 
-            setorEl.dataset.totalItems = total; 
-            const st = setorEl.querySelector('.setor-status'); 
-            st.dataset.completed = completed; 
-            if (completed === total && total > 0) { st.textContent = 'OK'; st.classList.add('ok'); } 
-            else { st.textContent = `${completed}/${total}`; st.classList.remove('ok'); } 
-        }
+        } 
+    }); 
+
+    setorEl.dataset.totalItems = total; 
+    const st = setorEl.querySelector('.setor-status'); 
+    if (st) {
+        st.dataset.completed = completed; 
+        if (completed === total && total > 0) { 
+            st.textContent = 'OK'; 
+            st.classList.add('ok'); 
+        } else { 
+            st.textContent = `${completed}/${total}`; 
+            st.classList.remove('ok'); 
+        } 
+    }
+}
 
         function updateItemMainStatusDisplay(item) { 
     if (item.dataset.type === 'single') return; 
+    
     const tombs = item.querySelectorAll('.tombamento-container'); 
     let conf = 0, alt = 0; 
 
     tombs.forEach(t => { 
         const uidOriginal = `${item.dataset.id}-${t.dataset.tomb}`;
-        const uidCautela = `CAUTELA-${uidOriginal}`; // O novo endereço que criamos
+        const uidCautela = `CAUTELA-${uidOriginal}`;
 
         const s = window.itemStatus[uidOriginal]?.status; 
-        const sCautela = window.itemStatus[uidCautela]?.status; // Busca a ciência isolada
+        const sCautela = window.itemStatus[uidCautela]?.status; 
 
-        // Agora validamos: o tombamento está conferido se estiver S/A, C/A, KEEP OU se tiver Ciente da Cautela
-        if (s === 'S/A' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
+        // 🛑 CORREÇÃO: Padronizado para entender que 'ok' (do botão S/A) significa CONFERIDO
+        if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
             conf++; 
-            // Se for alteração física (C/A/KEEP) ou cautela ativa, conta como alerta visual (laranja/vermelho)
             if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
         } 
     }); 
 
     const icon = item.querySelector('.status-icon'); 
-    item.className = 'item-conferencia item-has-tombamentos'; 
-    icon.className = 'status-icon'; 
+    // Mantém as classes base
+    item.classList.remove('status-ok', 'status-alert');
+    if (icon) icon.classList.remove('ok', 'alert');
 
-    if (conf === tombs.length) { 
+    // Se todos os tombamentos foram conferidos
+    if (conf === tombs.length && tombs.length > 0) { 
         if (alt > 0) { 
-            icon.classList.add('alert'); 
+            if (icon) icon.classList.add('alert'); 
             item.classList.add('status-alert'); 
         } else { 
-            icon.classList.add('ok'); 
+            if (icon) icon.classList.add('ok'); 
             item.classList.add('status-ok'); 
         } 
     } 
 }
-
         function toggleSetor(header) { 
             const content = header.nextElementSibling; const arrow = header.querySelector('.arrow'); 
             if (content.classList.contains('expanded')) { content.classList.remove('expanded'); arrow.textContent = '►'; } 
