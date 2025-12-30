@@ -1193,16 +1193,20 @@ function renderizarConferencia() {
             let listaMestra = listaMestraDoc.data().list;
             const itensConferidos = [];
             
-            // --- 🛑 CONSTRUÇÃO DO EXTRATO DETALHADO 🛑 ---
             let temQualquerAlteracao = false;
             let linhasExtrato = [];
 
             cautela.itens.forEach((cItem, index) => {
+                // 🛑 AJUSTE DE CHAVE: Garante que busca exatamente o que o setItemStatusID gravou
                 const uidBusca = cItem.tombamento ? `${cItem.id_base || cItem.id}-${cItem.tombamento}` : (cItem.id_base || cItem.id);
-                const statusLocal = window.itemStatus[uidBusca];
+                const statusLocal = window.itemStatus[uidBusca] || {};
                 
-                const statusFinal = statusLocal?.status === 'ok' ? 'S/A' : 'C/A';
-                const obsFinal = statusLocal?.obs || '';
+                // Normaliza a checagem: aceita 'ok' (minúsculo) ou 'S/A'
+                const isItemOk = (statusLocal.status === 'ok' || statusLocal.status === 'S/A');
+                const statusFinal = isItemOk ? 'S/A' : 'C/A';
+                
+                // Tenta buscar a OBS de várias fontes possíveis na memória
+                const obsFinal = statusLocal.obs || statusLocal.descricao || "";
                 
                 if (statusFinal === 'C/A') temQualquerAlteracao = true;
 
@@ -1212,12 +1216,11 @@ function renderizarConferencia() {
                     obs_recebimento: obsFinal
                 });
 
-                // Monta a linha do extrato para este item
                 const identificador = cItem.tombamento ? `(Tomb.: ${cItem.tombamento})` : `(QTD: ${cItem.quantidade}UN)`;
-                const relatoItem = statusFinal === 'ok' ? 'S/A' : (obsFinal || 'C/A sem obs.');
+                const relatoItem = isItemOk ? 'S/A' : (obsFinal || 'C/A sem obs.');
                 linhasExtrato.push(`${index + 1}. ${cItem.nome} ${identificador}: ${relatoItem}`);
 
-                // Atualização da Lista Mestra (Estoque)
+                // Atualização da Lista Mestra
                 listaMestra = listaMestra.map(setor => ({
                     ...setor,
                     itens: setor.itens.map(mItem => {
@@ -1263,9 +1266,10 @@ function renderizarConferencia() {
                 }));
             });
 
-            // Finaliza o Título e o Corpo do Log
             const icone = temQualquerAlteracao ? '⚠️' : '✅';
             const tituloLog = `${icone} Recebido ${temQualquerAlteracao ? 'C/A' : 'S/A'} pelo destinatário: ${meuNomeCompleto}`;
+            
+            // Adiciona o título e pula linha para a lista numerada
             const descricaoCompleta = `${tituloLog}\n${linhasExtrato.join('\n')}`;
 
             const logMovimentacao = {
@@ -1719,8 +1723,13 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     });
 
     if (itemEncontrado) {
-        // 🛑 MARCAÇÃO CIRÚRGICA: Registra interação e define status
-        window.itemStatus[uid] = { status: 'C/A', interacao_humana: true };
+        // 🛑 AJUSTE CIRÚRGICO PARA O EXTRATO DETALHADO 🛑
+        // Mantemos o seu status original e apenas injetamos a 'obs' para leitura posterior
+        window.itemStatus[uid] = { 
+            status: 'C/A', 
+            interacao_humana: true,
+            obs: obsDigitada // ⬅️ Isso permite que o log de cautela capture a descrição
+        };
         
         renderizarConferencia();
         
