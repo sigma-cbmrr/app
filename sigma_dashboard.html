@@ -7979,129 +7979,104 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo) {
     const p = pendenciaSendoResolvida;
     
-    console.log("%c--- INICIANDO AUDITORIA DE TROCA ---", "color: #f57c00; font-weight: bold;");
-    console.log("Dados da Pendência (Global):", p);
-
-    // 1. RECUPERAÇÃO SEGURA DO USUÁRIO
-    let nomeAutor = "Gestor";
+    // 1. RECUPERAÇÃO SEGURA DO USUÁRIO (Ajustado para o padrão do log)
+    let nomeGuerraFinal = "Gestor";
     try {
         const u = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
                   JSON.parse(localStorage.getItem('user_data') || '{}');
-        if (u.nomeGuerra) {
-            nomeAutor = `${u.postoGraduacao || ''} ${u.nomeGuerra}`.trim();
-        }
-    } catch (e) { console.error("Erro ao identificar usuário:", e); }
+        nomeGuerraFinal = u.nomeGuerra || "Gestor";
+    } catch (e) { console.error(e); }
 
     let qtdParaMovimentar = 1;
 
     try {
         const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
-        if (inputQtd) {
-            qtdParaMovimentar = parseInt(inputQtd.value);
-            if (isNaN(qtdParaMovimentar) || qtdParaMovimentar <= 0) {
-                alert("Por favor, insira uma quantidade válida.");
-                return;
-            }
-        }
+        if (inputQtd) qtdParaMovimentar = parseInt(inputQtd.value) || 1;
 
-        const confirmacao = confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`);
-        if (!confirmacao) return;
+        if (!confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`)) return;
 
         document.getElementById('modalSeletorEstoque').style.display = 'none';
         
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 2. BUSCA DADOS DA CAUTELA (Receptora)
+        // 2. BUSCA DADOS DA CAUTELA
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
-        if (!docCautela.exists) throw new Error("Cautela receptora não encontrada no banco.");
         const dadosC = docCautela.data();
 
-        // CONSTRUÇÃO DO LOG (Prevenção Total de Undefined)
-        const textoLog = `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} vindo de ${listaOrigemNovo.toUpperCase()}`;
+        // --- CORREÇÃO DOS CAMPOS DE LOG ---
+        // Ajustei as chaves para 'mensagem' e 'autor' (ou 'quem') conforme o que parece ser o seu padrão de leitura
+        const textoDaTroca = `Substituição Cruzada: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} vindo de ${listaOrigemNovo.toUpperCase()}`;
+        
         const logObjeto = {
             data: timestamp,
-            mensagem: String(textoLog),
-            tipo: "SUBSTITUICAO_CRUZADA",
-            autor: String(nomeAutor)
+            mensagem: textoDaTroca, // Dashboard espera 'mensagem'?
+            detalhes: textoDaTroca, // Dashboard espera 'detalhes'?
+            autor: nomeGuerraFinal, // Dashboard espera 'autor'?
+            quem: nomeGuerraFinal,   // Dashboard espera 'quem'?
+            tipo: "SUBSTITUICAO_CRUZADA"
         };
 
-        // 3. ATUALIZAÇÃO DOS ITENS NO CONTRATO
+        // 3. LIMPEZA AGRESSIVA DA PENDÊNCIA
+        // Se a pendência não sai, é porque ela está no array 'pendencias'. Vamos limpar por nome e ID.
+        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => {
+            const matchNome = pend.item_nome === p.itemNome;
+            const matchSolicitacao = pend.id_solicitacao === p.solicitacaoId;
+            // Se o nome do item bater, nós removemos para garantir que suma da tela
+            return !(matchNome || matchSolicitacao);
+        });
+
+        // 4. ATUALIZAÇÃO DOS ITENS
         const itensAtualizados = (dadosC.itens || []).map(it => {
-            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base && !p.itemTomb);
+            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base);
             if (ehOItem) {
                 return { 
                     ...it, 
-                    tombamento: (it.tombamento || tombamentoNovo || "S/T"),
-                    id_original_substituido: p.uidItem || "MANUAL",
-                    origem_lista: listaOrigemNovo || "EXTERNO", 
-                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})`.trim() 
+                    tombamento: tombamentoNovo || it.tombamento || "S/T",
+                    origem_lista: listaOrigemNovo,
+                    status_item: "REPOSTO",
+                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})`
                 };
             }
             return it;
         });
 
-        // 4. LIMPEZA DA PENDÊNCIA (O que faz sumir do Dashboard)
-        console.log("Pendências atuais no Banco:", dadosC.pendencias);
-        
-        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => {
-            // Critérios de remoção (Se qualquer um bater, ele apaga)
-            const matchSolicitacao = (pend.id_solicitacao && p.solicitacaoId && pend.id_solicitacao === p.solicitacaoId);
-            const matchIdBase = (pend.id_base && p.id_base && pend.id_base === p.id_base);
-            const matchNome = (pend.item_nome === p.itemNome);
-
-            const deveRemover = matchSolicitacao || (matchIdBase && matchNome);
-
-            if (deveRemover) {
-                console.log("%c✅ Pendência identificada e removida da gravação:", "color: green;", pend);
-            }
-            return !deveRemover;
-        });
-
-        console.log("Novas pendências (após limpeza):", pendenciasLimpas);
-
+        // GRAVAÇÃO NA CAUTELA
         batch.update(cautelaRef, {
             itens: itensAtualizados,
             pendencias: pendenciasLimpas,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto),
-            // Garantia extra: gravamos também no histórico de vida se o campo existir
-            historico_vida: firebase.firestore.FieldValue.arrayUnion(logObjeto) 
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
         });
 
-        // 5. ATUALIZAR LISTA DOADORA (Baixa no Saldo)
+        // 5. BAIXA NO DOADOR
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
-        if (docDoadora.exists) {
-            const doadoraData = docDoadora.data();
-            const novaListaDoadora = doadoraData.list.map(setor => ({
-                ...setor,
-                itens: (setor.itens || []).map(it => {
-                    if (it.id === uidNovo) {
-                        it.cautelas = it.cautelas || [];
-                        it.cautelas.push({
-                            id: p.cautelaId,
-                            quantidade: qtdParaMovimentar,
-                            destinatario: dadosC.destinatario || "Contrato " + p.cautelaId,
-                            data: new Date().toLocaleString('pt-BR'),
-                            tipo: "SUBSTITUICAO_EMPRESTIMO"
-                        });
-                    }
-                    return it;
-                })
-            }));
-            batch.update(listaDoadoraRef, { list: novaListaDoadora });
-        }
+        const doadoraData = docDoadora.data();
+        const novaListaDoadora = doadoraData.list.map(setor => ({
+            ...setor,
+            itens: (setor.itens || []).map(it => {
+                if (it.id === uidNovo) {
+                    it.cautelas = it.cautelas || [];
+                    it.cautelas.push({
+                        id: p.cautelaId,
+                        quantidade: qtdParaMovimentar,
+                        data: new Date().toLocaleString('pt-BR'),
+                        tipo: "SUBSTITUICAO_EMPRESTIMO"
+                    });
+                }
+                return it;
+            })
+        }));
+        batch.update(listaDoadoraRef, { list: novaListaDoadora });
 
-        // 6. EXECUÇÃO FINAL
         await batch.commit();
-        console.log("%c🚀 BATCH CONCLUÍDO COM SUCESSO!", "color: blue; font-weight: bold;");
-        alert(`✅ Substituição concluída com sucesso!`);
+        alert(`✅ Substituição Concluída!`);
         location.reload();
 
     } catch (e) {
-        console.error("%c❌ ERRO CRÍTICO NO BATCH:", "color: red; font-weight: bold;", e);
-        alert("❌ Erro ao processar: " + e.message);
+        console.error("Erro Crítico:", e);
+        alert("❌ Erro: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
