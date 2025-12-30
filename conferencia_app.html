@@ -546,9 +546,10 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
-    // --- 🛑 TRAVA DE VISUALIZAÇÃO: MODO DEVOLUÇÃO ---
-    // Identifica se estamos em fluxo de devolução para ocultar carimbos desnecessários
-    const modoDevolucao = (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao');
+    // --- 🛑 TRAVA DE SEGURANÇA: IDENTIFICAÇÃO DO MODO DE OPERAÇÃO ---
+    // Busca na URL se o modo é de devolução final. Se for, isModoDevolucao será true.
+    const urlParams = new URLSearchParams(window.location.search);
+    const isModoDevolucao = urlParams.get('modo') === 'devolucao_final';
 
     // --- SUB-FUNÇÃO: MONTAGEM DE CARDS DE PENDÊNCIA/CAUTELA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
@@ -589,9 +590,9 @@ function renderizarConferencia() {
                 </div>`;
         }
 
-        // 2. CARIMBOS DE CAUTELA (CORREÇÃO: OCULTAR NA DEVOLUÇÃO E CORRIGIR QUANTIDADE)
-        // Se for devolução, o recebedor não vê o carimbo laranja
-        if (itemOuTomb.situacao !== 'AVARIADO' && !modoDevolucao) {
+        // 2. CARIMBOS DE CAUTELA (OCULTAR SE FOR MODO DEVOLUÇÃO)
+        // A condição !isModoDevolucao impede que o recebedor veja o carimbo laranja
+        if (itemOuTomb.situacao !== 'AVARIADO' && !isModoDevolucao) {
             let listaDeCautelas = [];
             
             if (Array.isArray(itemOuTomb.cautelas) && itemOuTomb.cautelas.length > 0) {
@@ -602,16 +603,15 @@ function renderizarConferencia() {
 
             listaDeCautelas.forEach(c => {
                 const dataExibicao = c.data || "Data N/D";
-                // 🛑 CORREÇÃO DA QUANTIDADE: Captura o valor real do banco
                 const qtdEfetiva = Number(c.quantidade) || 1;
 
                 htmlAcumulado += `
                     <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 12px; margin-bottom: 8px; border-radius: 5px; text-align: left;">
-                        <div style="font-weight: bold; color: #f57c00; font-size: 0.8em; margin-bottom: 8px; border-bottom: 1px solid rgba(245, 124, 0, 0.2); padding-bottom: 4px; cursor: pointer; display: flex; align-items: center; gap: 5px;" onclick="verExtratoCautela('${c.id}')">
-                            <i class="fas fa-eye"></i> ${c.id || 'CAUTELA'} em ${dataExibicao}
+                        <div style="font-weight: bold; color: #f57c00; font-size: 0.8em; margin-bottom: 8px; border-bottom: 1px solid rgba(245, 124, 0, 0.2); padding-bottom: 4px; display: flex; align-items: center; gap: 5px;">
+                            <i class="fas fa-info-circle"></i> Item em Cautela Ativa
                         </div>
                         <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
-                            <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade Cautelada: <b style="color:#d90f23; font-size: 1.1em;">${qtdEfetiva} un.</b>
+                            <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Carga: <b style="color:#d90f23; font-size: 1.1em;">${qtdEfetiva} un.</b>
                         </div>
                         <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;">
                             <i class="fas fa-user" style="width: 18px; color: #666;"></i> Detentor: <b>${c.destinatario || 'N/D'}</b>
@@ -707,7 +707,6 @@ function renderizarConferencia() {
                 const currentStatus = window.itemStatus[itemId]?.status;
                 
                 const totalEsp = Number(item.quantidadeEsperada) || 0;
-                // SOMA DAS CAUTELAS GARANTIDA COMO NÚMERO PARA REFLETIR AS 4UN
                 const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 
