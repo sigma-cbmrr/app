@@ -857,7 +857,11 @@ function renderizarConferencia() {
         
         const data = doc.data();
         
-        // 🛑 PROCESSAMENTO DOS DADOS (VERSÃO CORRIGIDA PARA MANTER SALDOS) 🛑
+        // --- DETECÇÃO DE MODO DE OPERAÇÃO ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const isDevolucaoFinal = urlParams.get('modo') === 'devolucao_final';
+        
+        // 🛑 PROCESSAMENTO E CORREÇÃO DE DADOS 🛑
         if (isCautela) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
@@ -865,14 +869,21 @@ function renderizarConferencia() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
-                    // MANTEMOS O ARRAY DE CAUTELAS AQUI.
-                    // Isso permite que a 'renderizarConferencia' calcule:
-                    // SALDO = Total Esperado - Cautelas
                     
-                    if (item.tipo === 'single') {
-                        // Cálculo preventivo de soma (apenas para debug/verificação se necessário)
-                        const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                    // --- 🛠️ CORREÇÃO DE "DNA" PARA ITENS SINGLE CADASTRADOS COMO MULTI ---
+                    // Se o item tem tombamentos, mas o tombamento é igual ao nome (Ex: Pé de Cabra)
+                    // Nós forçamos ele a ser um item 'single' para a conferência fluir.
+                    const temErroCadastro = item.tombamentos && item.tombamentos.some(t => t.tomb === item.nome);
+                    
+                    if (temErroCadastro) {
+                        console.warn(`Corrigindo erro de cadastro: ${item.nome} forçado para SINGLE.`);
+                        item.tipo = 'single';
+                        // Se forçar para single, a quantidade esperada deve ser o número de tombamentos que existiam
+                        if (!item.quantidadeEsperada) item.quantidadeEsperada = item.tombamentos.length;
                     }
+
+                    // --- 🛡️ LOGICA DE CARREGAMENTO (MANTÉM DADOS PARA CÁLCULO DE SALDO) ---
+                    // Não deletamos os carimbos aqui para que a renderização saiba calcular o saldo real.
                     return item;
                 })
             }));
@@ -925,10 +936,9 @@ function renderizarConferencia() {
         
         if (loadingMsg) loadingMsg.innerHTML = "Renderizando itens...";
         
-        // Dispara a renderização (a lógica de ocultar o carimbo agora fica nela!)
+        // Dispara a renderização
         renderizarConferencia(); 
 
-        if (typeof updateHeaderInfo === "function") try { updateHeaderInfo(); } catch(e) {}
         if (typeof updateOverallStatus === "function") try { updateOverallStatus(); } catch(e) {}
         
         if (loadingMsg) loadingMsg.style.display = 'none'; 
