@@ -5316,8 +5316,6 @@ async function loadCustodiaLocais() {
 }
 		async function loadCustodiaItens() {
     const selectLocal = document.getElementById('cautela-local-origem');
-    
-    // 🛑 O value contém o ID REAL (ex: alfa_abt17)
     const listaId = selectLocal.value; 
     
     const itemListContainer = document.getElementById('itens-custodia-list');
@@ -5332,7 +5330,6 @@ async function loadCustodiaLocais() {
     }
     
     try {
-        // 1. Buscar Dados da Lista Mestra
         const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
         
         if (!listaDoc.exists) {
@@ -5345,22 +5342,25 @@ async function loadCustodiaLocais() {
         let totalGeralDisponivel = 0;
         let isFirst = true;
 
-        // 2. Renderização
         listaMestra.forEach(setor => {
             const setorItems = (setor.itens || []);
 
-            // 🛑 CÁLCULO DE DISPONIBILIDADE DO SETOR (Correção do NaN)
+            // 🛑 CÁLCULO UNIFICADO DE DISPONIBILIDADE (Igual ao App de Conferência)
             const setorTotal = setorItems.reduce((acc, item) => {
-    			if (item.tipo === 'single') {
-        			const esperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
-       			 const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-       			 const saldo = esperado - cautelado;
-        			return acc + (saldo > 0 ? saldo : 0);
-    			} else if (item.tipo === 'multi') {
-        			return acc + (item.tombamentos || []).filter(t => !t.cautela).length;
-   				}
-   			 return acc;
-			}, 0);
+                if (item.tipo === 'single') {
+                    const esperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
+                    const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                    // ⬇️ NOVA LÓGICA: Abate também pendências de conferência não resolvidas
+                    const pendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+                    
+                    const saldo = esperado - cautelado - pendente;
+                    return acc + (saldo > 0 ? saldo : 0);
+                } else if (item.tipo === 'multi') {
+                    // ⬇️ NOVA LÓGICA: Só conta se não tiver cautela E não tiver pendências de conferência no tombamento
+                    return acc + (item.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
+                }
+                return acc;
+            }, 0);
 
             if (setorTotal <= 0) return;
             totalGeralDisponivel += setorTotal;
@@ -5375,45 +5375,56 @@ async function loadCustodiaLocais() {
                     <div class="items-card-grid">`;
 
             setorItems.forEach(item => {
-               if (item.tipo === 'single') {
-    const totalEsperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
-    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-    const saldoDisponivel = totalEsperado - totalCautelado;
+                if (item.tipo === 'single') {
+                    const totalEsperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
+                    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                    // ⬇️ Abatimento de pendências para o saldo individual do card
+                    const totalPendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+                    
+                    const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
 
-    if (saldoDisponivel > 0) {
-        htmlContent += `
-            <div class="item-selection-card" data-item-id="${item.id}">
-                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
-                <div class="qtd-control-wrapper">
-                    <label>
-                        <input type="checkbox" name="cautela-item-base" 
-                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
-                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
-                    </label>
-                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
-                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
-                </div>
-                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
-            </div>`;
-    }
+                    if (saldoDisponivel > 0) {
+                        htmlContent += `
+                            <div class="item-selection-card" data-item-id="${item.id}">
+                                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
+                                <div class="qtd-control-wrapper">
+                                    <label>
+                                        <input type="checkbox" name="cautela-item-base" 
+                                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
+                                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
+                                    </label>
+                                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
+                                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
+                                </div>
+                                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
+                            </div>`;
+                    }
                 } else if (item.tipo === 'multi' && item.tombamentos?.length > 0) {
+                    // ⬇️ Filtra tombamentos que possuem pendências ativas (carimbos vermelhos)
                     const tags = (item.tombamentos || []).map(t => {
                         const isC = !!t.cautela;
+                        const hasP = (t.pendencias_ids && t.pendencias_ids.length > 0);
+                        const bloqueado = isC || hasP;
+                        const motivoBloqueio = isC ? 'Cautelado' : (hasP ? 'Com Pendência' : 'Livre');
+
                         return `
-                            <div class="tombamento-tag ${isC ? 'cautelado' : ''}" title="${isC ? 'Cautelado' : 'Livre'}">
+                            <div class="tombamento-tag ${bloqueado ? 'cautelado' : ''}" title="${motivoBloqueio}">
                                 <input type="checkbox" name="cautela-item-multi" 
                                        data-id="${item.id}-${t.tomb}" data-id-base="${item.id}" data-tombamento="${t.tomb}" 
                                        data-nome="${item.nome}" data-tipo="multi" 
-                                       onchange="updateCautelaItemCount();" ${isC ? 'disabled' : ''}>
-                                ${t.tomb} ${isC ? '<i class="fas fa-lock" style="color: #800020;"></i>' : ''}
+                                       onchange="updateCautelaItemCount();" ${bloqueado ? 'disabled' : ''}>
+                                ${t.tomb} ${bloqueado ? `<i class="fas fa-lock" style="color: ${hasP ? '#d90f23' : '#800020'};"></i>` : ''}
                             </div>`;
                     }).join('');
 
-                    htmlContent += `
-                        <div class="item-selection-card">
-                            <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
-                            <div class="tombamento-tag-list">${tags}</div>
-                        </div>`;
+                    // Só renderiza o card se houver algum tombamento não bloqueado
+                    if (tags.includes('type="checkbox"')) {
+                        htmlContent += `
+                            <div class="item-selection-card">
+                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
+                                <div class="tombamento-tag-list">${tags}</div>
+                            </div>`;
+                    }
                 }
             });
             htmlContent += '</div></div>';
@@ -5421,14 +5432,12 @@ async function loadCustodiaLocais() {
         });
 
         if (totalGeralDisponivel === 0) {
-            itemListContainer.innerHTML = '<p style="color:green; padding:20px; text-align:center;">✅ Nenhum material disponível para cautela.</p>';
+            itemListContainer.innerHTML = '<p style="color:green; padding:20px; text-align:center;">✅ Nenhum material disponível para cautela (itens com pendência ou cautelados).</p>';
         } else {
             itemListContainer.innerHTML = htmlContent + '</div>';
-            
             document.querySelectorAll('.input-qtd-cautela').forEach(el => {
                 el.addEventListener('input', updateCautelaItemCount);
             });
-            
             updateCautelaItemCount();
         }
 
@@ -5436,6 +5445,7 @@ async function loadCustodiaLocais() {
         console.error("Erro ao carregar itens:", error);
         itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar materiais.</p>';
     }
+}
 }
         
 function updateCardClass(card) {
