@@ -300,11 +300,9 @@
     tombs.forEach(t => { 
         const uidOriginal = `${item.dataset.id}-${t.dataset.tomb}`;
         const uidCautela = `CAUTELA-${uidOriginal}`;
-
         const s = window.itemStatus[uidOriginal]?.status; 
         const sCautela = window.itemStatus[uidCautela]?.status; 
 
-        // 🛑 CORREÇÃO: Padronizado para entender que 'ok' (do botão S/A) significa CONFERIDO
         if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
             conf++; 
             if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
@@ -312,11 +310,9 @@
     }); 
 
     const icon = item.querySelector('.status-icon'); 
-    // Mantém as classes base
     item.classList.remove('status-ok', 'status-alert');
-    if (icon) icon.classList.remove('ok', 'alert');
+    if (icon) icon.className = 'status-icon'; 
 
-    // Se todos os tombamentos foram conferidos
     if (conf === tombs.length && tombs.length > 0) { 
         if (alt > 0) { 
             if (icon) icon.classList.add('alert'); 
@@ -336,22 +332,16 @@
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
-    // 1. Atualiza o estado global e visual primeiro
-    // Isso garante que o selo S/A ou C/A seja desenhado antes de qualquer movimento
     updateOverallStatus();
 
-    // 2. CONTAGEM PARA LÓGICA DE AVANÇO
     const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
     const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
 
-    // 3. DECISÃO DE FLUXO
     if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
-        // SETOR CONCLUÍDO: Aguarda um pouco para o usuário ver o selo mudar e então retrai
         setTimeout(() => {
             autoAdvanceSetor(currentSetor); 
-        }, 550); // Tempo ideal para ver a "mágica" do selo antes de fechar
+        }, 550);
     } else {
-        // SETOR EM ANDAMENTO: Busca o PRÓXIMO ALVO PENDENTE
         const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
         
         const indexAtual = todosAlvos.findIndex(el => {
@@ -369,14 +359,13 @@
             const stNormal = window.itemStatus[id]?.status;
             const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
             
-            return (!stNormal || stNormal === 'pending') && (stCautela !== 'cautela_ciente');
+            // 🛑 CORREÇÃO: Se stNormal for 'ok', ele NÃO é um alvo pendente. Pula para o próximo.
+            return (!stNormal || stNormal === 'pending') && (stNormal !== 'ok') && (stCautela !== 'cautela_ciente');
         });
 
         if (proximoAlvo) {
             setTimeout(() => {
                 proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Feedback visual sutil no próximo item
                 proximoAlvo.style.transition = "box-shadow 0.3s";
                 proximoAlvo.style.boxShadow = "0 0 10px rgba(245, 124, 0, 0.5)";
                 setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
@@ -1712,66 +1701,42 @@ function setItemStatusID(btn, status, uid) {
     const setor = btn.closest('.setor');
     const itemPai = btn.closest('.item-conferencia');
 
-    // Inicializa o objeto se não existir
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
     if (status === 'ok') {
-        // 1. ATUALIZAÇÃO (CORREÇÃO: Gravando 'ok' para bater com a renderização)
-        window.itemStatus[uid] = { 
-            ...window.itemStatus[uid], 
-            status: 'ok' // Mudado de 'S/A' para 'ok' para consistência com renderizarConferencia
-        };
+        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'ok' };
 
-        // 2. Feedback visual nos botões
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         
-        // 3. ATUALIZAÇÃO DE CLASSE
-        if (itemPai && itemPai.getAttribute('data-type') === 'single') {
+        if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
+            updateItemMainStatusDisplay(itemPai);
+        } else if (itemPai && itemPai.getAttribute('data-type') === 'single') {
             itemPai.classList.add('status-ok');
             itemPai.classList.remove('status-alert');
             const icon = itemPai.querySelector('.status-icon');
             if (icon) icon.className = 'status-icon ok';
         }
-
-        // 4. Se for Multi, reavalia o cabeçalho do item
-        if (itemPai && itemPai.classList.contains('item-has-tombamentos')) {
-            if (typeof updateItemMainStatusDisplay === 'function') {
-                updateItemMainStatusDisplay(itemPai);
-            }
-        }
-
     } else if (status === 'cautela_ciente') {
-        // Obtenção da quantidade se for um item de cautela (para não perder o valor no estado)
-        // Buscamos o valor que já estava no card para persistir
         const qtdNoCard = container.querySelector('b[style*="color:#d90f23"]')?.textContent.replace(/\D/g, '') || 1;
-
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'cautela_ciente',
-            quantidade: parseInt(qtdNoCard), // Salva a quantidade real no estado
+            quantidade: parseInt(qtdNoCard),
             cautela_confirmada: true
         };
-        
-        // Feedback visual imediato
         btn.innerHTML = '<i class="fas fa-check"></i> Ciente registrado';
         btn.disabled = true;
         btn.style.backgroundColor = "#1b8a3e";
         
         setTimeout(() => {
-            const scrollPos = window.scrollY;
-            if (typeof renderizarConferencia === 'function') {
-                renderizarConferencia();
-            }
-            window.scrollTo(0, scrollPos);
+            if (typeof renderizarConferencia === 'function') renderizarConferencia();
             updateOverallStatus();
         }, 400);
     }
 
-    // 5. Atualiza contadores globais
-    if (typeof updateOverallStatus === 'function') {
-        updateOverallStatus();
-    }
+    updateOverallStatus();
+    if (setor) updateSetorStatus(setor); // 🛑 Garante atualização do badge 0/X
 
     if (setor && typeof checkSetorCompletion === 'function') { 
         checkSetorCompletion(setor, uid);
