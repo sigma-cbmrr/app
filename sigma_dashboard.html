@@ -5685,6 +5685,16 @@ async function iniciarCautelaProcesso() {
     btn.disabled = true; btn.textContent = "Processando...";
 
     try {
+        // --- 🛑 BUSCA CIRÚRGICA NA ROTA PARA NOME AMIGÁVEL ---
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const rotas = rotasDoc.data() || {};
+        const rotaInfo = rotas[localId];
+        
+        // Monta o nome amigável no padrão "POSTO - NOME"
+        const nomeAmigavelLocal = rotaInfo ? `${rotaInfo.posto} - ${rotaInfo.nome}` : "Local N/D";
+        const unidadeOrigem = rotaInfo ? rotaInfo.unidade : "";
+        // ----------------------------------------------------
+
         const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteNome = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
         const dataAtual = new Date().toLocaleString('pt-BR');
@@ -5695,7 +5705,10 @@ async function iniciarCautelaProcesso() {
             emitente: emitenteNome,
             destinatario_original_uid: destinatarioUid,
             destinatario_original_nome: destinatarioNome,
+            destinatario_uid: destinatarioUid, // Define destinatário atual inicial
             local_origem_id: localId,
+            local_origem: nomeAmigavelLocal, // ⬅️ AGORA SALVA O NOME AMIGÁVEL VIA ROTA
+            unidade_origem: unidadeOrigem,   // ⬅️ SALVA A UNIDADE PARA GESTÃO
             status: 'ABERTA',
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             observacoes_emissao: obsEmissao,
@@ -5737,7 +5750,6 @@ async function iniciarCautelaProcesso() {
                                     return t;
                                 });
                             } else {
-                                // SINGLE: Empilhamento inteligente
                                 if (!mItem.cautelas) mItem.cautelas = [];
                                 mItem.cautelas.push(carimbo);
                             }
@@ -5758,6 +5770,7 @@ async function iniciarCautelaProcesso() {
         console.error(e);
         alert("Erro ao emitir cautela: " + e.message);
         btn.disabled = false;
+        btn.textContent = "Enviar Cautela";
     }
 }
 		
