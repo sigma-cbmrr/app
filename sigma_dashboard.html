@@ -5667,119 +5667,88 @@ async function iniciarCautelaProcesso() {
     const destinatarioNome = document.getElementById('cautela-destinatario').value;
     const obsEmissao = document.getElementById('cautela-obs')?.value || "";
     
-    // Captura segura da variável de itens
-    const itensParaProcessar = (typeof cautelaItensSelecionados !== 'undefined') ? cautelaItensSelecionados : [];
-
-    if (!localId || !destinatarioUid || itensParaProcessar.length === 0) {
-        alert("Verifique se selecionou o local, o militar e os itens.");
+    if (!localId || !destinatarioUid || cautelaItensSelecionados.length === 0) {
+        alert("Preencha todos os campos e selecione ao menos um item.");
         return;
     }
 
     const btn = document.getElementById('btn-iniciar-cautela');
-    if (btn) { btn.disabled = true; btn.textContent = "Processando..."; }
+    btn.disabled = true; btn.textContent = "Processando...";
 
     try {
         const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
-        const emitenteUid = firebase.auth().currentUser.uid;
-        const emitenteNome = `${currentUserData.posto || ""} ${currentUserData.quadro || ""} ${currentUserData.nome_guerra || ""}`.trim();
+        const emitenteNome = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
         const dataAtual = new Date().toLocaleString('pt-BR');
-        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
 
         const novaCautela = {
             cautela_id: cautelaId,
-            emitente_uid: emitenteUid,
+            emitente_uid: firebase.auth().currentUser.uid,
             emitente: emitenteNome,
             destinatario_original_uid: destinatarioUid,
             destinatario_original_nome: destinatarioNome,
-            destinatario_uid: null,
-            destinatario: null,
             local_origem_id: localId,
-            local_origem: document.getElementById('cautela-local-origem').options[document.getElementById('cautela-local-origem').selectedIndex].text,
             status: 'ABERTA',
-            timestamp_emissao: timestamp,
+            timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             observacoes_emissao: obsEmissao,
-            itens: itensParaProcessar
+            itens: cautelaItensSelecionados
         };
 
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const listaRef = db.collection('listas_conferencia').doc(localId);
 
         await db.runTransaction(async (transaction) => {
             const listaDoc = await transaction.get(listaRef);
-            if (!listaDoc.exists) throw new Error("Lista de origem não encontrada.");
+            if (!listaDoc.exists) throw new Error("Lista não encontrada.");
 
-            let listaMestra = listaDoc.data().list;
+            let list = listaDoc.data().list;
 
-            // --- AQUI ESTÁ A CORREÇÃO PARA O 2º TOMBAMENTO ---
-            listaMestra = listaMestra.map(setor => ({
+            list = list.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(mItem => {
-                    // Buscamos TODOS os itens da cautela que pertencem a este ID de material
-                    const selecoesDesteMaterial = itensParaProcessar.filter(c => (c.id_base || c.id) === mItem.id);
+                    const selecoes = cautelaItensSelecionados.filter(c => c.id_base === mItem.id);
                     
-                    if (selecoesDesteMaterial.length > 0) {
+                    if (selecoes.length > 0) {
                         if (!mItem.historico_vida) mItem.historico_vida = [];
-
-                        // Processamos cada seleção individualmente (Resolve o problema de múltiplos tombamentos)
-                        selecoesDesteMaterial.forEach(cItem => {
-                            const objetoCautela = {
+                        
+                        selecoes.forEach(sel => {
+                            const carimbo = {
                                 id: cautelaId,
-                                emitente: emitenteNome,
                                 destinatario: destinatarioNome,
                                 data: dataAtual,
-                                quantidade: Number(cItem.quantidade) || 1
+                                quantidade: Number(sel.quantidade) || 1
                             };
 
-                            // Carimba o histórico
                             mItem.historico_vida.push({
-                                evento: "SAÍDA_CAUTELA",
-                                id_doc: cautelaId,
-                                quem: emitenteNome,
-                                data: dataAtual,
-                                detalhes: `Cautelado ${objetoCautela.quantidade}un (${cItem.tombamento || 'S/T'}) para ${destinatarioNome}.`
+                                evento: "SAIDA_CAUTELA", id_doc: cautelaId, quem: emitenteNome, data: dataAtual,
+                                detalhes: `Saída de ${carimbo.quantidade}un para ${destinatarioNome}`
                             });
 
-                            if (mItem.tipo === 'multi' && cItem.tombamento) {
-                                // CARIMBA CADA TOMBAMENTO SELECIONADO
-                                mItem.tombamentos = (mItem.tombamentos || []).map(t => {
-                                    if (t.tomb === cItem.tombamento) {
-                                        t.cautela = objetoCautela;
-                                    }
+                            if (mItem.tipo === 'multi' && sel.tombamento) {
+                                mItem.tombamentos = mItem.tombamentos.map(t => {
+                                    if (t.tomb === sel.tombamento) t.cautela = carimbo;
                                     return t;
                                 });
                             } else {
-    							// --- CORREÇÃO PARA ITENS SINGLE ---
-   							 	if (!mItem.cautelas) mItem.cautelas = [];
-    
-   								 // Verificamos se já existe um carimbo desta mesma cautela (evita duplicidade no push)
-   								 const indexExistente = mItem.cautelas.findIndex(c => c.id === cautelaId);
-    
-    								if (indexExistente > -1) {
-        								// Se por algum motivo já existir, atualiza a quantidade
-        								mItem.cautelas[indexExistente] = objetoCautela;
-   									 } else {
-        								// Adiciona o novo carimbo com a quantidade correta (Ex: 2)
-       								 mItem.cautelas.push(objetoCautela);
-    								}
-								}
+                                // SINGLE: Empilhamento inteligente
+                                if (!mItem.cautelas) mItem.cautelas = [];
+                                mItem.cautelas.push(carimbo);
+                            }
                         });
                     }
                     return mItem;
                 })
             }));
 
-            transaction.set(cautelaRef, novaCautela);
-            transaction.update(listaRef, { list: listaMestra });
+            transaction.set(db.collection('cautelas_abertas').doc(cautelaId), novaCautela);
+            transaction.update(listaRef, { list });
         });
 
-        alert(`✅ Cautela ${cautelaId} emitida com sucesso!`);
+        alert(`✅ Cautela ${cautelaId} enviada com sucesso!`);
         location.reload();
 
     } catch (e) {
         console.error(e);
-        alert("Erro ao emitir: " + e.message);
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Cautela'; }
+        alert("Erro ao emitir cautela: " + e.message);
+        btn.disabled = false;
     }
 }
 		
