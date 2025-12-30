@@ -176,10 +176,18 @@
     }
 
     function updateHeaderInfo() {
-        const el = document.getElementById('militar-info');
-        if (el) { el.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`;
-        }
-    }
+    const el = document.getElementById('militar-info');
+    if (!el) return;
+
+    // Tenta pegar da variável global, se estiver vazia, tenta ler da URL na hora
+    const p = (userInfo.nomeGuerra !== "ND") ? userInfo : {
+        postoGraduacao: getUrlParameter('posto_grad') || "ND",
+        quadro: getUrlParameter('quadro_mil') || "ND",
+        nomeGuerra: getUrlParameter('nome_guerra') || "ND"
+    };
+
+    el.innerHTML = `<strong>Conferente:</strong> ${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`;
+}
 
     function updateOverallStatus() {
     // 1. Identifica todos os itens de conferência na tela
@@ -680,12 +688,12 @@ function renderizarConferencia() {
                 const hasPendencia = (item.pendencias_ids && item.pendencias_ids.length > 0) || item.situacao === 'AVARIADO';
                 const currentStatus = window.itemStatus[itemId]?.status;
                 
+                // Dentro do else (Caso Single)
                 const totalEsp = Number(item.quantidadeEsperada) || 0;
-                
-                // 🛑 CORREÇÃO DE SALDO: Se for recebimento de cautela, o totalCaut deve ser 0 para não abater o saldo de si mesmo
+                // No recebimento de cautela, ignoramos o desconto de outras cautelas
                 const totalCaut = isConferenciaDeCautela ? 0 : (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-                
+
                 const saldoReal = totalEsp - totalCaut - totalPend;
                 const corSaldo = saldoReal < totalEsp ? '#d90f23' : '#1b8a3e';
 
@@ -776,43 +784,36 @@ function renderizarConferencia() {
 
     const setorCautela = {
         id: cautelaData.cautela_id,
-        nome: "MATERIAIS DESTE TERMO",
+        nome: "ITENS PARA RECEBIMENTO",
         itens: cautelaData.itens.map(cItem => {
             
-            // Verifica se é um item com tombamento ou apenas quantidade
-            let tipo = (cItem.tombamento && cItem.tombamento !== "" && cItem.tombamento !== cItem.nome) ? 'multi' : 'single';
-            let tombamentos = null;
+            // 🛑 AQUI ESTÁ O SEGREDO: Captura as 4 unidades de qualquer lugar que elas estejam
+            const qtdReal = Number(cItem.quantidade || cItem.quantidadeEsperada || 1);
 
-            // Se for multi, cria a estrutura de tombamento único
+            // Verifica se é erro de cadastro (Pé de Cabra com tombamento = nome)
+            const tombInvalido = (cItem.tombamento === cItem.nome || cItem.tombamento === "S/T" || !cItem.tombamento);
+            let tipo = tombInvalido ? 'single' : 'multi';
+            
+            let tombamentos = null;
             if (tipo === 'multi') {
                 tombamentos = [{
                     tomb: cItem.tombamento,
-                    id_completo: cItem.id_completo || `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
-                    cautela: {
-                        id: cautelaData.cautela_id,
-                        destinatario: cautelaData.destinatario || cautelaData.destinatario_original_nome,
-                        data: new Date().toLocaleDateString('pt-BR')
-                    }
+                    id_completo: `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
+                    cautela: { id: cautelaData.cautela_id, destinatario: cautelaData.destinatario || "N/D" }
                 }];
             }
-
-            // 🛑 AQUI ESTÁ A CHAVE: 
-            // A quantidadeEsperada para a tela de RECEBIMENTO deve ser 
-            // exatamente a quantidade que consta no documento da cautela.
-            const qtdNaCautela = Number(cItem.quantidade) || 1;
 
             return {
                 id: cItem.id_base || cItem.id,
                 nome: cItem.nome,
-                quantidadeEsperada: qtdNaCautela, // Agora puxa as 4 unidades
+                quantidadeEsperada: qtdReal, // Define 4 unidades aqui!
                 tipo: tipo,
                 tombamentos: tombamentos,
-                cautelas: [], // Limpo para não gerar carimbo laranja na devolução
-                situacao: "DISPONÍVEL" 
+                cautelas: [], // Esconde carimbo laranja
+                situacao: "DISPONÍVEL"
             };
         })
     };
-
     return [setorCautela];
 }
        async function carregarDadosRemotos() {
