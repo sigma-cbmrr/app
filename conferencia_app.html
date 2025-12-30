@@ -292,21 +292,21 @@
 }
 
         function updateItemMainStatusDisplay(item) { 
-    if (item.dataset.type === 'single') return; 
+    if (!item || item.dataset.type === 'single') return; 
     
     const itemIdBase = item.getAttribute('data-id'); 
     const tombs = item.querySelectorAll('.tombamento-container'); 
     let conf = 0, alt = 0; 
 
     tombs.forEach(t => { 
-        const nTomb = t.getAttribute('data-tomb');
+        const nTomb = t.getAttribute('data-tomb'); // Lê do atributo novo
         const uidOriginal = `${itemIdBase}-${nTomb}`;
         const uidCautela = `CAUTELA-${uidOriginal}`;
 
         const s = window.itemStatus[uidOriginal]?.status; 
         const sCautela = window.itemStatus[uidCautela]?.status; 
 
-        // 🛑 Reconhece 'ok' (S/A), 'C/A', 'KEEP' ou 'cautela_ciente' como CONFERIDO
+        // Padronizado para entender 'ok'
         if (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') { 
             conf++; 
             if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') alt++; 
@@ -327,7 +327,7 @@
         } 
     } 
     
-    // Atualiza o contador de progresso do setor (badge 0/X)
+    // Força a atualização do progresso visual do setor
     const setorEl = item.closest('.setor');
     if (setorEl) updateSetorStatus(setorEl);
 }
@@ -342,51 +342,36 @@
 
     updateOverallStatus();
 
-    const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
-    const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
+    // Mapeia todos os itens que podem receber foco
+    const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
+    
+    // 1. Localiza o índice do item atual pelo data-id
+    const indexAtual = todosAlvos.findIndex(el => el.getAttribute('data-id') === currentItemId);
 
-    if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
-        setTimeout(() => { autoAdvanceSetor(currentSetor); }, 550);
-    } else {
-        const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
+    // 2. Busca o PRÓXIMO alvo que NÃO esteja concluído
+    const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
+        const id = el.getAttribute('data-id');
+        const stNormal = window.itemStatus[id]?.status;
+        const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
         
-        const indexAtual = todosAlvos.findIndex(el => {
-            let id;
-            if (el.classList.contains('tombamento-container')) {
-                const paiId = el.closest('.item-conferencia').getAttribute('data-id');
-                const tomb = el.getAttribute('data-tomb');
-                id = `${paiId}-${tomb}`;
-            } else {
-                id = el.getAttribute('data-id');
-            }
-            return id === currentItemId;
-        });
+        // Regra: Se está 'ok', 'C/A' ou 'ciente', já está concluído. PULA.
+        const jaConcluido = (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+        return !jaConcluido;
+    });
 
-        const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
-            let id;
-            if (el.classList.contains('tombamento-container')) {
-                const paiId = el.closest('.item-conferencia').getAttribute('data-id');
-                const tomb = el.getAttribute('data-tomb');
-                id = `${paiId}-${tomb}`;
-            } else {
-                id = el.getAttribute('data-id');
-            }
-            
-            const stNormal = window.itemStatus[id]?.status;
-            const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
-            
-            // 🛑 Pula itens que já estão 'ok' ou 'cautela_ciente'
-            const jaConcluido = (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
-            return !jaConcluido;
-        });
-
-        if (proximoAlvo) {
-            setTimeout(() => {
-                proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                proximoAlvo.style.transition = "box-shadow 0.3s";
-                proximoAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.4)";
-                setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
-            }, 300);
+    if (proximoAlvo) {
+        setTimeout(() => {
+            proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            proximoAlvo.style.transition = "box-shadow 0.3s";
+            proximoAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.4)";
+            setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
+        }, 300);
+    } else {
+        // Se não há mais nada no setor, verifica se deve fechar o acordeão
+        const totalNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
+        const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
+        if (concluidos >= totalNoSetor) {
+            setTimeout(() => { autoAdvanceSetor(currentSetor); }, 500);
         }
     }
 }
@@ -658,16 +643,14 @@ function renderizarConferencia() {
 
                 item.tombamentos.forEach(t => {
                     const uid = `${itemId}-${t.tomb}`;
-                    const pndHtml = montarPendenciaHtml(uid, t);
-                    const hasCarimboAtivo = pndHtml.length > 0;
-                    const statusU = window.itemStatus[uid]?.status;
-                    const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
+const pndHtml = montarPendenciaHtml(uid, t);
+const hasCarimboAtivo = pndHtml.length > 0;
+const statusU = window.itemStatus[uid]?.status;
+const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
 
-                    if (statusU === 'ok' || statusU === 'C/A' || statusC === 'cautela_ciente') confCount++;
-                    if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
-
-                    htmlTombamentos += `
+htmlTombamentos += `
     <div class="tombamento-container" 
+         data-id="${uid}" 
          data-tomb="${t.tomb}" 
          style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
         <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
