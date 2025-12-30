@@ -545,97 +545,88 @@ function renderizarConferencia() {
     let htmlSetores = ''; 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     
-    // --- 🛑 TRAVA DE SEGURANÇA E CONTEXTO ---
     const urlParams = new URLSearchParams(window.location.search);
     const isModoDevolucao = urlParams.get('modo') === 'devolucao_final' || 
                             (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao_final');
-    
-    // Identifica se estamos processando um Termo de Cautela ou uma Lista de Estoque
     const isConferenciaDeCautela = !!urlParams.get('cautelaId');
 
-    // --- SUB-FUNÇÃO: MONTAGEM DE CARDS DE PENDÊNCIA/CAUTELA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
-        const cautelaUid = `CAUTELA-${uid}`;
         const statusLocal = window.itemStatus[uid] || {};
-        const statusCautela = window.itemStatus[cautelaUid] || {};
-        const isCiente = statusCautela.status === 'cautela_ciente' || statusCautela.cautela_confirmada === true;
 
-        // 1. LÓGICA DE AVARIA
+        // --- 1. BLOCO DE AVARIA (CARIMBO VERMELHO) ---
         if (itemOuTomb.situacao === 'AVARIADO' || itemOuTomb.status === 'AVARIA') {
-            const idAvaria = `AVARIA-${itemOuTomb.id_cautela_origem || 'S-N'}`;
+            const idAvaria = `AVARIA-${itemOuTomb.id_cautela_origem || 'MANUAL'}`;
             const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(idAvaria);
             
-            let acoesAvariaHtml = jaFoiMantido ? `
-                <div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;">
-                    <i class="fas fa-check-double"></i> MANTIDO NESTA CONFERÊNCIA
-                </div>` : `
-                <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
-                    <button type="button" class="btn-manter" style="flex:1" onclick="manterID('${idAvaria}', '${uid}')">Manter</button>
-                    <button type="button" class="btn-resolver" style="flex:1" onclick="abrirModalResolver('${idAvaria}', '${uid}', 1, 'Reparo de item avariado')">Resolvido</button>
-                </div>`;
-
             htmlAcumulado += `
-                <div class="pendencia-id-card status-avaria" style="border-left: 4px solid #d90f23; background-color: #fff5f5; padding: 12px; margin-bottom: 8px; border-radius: 8px; border: 1px solid #ffcccc;">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #d90f23; margin-bottom: 8px; border-bottom: 1px solid #ffcccc; padding-bottom: 4px; font-weight: bold;">
-                        <span>AVARIA EM [${itemOuTomb.id_cautela_origem || 'N/D'}]</span>
-                        <span>${itemOuTomb.data_avaria || ''}</span>
+                <div class="pendencia-id-card status-avaria" style="border-left: 4px solid #d90f23; background-color: #fff5f5; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ffcccc;">
+                    <div style="font-size: 0.75em; color: #d90f23; font-weight: bold; border-bottom: 1px solid #ffcccc; padding-bottom: 4px; margin-bottom: 5px;">
+                        <i class="fas fa-tools"></i> ITEM AVARIADO
                     </div>
-                    <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">Motivo: <b>${itemOuTomb.motivo_avaria || 'Não informado'}</b></div>
-                    ${acoesAvariaHtml}
+                    <div style="font-size: 0.85em; color: #333;"><b>Motivo:</b> ${itemOuTomb.motivo_avaria || 'Avaria física'}</div>
+                    ${jaFoiMantido ? `<div style="color:#1b8a3e; font-size:0.75em; margin-top:5px; font-weight:bold;">✓ MANTIDO</div>` : `
+                        <div class="pendencia-actions" style="margin-top:8px; display:flex; gap:5px;">
+                            <button type="button" class="btn-manter" onclick="manterID('${idAvaria}', '${uid}')">Manter</button>
+                            <button type="button" class="btn-resolver" onclick="abrirModalResolver('${idAvaria}', '${uid}', 1, 'Conserto')">Resolver</button>
+                        </div>
+                    `}
                 </div>`;
         }
 
-        // 2. CARIMBOS DE CAUTELA (OCULTADOS NA DEVOLUÇÃO/RECEBIMENTO)
-        if (itemOuTomb.situacao !== 'AVARIADO' && !isModoDevolucao && !isConferenciaDeCautela) {
-            let listaDeCautelas = [];
-            if (Array.isArray(itemOuTomb.cautelas) && itemOuTomb.cautelas.length > 0) {
-                listaDeCautelas = itemOuTomb.cautelas;
-            } else if (itemOuTomb.cautela) {
-                listaDeCautelas = [itemOuTomb.cautela];
-            }
-
+        // --- 2. BLOCO DE CAUTELAS (CARIMBO LARANJA) ---
+        if (!isModoDevolucao && !isConferenciaDeCautela) {
+            let listaDeCautelas = Array.isArray(itemOuTomb.cautelas) ? itemOuTomb.cautelas : (itemOuTomb.cautela ? [itemOuTomb.cautela] : []);
             listaDeCautelas.forEach(c => {
-                const qtdEfetiva = Number(c.quantidade) || 1;
+                const cautelaUid = `CAUTELA-${c.id}`;
+                const statusCautela = window.itemStatus[cautelaUid] || {};
+                const isCiente = statusCautela.status === 'cautela_ciente' || statusCautela.cautela_confirmada === true;
+                const qtdC = Number(c.quantidade) || 1;
+
                 htmlAcumulado += `
-                    <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 12px; margin-bottom: 8px; border-radius: 5px; text-align: left;">
-                        <div style="font-weight: bold; color: #f57c00; font-size: 0.8em; margin-bottom: 8px; border-bottom: 1px solid rgba(245, 124, 0, 0.2); padding-bottom: 4px; display: flex; align-items: center; gap: 5px;">
-                            <i class="fas fa-info-circle"></i> Item em Cautela Ativa
+                    <div class="pendencia-id-card status-cautela" style="border-left: 4px solid #f57c00; background-color: #fff8e0; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ffe0b2;">
+                        <div style="font-weight: bold; color: #f57c00; font-size: 0.75em; border-bottom: 1px solid rgba(245,124,0,0.2); margin-bottom: 5px; padding-bottom: 3px;">
+                            <i class="fas fa-user-tag"></i> CAUTELA ATIVA [${c.id || 'N/D'}]
                         </div>
-                        <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
-                            Quantidade: <b style="color:#d90f23;">${qtdEfetiva} un.</b>
-                        </div>
-                        <div style="font-size: 0.85em; color: #333;">Detentor: <b>${c.destinatario || 'N/D'}</b></div>
-                        ${isCiente ? `<div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; margin-top: 4px;">Ciente registrado</div>` : 
-                        `<button type="button" class="action-button ca-alert active" style="width: 100%; margin-top: 5px; height: 30px; font-size: 0.8em;" onclick="setItemStatusID(this, 'cautela_ciente', '${cautelaUid}')">Ciente</button>`}
+                        <div style="font-size: 0.85em; color: #333;"><b>Qtd:</b> ${qtdC} un. | <b>Com:</b> ${c.destinatario || 'N/D'}</div>
+                        ${isCiente ? `<div style="color:#1b8a3e; font-size:0.75em; margin-top:5px; font-weight:bold;">✓ CIENTE</div>` : `
+                            <button type="button" class="action-button ca-alert active" style="width:100%; height:28px; margin-top:5px; font-size:0.75em;" onclick="setItemStatusID(this, 'cautela_ciente', '${cautelaUid}')">Confirmar Ciência</button>
+                        `}
                     </div>`;
             });
         }
 
-        // 3. PENDÊNCIAS RELATADAS
-        if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
+        // --- 3. BLOCO DE PENDÊNCIAS/FALTAS (CARIMBO AZUL/VERMELHO) ---
+        if (itemOuTomb.pendencias_ids) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
+                const isTemp = String(p.id).startsWith('TEMP-');
+                
                 htmlAcumulado += `
-                    <div class="pendencia-id-card" style="border: 1px solid ${jaFoiMantido ? '#1b8a3e' : '#d90f23'}; border-radius: 8px; padding: 12px; margin-bottom: 10px; background-color: #fff;">
-                        <div style="font-size: 0.75em; color: #666; margin-bottom: 4px;">Relatado por: <b>${p.autor_nome}</b></div>
-                        <div style="font-size: 0.85em; color: #333;">Qtd: <b>${p.quantidade} un.</b> | Motivo: <b>${p.descricao}</b></div>
+                    <div class="pendencia-id-card" style="border-left: 4px solid ${isTemp ? '#2196F3' : '#d90f23'}; background-color: #fff; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #eee;">
+                        <div style="font-size: 0.75em; font-weight:bold; color:#666; margin-bottom:5px;">
+                            ${isTemp ? 'NOVO LANÇAMENTO' : 'ALTERAÇÃO REGISTRADA'}
+                        </div>
+                        <div style="font-size: 0.85em; color:#333;"><b>Qtd:</b> ${p.quantidade} un. | <b>Obs:</b> ${p.descricao}</div>
+                        ${jaFoiMantido ? `<div style="color:#1b8a3e; font-size:0.75em; margin-top:5px; font-weight:bold;">✓ MANTIDO</div>` : `
+                            <div class="pendencia-actions" style="margin-top:8px; display:flex; gap:5px;">
+                                ${!isTemp ? `<button type="button" class="btn-manter" onclick="manterID('${p.id}', '${uid}')">Manter</button>
+                                <button type="button" class="btn-resolver" onclick="abrirModalResolver('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')">Resolver</button>` : `<small style="font-style:italic; color:#2196F3;">Aguardando finalizar...</small>`}
+                            </div>
+                        `}
                     </div>`;
             });
         }
         return htmlAcumulado;
     };
 
-    // --- LOOP PRINCIPAL DE RENDERIZAÇÃO ---
-    fonteDados.forEach((setor, index) => {
-        const isFirstSetor = (index === 0); 
-        let htmlItens = ''; 
-        
+    fonteDados.forEach((setor, idxSetor) => {
+        let htmlItens = '';
         setor.itens.forEach(item => {
-            const nomeEscapado = item.nome.replace(/'/g, "\\'");
             const itemId = item.id;
-
-            // 🛑 CORREÇÃO: Valida se o item é realmente MULTI ou Erro de Cadastro
+            const nomeEscapado = item.nome.replace(/'/g, "\\'");
+            
+            // INTELIGÊNCIA DE TIPO
             const isErroCadastro = item.tombamentos && item.tombamentos.length > 0 && item.tombamentos[0].tomb === item.nome;
             const isRealMulti = item.tipo === 'multi' && item.tombamentos && !isErroCadastro;
 
@@ -645,50 +636,49 @@ function renderizarConferencia() {
 
                 item.tombamentos.forEach(t => {
                     const uid = `${itemId}-${t.tomb}`;
+                    const pndHtml = montarPendenciaHtml(uid, t);
+                    const hasCarimboAtivo = pndHtml.length > 0;
                     const statusU = window.itemStatus[uid]?.status;
                     const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
-                    const isCiente = statusC === 'cautela_ciente';
 
-                    if (statusU === 'ok' || statusU === 'C/A' || isCiente) confCount++;
-                    if (statusU === 'C/A' || isCiente) altCount++;
+                    if (statusU === 'ok' || statusU === 'C/A' || statusC === 'cautela_ciente') confCount++;
+                    if (statusU === 'C/A' || statusC === 'cautela_ciente') altCount++;
 
                     htmlTombamentos += `
-                        <div class="tombamento-container" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4;' : ''}">
-                            <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div class="tombamento-container" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+                            <div class="tombamento-controls" style="display:flex; justify-content:space-between; align-items:center;">
                                 <span>Tomb.: <b>${t.tomb}</b></span>
+                                ${!hasCarimboAtivo ? `
                                 <div class="tombamento-options">
                                     <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
                                     <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
-                                </div>
+                                </div>` : ''}
                             </div>
-                            <div class="alerts-wrapper">${montarPendenciaHtml(uid, t)}</div>
+                            <div class="alerts-wrapper">${pndHtml}</div>
                         </div>`;
                 });
 
-                let classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
-                htmlItens += `<div class="item-conferencia item-has-tombamentos ${classeMulti}" data-id="${itemId}">
+                const classeMulti = (confCount === item.tombamentos.length) ? (altCount > 0 ? 'status-alert' : 'status-ok') : '';
+                htmlItens += `<div class="item-conferencia ${classeMulti}" data-id="${itemId}">
                     <div class="item-header">
                         <span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}"></span>
                         <span class="item-label">${item.nome}</span>
                     </div>
                     ${htmlTombamentos}
                 </div>`;
-            } 
-            else {
-                // CASO SINGLE (Inclui PÉ DE CABRA corrigido)
-                const hasPendencia = (item.pendencias_ids && item.pendencias_ids.length > 0) || item.situacao === 'AVARIADO';
+            } else {
+                // LÓGICA SINGLE PADRONIZADA (Ex: PÉ DE CABRA)
+                const pndHtml = montarPendenciaHtml(itemId, item);
+                const hasCarimboAtivo = pndHtml.length > 0;
                 const currentStatus = window.itemStatus[itemId]?.status;
                 
-                // Dentro do else (Caso Single)
-                const totalEsp = Number(item.quantidadeEsperada) || 0;
-                // No recebimento de cautela, ignoramos o desconto de outras cautelas
+                const totalEsp = Number(item.quantidadeEsperada || item.quantidade) || 0;
                 const totalCaut = isConferenciaDeCautela ? 0 : (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-
                 const saldoReal = totalEsp - totalCaut - totalPend;
+                
+                const classeSingle = (currentStatus === 'ok') ? 'status-ok' : (hasCarimboAtivo ? 'status-alert' : '');
                 const corSaldo = saldoReal < totalEsp ? '#d90f23' : '#1b8a3e';
-
-                let classeSingle = (currentStatus === 'ok') ? 'status-ok' : (hasPendencia ? 'status-alert' : '');
 
                 htmlItens += `
                 <div class="item-conferencia ${classeSingle}" data-type="single" data-id="${itemId}">
@@ -699,25 +689,23 @@ function renderizarConferencia() {
                             <span style="font-size:0.85em; color:${corSaldo}; font-weight:bold;">DISPONÍVEL: ${saldoReal} de ${totalEsp}</span>
                         </div>
                     </div>
-                    <div class="item-options">
+                    ${!hasCarimboAtivo ? `
+                    <div class="item-options" style="margin-top:10px;">
                         <button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>
                         <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${saldoReal})">+ Alteração</button>
-                    </div>
-                    <div class="alerts-wrapper" style="margin-top:10px">${montarPendenciaHtml(itemId, item)}</div>
+                    </div>` : ''}
+                    <div class="alerts-wrapper" style="margin-top:10px">${pndHtml}</div>
                 </div>`;
             }
         });
-        
+
         htmlSetores += `
             <div class="setor" data-total-items="${setor.itens.length}" data-id="${setor.id || setor.nome}">
                 <div class="setor-header" onclick="toggleSetor(this)">
-                    <div class="setor-info">
-                        <span>${setor.nome}</span>
-                        <div class="setor-status">0/${setor.itens.length}</div>
-                    </div>
-                    <span class="arrow">${isFirstSetor ? '▼' : '►'}</span>
+                    <div class="setor-info"><span>${setor.nome}</span><div class="setor-status">0/${setor.itens.length}</div></div>
+                    <span class="arrow">${idxSetor === 0 ? '▼' : '►'}</span>
                 </div>
-                <div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div>
+                <div class="setor-content ${idxSetor === 0 ? 'expanded' : ''}">${htmlItens}</div>
             </div>`;
     });
 
