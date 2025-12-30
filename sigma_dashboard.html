@@ -7984,128 +7984,100 @@ async function abrirSeletorGlobalSubstituicao() {
     try {
         const u = (typeof userInfo !== 'undefined' && userInfo) ? userInfo : 
                   JSON.parse(localStorage.getItem('user_data') || '{}');
-        if (u.nomeGuerra) {
-            nomeAutor = `${u.postoGraduacao || ''} ${u.nomeGuerra}`.trim();
-        }
-    } catch (e) { console.error("Erro ao identificar usuário:", e); }
+        nomeAutor = (u.postoGraduacao || u.nomeGuerra) ? `${u.postoGraduacao || ''} ${u.nomeGuerra || ''}`.trim() : "Gestor";
+    } catch (e) { console.error("Erro usuário:", e); }
 
     let qtdParaMovimentar = 1;
 
     try {
         const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
         if (inputQtd) {
-            qtdParaMovimentar = parseInt(inputQtd.value);
-            if (isNaN(qtdParaMovimentar) || qtdParaMovimentar <= 0) {
-                alert("Por favor, insira uma quantidade válida.");
-                return;
-            }
+            qtdParaMovimentar = parseInt(inputQtd.value) || 1;
         }
 
-        const confirmacao = confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`);
-        if (!confirmacao) return;
+        if (!confirm(`Confirmar substituição física?\nItem: ${tombamentoNovo}\nQuantidade: ${qtdParaMovimentar}`)) return;
 
         document.getElementById('modalSeletorEstoque').style.display = 'none';
         
         const batch = db.batch();
         const timestamp = firebase.firestore.Timestamp.now();
 
-        // 2. BUSCA DADOS DA CAUTELA (Receptora)
+        // 2. BUSCA DADOS DA CAUTELA
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const docCautela = await cautelaRef.get();
-        if (!docCautela.exists) throw new Error("Cautela receptora não encontrada.");
+        if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // CONSTRUÇÃO DO LOG (Sem undefined)
-        const textoLog = `Substituição: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} vindo de ${listaOrigemNovo.toUpperCase()}`;
+        // CONSTRUÇÃO DA MENSAGEM (Garantindo strings)
+        const msgFinal = `Substituição Cruzada: Recebido ${qtdParaMovimentar} un de ${tombamentoNovo || 'Material'} vindo de ${listaOrigemNovo.toUpperCase()}`;
+        
         const logObjeto = {
             data: timestamp,
-            mensagem: textoLog,
+            mensagem: String(msgFinal),
             tipo: "SUBSTITUICAO_CRUZADA",
-            autor: nomeAutor
+            autor: String(nomeAutor)
         };
 
-        // Atualização dos itens no contrato
+        // 3. LIMPEZA DA PENDÊNCIA (Comparação múltipla para garantir que suma)
+        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => {
+            const matchId = pend.id_solicitacao && p.solicitacaoId && (pend.id_solicitacao === p.solicitacaoId);
+            const matchBase = pend.id_base && p.id_base && (pend.id_base === p.id_base);
+            // Se bater qualquer um, removemos (return false)
+            return !(matchId || matchBase);
+        });
+
+        // 4. ATUALIZAÇÃO DOS ITENS
         const itensAtualizados = (dadosC.itens || []).map(it => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (it.id === p.id_base && !p.itemTomb);
             if (ehOItem) {
                 return { 
                     ...it, 
-                    tombamento: (inputQtd ? it.tombamento : tombamentoNovo) || it.tombamento || "S/T",
-                    id_original_substituido: p.uidItem || "MANUAL",
-                    origem_lista: listaOrigemNovo || "EXTERNO", 
-                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Vindo de: ${listaOrigemNovo})`.trim() 
+                    tombamento: tombamentoNovo || it.tombamento || "S/T",
+                    origem_lista: listaOrigemNovo, 
+                    obs: `Reposto ${qtdParaMovimentar} un em ${new Date().toLocaleDateString()} (Origem: ${listaOrigemNovo})` 
                 };
             }
             return it;
         });
 
-        // 3. LIMPEZA DA PENDÊNCIA (O que faz sumir do Dashboard)
-        const pendenciasLimpas = (dadosC.pendencias || []).filter(pend => {
-            // Remove se o ID da solicitação bater OU se for o mesmo item base avariado
-            return pend.id_solicitacao !== p.solicitacaoId && pend.id_base !== p.id_base;
-        });
-
+        // GRAVAÇÃO NA CAUTELA (Duplicando campo de log para garantir compatibilidade)
         batch.update(cautelaRef, {
             itens: itensAtualizados,
             pendencias: pendenciasLimpas,
-            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto),
+            historico_vida: firebase.firestore.FieldValue.arrayUnion(logObjeto) // Campo alternativo
         });
 
-        // 4. ATUALIZAR LISTA DOADORA (Baixa no Saldo)
+        // 5. ATUALIZAR LISTA DOADORA
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
-        const doadoraData = docDoadora.data();
-
-        const novaListaDoadora = doadoraData.list.map(setor => ({
-            ...setor,
-            itens: (setor.itens || []).map(it => {
-                if (it.id === uidNovo) {
-                    it.cautelas = it.cautelas || [];
-                    it.cautelas.push({
-                        id: p.cautelaId,
-                        quantidade: qtdParaMovimentar,
-                        destinatario: dadosC.destinatario || "Viatura",
-                        data: new Date().toLocaleString('pt-BR'),
-                        tipo: "SUBSTITUICAO_EMPRESTIMO"
-                    });
-                }
-                return it;
-            })
-        }));
-        batch.update(listaDoadoraRef, { list: novaListaDoadora });
-
-        // 5. MARCAR AVARIADO NA LISTA RECEPTORA (Onde quebrou)
-        const listaReceptoraRef = db.collection('listas_conferencia').doc(p.localId);
-        const docReceptora = await listaReceptoraRef.get();
-        if (docReceptora.exists) {
-            const receptoraData = docReceptora.data();
-            const novaListaReceptora = receptoraData.list.map(setor => ({
+        if (docDoadora.exists) {
+            const doadoraData = docDoadora.data();
+            const novaListaDoadora = doadoraData.list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    const marcarAvariado = (entidade, idAtual) => {
-                        if (idAtual === p.uidItem) {
-                            return { ...entidade, situacao: "AVARIADO", status_conferencia: "AVARIADO" };
-                        }
-                        return entidade;
-                    };
-                    if (it.tipo === 'multi' && it.tombamentos) {
-                        it.tombamentos = it.tombamentos.map(t => marcarAvariado(t, `${it.id}-${t.tomb}`));
-                    } else {
-                        it = marcarAvariado(it, it.id);
+                    if (it.id === uidNovo) {
+                        it.cautelas = it.cautelas || [];
+                        it.cautelas.push({
+                            id: p.cautelaId,
+                            quantidade: qtdParaMovimentar,
+                            data: new Date().toLocaleString('pt-BR'),
+                            tipo: "SUBSTITUICAO_EMPRESTIMO"
+                        });
                     }
                     return it;
                 })
             }));
-            batch.update(listaReceptoraRef, { list: novaListaReceptora });
+            batch.update(listaDoadoraRef, { list: novaListaDoadora });
         }
 
         await batch.commit();
-        alert(`✅ Substituição concluída com sucesso!`);
+        alert(`✅ Substituição Concluída!`);
         location.reload();
 
     } catch (e) {
-        console.error("Erro Crítico no Batch:", e);
-        alert("❌ Erro ao processar: " + e.message);
+        console.error("Erro Crítico:", e);
+        alert("❌ Erro: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
