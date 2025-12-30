@@ -361,74 +361,57 @@
     const setorEl = item.closest('.setor');
     if (setorEl) updateSetorStatus(setorEl);
 }
-       function toggleSetor(header) {
-    const content = header.nextElementSibling;
-    const arrow = header.querySelector('.arrow');
-    const isExpanding = !content.classList.contains('expanded');
-
-    // Fecha todos os outros antes de abrir o novo
-    if (isExpanding) {
-        document.querySelectorAll('.setor-content.expanded').forEach(openContent => {
-            openContent.classList.remove('expanded');
-            // Busca a seta do setor que está sendo fechado
-            const otherArrow = openContent.closest('.setor').querySelector('.arrow');
-            if (otherArrow) otherArrow.textContent = '►';
-        });
-        
-        content.classList.add('expanded');
-        if (arrow) arrow.textContent = '▼';
-    } else {
-        // Se já estava aberto, apenas fecha
-        content.classList.remove('expanded');
-        if (arrow) arrow.textContent = '►';
-    }
+       function toggleSetor(header) { 
+    const content = header.nextElementSibling; 
+    const arrow = header.querySelector('.arrow'); 
+    if (content.classList.contains('expanded')) { 
+        content.classList.remove('expanded'); 
+        arrow.textContent = '►'; 
+    } else { 
+        document.querySelectorAll('.setor-content.expanded').forEach(c => {
+            c.classList.remove('expanded'); 
+            c.previousElementSibling.querySelector('.arrow').textContent = '►';
+        }); 
+        content.classList.add('expanded'); 
+        arrow.textContent = '▼'; 
+    } 
 }
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
-    // Garante que os números e badges globais estejam atualizados antes de decidir o foco
     updateOverallStatus();
 
-    // Mapeia todos os elementos que podem receber o foco (tombamentos ou itens únicos)
-    const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
-    
-    // 1. Localiza o índice do alvo atual pelo data-id
-    const indexAtual = todosAlvos.findIndex(el => el.getAttribute('data-id') === currentItemId);
+    const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
+    const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
 
-    // 2. Busca o PRÓXIMO alvo pendente
-    const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
-        const id = el.getAttribute('data-id');
-        const stNormal = window.itemStatus[id]?.status;
-        const statusCautela = window.itemStatus[`CAUTELA-${id}`];
-        
-        // Verifica se a cautela foi confirmada (pelo status ou pela flag booleana)
-        const isCiente = statusCautela?.status === 'cautela_ciente' || statusCautela?.cautela_confirmada === true;
-
-        // Regra: Se está 'ok', 'C/A', 'KEEP' ou 'ciente', pula porque já terminou.
-        const jaConcluido = (stNormal === 'ok' || stNormal === 'S/A' || stNormal === 'C/A' || stNormal === 'KEEP' || isCiente);
-        return !jaConcluido;
-    });
-
-    if (proximoAlvo) {
-        // Rola suavemente para o próximo tombamento pendente
+    if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
         setTimeout(() => {
-            proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            // Feedback visual verde sutil para guiar o olho do usuário
-            proximoAlvo.style.transition = "box-shadow 0.3s ease";
-            proximoAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.5)";
-            setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
-        }, 300);
+            autoAdvanceSetor(currentSetor); 
+        }, 550);
     } else {
-        // Se não há próximo alvo NO SETOR, verifica se o setor como um todo foi finalizado
-        const totalNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
-        const concluidos = currentSetor.querySelectorAll('.item-conferencia.status-ok, .item-conferencia.status-alert').length;
+        // Busca todos os alvos (Tombamentos ou Itens Singles)
+        const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
+        
+        // CORREÇÃO AQUI: Busca o ID direto do data-id que colocamos no HTML
+        const indexAtual = todosAlvos.findIndex(el => el.getAttribute('data-id') === currentItemId);
 
-        // Se o número de itens pais concluídos atingiu o total do setor, retrai e avança
-        if (concluidos >= totalNoSetor && totalNoSetor > 0) {
-            setTimeout(() => { 
-                autoAdvanceSetor(currentSetor); 
-            }, 500);
+        const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
+            const id = el.getAttribute('data-id');
+            const stNormal = window.itemStatus[id]?.status;
+            const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
+            
+            // Retorna o primeiro que não estiver OK ou CIENTE
+            const jaResolvido = (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+            return !jaResolvido;
+        });
+
+        if (proximoAlvo) {
+            setTimeout(() => {
+                proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                proximoAlvo.style.transition = "box-shadow 0.3s";
+                proximoAlvo.style.boxShadow = "0 0 10px rgba(245, 124, 0, 0.5)";
+                setTimeout(() => proximoAlvo.style.boxShadow = "none", 800);
+            }, 300);
         }
     }
 }
@@ -474,42 +457,33 @@
 }
 
         function autoAdvanceSetor(currentSetorElement) {
-    if (!currentSetorElement) return;
-    
     const todosSetores = Array.from(document.querySelectorAll('.setor'));
     const currentIndex = todosSetores.indexOf(currentSetorElement);
     
-    // 1. Fecha o atual e garante que a seta mude
     const currentContent = currentSetorElement.querySelector('.setor-content');
     const currentArrow = currentSetorElement.querySelector('.arrow');
+    
     if (currentContent) currentContent.classList.remove('expanded');
     if (currentArrow) currentArrow.textContent = '►';
 
-    // 2. Busca o próximo
     if (currentIndex !== -1 && currentIndex < todosSetores.length - 1) {
         const nextSetorEl = todosSetores[currentIndex + 1];
         const nextContent = nextSetorEl.querySelector('.setor-content');
         const nextArrow = nextSetorEl.querySelector('.arrow');
-
-        // Limpeza Total: Garante que nenhum outro setor (inclusive os anteriores) fique aberto
-        document.querySelectorAll('.setor-content').forEach(c => {
-            if (c !== nextContent) {
-                c.classList.remove('expanded');
-                const seta = c.closest('.setor').querySelector('.arrow');
-                if (seta) seta.textContent = '►';
-            }
-        });
-
-        // Abre o próximo e gira a seta
+        
         if (nextContent) nextContent.classList.add('expanded');
         if (nextArrow) nextArrow.textContent = '▼';
         
-        // Scroll suave
         setTimeout(() => {
-            const yOffset = -80;
-            const y = nextSetorEl.getBoundingClientRect().top + window.pageYOffset + yOffset;
-            window.scrollTo({ top: y, behavior: 'smooth' });
-        }, 300); // Tempo maior para esperar a animação do CSS começar
+            nextSetorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 150);
+    } else {
+        const btnFin = document.getElementById('btn-finalizar');
+        if (btnFin) {
+            setTimeout(() => {
+                btnFin.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 300);
+        }
     }
 }
         function isElementInViewport(el) { const rect = el.getBoundingClientRect(); return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth)); }
