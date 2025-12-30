@@ -7740,7 +7740,7 @@ async function abrirGestaoPendenciasCautela() {
     if (!pendenciaSendoResolvida) return;
     
     const p = pendenciaSendoResolvida;
-    const confirmacao = confirm(`Deseja confirmar o recolhimento definitivo de "${p.itemNome}" para manutenção?\n\nIsso removerá a carga do militar e marcará o item como AVARIADO.`);
+    const confirmacao = confirm(`Deseja confirmar o recolhimento definitivo de "${p.itemNome}" para manutenção?\n\nIsso removerá a carga do militar e criará um carimbo de AVARIA no estoque.`);
     if (!confirmacao) return;
 
     const COLECAO_LISTAS = "listas_conferencia"; 
@@ -7759,7 +7759,6 @@ async function abrirGestaoPendenciasCautela() {
         const dataCautela = docCautela.data();
         const dataRegistro = new Date().toLocaleString('pt-BR');
 
-        // 🛑 CORREÇÃO CIRÚRGICA: Montagem do nome com QUADRO (Ex: CAP QPCBM VIDO)
         let militarLogado = "Gestor";
         if (typeof currentUserData !== 'undefined') {
             const posto = currentUserData.posto || "";
@@ -7768,7 +7767,6 @@ async function abrirGestaoPendenciasCautela() {
             militarLogado = `${posto} ${quadro} ${nomeGuerra}`.replace(/\s+/g, ' ').trim();
         }
 
-        // 1. PREPARAÇÃO DO LOG PARA O HISTÓRICO DA CAUTELA
         const logRecolhimento = {
             data: dataRegistro,
             descricao: `Recolhimento: Item ${p.itemNome} (${p.itemTomb || 'S/T'}) retirado de carga e enviado para manutenção. Motivo: ${p.motivo}`,
@@ -7776,18 +7774,14 @@ async function abrirGestaoPendenciasCautela() {
             tipo: "RECOLHIMENTO_AVARIA"
         };
 
-        // 2. FILTRAGEM DAS PENDÊNCIAS (Para sumir do dashboard)
         const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
-        // 3. ATUALIZAÇÃO DOS ITENS NA CAUTELA (Reduzir ou Remover carga)
         let novosItensCautela = [...(dataCautela.itens || [])];
         if (p.itemTomb) {
-            // Multi: Remove a linha do tombamento específico
             novosItensCautela = novosItensCautela.filter(it => it.tombamento !== p.itemTomb);
         } else {
-            // Single: Busca pelo ID e reduz a quantidade
             const idx = novosItensCautela.findIndex(it => it.id === p.uidItem || it.id === p.id_base);
             if (idx !== -1) {
                 const qtdRelatada = Number(p.quantidade) || 1;
@@ -7799,72 +7793,66 @@ async function abrirGestaoPendenciasCautela() {
             }
         }
 
-        // 4. ATUALIZAÇÃO DA LISTA DE CONFERÊNCIA (ESTOQUE)
+        // 🛑 PASSO 4: ATUALIZAÇÃO CIRÚRGICA DO ESTOQUE
         const novaListaMestra = docLista.data().list.map(setor => ({
             ...setor,
             itens: (setor.itens || []).map(it => {
                 const idBaseMatch = it.id === (p.id_base || p.uidItem);
 
-                // Caso Item SINGLE
-                if (idBaseMatch && (it.tipo === 'single' || !it.tombamentos)) {
-                    // Remove a cautela do array de cautelas do item single
+                if (idBaseMatch) {
+                    // 1. Limpa o carimbo de cautela (Laranja)
                     it.cautelas = (it.cautelas || []).filter(c => c.id !== p.cautelaId);
-                    
-                    // Adiciona log no histórico de vida do item
+
+                    // 2. CRIA O CARIMBO DE PENDÊNCIA (Vermelho) - Conforme consenso
+                    const carimboAvaria = {
+                        id: "AVARIA-" + Date.now(),
+                        quantidade: Number(p.quantidade) || 1,
+                        descricao: `MATERIAL AVARIADO: Recolhido da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
+                        autor_nome: militarLogado,
+                        data_criacao: dataRegistro,
+                        status_gestao: "MANUTENÇÃO"
+                    };
+                    if (!it.pendencias_ids) it.pendencias_ids = [];
+                    it.pendencias_ids.push(carimboAvaria);
+
+                    // 3. Histórico de vida
                     if (!it.historico_vida) it.historico_vida = [];
                     it.historico_vida.push({
                         evento: "RECOLHIDO_AVARIADO",
                         data: dataRegistro,
-                        detalhes: `Recolhido ${p.quantidade} un para manutenção. Motivo: ${p.motivo}`,
-                        quem: militarLogado // Agora com Quadro
+                        detalhes: `Recolhido ${p.quantidade} un para manutenção via Dashboard.`,
+                        quem: militarLogado
                     });
-                }
 
-                // Caso Item MULTI
-                if (it.tombamentos) {
-                    it.tombamentos = it.tombamentos.map(t => {
-                        if (t.tomb === p.itemTomb) {
-                            delete t.cautela; // Tira o nome do militar do tombamento
-                            t.situacao = "AVARIADO"; // Trava o item para futuras cautelas
-                            t.motivo_recolhimento = p.motivo;
-                            
-                            // Também registra no histórico do item multi se necessário
-                            if (!it.historico_vida) it.historico_vida = [];
-                            it.historico_vida.push({
-                                evento: "RECOLHIDO_AVARIADO",
-                                data: dataRegistro,
-                                detalhes: `Tombamento ${t.tomb} recolhido para manutenção. Motivo: ${p.motivo}`,
-                                quem: militarLogado
-                            });
-                        }
-                        return t;
-                    });
+                    // 4. Trata tombamentos (se for multi)
+                    if (it.tombamentos) {
+                        it.tombamentos = it.tombamentos.map(t => {
+                            if (t.tomb === p.itemTomb) {
+                                delete t.cautela;
+                                t.situacao = "AVARIADO";
+                                t.motivo_recolhimento = p.motivo;
+                            }
+                            return t;
+                        });
+                    }
                 }
                 return it;
             })
         }));
 
-        // 5. EXECUÇÃO DO BATCH
         const batch = db.batch();
-        
-        // Atualiza a Cautela
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: pendenciasRestantes,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logRecolhimento)
         });
-
-        // Atualiza a Lista Mestra
         batch.update(listaRef, { list: novaListaMestra });
 
         await batch.commit();
 
-        alert("✅ Recolhimento efetuado!\nO material foi retirado da carga do militar e marcado como 'Avariado' no estoque.");
+        alert("✅ Recolhimento efetuado!\nO carimbo de cautela foi removido e um carimbo de Avaria foi criado no estoque.");
         
-        if (document.getElementById('modalDecisaoGestor')) {
-            document.getElementById('modalDecisaoGestor').style.display = 'none';
-        }
-        
+        if (document.getElementById('modalDecisaoGestor')) document.getElementById('modalDecisaoGestor').style.display = 'none';
         if (typeof fecharTabela === 'function') fecharTabela(); 
         if (typeof loadCaaData === 'function') await loadCaaData(); 
 
@@ -8032,7 +8020,7 @@ async function abrirSeletorGlobalSubstituicao() {
             tipo: "SUBSTITUICAO_CRUZADA"
         };
 
-        // 2. ATUALIZAÇÃO DA CARGA DO MILITAR (A cautela agora aponta para o item novo)
+        // 2. ATUALIZAÇÃO DA CARGA DO MILITAR
         const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
             if (ehOItem) {
@@ -8052,8 +8040,7 @@ async function abrirSeletorGlobalSubstituicao() {
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logObjeto)
         });
 
-        // 3. ATUALIZAÇÃO DA LISTA MESTRA DE ORIGEM (Onde o item estragou)
-        // O item quebrado sai do array 'cautelas' e entra no array 'pendencias_ids' (Carimbo Vermelho)
+        // 3. ATUALIZAÇÃO DA LISTA MESTRA DE ORIGEM (Avariado)
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
         if (docOrigemAvaria.exists) {
@@ -8064,11 +8051,11 @@ async function abrirSeletorGlobalSubstituicao() {
                         // Remove carimbo de cautela (Laranja)
                         if (it.cautelas) it.cautelas = it.cautelas.filter(c => c.id !== p.cautelaId);
                         
-                        // Cria Carimbo de Pendência (Vermelho) para o item avariado
+                        // 🛑 CRIA CARIMBO DE PENDÊNCIA (Vermelho) PARA O AVARIADO
                         const novaPendenciaAvaria = {
                             id: "AVARIA-" + Date.now(),
                             quantidade: qtdParaMovimentar,
-                            descricao: `AVARIADO: Recolhido de ${dadosC.destinatario_original_nome}. Motivo: ${p.motivo}`,
+                            descricao: `MATERIAL AVARIADO: Recolhido de ${dadosC.destinatario_original_nome} via Troca Cruzada. Motivo: ${p.motivo}`,
                             autor_nome: nomeAutor,
                             data_criacao: dataFormatada,
                             status_gestao: "MANUTENCAO"
@@ -8092,7 +8079,7 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemAvariaRef, { list: listData });
         }
 
-        // 4. ATUALIZAÇÃO DA LISTA DOADORA (Onde o item novo saiu)
+        // 🛑 4. ATUALIZAÇÃO DA LISTA DOADORA (Apenas histórico, sem novo carimbo)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
@@ -8101,23 +8088,15 @@ async function abrirSeletorGlobalSubstituicao() {
                 ...setor,
                 itens: (setor.itens || []).map(it => {
                     if (it.id === uidNovo || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
-                        const carimboCautela = { 
-                            id: p.cautelaId, 
-                            destinatario: dadosC.destinatario_original_nome, 
-                            data: dataFormatada, 
-                            quantidade: qtdParaMovimentar,
-                            tipo: "SUBSTITUICAO" 
-                        };
-
-                        if (it.id === uidNovo) {
-                            if (!it.cautelas) it.cautelas = [];
-                            it.cautelas.push(carimboCautela);
-                        } else {
-                            it.tombamentos = it.tombamentos.map(t => {
-                                if (`${it.id}-${t.tomb}` === uidNovo) t.cautela = carimboCautela;
-                                return t;
-                            });
-                        }
+                        // Apenas registra no Histórico de Vida do item doador
+                        if (!it.historico_vida) it.historico_vida = [];
+                        it.historico_vida.push({
+                            evento: "SAIDA_TROCA_CRUZADA",
+                            data: dataFormatada,
+                            detalhes: `Item saiu para suprir troca na Cautela ${p.cautelaId}. Carga registrada no documento da cautela.`,
+                            quem: nomeAutor
+                        });
+                        // 🛑 REMOVIDO: it.cautelas.push ou t.cautela = carimbo
                     }
                     return it;
                 })
@@ -8126,7 +8105,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert(`✅ Troca concluída!\nItem novo cautelado e item antigo marcado como PENDÊNCIA para manutenção.`);
+        alert(`✅ Troca concluída!\nItem novo enviado e item antigo marcado como PENDÊNCIA (Vermelho) no local de origem.`);
         location.reload();
 
     } catch (e) {
