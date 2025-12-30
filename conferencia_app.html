@@ -545,6 +545,10 @@ function renderizarConferencia() {
 
     let htmlSetores = ''; 
     const fonteDados = window.dadosConferencia || dadosConferencia;
+    
+    // --- 🛑 TRAVA DE VISUALIZAÇÃO: MODO DEVOLUÇÃO ---
+    // Identifica se estamos em fluxo de devolução para ocultar carimbos desnecessários
+    const modoDevolucao = (typeof MODO_OPERACAO !== 'undefined' && MODO_OPERACAO === 'devolucao');
 
     // --- SUB-FUNÇÃO: MONTAGEM DE CARDS DE PENDÊNCIA/CAUTELA ---
     const montarPendenciaHtml = (uid, itemOuTomb) => {
@@ -585,11 +589,11 @@ function renderizarConferencia() {
                 </div>`;
         }
 
-        // 2. CARIMBOS DE CAUTELA (CORREÇÃO DA QUANTIDADE SINGLE)
-        if (itemOuTomb.situacao !== 'AVARIADO') {
+        // 2. CARIMBOS DE CAUTELA (CORREÇÃO: OCULTAR NA DEVOLUÇÃO E CORRIGIR QUANTIDADE)
+        // Se for devolução, o recebedor não vê o carimbo laranja
+        if (itemOuTomb.situacao !== 'AVARIADO' && !modoDevolucao) {
             let listaDeCautelas = [];
             
-            // PRIORIDADE: Se for Single, usa o array 'cautelas'. Se for Multi, usa o objeto 'cautela'.
             if (Array.isArray(itemOuTomb.cautelas) && itemOuTomb.cautelas.length > 0) {
                 listaDeCautelas = itemOuTomb.cautelas;
             } else if (itemOuTomb.cautela) {
@@ -598,7 +602,7 @@ function renderizarConferencia() {
 
             listaDeCautelas.forEach(c => {
                 const dataExibicao = c.data || "Data N/D";
-                // Captura a quantidade real (importante para seus itens de 4un)
+                // 🛑 CORREÇÃO DA QUANTIDADE: Captura o valor real do banco
                 const qtdEfetiva = Number(c.quantidade) || 1;
 
                 htmlAcumulado += `
@@ -622,7 +626,7 @@ function renderizarConferencia() {
             });
         }
 
-        // 3. PENDÊNCIAS RELATADAS (MANUAIS/FALTA/QUEBRA)
+        // 3. PENDÊNCIAS RELATADAS (MANUAIS)
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
@@ -659,7 +663,6 @@ function renderizarConferencia() {
             const nomeEscapado = item.nome.replace(/'/g, "\\'");
             const itemId = item.id;
 
-            // CASO A: ITEM MULTI (Tombamentos individuais)
             if (item.tipo === 'multi' && item.tombamentos) {
                 let htmlTombamentos = '';
                 let confCount = 0, altCount = 0;
@@ -699,13 +702,12 @@ function renderizarConferencia() {
                     ${htmlTombamentos}
                 </div>`;
             } 
-            // CASO B: ITEM SINGLE (Saldos e Quantidades)
             else {
                 const hasPendencia = (item.pendencias_ids && item.pendencias_ids.length > 0) || item.situacao === 'AVARIADO';
                 const currentStatus = window.itemStatus[itemId]?.status;
                 
                 const totalEsp = Number(item.quantidadeEsperada) || 0;
-                // SOMA DAS CAUTELAS GARANTIDA COMO NÚMERO
+                // SOMA DAS CAUTELAS GARANTIDA COMO NÚMERO PARA REFLETIR AS 4UN
                 const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
                 const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
                 
@@ -734,7 +736,7 @@ function renderizarConferencia() {
         });
         
         htmlSetores += `
-            <div class="setor" data-id="${setor.id || setor.nome}">
+            <div class="setor" data-total-items="${setor.itens.length}" data-id="${setor.id || setor.nome}">
                 <div class="setor-header" onclick="toggleSetor(this)">
                     <div class="setor-info">
                         <span>${setor.nome}</span>
