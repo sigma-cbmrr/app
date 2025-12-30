@@ -1197,16 +1197,12 @@ function renderizarConferencia() {
             let linhasExtrato = [];
 
             cautela.itens.forEach((cItem, index) => {
-                // 🛑 AJUSTE DE CHAVE: Garante que busca exatamente o que o setItemStatusID gravou
                 const uidBusca = cItem.tombamento ? `${cItem.id_base || cItem.id}-${cItem.tombamento}` : (cItem.id_base || cItem.id);
                 const statusLocal = window.itemStatus[uidBusca] || {};
                 
-                // Normaliza a checagem: aceita 'ok' (minúsculo) ou 'S/A'
                 const isItemOk = (statusLocal.status === 'ok' || statusLocal.status === 'S/A');
                 const statusFinal = isItemOk ? 'S/A' : 'C/A';
-                
-                // Tenta buscar a OBS de várias fontes possíveis na memória
-                const obsFinal = statusLocal.obs || statusLocal.descricao || "";
+                const obsFinal = statusLocal.obs || "";
                 
                 if (statusFinal === 'C/A') temQualquerAlteracao = true;
 
@@ -1218,6 +1214,8 @@ function renderizarConferencia() {
 
                 const identificador = cItem.tombamento ? `(Tomb.: ${cItem.tombamento})` : `(QTD: ${cItem.quantidade}UN)`;
                 const relatoItem = isItemOk ? 'S/A' : (obsFinal || 'C/A sem obs.');
+                
+                // Monta a linha com o padrão solicitado
                 linhasExtrato.push(`${index + 1}. ${cItem.nome} ${identificador}: ${relatoItem}`);
 
                 // Atualização da Lista Mestra
@@ -1225,26 +1223,21 @@ function renderizarConferencia() {
                     ...setor,
                     itens: setor.itens.map(mItem => {
                         const idMestra = mItem.id_base || mItem.id;
-                        const idCautelaItem = cItem.id_base || cItem.id;
-
-                        if (idMestra === idCautelaItem) {
-                            const logHistorico = {
+                        if (idMestra === (cItem.id_base || cItem.id)) {
+                            if (!mItem.historico_vida) mItem.historico_vida = [];
+                            mItem.historico_vida.push({
                                 evento: "CONFIRMAÇÃO_RECEBIMENTO",
                                 id_doc: CAUTELA_ID,
                                 quem: meuNomeCompleto,
                                 data: dataAtual,
-                                estado: statusFinal,
-                                detalhes: statusFinal === 'C/A' ? `Avaria detectada no recebimento: ${obsFinal}` : "Recebido em perfeito estado (S/A)."
-                            };
-
-                            if (!mItem.historico_vida) mItem.historico_vida = [];
-                            mItem.historico_vida.push(logHistorico);
+                                detalhes: statusFinal === 'C/A' ? `Avaria: ${obsFinal}` : "Recebido S/A."
+                            });
 
                             const objetoCautelaAtualizado = {
                                 id: CAUTELA_ID,
                                 emitente: cData.emitente,
                                 destinatario: meuNomeCompleto,
-                                data: cData.timestamp_emissao ? cData.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : dataAtual,
+                                data: dataAtual,
                                 status_item: statusFinal,
                                 obs_item: obsFinal,
                                 quantidade: cItem.quantidade
@@ -1256,9 +1249,7 @@ function renderizarConferencia() {
                                     return t;
                                 });
                             } else if (!cItem.tombamento && mItem.cautelas) {
-                                const idxC = mItem.cautelas.findIndex(c => c.id === CAUTELA_ID);
-                                if (idxC !== -1) mItem.cautelas[idxC] = objetoCautelaAtualizado;
-                                else mItem.cautelas.push(objetoCautelaAtualizado);
+                                mItem.cautelas.push(objetoCautelaAtualizado);
                             }
                         }
                         return mItem;
@@ -1269,7 +1260,7 @@ function renderizarConferencia() {
             const icone = temQualquerAlteracao ? '⚠️' : '✅';
             const tituloLog = `${icone} Recebido ${temQualquerAlteracao ? 'C/A' : 'S/A'} pelo destinatário: ${meuNomeCompleto}`;
             
-            // Adiciona o título e pula linha para a lista numerada
+            // 🛑 A MÁGICA DA QUEBRA DE LINHA ACONTECE AQUI (\n)
             const descricaoCompleta = `${tituloLog}\n${linhasExtrato.join('\n')}`;
 
             const logMovimentacao = {
