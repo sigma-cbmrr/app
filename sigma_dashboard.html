@@ -7981,101 +7981,128 @@ async function abrirSeletorGlobalSubstituicao() {
     const p = pendenciaSendoResolvida;
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
-    const militarLogado = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`.replace(/\s+/g, ' ').trim();
+    
+    let nomeAutor = "Gestor";
+    try {
+        const u = (typeof currentUserData !== 'undefined' && currentUserData) ? currentUserData : 
+                  JSON.parse(localStorage.getItem('user_data') || '{}');
+        nomeAutor = `${u.posto || ''} ${u.quadro || ''} ${u.nome_guerra || 'Gestor'}`.replace(/\s+/g, ' ').trim();
+    } catch (e) { console.error("Erro user:", e); }
 
     try {
-        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
-        const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
-        const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
+        const inputQtd = document.getElementById(`qtd_subst_${uidNovo}_${listaOrigemNovo}`);
+        const qtdParaMovimentar = inputQtd ? parseInt(inputQtd.value) : (parseInt(p.quantidade) || 1);
+
+        if (!confirm(`Confirmar substituição física?\nItem Novo: ${tombamentoNovo}\nSubstituindo Avariado: ${p.itemNome}`)) return;
+
+        if (document.getElementById('modalSeletorEstoque')) {
+            document.getElementById('modalSeletorEstoque').style.display = 'none';
+        }
         
-        const [docCautela, docOrigem, docDoadora] = await Promise.all([
-            cautelaRef.get(), 
-            listaOrigemAvariaRef.get(),
-            listaDoadoraRef.get()
-        ]);
-
-        if (!docCautela.exists || !docOrigem.exists) throw new Error("Documentos não localizados.");
-
-        const dadosC = docCautela.data();
         const batch = db.batch();
-        const qtdSendoTrocada = parseInt(p.quantidade) || 1;
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const docCautela = await cautelaRef.get();
+        if (!docCautela.exists) throw new Error("Cautela não encontrada.");
+        const dadosC = docCautela.data();
 
-        // 1. ATUALIZAÇÃO DA CAUTELA (APENAS HISTÓRICO)
+        // 1. ATUALIZAÇÃO DA CARGA NA CAUTELA (O militar continua com a mesma QTD)
+        const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
+            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
+            return ehOItem ? { 
+                ...it, 
+                tombamento: tombamentoNovo || it.tombamento || "S/T",
+                origem_lista: listaOrigemNovo,
+                obs: `Substituído em ${dataFormatada} por ${nomeAutor}.`
+            } : it;
+        });
+
         batch.update(cautelaRef, {
+            itens: itensAtualizados,
             pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: dataFormatada,
-                descricao: `Troca física: 1un de ${p.itemNome} trocada por material de ${listaOrigemNovo.toUpperCase()}. Carga de ${dadosC.itens[p.item_index]?.quantidade || 1}un mantida com o militar.`,
-                militar: militarLogado
+                descricao: `Troca Cruzada: Item ${p.itemNome} recolhido por avaria. Reposto por ${tombamentoNovo || 'material'} de ${listaOrigemNovo.toUpperCase()}. Carga mantida.`,
+                militar: nomeAutor
             })
         });
 
-        // 🛑 2. ESTOQUE DE ORIGEM: INJEÇÃO DO CARIMBO DE AVARIA (O QUE DEU CERTO ANTES)
-        const listDataOrigem = docOrigem.data().list.map(setor => ({
-            ...setor,
-            itens: (setor.itens || []).map(it => {
-                // Match por ID ou Nome para garantir o Pé de Cabra
-                const matchId = (it.id === p.id_base || it.id === p.uidItem);
-                const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
-
-                if (matchId || matchNome) {
-                    // A. CRIAR O CARIMBO VERMELHO (ESTRUTURA QUE FUNCIONOU)
-                    const novaPendenciaAvaria = {
-                        id: "AVARIA-" + Date.now(),
-                        quantidade: qtdSendoTrocada,
-                        descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
-                        autor_nome: militarLogado,
-                        data_criacao: dataSimples,
-                        status_gestao: "MANUTENCAO",
-                        tipo: "PENDENCIA" 
-                    };
-
-                    if (!it.pendencias_ids) it.pendencias_ids = [];
-                    it.pendencias_ids.push(novaPendenciaAvaria);
-                    
-                    // B. FORÇA O STATUS PARA O APP RECONHECER
-                    it.status_conferencia = "AVARIADO";
-
-                    // C. HISTÓRICO DE VIDA
-                    if (!it.historico_vida) it.historico_vida = [];
-                    it.historico_vida.push({
-                        evento: "RECOLHIDO_AVARIADO",
-                        data: dataFormatada,
-                        detalhes: `Unidade retornada avariada via Troca Cruzada.`,
-                        quem: militarLogado
-                    });
-                    
-                    // 🛑 REGRA: NÃO mexemos no it.cautelas (O carimbo laranja fica!)
-                }
-                return it;
-            })
-        }));
-        batch.update(listaOrigemAvariaRef, { list: listDataOrigem });
-
-        // 3. ESTOQUE DOADOR: HISTÓRICO DE SAÍDA
-        if (docDoadora.exists) {
-            const listDataDoadora = docDoadora.data().list.map(setor => ({
+        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO (SEM APAGAR O LARANJA)
+        const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
+        const docOrigemAvaria = await listaOrigemAvariaRef.get();
+        
+        if (docOrigemAvaria.exists) {
+            const listData = docOrigemAvaria.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    const idListaCurto = String(it.id).split('-')[0];
-                    const idNovoCurto = String(uidNovo).split('-')[0];
-                    if (it.id === uidNovo || idListaCurto === idNovoCurto) {
+                    const matchId = (String(it.id) === String(p.uidItem) || String(it.id) === String(p.id_base));
+                    const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
+
+                    if (matchId || matchNome) {
+                        // ❌ REMOVIDO: o it.cautelas.filter que apagava o carimbo laranja.
+                        // O carimbo laranja permanece pois o militar ainda "deve" as unidades.
+                        
+                        // B. Injeta o Carimbo Vermelho de Avaria
+                        const novaPendenciaAvaria = {
+                            id: "AVARIA-" + Date.now(),
+                            quantidade: qtdParaMovimentar,
+                            descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
+                            autor_nome: nomeAutor,
+                            data_criacao: dataSimples,
+                            status_gestao: "MANUTENCAO",
+                            tipo: "PENDENCIA" 
+                        };
+
+                        if (!it.pendencias_ids) it.pendencias_ids = [];
+                        
+                        const jaGravado = it.pendencias_ids.some(pen => pen.descricao.includes(p.cautelaId));
+                        if (!jaGravado) {
+                            it.pendencias_ids.push(novaPendenciaAvaria);
+                            it.status_conferencia = "AVARIADO";
+                        }
+
+                        // C. Histórico de Vida do item que voltou estragado
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
-                            evento: "SAIDA_SUBSTITUICAO",
+                            evento: "RECOLHIDO_AVARIADO",
                             data: dataFormatada,
-                            detalhes: `Item saiu para repor material avariado na Cautela ${p.cautelaId}.`,
-                            quem: militarLogado
+                            detalhes: `Unidade retornada avariada da Cautela ${p.cautelaId} via troca.`,
+                            quem: nomeAutor
                         });
                     }
                     return it;
                 })
             }));
-            batch.update(listaDoadoraRef, { list: listDataDoadora });
+            batch.update(listaOrigemAvariaRef, { list: listData });
+        }
+
+        // 4. ATUALIZAÇÃO DA LISTA DOADORA (HISTÓRICO MANTIDO)
+        const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
+        const docDoadora = await listaDoadoraRef.get();
+        if (docDoadora.exists) {
+            const doadoraData = docDoadora.data();
+            const novaListaDoadora = doadoraData.list.map(setor => ({
+                ...setor,
+                itens: (setor.itens || []).map(it => {
+                    const idListaCurto = String(it.id).split('-')[0];
+                    const idNovoCurto = String(uidNovo).split('-')[0];
+
+                    if (it.id === uidNovo || idListaCurto === idNovoCurto || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
+                        if (!it.historico_vida) it.historico_vida = [];
+                        it.historico_vida.push({
+                            evento: "SAIDA_TROCA_CRUZADA",
+                            data: dataFormatada,
+                            detalhes: `Item saiu para suprir troca na Cautela ${p.cautelaId}.`,
+                            quem: nomeAutor
+                        });
+                    }
+                    return it;
+                })
+            }));
+            batch.update(listaDoadoraRef, { list: novaListaDoadora });
         }
 
         await batch.commit();
-        alert(`✅ Sucesso!\nO carimbo de avaria (Vermelho) foi criado e a carga de cautela (Laranja) foi preservada.`);
+        alert(`✅ Troca concluída!\nCarga preservada e unidade avariada registrada.`);
         location.reload();
 
     } catch (e) {
