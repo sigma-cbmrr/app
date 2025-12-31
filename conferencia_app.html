@@ -1486,7 +1486,6 @@ function renderizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled) return;
 
-    // 🛑 TRAVA CIRÚRGICA: Se não há LISTA_ID, estamos em modo Cautela/Devolução
     if (!LISTA_ID) {
         console.warn("Redirecionando fluxo: LISTA_ID ausente.");
         if (typeof finalizarRecebimentoDevolucao === 'function' && CAUTELA_ID) {
@@ -1523,12 +1522,14 @@ function renderizarConferencia() {
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
+                        // 1. Tratamento de Avarias Resolvidas
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
+                        // 2. Se o item não foi conferido (está pendente no app)
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
@@ -1539,6 +1540,7 @@ function renderizarConferencia() {
                             return entidade;
                         }
 
+                        // 3. Resolução de Pendências Antigas
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -1561,6 +1563,7 @@ function renderizarConferencia() {
                             });
                         }
 
+                        // 4. Efetivação de Novas Pendências (TEMP -> PEND)
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id.startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
@@ -1573,16 +1576,46 @@ function renderizarConferencia() {
                             return p;
                         });
 
-                        const temAlteracao = entidade.pendencias_ids.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente';
+                        // 🛡️ NOVIDADE: Captura de Cautelas para o Relatório
+                        let pendenciasParaRelatorio = [...entidade.pendencias_ids];
+                        
+                        // Caso A: Cautelas em Itens Coletivos (Array 'cautelas')
+                        if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
+                            entidade.cautelas.forEach(c => {
+                                pendenciasParaRelatorio.push({
+                                    autor_nome: c.emitente || "SISTEMA",
+                                    data_criacao: c.data || "",
+                                    quantidade: c.quantidade || 0,
+                                    descricao: `Cautelado para ${c.destinatario} (ID: ${c.id}).`,
+                                    status_gestao: "CAUTELADO"
+                                });
+                            });
+                        }
+                        // Caso B: Cautelas em Tombamentos (Objeto 'cautela')
+                        if (entidade.cautela && entidade.cautela.id) {
+                            const c = entidade.cautela;
+                            pendenciasParaRelatorio.push({
+                                autor_nome: c.emitente || "SISTEMA",
+                                data_criacao: c.data || "",
+                                quantidade: c.quantidade || 1,
+                                descricao: `Cautelado para ${c.destinatario} (ID: ${c.id}).`,
+                                status_gestao: "CAUTELADO"
+                            });
+                        }
+
+                        const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
                         const dRel = {
                             id: uid, nomeCompleto: nomeParaRelatorio, status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                            pendencias_ids: [...entidade.pendencias_ids], quantidade: quantidadeReal,
-                            setor: setor.nome, obs: entidade.pendencias_ids.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
+                            pendencias_ids: pendenciasParaRelatorio, // Aqui vão as físicas + cautelas
+                            quantidade: quantidadeReal,
+                            setor: setor.nome, 
+                            obs: pendenciasParaRelatorio.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
+
                         itensRelatorio.push(dRel);
                         if (temAlteracao) { itensCaa.push(dRel); totalCaa++; }
                         return entidade;
@@ -1604,6 +1637,7 @@ function renderizarConferencia() {
             lista_id: LISTA_ID, local_nome: localNome, conferente_uid: p.uid,
             conferente_completo: conferenteCompleto, timestamp_ultima_conferencia: timestampAgora
         }, { merge: true });
+        
         batch.set(db.collection('resultados_conferencias').doc(), {
             local: localNome, lista_id: LISTA_ID, conferente_uid: p.uid, conferente: conferenteCompleto,
             timestamp: timestampAgora, totalItensConferidos: itensRelatorio.length,
