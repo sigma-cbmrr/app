@@ -932,7 +932,6 @@ function renderizarConferencia() {
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
     const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
     
-    // --- CAPTURA E EXIBIÇÃO IMEDIATA DO CONFERENTE ---
     const urlParamsLocal = new URLSearchParams(window.location.search);
     userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
     userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
@@ -975,8 +974,27 @@ function renderizarConferencia() {
         }
 
         window.dadosConferencia = dadosConferencia;
+
+        // 🛑 BLOCO CIRÚRGICO: Sincronização de Pendências Gravadas (Avarias)
+        dadosConferencia.forEach(setor => {
+            setor.itens.forEach(it => {
+                const ativarVisual = (obj, uid) => {
+                    if (obj.pendencias_ids && obj.pendencias_ids.length > 0) {
+                        window.itemStatus[uid] = { 
+                            status: 'C/A', 
+                            ids_mantidos: obj.pendencias_ids.map(p => p.id),
+                            interacao_humana: true 
+                        };
+                    }
+                };
+                if (it.tipo === 'multi' && it.tombamentos) {
+                    it.tombamentos.forEach(t => ativarVisual(t, `${it.id}-${t.tomb}`));
+                } else {
+                    ativarVisual(it, it.id);
+                }
+            });
+        });
         
-        // 🛑 AJUSTE CIRÚRGICO: Limpeza de rótulos redundantes no cabeçalho
         infoLocal = { 
             nome: isCautela ? `${CAUTELA_ID}` : (data.nome_local || "Lista"),
             posto: isCautela ? "" : (data.posto || "Geral")
@@ -984,20 +1002,15 @@ function renderizarConferencia() {
         
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
-            // Remove o hífen se for cautela (posto vazio)
             const separador = infoLocal.posto ? " - " : "";
             infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto}${separador}${infoLocal.nome}</span>`;
         }
 
         const btnFinalizar = document.getElementById('btn-finalizar');
         if (btnFinalizar) {
-            if (isDevolucaoFinal) {
-                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
-            } else if (isCautela) {
-                btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
-            } else {
-                btnFinalizar.onclick = () => finalizarConferencia();
-            }
+            if (isDevolucaoFinal) btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
+            else if (isCautela) btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
+            else btnFinalizar.onclick = () => finalizarConferencia();
         }
 
         renderizarConferencia(); 
