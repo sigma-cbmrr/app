@@ -929,100 +929,169 @@ function renderizarConferencia() {
     return [setorCautela];
 }
       async function carregarDadosRemotos() {
+
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
+
     const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
+
     
+
+    // --- CAPTURA E EXIBIÇÃO IMEDIATA DO CONFERENTE ---
+
     const urlParamsLocal = new URLSearchParams(window.location.search);
+
     userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
+
     userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
+
     userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
+
     userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
 
+
+
     const elHeader = document.getElementById('militar-info');
+
     if (elHeader) {
+
         elHeader.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
+
     }
 
+
+
     if (!ID_ALVO) return;
+
         
+
     const loadingMsg = document.getElementById('loading-message');
+
     if (loadingMsg) loadingMsg.innerHTML = "Conectando ao SIGMA...";
 
+
+
     try {
+
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
+
         if (!doc.exists) throw new Error("Documento não encontrado.");
+
         
+
         const data = doc.data();
+
         const isDevolucaoFinal = urlParamsLocal.get('modo') === 'devolucao_final';
+
         
+
         if (isCautela) {
+
             dadosConferencia = adaptarCautelaParaRender(data);
+
         } else {
+
             const listaBruta = data.list || [];
+
             dadosConferencia = listaBruta.map(setor => ({
+
                 ...setor,
+
                 itens: (setor.itens || []).map(item => {
+
                     const tombamentoInvalido = item.tombamentos && item.tombamentos.some(t => t.tomb === item.nome || t.tomb === "S/T");
+
                     if (tombamentoInvalido || item.tipo === 'single') {
+
                         item.tipo = 'single';
+
                         item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
+
                     }
+
                     item._ocultarCarimbo = isDevolucaoFinal;
+
                     return item;
+
                 })
+
             }));
+
         }
+
+
 
         window.dadosConferencia = dadosConferencia;
 
-        // 🛑 BLOCO CIRÚRGICO: Sincronização de Pendências Gravadas (Avarias)
-        dadosConferencia.forEach(setor => {
-            setor.itens.forEach(it => {
-                const ativarVisual = (obj, uid) => {
-                    if (obj.pendencias_ids && obj.pendencias_ids.length > 0) {
-                        window.itemStatus[uid] = { 
-                            status: 'C/A', 
-                            ids_mantidos: obj.pendencias_ids.map(p => p.id),
-                            interacao_humana: true 
-                        };
-                    }
-                };
-                if (it.tipo === 'multi' && it.tombamentos) {
-                    it.tombamentos.forEach(t => ativarVisual(t, `${it.id}-${t.tomb}`));
-                } else {
-                    ativarVisual(it, it.id);
-                }
-            });
-        });
         
+
+        // 🛑 AJUSTE CIRÚRGICO: Limpeza de rótulos redundantes no cabeçalho
+
         infoLocal = { 
+
             nome: isCautela ? `${CAUTELA_ID}` : (data.nome_local || "Lista"),
+
             posto: isCautela ? "" : (data.posto || "Geral")
+
         };
+
         
+
         const infoElement = document.getElementById('local-posto-info');
+
         if (infoElement) {
+
+            // Remove o hífen se for cautela (posto vazio)
+
             const separador = infoLocal.posto ? " - " : "";
+
             infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto}${separador}${infoLocal.nome}</span>`;
+
         }
 
+
+
         const btnFinalizar = document.getElementById('btn-finalizar');
+
         if (btnFinalizar) {
-            if (isDevolucaoFinal) btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
-            else if (isCautela) btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
-            else btnFinalizar.onclick = () => finalizarConferencia();
+
+            if (isDevolucaoFinal) {
+
+                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
+
+            } else if (isCautela) {
+
+                btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
+
+            } else {
+
+                btnFinalizar.onclick = () => finalizarConferencia();
+
+            }
+
         }
+
+
 
         renderizarConferencia(); 
 
+
+
         if (typeof updateOverallStatus === "function") updateOverallStatus();
+
         if (loadingMsg) loadingMsg.style.display = 'none'; 
+
         document.getElementById('main-content').style.display = 'block';
 
+
+
     } catch (e) { 
+
         console.error(e);
+
         if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>${e.message}</span>`;
+
     }
+
 }
      
        async function finalizarConferencia() {
