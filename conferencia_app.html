@@ -669,7 +669,11 @@ function renderizarConferencia() {
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
-                const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
+                
+                // 🟢 DECLARAÇÃO CRUCIAL: Verifica se o ID desta pendência específica 
+                // está na lista de quem o conferente JÁ CLICOU em "Manter" nesta sessão.
+                const jaFoiMantidoNestaSessao = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(p.id);
+                
                 const nomeExibicao = p.autor_nome || "Conferente";
 
                 let acoesHtml = '';
@@ -682,9 +686,13 @@ function renderizarConferencia() {
                             <span onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" style="cursor:pointer; color:#d90f23; font-size:1.1em; padding:5px;"><i class="fas fa-trash-alt"></i></span>
                         </div>`;
                     acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
-                } else if (jaFoiMantido) {
+                } 
+                else if (jaFoiMantidoNestaSessao) { 
+                    // 🟢 Se ele já clicou em "Manter", mostramos o selo verde e escondemos os botões.
                     acoesHtml = `<div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;"><i class="fas fa-check-double"></i> MANTIDO</div>`;
-                } else {
+                } 
+                else {
+                    // 🟢 Caso contrário (inclusive para avarias novas vindas do banco), mostramos os botões.
                     acoesHtml = `
                         <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
                             <button type="button" class="btn-manter" style="flex:1" onclick="manterID('${p.id}', '${uid}')">Manter</button>
@@ -693,7 +701,7 @@ function renderizarConferencia() {
                 }
 
                 htmlAcumulado += `
-                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantido ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 12px; margin-bottom: 10px; background-color: #fff; text-align: left;">
+                    <div class="pendencia-id-card" id="card-${p.id}" style="position:relative; border: 1px solid ${isTemp ? '#2196F3' : (jaFoiMantidoNestaSessao ? '#1b8a3e' : '#d90f23')}; border-radius: 8px; padding: 12px; margin-bottom: 10px; background-color: #fff; text-align: left;">
                         <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 4px;">
                             <span>
                                 <i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}" style="margin-right: 5px; color: ${isTemp ? '#2196F3' : '#666'};"></i> 
@@ -715,8 +723,6 @@ function renderizarConferencia() {
                     </div>`;
             });
         }
-        return htmlAcumulado;
-    };
 
     fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0);
@@ -981,17 +987,15 @@ function renderizarConferencia() {
         dadosConferencia.forEach(setor => {
             setor.itens.forEach(it => {
                 const checkPendencias = (obj, uid) => {
-                    // Se houver pendências (Avarias/Ferrugem) no banco...
-                    if (obj.pendencias_ids && obj.pendencias_ids.length > 0) {
-                        // Registramos os IDs e marcamos status 'C/A' (Com Alteração)
-                        // mas deixamos interacao_humana: false para os botões APARECEREM
-                        window.itemStatus[uid] = { 
-                            status: 'C/A', 
-                            ids_mantidos: obj.pendencias_ids.map(p => p.id),
-                            interacao_humana: false 
-                        };
-                    }
-                };
+    if (obj.pendencias_ids && obj.pendencias_ids.length > 0) {
+        window.itemStatus[uid] = { 
+            status: 'C/A', 
+            ids_originais: obj.pendencias_ids.map(p => p.id), // 🟢 Mudamos para ids_originais
+            ids_mantidos: [], // 🟢 Começa vazio para os botões aparecerem
+            interacao_humana: false 
+        };
+    }
+};
 
                 if (it.tipo === 'multi' && it.tombamentos) {
                     it.tombamentos.forEach(t => checkPendencias(t, `${it.id}-${t.tomb}`));
