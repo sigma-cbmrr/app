@@ -7995,68 +7995,41 @@ async function abrirSeletorGlobalSubstituicao() {
             listaDoadoraRef.get()
         ]);
 
-        if (!docCautela.exists || !docOrigem.exists) throw new Error("Documentos de cautela ou estoque não localizados.");
+        if (!docCautela.exists || !docOrigem.exists) throw new Error("Documentos não localizados.");
 
         const dadosC = docCautela.data();
         const batch = db.batch();
         const qtdSendoTrocada = parseInt(p.quantidade) || 1;
 
         // -------------------------------------------------------------------------
-        // 2. ATUALIZAÇÃO DA CAUTELA (CARGA ADMINISTRATIVA)
+        // 2. ATUALIZAÇÃO DA CAUTELA (CARGA ADMINISTRATIVA - HISTÓRICO)
         // -------------------------------------------------------------------------
-        const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
-            const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
-            if (ehOItem) {
-                return { 
-                    ...it, 
-                    tombamento: tombamentoNovo || it.tombamento || "S/T",
-                    origem_lista: listaOrigemNovo, // Agora o item na carga vem do novo estoque
-                    obs: `Substituído em ${dataFormatada} por ${militarLogado}.`
-                };
-            }
-            return it;
-        });
-
         batch.update(cautelaRef, {
-            itens: itensAtualizados,
+            // Saneia a solicitação de troca na lista do gestor
             pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
+            // Registra a troca física no histórico do documento
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: dataFormatada,
-                descricao: `Troca efetuada: ${p.itemNome} recolhido por avaria. Reposto por item vindo de ${listaOrigemNovo.toUpperCase()}.`,
+                descricao: `Troca física realizada: 1un de ${p.itemNome} substituída por material vindo de ${listaOrigemNovo.toUpperCase()}. Carga mantida.`,
                 militar: militarLogado
             })
         });
 
         // -------------------------------------------------------------------------
-        // 3. ESTOQUE DE ORIGEM (MATEMÁTICA INTELIGENTE: DIMINUI LARANJA, CRIA VERMELHO)
+        // 3. ESTOQUE DE ORIGEM (MATEMÁTICA INTELIGENTE: CRIA VERMELHO, MANTÉM LARANJA)
         // -------------------------------------------------------------------------
         const listDataOrigem = docOrigem.data().list.map(setor => ({
             ...setor,
             itens: (setor.itens || []).map(it => {
-                // Match por ID ou Nome para garantir que pegamos o Pé de Cabra e não o setor
                 const matchId = (it.id === p.id_base || it.id === p.uidItem);
                 const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
 
                 if (matchId || matchNome) {
-                    // A. Gerenciar Carimbo Laranja (Cautela)
-                    if (it.cautelas) {
-                        const cIdx = it.cautelas.findIndex(c => c.id === p.cautelaId);
-                        if (cIdx !== -1) {
-                            if (it.cautelas[cIdx].quantidade > qtdSendoTrocada) {
-                                // Se ele tinha 2un e trocou 1, o carimbo laranja continua com 1un
-                                it.cautelas[cIdx].quantidade -= qtdSendoTrocada;
-                            } else {
-                                // Se ele tinha apenas a quantidade que trocou, remove o carimbo laranja
-                                it.cautelas.splice(cIdx, 1);
-                            }
-                        }
-                    }
-
-                    // B. Criar Carimbo Vermelho (Avaria Física no Estoque)
+                    // A. CRIAR CARIMBO VERMELHO (Avaria Física que voltou)
                     const novaPendenciaAvaria = {
                         id: "AVARIA-" + Date.now(),
                         quantidade: qtdSendoTrocada,
-                        descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
+                        descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId} via Troca Cruzada. Motivo: ${p.motivo}`,
                         autor_nome: militarLogado,
                         data_criacao: dataSimples,
                         status_gestao: "MANUTENCAO",
@@ -8064,13 +8037,14 @@ async function abrirSeletorGlobalSubstituicao() {
                     };
                     if (!it.pendencias_ids) it.pendencias_ids = [];
                     it.pendencias_ids.push(novaPendenciaAvaria);
+                    it.status_conferencia = "AVARIADO";
 
-                    // C. Histórico de vida do item avariado
+                    // B. LOG NO HISTÓRICO DE VIDA DO ITEM
                     if (!it.historico_vida) it.historico_vida = [];
                     it.historico_vida.push({
-                        evento: "RECOLHIDO_AVARIADO",
+                        evento: "RETORNO_AVARIADO",
                         data: dataFormatada,
-                        detalhes: `Troca cruzada: 1un retornou avariada da Cautela ${p.cautelaId}.`,
+                        detalhes: `Unidade física retornou avariada (Troca Cruzada).`,
                         quem: militarLogado
                     });
                 }
@@ -8080,7 +8054,7 @@ async function abrirSeletorGlobalSubstituicao() {
         batch.update(listaOrigemAvariaRef, { list: listDataOrigem });
 
         // -------------------------------------------------------------------------
-        // 4. ESTOQUE DOADOR (TRANSFERE A CARGA SEM DUPLICAR ABATE)
+        // 4. ESTOQUE DOADOR (APENAS HISTÓRICO - SEM CARIMBO LARANJA DUPLICADO)
         // -------------------------------------------------------------------------
         if (docDoadora.exists) {
             const listDataDoadora = docDoadora.data().list.map(setor => ({
@@ -8089,31 +8063,12 @@ async function abrirSeletorGlobalSubstituicao() {
                     const idListaCurto = String(it.id).split('-')[0];
                     const idNovoCurto = String(uidNovo).split('-')[0];
 
-                    if (it.id === uidNovo || idListaCurto === idNovoCurto || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
-                        
-                        // Injeta o carimbo laranja no item NOVO que está saindo para o militar
-                        const novoCarimboLaranja = {
-                            id: p.cautelaId,
-                            destinatario: dadosC.destinatario_original_nome,
-                            data: dataFormatada,
-                            quantidade: qtdSendoTrocada
-                        };
-
-                        if (it.tipo === 'single') {
-                            if (!it.cautelas) it.cautelas = [];
-                            it.cautelas.push(novoCarimboLaranja);
-                        } else {
-                            it.tombamentos = it.tombamentos.map(t => {
-                                if (`${it.id}-${t.tomb}` === uidNovo) t.cautela = novoCarimboLaranja;
-                                return t;
-                            });
-                        }
-
+                    if (it.id === uidNovo || idListaCurto === idNovoCurto) {
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
-                            evento: "SAIDA_TROCA_CRUZADA",
+                            evento: "SAIDA_SUBSTITUICAO",
                             data: dataFormatada,
-                            detalhes: `Item saiu para repor a Cautela ${p.cautelaId}.`,
+                            detalhes: `Item saiu para repor material avariado na Cautela ${p.cautelaId}.`,
                             quem: militarLogado
                         });
                     }
@@ -8123,14 +8078,14 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaDoadoraRef, { list: listDataDoadora });
         }
 
-        // FINALIZAÇÃO
+        // 5. FINALIZAÇÃO DA TRANSAÇÃO
         await batch.commit();
-        alert(`✅ Troca concluída!\nSaldo atualizado: -1un na carga antiga, +1un de avaria no estoque e carga transferida para o item novo.`);
+        alert(`✅ Troca concluída!\nItem avariado registrado no estoque e pendência de troca finalizada.`);
         location.reload();
 
     } catch (e) {
         console.error("Erro na Troca Cruzada:", e);
-        alert("❌ Erro: " + e.message);
+        alert("❌ Erro ao processar: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
