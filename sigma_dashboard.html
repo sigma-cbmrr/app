@@ -8026,7 +8026,7 @@ async function abrirSeletorGlobalSubstituicao() {
             })
         });
 
-        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO
+        // 🛑 2. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
         
@@ -8034,7 +8034,6 @@ async function abrirSeletorGlobalSubstituicao() {
             const listData = docOrigemAvaria.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    // Match simplificado e direto
                     const itemID = String(it.id);
                     const pendID = String(p.uidItem || p.id_base);
                     const nomeBate = it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim();
@@ -8042,7 +8041,7 @@ async function abrirSeletorGlobalSubstituicao() {
                     if (itemID === pendID || nomeBate) {
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         
-                        // 🟢 CRIAR CARIMBO SEM TRAVAS QUE BLOQUEIAM TESTES REPETIDOS
+                        // 🟢 CRIAR CARIMBO VINCULADO À SOLICITAÇÃO
                         it.pendencias_ids.push({
                             id: "AVARIA-" + Date.now(),
                             quantidade: qtdParaMovimentar,
@@ -8050,7 +8049,8 @@ async function abrirSeletorGlobalSubstituicao() {
                             autor_nome: nomeAutor,
                             data_criacao: dataSimples,
                             status_gestao: "MANUTENCAO",
-                            tipo: "PENDENCIA" 
+                            tipo: "PENDENCIA",
+                            solicitacao_origem_id: p.solicitacaoId // 🛑 Crucial para o App identificar
                         });
                         it.status_conferencia = "AVARIADO";
 
@@ -8068,7 +8068,7 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemAvariaRef, { list: listData });
         }
 
-        // 4. ATUALIZAÇÃO DO DOADOR (Apenas histórico)
+        // 3. ATUALIZAÇÃO DO DOADOR
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
