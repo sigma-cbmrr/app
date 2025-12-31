@@ -8005,7 +8005,7 @@ async function abrirSeletorGlobalSubstituicao() {
         if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // 1. ATUALIZAÇÃO DA CARGA NA CAUTELA (O militar continua com a mesma QTD)
+        // 1. ATUALIZAÇÃO DA CARGA NA CAUTELA (Mantém o carimbo de cautela vivo no estoque)
         const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
             return ehOItem ? { 
@@ -8026,7 +8026,7 @@ async function abrirSeletorGlobalSubstituicao() {
             })
         });
 
-        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO (SEM APAGAR O LARANJA)
+        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO (MANTIDO E REFORÇADO)
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
         
@@ -8038,10 +8038,7 @@ async function abrirSeletorGlobalSubstituicao() {
                     const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
 
                     if (matchId || matchNome) {
-                        // ❌ REMOVIDO: o it.cautelas.filter que apagava o carimbo laranja.
-                        // O carimbo laranja permanece pois o militar ainda "deve" as unidades.
-                        
-                        // B. Injeta o Carimbo Vermelho de Avaria
+                        // Injeta o Carimbo Vermelho de Avaria
                         const novaPendenciaAvaria = {
                             id: "AVARIA-" + Date.now(),
                             quantidade: qtdParaMovimentar,
@@ -8049,18 +8046,19 @@ async function abrirSeletorGlobalSubstituicao() {
                             autor_nome: nomeAutor,
                             data_criacao: dataSimples,
                             status_gestao: "MANUTENCAO",
-                            tipo: "PENDENCIA" 
+                            tipo: "PENDENCIA",
+                            solicitacao_id: p.solicitacaoId // 🛑 CHAVE ÚNICA PARA EVITAR TRAVA DE CAUTELA REPETIDA
                         };
 
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         
-                        const jaGravado = it.pendencias_ids.some(pen => pen.descricao.includes(p.cautelaId));
+                        // Trava baseada na solicitação única, não na cautela
+                        const jaGravado = it.pendencias_ids.some(pen => pen.solicitacao_id === p.solicitacaoId);
                         if (!jaGravado) {
                             it.pendencias_ids.push(novaPendenciaAvaria);
                             it.status_conferencia = "AVARIADO";
                         }
 
-                        // C. Histórico de Vida do item que voltou estragado
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "RECOLHIDO_AVARIADO",
@@ -8079,14 +8077,12 @@ async function abrirSeletorGlobalSubstituicao() {
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
-            const doadoraData = docDoadora.data();
-            const novaListaDoadora = doadoraData.list.map(setor => ({
+            const novaListaDoadora = docDoadora.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
                     const idListaCurto = String(it.id).split('-')[0];
                     const idNovoCurto = String(uidNovo).split('-')[0];
-
-                    if (it.id === uidNovo || idListaCurto === idNovoCurto || (it.tombamentos && it.tombamentos.some(t => `${it.id}-${t.tomb}` === uidNovo))) {
+                    if (it.id === uidNovo || idListaCurto === idNovoCurto) {
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "SAIDA_TROCA_CRUZADA",
@@ -8104,7 +8100,6 @@ async function abrirSeletorGlobalSubstituicao() {
         await batch.commit();
         alert(`✅ Troca concluída!\nCarga preservada e unidade avariada registrada.`);
         location.reload();
-
     } catch (e) {
         console.error("Erro na Troca Cruzada:", e);
         alert("❌ Erro: " + e.message);
