@@ -3670,7 +3670,9 @@ function reimprimirPDF(data) {
 
         doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
         doc.setFontSize(10).setTextColor(50);
-        const dataTimestamp = data.timestamp ? new Date(data.timestamp.seconds * 1000) : new Date();
+        
+        // Tratamento do Timestamp (suporta objeto Firestore ou Data JS)
+        const dataTimestamp = data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000) : new Date();
         
         doc.setFont('helvetica','bold').text('Local:', MARGIN + 5, 46); 
         doc.setFont('helvetica','normal').text(data.local || '', MARGIN + 35, 46); 
@@ -3694,20 +3696,18 @@ function reimprimirPDF(data) {
                     currentSector = setorItem;
                 }
 
-                // 🛡️ LÓGICA DE CAPTURA EXCLUSIVA (MATA O FANTASMA NO PDF)
                 let finalObs = '-';
                 
-                const formatData = (d) => {
-                    if(!d) return '';
-                    const m = d.toString().match(/\d{2}\/\d{2}\/\d{4}/);
-                    return m ? m[0] : d;
-                };
-
-                // REGRA: Se existe a lista de carimbos, usa ela e IGNORA o campo 'obs' raiz.
-                if (item.pendencias_ca && Array.isArray(item.pendencias_ca) && item.pendencias_ca.length > 0) {
-                    finalObs = item.pendencias_ca.map(p => `- Por ${p.quem} em ${formatData(p.data)}: ${p.obs}`).join('\n');
+                // 🛠️ AJUSTE CIRÚRGICO: Mapeia pendencias_ids do banco de dados para o PDF
+                if (item.pendencias_ids && Array.isArray(item.pendencias_ids) && item.pendencias_ids.length > 0) {
+                    finalObs = item.pendencias_ids.map(p => {
+                        const autor = p.autor_nome || 'Não identificado';
+                        const dataP = p.data_criacao || '';
+                        const desc = p.descricao || '';
+                        return `\u2022 Por ${autor} em ${dataP}: ${desc}`;
+                    }).join('\n');
                 } 
-                // FALLBACK: Se não tem a lista, tenta o texto do campo 'obs'
+                // Fallback para o campo obs simples caso não haja array de pendências
                 else if (item.obs && item.obs !== "") {
                     finalObs = item.obs;
                 }
@@ -3716,7 +3716,7 @@ function reimprimirPDF(data) {
 
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
-                    { content: `QTD: ${item.quantidade || 1}`, styles: { halign: 'center' } }, 
+                    { content: `QTD: ${item.quantidade || 0}`, styles: { halign: 'center' } }, 
                     { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center' } }, 
                     { content: finalObs, styles: { halign: 'left' } } 
                 ]);
@@ -3728,8 +3728,8 @@ function reimprimirPDF(data) {
             head: [['Material', 'Quantidade', 'Status', 'Observação']], 
             body: tableBody, 
             theme: 'striped', 
-            styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 1.5 }, 
-            columnStyles: { 0:{cellWidth:80}, 1:{cellWidth:20}, 2:{cellWidth:20}, 3:{cellWidth:'auto'} }, 
+            styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 2 }, 
+            columnStyles: { 0:{cellWidth:75}, 1:{cellWidth:20}, 2:{cellWidth:18}, 3:{cellWidth:'auto'} }, 
             headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
         });
 
