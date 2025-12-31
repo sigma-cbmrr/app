@@ -8005,7 +8005,7 @@ async function abrirSeletorGlobalSubstituicao() {
         if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // 1. ATUALIZAÇÃO DA CARGA NA CAUTELA (Mantém o carimbo de cautela vivo no estoque)
+        // 1. ATUALIZAÇÃO DA CAUTELA
         const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
             const ehOItem = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
             return ehOItem ? { 
@@ -8021,12 +8021,12 @@ async function abrirSeletorGlobalSubstituicao() {
             pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: dataFormatada,
-                descricao: `Troca Cruzada: Item ${p.itemNome} recolhido por avaria. Reposto por ${tombamentoNovo || 'material'} de ${listaOrigemNovo.toUpperCase()}. Carga mantida.`,
+                descricao: `Troca Cruzada: Item ${p.itemNome} recolhido. Reposto por ${tombamentoNovo || 'material'} de ${listaOrigemNovo.toUpperCase()}.`,
                 militar: nomeAutor
             })
         });
 
-        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO (MANTIDO E REFORÇADO)
+        // 🛑 3. ESTOQUE DE ORIGEM: GRAVAÇÃO DO CARIMBO VERMELHO
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
         
@@ -8034,30 +8034,25 @@ async function abrirSeletorGlobalSubstituicao() {
             const listData = docOrigemAvaria.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    const matchId = (String(it.id) === String(p.uidItem) || String(it.id) === String(p.id_base));
-                    const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
+                    // Match simplificado e direto
+                    const itemID = String(it.id);
+                    const pendID = String(p.uidItem || p.id_base);
+                    const nomeBate = it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim();
 
-                    if (matchId || matchNome) {
-                        // Injeta o Carimbo Vermelho de Avaria
-                        const novaPendenciaAvaria = {
+                    if (itemID === pendID || nomeBate) {
+                        if (!it.pendencias_ids) it.pendencias_ids = [];
+                        
+                        // 🟢 CRIAR CARIMBO SEM TRAVAS QUE BLOQUEIAM TESTES REPETIDOS
+                        it.pendencias_ids.push({
                             id: "AVARIA-" + Date.now(),
                             quantidade: qtdParaMovimentar,
                             descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
                             autor_nome: nomeAutor,
                             data_criacao: dataSimples,
                             status_gestao: "MANUTENCAO",
-                            tipo: "PENDENCIA",
-                            solicitacao_id: p.solicitacaoId // 🛑 CHAVE ÚNICA PARA EVITAR TRAVA DE CAUTELA REPETIDA
-                        };
-
-                        if (!it.pendencias_ids) it.pendencias_ids = [];
-                        
-                        // Trava baseada na solicitação única, não na cautela
-                        const jaGravado = it.pendencias_ids.some(pen => pen.solicitacao_id === p.solicitacaoId);
-                        if (!jaGravado) {
-                            it.pendencias_ids.push(novaPendenciaAvaria);
-                            it.status_conferencia = "AVARIADO";
-                        }
+                            tipo: "PENDENCIA" 
+                        });
+                        it.status_conferencia = "AVARIADO";
 
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
@@ -8073,16 +8068,14 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemAvariaRef, { list: listData });
         }
 
-        // 4. ATUALIZAÇÃO DA LISTA DOADORA (HISTÓRICO MANTIDO)
+        // 4. ATUALIZAÇÃO DO DOADOR (Apenas histórico)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
             const novaListaDoadora = docDoadora.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    const idListaCurto = String(it.id).split('-')[0];
-                    const idNovoCurto = String(uidNovo).split('-')[0];
-                    if (it.id === uidNovo || idListaCurto === idNovoCurto) {
+                    if (String(it.id).startsWith(String(uidNovo).split('-')[0])) {
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "SAIDA_TROCA_CRUZADA",
@@ -8098,10 +8091,11 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert(`✅ Troca concluída!\nCarga preservada e unidade avariada registrada.`);
+        alert(`✅ Troca concluída!`);
         location.reload();
+
     } catch (e) {
-        console.error("Erro na Troca Cruzada:", e);
+        console.error("Erro:", e);
         alert("❌ Erro: " + e.message);
     }
 }
