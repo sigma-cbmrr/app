@@ -7984,7 +7984,6 @@ async function abrirSeletorGlobalSubstituicao() {
     const militarLogado = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`.replace(/\s+/g, ' ').trim();
 
     try {
-        // 1. REFERÊNCIAS E CONSISTÊNCIA
         const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
@@ -8001,68 +8000,65 @@ async function abrirSeletorGlobalSubstituicao() {
         const batch = db.batch();
         const qtdSendoTrocada = parseInt(p.quantidade) || 1;
 
-        // -------------------------------------------------------------------------
-        // 2. ATUALIZAÇÃO DA CAUTELA (CARGA ADMINISTRATIVA - HISTÓRICO)
-        // -------------------------------------------------------------------------
+        // 1. ATUALIZAÇÃO DA CAUTELA (APENAS HISTÓRICO)
         batch.update(cautelaRef, {
-            // Saneia a solicitação de troca na lista do gestor
             pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
-            // Registra a troca física no histórico do documento
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: dataFormatada,
-                descricao: `Troca física realizada: 1un de ${p.itemNome} substituída por material vindo de ${listaOrigemNovo.toUpperCase()}. Carga mantida.`,
+                descricao: `Troca física: 1un de ${p.itemNome} trocada por material de ${listaOrigemNovo.toUpperCase()}. Carga de ${dadosC.itens[p.item_index]?.quantidade || 1}un mantida com o militar.`,
                 militar: militarLogado
             })
         });
 
-        // -------------------------------------------------------------------------
-        // 3. ESTOQUE DE ORIGEM (MATEMÁTICA INTELIGENTE: CRIA VERMELHO, MANTÉM LARANJA)
-        // -------------------------------------------------------------------------
+        // 🛑 2. ESTOQUE DE ORIGEM: INJEÇÃO DO CARIMBO DE AVARIA (O QUE DEU CERTO ANTES)
         const listDataOrigem = docOrigem.data().list.map(setor => ({
             ...setor,
             itens: (setor.itens || []).map(it => {
+                // Match por ID ou Nome para garantir o Pé de Cabra
                 const matchId = (it.id === p.id_base || it.id === p.uidItem);
                 const matchNome = (it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim());
 
                 if (matchId || matchNome) {
-                    // A. CRIAR CARIMBO VERMELHO (Avaria Física que voltou)
+                    // A. CRIAR O CARIMBO VERMELHO (ESTRUTURA QUE FUNCIONOU)
                     const novaPendenciaAvaria = {
                         id: "AVARIA-" + Date.now(),
                         quantidade: qtdSendoTrocada,
-                        descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId} via Troca Cruzada. Motivo: ${p.motivo}`,
+                        descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
                         autor_nome: militarLogado,
                         data_criacao: dataSimples,
                         status_gestao: "MANUTENCAO",
                         tipo: "PENDENCIA" 
                     };
+
                     if (!it.pendencias_ids) it.pendencias_ids = [];
                     it.pendencias_ids.push(novaPendenciaAvaria);
+                    
+                    // B. FORÇA O STATUS PARA O APP RECONHECER
                     it.status_conferencia = "AVARIADO";
 
-                    // B. LOG NO HISTÓRICO DE VIDA DO ITEM
+                    // C. HISTÓRICO DE VIDA
                     if (!it.historico_vida) it.historico_vida = [];
                     it.historico_vida.push({
-                        evento: "RETORNO_AVARIADO",
+                        evento: "RECOLHIDO_AVARIADO",
                         data: dataFormatada,
-                        detalhes: `Unidade física retornou avariada (Troca Cruzada).`,
+                        detalhes: `Unidade retornada avariada via Troca Cruzada.`,
                         quem: militarLogado
                     });
+                    
+                    // 🛑 REGRA: NÃO mexemos no it.cautelas (O carimbo laranja fica!)
                 }
                 return it;
             })
         }));
         batch.update(listaOrigemAvariaRef, { list: listDataOrigem });
 
-        // -------------------------------------------------------------------------
-        // 4. ESTOQUE DOADOR (APENAS HISTÓRICO - SEM CARIMBO LARANJA DUPLICADO)
-        // -------------------------------------------------------------------------
+        // 3. ESTOQUE DOADOR: HISTÓRICO DE SAÍDA
         if (docDoadora.exists) {
             const listDataDoadora = docDoadora.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
                     const idListaCurto = String(it.id).split('-')[0];
                     const idNovoCurto = String(uidNovo).split('-')[0];
-
                     if (it.id === uidNovo || idListaCurto === idNovoCurto) {
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
@@ -8078,14 +8074,13 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaDoadoraRef, { list: listDataDoadora });
         }
 
-        // 5. FINALIZAÇÃO DA TRANSAÇÃO
         await batch.commit();
-        alert(`✅ Troca concluída!\nItem avariado registrado no estoque e pendência de troca finalizada.`);
+        alert(`✅ Sucesso!\nO carimbo de avaria (Vermelho) foi criado e a carga de cautela (Laranja) foi preservada.`);
         location.reload();
 
     } catch (e) {
         console.error("Erro na Troca Cruzada:", e);
-        alert("❌ Erro ao processar: " + e.message);
+        alert("❌ Erro: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
