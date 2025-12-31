@@ -8011,7 +8011,7 @@ async function abrirSeletorGlobalSubstituicao() {
             return ehOItem ? { 
                 ...it, 
                 tombamento: tombamentoNovo || it.tombamento || "S/T",
-                origem_lista: listaOrigemNovo,
+                origem_lista: listaOrigemNovo || "desconhecida",
                 obs: `Substituído em ${dataFormatada} por ${nomeAutor}.`
             } : it;
         });
@@ -8035,22 +8035,22 @@ async function abrirSeletorGlobalSubstituicao() {
                 ...setor,
                 itens: (setor.itens || []).map(it => {
                     const itemID = String(it.id);
-                    const pendID = String(p.uidItem || p.id_base);
+                    const pendID = String(p.uidItem || p.id_base || "");
                     const nomeBate = it.nome.toUpperCase().trim() === p.itemNome.toUpperCase().trim();
 
-                    if (itemID === pendID || nomeBate) {
+                    if (itemID === pendID || (pendID !== "" && itemID.includes(pendID)) || nomeBate) {
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         
-                        // 🟢 CRIAR CARIMBO VINCULADO À SOLICITAÇÃO
+                        // 🟢 CRIAR CARIMBO BLINDADO CONTRA UNDEFINED
                         it.pendencias_ids.push({
                             id: "AVARIA-" + Date.now(),
                             quantidade: qtdParaMovimentar,
-                            descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId}. Motivo: ${p.motivo}`,
+                            descricao: `MATERIAL AVARIADO: Retornado da Cautela ${p.cautelaId || 'N/D'}. Motivo: ${p.motivo || 'Troca Cruzada'}`,
                             autor_nome: nomeAutor,
                             data_criacao: dataSimples,
                             status_gestao: "MANUTENCAO",
                             tipo: "PENDENCIA",
-                            solicitacao_origem_id: p.solicitacaoId // 🛑 Crucial para o App identificar
+                            solicitacao_id: p.solicitacaoId || "avulso" // Garante que não seja undefined
                         });
                         it.status_conferencia = "AVARIADO";
 
@@ -8068,14 +8068,16 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemAvariaRef, { list: listData });
         }
 
-        // 3. ATUALIZAÇÃO DO DOADOR
+        // 4. ATUALIZAÇÃO DO DOADOR
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
             const novaListaDoadora = docDoadora.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    if (String(it.id).startsWith(String(uidNovo).split('-')[0])) {
+                    const idCurtoItem = String(it.id).split('-')[0];
+                    const idCurtoNovo = String(uidNovo).split('-')[0];
+                    if (it.id === uidNovo || idCurtoItem === idCurtoNovo) {
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "SAIDA_TROCA_CRUZADA",
@@ -8095,8 +8097,8 @@ async function abrirSeletorGlobalSubstituicao() {
         location.reload();
 
     } catch (e) {
-        console.error("Erro:", e);
-        alert("❌ Erro: " + e.message);
+        console.error("Erro detalhado:", e);
+        alert("❌ Erro ao salvar: Verifique o console para detalhes técnicos.");
     }
 }
 	async function prepararSubstituicaoFisica() {
