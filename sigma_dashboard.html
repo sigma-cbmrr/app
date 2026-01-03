@@ -7976,27 +7976,33 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem) {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
+    
+    // Proteção: Garante que o nome enviado pelo botão existe
+    if (!nomeItemOrigem) {
+        alert("Erro: Nome do item não identificado.");
+        return;
+    }
     const nomeLimpo = nomeItemOrigem.trim().toUpperCase();
 
-    // Log para confirmar que os parâmetros chegaram do botão
-    console.log("Iniciando Troca Cruzada para:", nomeLimpo);
+    console.log("🚀 Iniciando Troca Blindada para:", nomeLimpo);
 
     try {
         const batch = db.batch();
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const listaOrigemRef = db.collection('listas_conferencia').doc(localIdOrigem);
 
-        // --- 1. ATUALIZAÇÃO DA CAUTELA (Card sumir e Registro aparecer) ---
+        // --- 1. ATUALIZAÇÃO DA CAUTELA (Card e Registro) ---
         const docC = await cautelaRef.get();
         if (docC.exists) {
             const d = docC.data();
             
-            // Remove a pendência ativa baseando-se no NOME exato do item
-            const pAtivas = (d.pendencias_ativas || []).filter(pa => 
-                pa.itemNome.trim().toUpperCase() !== nomeLimpo
-            );
+            // LIMPEZA SEGURA: Remove a pendência mesmo que itemNome seja undefined no objeto
+            const pAtivas = (d.pendencias_ativas || []).filter(pa => {
+                const nomeNaPendencia = (pa.itemNome || "").trim().toUpperCase();
+                // Se o nome bater OU se o id_base bater, removemos do Dashboard
+                return nomeNaPendencia !== nomeLimpo && pa.id_base !== idBaseOrigem;
+            });
 
-            // Atualiza os dados do item dentro do array da cautela
             const itensC = (d.itens || []).map(it => {
                 if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
@@ -8015,29 +8021,27 @@ async function abrirSeletorGlobalSubstituicao() {
             });
         }
 
-        // --- 2. ATUALIZAÇÃO DO ESTOQUE (Carimbo Vermelho e Histórico) ---
+        // --- 2. ATUALIZAÇÃO DO ESTOQUE (Carimbo Vermelho) ---
         const docL = await listaOrigemRef.get();
         if (docL.exists) {
             const listData = docL.data().list.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(it => {
-                    if (it.nome.trim().toUpperCase() === nomeLimpo) {
-                        // Injeta o carimbo de Pendência
+                    if (it.nome.trim().toUpperCase() === nomeLimpo || it.id === idBaseOrigem) {
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
                             quantidade: 1,
-                            descricao: `AVARIADO (RETORNO DE TROCA - CAUTELA ${cautelaId})`,
+                            descricao: `AVARIADO (TROCA CRUZADA - CAUTELA ${cautelaId})`,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA"
                         });
 
-                        // Injeta o histórico de vida no item do estoque
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
-                            evento: "RETORNO_TROCA_CRUZADA",
                             data: dataFormatada,
+                            evento: "RETORNO_TROCA",
                             detalhes: `Unidade avariada retornou da Cautela ${cautelaId}.`,
                             quem: "Gestor"
                         });
@@ -8048,16 +8052,13 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemRef, { list: listData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
         }
 
-        // Se o item novo vier de uma lista diferente, precisaríamos de um 3º update aqui. 
-        // Mas como estamos focando no Pé de Cabra (Estoque Local), o Passo 2 já resolve.
-
         await batch.commit();
-        alert("✅ Troca Cruzada Processada!\nO card de pendência foi removido e o histórico registrado.");
+        alert("✅ Sucesso! O card de pendência foi removido.");
         location.reload();
 
     } catch (e) {
-        console.error("Erro fatal na gravação:", e);
-        alert("Erro ao gravar dados: " + e.message);
+        console.error("Erro fatal:", e);
+        alert("Erro ao gravar: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
