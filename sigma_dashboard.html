@@ -7999,14 +7999,14 @@ async function abrirSeletorGlobalSubstituicao() {
         if (!docCautela.exists) throw new Error("Cautela não encontrada.");
         const dadosC = docCautela.data();
 
-        // 1. ATUALIZAÇÃO DOS ITENS NA CAUTELA (O MILITAR TROCA O RUIM PELO BOM)
+        // 1. ATUALIZAÇÃO DA CAUTELA (Militar troca o ID/Tombamento mas mantém a posse)
         const itensAtualizados = (dadosC.itens || []).map((it, idx) => {
             const ehOItemAlvo = (p.itemTomb && it.tombamento === p.itemTomb) || (idx === p.item_index);
             return ehOItemAlvo ? { 
                 ...it, 
-                id: uidNovo, // Novo UID (se for multi)
+                id: uidNovo, 
                 tombamento: tombamentoNovo || it.tombamento || "S/T",
-                obs: `Trocado em ${dataFormatada}. Antigo: ${p.itemTomb || 'unidade s/t'}`
+                obs: `Substituído em ${dataFormatada}. Antigo: ${p.itemTomb || 'unidade s/t'}`
             } : it;
         });
 
@@ -8015,12 +8015,12 @@ async function abrirSeletorGlobalSubstituicao() {
             pendencias_ativas: (dadosC.pendencias_ativas || []).filter(pend => String(pend.id_solicitacao) !== String(p.solicitacaoId)),
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: dataFormatada,
-                descricao: `Substituição: Reposto ${tombamentoNovo || 'material'}. Item avariado retornou ao estoque com pendência.`,
+                descricao: `Troca Cruzada: Reposto ${tombamentoNovo || 'material'}. Item avariado retornou ao estoque com pendência.`,
                 militar: nomeAutor
             })
         });
 
-        // 2. ESTOQUE DE ORIGEM (ONDE O ITEM RUIM VOLTOU): CARIMBO VERMELHO
+        // 2. ESTOQUE DE ORIGEM (ONDE O RUIM VOLTOU): GRAVAR PENDÊNCIA (VERMELHO)
         const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
         const docOrigemAvaria = await listaOrigemAvariaRef.get();
         
@@ -8028,26 +8028,36 @@ async function abrirSeletorGlobalSubstituicao() {
             const listData = docOrigemAvaria.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    if (it.id === (p.id_base || p.uidItem.split('-')[0] + '-' + p.uidItem.split('-')[1])) {
-                        // Remove cautela e adiciona pendência
-                        if (it.tipo === 'single') it.cautelas = (it.cautelas || []).filter(c => c.id !== p.cautelaId);
-                        
+                    // Busca cirúrgica pelo ID Base (funciona para Single e Multi)
+                    const idBasePendente = p.id_base || p.uidItem.split('-').slice(0, 2).join('-');
+                    
+                    if (it.id === idBasePendente) {
+                        // AQUI ESTÁ A CHAVE: Adiciona o carimbo PEND- sem mexer nas Cautelas
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
                             quantidade: qtdParaMovimentar,
-                            descricao: `SUBSTITUÍDO NA CAUTELA ${p.cautelaId}: ${p.motivo}`,
+                            descricao: `AVARIADO (RETORNO DE CAUTELA ${p.cautelaId}): ${p.motivo}`,
                             autor_nome: nomeAutor,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE"
                         });
 
-                        if (it.tombamentos && p.itemTomb) {
+                        // Se for MULTI, tira a cautela do tombamento antigo para que ele fique "disponível mas com pendência"
+                        if (it.tipo === 'multi' && it.tombamentos && p.itemTomb) {
                             it.tombamentos = it.tombamentos.map(t => {
                                 if (t.tomb === p.itemTomb) delete t.cautela;
                                 return t;
                             });
                         }
+                        
+                        if (!it.historico_vida) it.historico_vida = [];
+                        it.historico_vida.push({
+                            evento: "RETORNO_AVARIA_TROCA",
+                            data: dataFormatada,
+                            detalhes: `Unidade retornou avariada da Cautela ${p.cautelaId}.`,
+                            quem: nomeAutor
+                        });
                     }
                     return it;
                 })
@@ -8055,23 +8065,24 @@ async function abrirSeletorGlobalSubstituicao() {
             batch.update(listaOrigemAvariaRef, { list: listData });
         }
 
-        // 3. ESTOQUE DOADOR (ONDE O ITEM BOM SAIU): CARIMBO LARANJA
+        // 3. ESTOQUE DOADOR (DE ONDE O BOM SAIU): GRAVAR CAUTELA (LARANJA)
         const listaDoadoraRef = db.collection('listas_conferencia').doc(listaOrigemNovo);
         const docDoadora = await listaDoadoraRef.get();
         if (docDoadora.exists) {
             const listDoadora = docDoadora.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
-                    if (it.id === uidNovo.split('-')[0] + '-' + uidNovo.split('-')[1]) {
-                        // Se for single, adiciona carimbo de cautela
+                    const idBaseDoador = uidNovo.split('-').slice(0, 2).join('-');
+                    
+                    if (it.id === idBaseDoador) {
+                        const carimboNovo = { id: p.cautelaId, destinatario: dadosC.destinatario_original_nome, data: dataSimples, quantidade: qtdParaMovimentar };
+                        
                         if (it.tipo === 'single') {
                             if (!it.cautelas) it.cautelas = [];
-                            it.cautelas.push({ id: p.cautelaId, destinatario: dadosC.destinatario_original_nome, data: dataSimples, quantidade: qtdParaMovimentar });
-                        }
-                        // Se for multi, atualiza o tombamento específico
-                        if (it.tombamentos) {
+                            it.cautelas.push(carimboNovo);
+                        } else if (it.tombamentos) {
                             it.tombamentos = it.tombamentos.map(t => {
-                                if (`${it.id}-${t.tomb}` === uidNovo) t.cautela = { id: p.cautelaId, destinatario: dadosC.destinatario_original_nome, data: dataSimples, quantidade: 1 };
+                                if (`${it.id}-${t.tomb}` === uidNovo) t.cautela = carimboNovo;
                                 return t;
                             });
                         }
@@ -8083,12 +8094,12 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert(`✅ Substituição concluída com sucesso!`);
+        alert(`✅ Troca concluída!\nItem ruim retornou como PENDÊNCIA e item novo foi vinculado à cautela.`);
         location.reload();
 
     } catch (e) {
         console.error("Erro na troca:", e);
-        alert("❌ Erro ao salvar troca.");
+        alert("❌ Erro ao salvar troca: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
