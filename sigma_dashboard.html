@@ -7977,6 +7977,11 @@ async function abrirSeletorGlobalSubstituicao() {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
     const nomeLimpo = nomeItemOrigem.trim().toUpperCase();
+    
+    // Captura o nome do militar detentor da cautela para o carimbo não ficar como "Conferente"
+    // Usamos o objeto global pendenciaSendoResolvida que já está na memória do Dashboard
+    const nomeMilitar = (typeof pendenciaSendoResolvida !== 'undefined') ? 
+                        (pendenciaSendoResolvida.gestor_alvo_nome || "Militar") : "Militar";
 
     try {
         const batch = db.batch();
@@ -7987,14 +7992,12 @@ async function abrirSeletorGlobalSubstituicao() {
         if (docC.exists) {
             const d = docC.data();
             
-            // Filtro para remover a pendência ativa usando as chaves snake_case do seu banco
             const pAtivas = (d.pendencias_ativas || []).filter(pa => {
                 const nomeNoBanco = (pa.item_nome || "").trim().toUpperCase();
                 const idNoBanco = pa.item_id_base || "";
                 return !(nomeNoBanco === nomeLimpo || idNoBanco === idBaseOrigem); 
             });
 
-            // Atualiza os itens da cautela com o novo item doador
             const itensC = (d.itens || []).map(it => {
                 if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
@@ -8007,13 +8010,12 @@ async function abrirSeletorGlobalSubstituicao() {
                 itens: itensC,
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                     data: dataFormatada,
-                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído. Relato militar: "${motivoMilitar}".`,
+                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído. Relato militar (${nomeMilitar}): "${motivoMilitar}".`,
                     militar: "Gestor"
                 })
             });
         }
 
-        // --- ATUALIZAÇÃO DO ESTOQUE (Carimbo Detalhado) ---
         const docL = await listaOrigemRef.get();
         if (docL.exists) {
             const listData = docL.data().list.map(setor => ({
@@ -8025,20 +8027,19 @@ async function abrirSeletorGlobalSubstituicao() {
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
                             quantidade: 1,
-                            // Descrição personalizada: OBS + CAUTELA
                             descricao: `${motivoMilitar.toUpperCase()} (TROCA CRUZADA - CAUTELA ${cautelaId})`,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA",
-                            // UID do militar que estava com a cautela (Dono)
-                            autor_uid: uidResponsavel 
+                            autor_uid: uidResponsavel,
+                            autor_nome: nomeMilitar // Injeção do Nome para substituir "Conferente" no App
                         });
                         
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             data: dataFormatada,
                             evento: "RETORNO_TROCA",
-                            detalhes: `Militar (UID: ${uidResponsavel}) relatou: ${motivoMilitar}. Item avariado retornou ao estoque.`,
+                            detalhes: `Militar ${nomeMilitar} (UID: ${uidResponsavel}) relatou: ${motivoMilitar}.`,
                             quem: "Gestor"
                         });
                     }
@@ -8049,7 +8050,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert("✅ Troca Cruzada concluída com sucesso!");
+        alert("✅ Troca Cruzada concluída!\nO carimbo agora identifica o militar corretamente.");
         location.reload();
 
     } catch (e) {
