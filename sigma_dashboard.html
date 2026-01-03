@@ -7555,22 +7555,19 @@ async function loadCautelaPendencies() {
                 
                 // --- CORREÇÃO CIRÚRGICA: INJETAR DADOS DO MILITAR EM CADA PENDÊNCIA ---
                 const pendenciasComRastreabilidade = data.pendencias_ativas.map(p => {
-    // Captura o nome de todas as fontes possíveis identificadas nos seus logs
-    const nomeReal = data.destinatario_original_nome || data.militar_completo_receptor || data.destinatario || "Militar";
-    const uidReal = data.destinatario_uid || data.receptor_uid || "";
+    			// Chaves REAIS confirmadas no seu log:
+    			const nomeReal = data.destinatario_original_nome || p.solicitante_nome || "Militar";
+    			const uidReal = data.destinatario_uid || p.solicitante_uid || "";
 
-    return {
-        ...p,
-        // Injetamos em múltiplas chaves para evitar erro de leitura no Modal
-        gestor_alvo_nome: nomeReal,
-        solicitante_nome: nomeReal,
-        gestor_alvo_uid: uidReal,
-        solicitante_uid: uidReal,
-        cautelaId: doc.id,
-        localId: data.local_origem_id,
-        itemNome: p.item_nome || p.itemNome || "Item"
-    };
-});
+   				 return {
+        			...p,
+        			gestor_alvo_nome: nomeReal, // Normaliza para o fluxo seguinte
+        			gestor_alvo_uid: uidReal,
+        			cautelaId: doc.id,
+        			localId: data.local_origem_id,
+        			itemNome: p.item_nome || p.itemNome || "Item"
+    			};
+			});
 
                 if (pendenciasComRastreabilidade.length > 0) {
                     totalPendenciasTroca += pendenciasComRastreabilidade.length;
@@ -7704,17 +7701,16 @@ async function abrirGestaoPendenciasCautela() {
         const data = JSON.parse(decodeURIComponent(dataJson));
         console.log("=== Dados brutos recebidos no Modal ===", data);
 
-        // 1. NORMALIZAÇÃO DE RASTREABILIDADE (Ajustada para o seu banco real)
-        // Adicionamos 'destinatario_original_nome' na fila de prioridade
+        // 1. NORMALIZAÇÃO DE RASTREABILIDADE (Ajustada para chaves reais do seu Firestore)
+        // Prioridade para as chaves confirmadas no seu log de debug
         data.gestor_alvo_nome = data.gestor_alvo_nome || 
                                 data.destinatario_original_nome || 
                                 data.solicitante_nome || 
-                                data.militar_nome || 
                                 "Militar";
 
         data.gestor_alvo_uid = data.gestor_alvo_uid || 
                                data.destinatario_uid || 
-                               data.solicitante_uid || 
+                               data.destinatario_original_uid || 
                                "";
         
         // Normaliza nomes de itens e motivos
@@ -7722,7 +7718,7 @@ async function abrirGestaoPendenciasCautela() {
         data.motivo = data.motivo || "Avaria relatada";
 
         // 2. CORREÇÃO DE IDS ESPECÍFICOS (Pé de Cabra / EPR)
-        if (!data.uidItem || (data.uidItem && data.uidItem.includes('undefined'))) {
+        if (!data.uidItem || (data.uidItem && String(data.uidItem).includes('undefined'))) {
             const nomeUpper = data.itemNome.toUpperCase();
             if (nomeUpper.includes("PÉ DE CABRA")) {
                 data.uidItem = "56911524-65986249";
@@ -8012,28 +8008,32 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem, motivoMilitar, uidResponsavel, nomeResponsavel) {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
-    const nomeLimpo = nomeItemOrigem.trim().toUpperCase();
+    const nomeLimpo = (nomeItemOrigem || "").trim().toUpperCase();
     
-    // Agora usamos o nomeResponsavel que vem direto do parâmetro (enviado pelo botão)
+    // Identifica o militar responsável pelo relato original (vindo dos parâmetros)
     const nomeMilitar = nomeResponsavel || "Militar";
+    const uidMilitar = uidResponsavel || "";
 
     try {
         const batch = db.batch();
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const listaOrigemRef = db.collection('listas_conferencia').doc(localIdOrigem);
 
+        // 1. ATUALIZAÇÃO DA CAUTELA (CARGA DO MILITAR)
         const docC = await cautelaRef.get();
         if (docC.exists) {
             const d = docC.data();
             
+            // Remove a pendência que acaba de ser resolvida
             const pAtivas = (d.pendencias_ativas || []).filter(pa => {
                 const nomeNoBanco = (pa.item_nome || "").trim().toUpperCase();
                 const idNoBanco = pa.item_id_base || "";
                 return !(nomeNoBanco === nomeLimpo || idNoBanco === idBaseOrigem); 
             });
 
+            // Substitui o ID e Tombamento do item na carga do militar pelo novo item vindo do estoque
             const itensC = (d.itens || []).map(it => {
-                if (it.nome.trim().toUpperCase() === nomeLimpo) {
+                if (it.nome.trim().toUpperCase() === nomeLimpo || it.id_base === idBaseOrigem) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
                 }
                 return it;
@@ -8044,20 +8044,23 @@ async function abrirSeletorGlobalSubstituicao() {
                 itens: itensC,
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                     data: dataFormatada,
-                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído. Relato militar (${nomeMilitar}): "${motivoMilitar}".`,
-                    militar: "Gestor"
+                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído pelo tombamento ${tombamentoNovo}. Relato de ${nomeMilitar}: "${motivoMilitar}".`,
+                    militar: "Gestor" // Autor da ação no Dashboard
                 })
             });
         }
 
+        // 2. ATUALIZAÇÃO DO ESTOQUE (LISTA MESTRA) - CARIMBO DE PENDÊNCIA
         const docL = await listaOrigemRef.get();
         if (docL.exists) {
             const listData = docL.data().list.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(it => {
+                    // Localiza o item que retornou avariado para o estoque
                     if (it.nome.trim().toUpperCase() === nomeLimpo || it.id === idBaseOrigem) {
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         
+                        // Grava o carimbo vermelho (Pendência) para o App de conferência ler
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
                             quantidade: 1,
@@ -8065,15 +8068,15 @@ async function abrirSeletorGlobalSubstituicao() {
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA",
-                            autor_uid: uidResponsavel,
-                            autor_nome: nomeMilitar // Nome real gravado aqui para o App exibir corretamente
+                            autor_uid: uidMilitar, // UID Real do ST LARA
+                            autor_nome: nomeMilitar // Nome Real do ST LARA
                         });
                         
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             data: dataFormatada,
                             evento: "RETORNO_TROCA",
-                            detalhes: `Militar ${nomeMilitar} (UID: ${uidResponsavel}) relatou: ${motivoMilitar}.`,
+                            detalhes: `Troca Cruzada: Militar ${nomeMilitar} (UID: ${uidMilitar}) relatou avaria: ${motivoMilitar}.`,
                             quem: "Gestor"
                         });
                     }
@@ -8084,7 +8087,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert("✅ Troca Cruzada concluída!\nO carimbo agora identifica o militar: " + nomeMilitar);
+        alert("✅ Troca Cruzada concluída!\nO item avariado retornou ao estoque identificado como pendência de: " + nomeMilitar);
         location.reload();
 
     } catch (e) {
