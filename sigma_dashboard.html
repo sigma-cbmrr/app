@@ -7552,16 +7552,25 @@ async function loadCautelaPendencies() {
             const pertenceAoSetor = currentUserData.role === 'admin' || unitListIds.includes(data.local_origem_id);
 
             if (pertenceAoSetor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
-                const pendenciasFiltradas = data.pendencias_ativas; 
+                
+                // --- CORREÇÃO CIRÚRGICA: INJETAR DADOS DO MILITAR EM CADA PENDÊNCIA ---
+                const pendenciasComRastreabilidade = data.pendencias_ativas.map(p => ({
+                    ...p,
+                    gestor_alvo_nome: data.destinatario || "Militar", // Pega da raiz do doc
+                    gestor_alvo_uid: data.destinatario_uid || data.uid_destinatario || "", // Pega da raiz do doc
+                    cautelaId: doc.id,
+                    localId: data.local_origem_id,
+                    itemNome: p.item_nome || p.itemNome // Normaliza para o Modal
+                }));
 
-                if (pendenciasFiltradas.length > 0) {
-                    totalPendenciasTroca += pendenciasFiltradas.length;
+                if (pendenciasComRastreabilidade.length > 0) {
+                    totalPendenciasTroca += pendenciasComRastreabilidade.length;
                     cautelasComPendencia.push({ 
                         id: doc.id, 
                         ...data, 
-                        pendencias: pendenciasFiltradas 
+                        pendencias: pendenciasComRastreabilidade 
                     });
-                    console.log(`Cautela ${doc.id} tem ${pendenciasFiltradas.length} item(ns) pendente(s).`);
+                    console.log(`Cautela ${doc.id}: ${data.destinatario} tem ${pendenciasComRastreabilidade.length} pendência(s).`);
                 }
             }
         });
@@ -7577,7 +7586,7 @@ async function loadCautelaPendencies() {
             return;
         }
 
-        // MONTAGEM DO CARD (Removido a passagem de JSON via parâmetro)
+        // MONTAGEM DO CARD
         let cardHtml = `
             <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
                  style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
@@ -7605,7 +7614,6 @@ async function loadCautelaPendencies() {
         console.error("Erro ao carregar pendências de cautela:", e);
     }
 }
-
 async function abrirGestaoPendenciasCautela() {
     const cautelas = cachePendenciasCautela;
     const wrapper = document.getElementById('ca-table-wrapper');
