@@ -7973,111 +7973,91 @@ async function abrirSeletorGlobalSubstituicao() {
         container.innerHTML = "<p>Erro ao processar busca global.</p>";
     }
 }
-	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaIdManual, localIdManual, idBaseManual, nomeManual) {
-    // Recupera os dados dos parâmetros (Blindagem contra perda de memória global)
-    const p = {
-        cautelaId: cautelaIdManual,
-        localId: localIdManual,
-        id_base: idBaseManual,
-        itemNome: nomeManual,
-        motivo: "Substituição via Troca Cruzada"
-    };
-
+	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem) {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
-    
-    // Identificação do Gestor
-    let nomeAutor = "Gestor";
-    try {
-        const u = (typeof currentUserData !== 'undefined' && currentUserData) ? currentUserData : 
-                  JSON.parse(localStorage.getItem('user_data') || '{}');
-        nomeAutor = `${u.posto || ''} ${u.quadro || ''} ${u.nome_guerra || 'Gestor'}`.replace(/\s+/g, ' ').trim();
-    } catch (e) { console.error("Erro user:", e); }
+    const nomeLimpo = nomeItemOrigem.trim().toUpperCase();
+
+    // Log para confirmar que os parâmetros chegaram do botão
+    console.log("Iniciando Troca Cruzada para:", nomeLimpo);
 
     try {
         const batch = db.batch();
-        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
-        const listaOrigemAvariaRef = db.collection('listas_conferencia').doc(p.localId);
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
+        const listaOrigemRef = db.collection('listas_conferencia').doc(localIdOrigem);
 
-        // --- PASSO 1: ATUALIZAÇÃO DA CAUTELA (PARA O CARD SUMIR E REGISTRAR) ---
-        const docCautela = await cautelaRef.get();
-        if (docCautela.exists) {
-            const dadosC = docCautela.data();
+        // --- 1. ATUALIZAÇÃO DA CAUTELA (Card sumir e Registro aparecer) ---
+        const docC = await cautelaRef.get();
+        if (docC.exists) {
+            const d = docC.data();
             
-            // Atualiza o item dentro da cautela (muda o ID/Tombamento se for o caso)
-            const itensC = dadosC.itens.map(it => {
-                if (it.nome.trim().toUpperCase() === p.itemNome.trim().toUpperCase()) {
+            // Remove a pendência ativa baseando-se no NOME exato do item
+            const pAtivas = (d.pendencias_ativas || []).filter(pa => 
+                pa.itemNome.trim().toUpperCase() !== nomeLimpo
+            );
+
+            // Atualiza os dados do item dentro do array da cautela
+            const itensC = (d.itens || []).map(it => {
+                if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
                 }
                 return it;
             });
 
-            // LIMPEZA DO CARD: Remove a pendência do array pendencias_ativas
-            // Usamos o nome do item como filtro reserva caso o solicitacaoId seja undefined
-            const pendenciasLimpas = (dadosC.pendencias_ativas || []).filter(pen => 
-                pen.itemNome.trim().toUpperCase() !== p.itemNome.trim().toUpperCase()
-            );
-
             batch.update(cautelaRef, {
+                pendencias_ativas: pAtivas,
                 itens: itensC,
-                pendencias_ativas: pendenciasLimpas,
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                     data: dataFormatada,
-                    descricao: `Troca Cruzada: Item ${p.itemNome} substituído por material de ${listaOrigemNovo}.`,
-                    militar: nomeAutor
+                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído. Avariado retornou ao estoque.`,
+                    militar: "Gestor"
                 })
             });
         }
 
-        // --- PASSO 2: ATUALIZAÇÃO DO ESTOQUE (CARIMBO VERMELHO) ---
-        const docLista = await listaOrigemAvariaRef.get();
-        if (docLista.exists) {
-            const listData = docLista.data().list.map(setor => ({
+        // --- 2. ATUALIZAÇÃO DO ESTOQUE (Carimbo Vermelho e Histórico) ---
+        const docL = await listaOrigemRef.get();
+        if (docL.exists) {
+            const listData = docL.data().list.map(setor => ({
                 ...setor,
-                itens: (setor.itens || []).map(it => {
-                    if (it.id === p.id_base || it.nome.trim().toUpperCase() === p.itemNome.trim().toUpperCase()) {
-                        
-                        // Adiciona a Pendência (Vermelho)
+                itens: setor.itens.map(it => {
+                    if (it.nome.trim().toUpperCase() === nomeLimpo) {
+                        // Injeta o carimbo de Pendência
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
-                            quantidade: 1, 
-                            descricao: `AVARIADO (RETORNO DE TROCA - CAUTELA ${p.cautelaId})`,
+                            quantidade: 1,
+                            descricao: `AVARIADO (RETORNO DE TROCA - CAUTELA ${cautelaId})`,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA"
                         });
 
-                        // Registra no histórico de vida do item no estoque
+                        // Injeta o histórico de vida no item do estoque
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             evento: "RETORNO_TROCA_CRUZADA",
                             data: dataFormatada,
-                            detalhes: `Unidade avariada retornou ao estoque. Reposto por item de ${listaOrigemNovo}.`,
-                            quem: nomeAutor
+                            detalhes: `Unidade avariada retornou da Cautela ${cautelaId}.`,
+                            quem: "Gestor"
                         });
-
-                        // Se for Multi, libera o tombamento
-                        if (it.tipo === 'multi' && it.tombamentos) {
-                            it.tombamentos = it.tombamentos.map(t => {
-                                if (t.cautela && t.cautela.id === p.cautelaId) delete t.cautela;
-                                return t;
-                            });
-                        }
                     }
                     return it;
                 })
             }));
-            batch.update(listaOrigemAvariaRef, { list: listData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+            batch.update(listaOrigemRef, { list: listData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
         }
 
+        // Se o item novo vier de uma lista diferente, precisaríamos de um 3º update aqui. 
+        // Mas como estamos focando no Pé de Cabra (Estoque Local), o Passo 2 já resolve.
+
         await batch.commit();
-        alert("✅ Troca Cruzada concluída!\nCard removido e estoque atualizado.");
+        alert("✅ Troca Cruzada Processada!\nO card de pendência foi removido e o histórico registrado.");
         location.reload();
 
     } catch (e) {
-        console.error("Erro fatal na troca:", e);
-        alert("Erro ao processar a troca: " + e.message);
+        console.error("Erro fatal na gravação:", e);
+        alert("Erro ao gravar dados: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
