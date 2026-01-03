@@ -7554,15 +7554,23 @@ async function loadCautelaPendencies() {
             if (pertenceAoSetor && data.pendencias_ativas && data.pendencias_ativas.length > 0) {
                 
                 // --- CORREÇÃO CIRÚRGICA: INJETAR DADOS DO MILITAR EM CADA PENDÊNCIA ---
-                const pendenciasComRastreabilidade = data.pendencias_ativas.map(p => ({
-    			...p,
-    			// CORREÇÃO: Usando a chave real do seu banco de dados
-    			gestor_alvo_nome: data.militar_completo_receptor || data.emitente || "Militar", 
-   				gestor_alvo_uid: data.receptor_uid || data.militar_uid || "", 
-    			cautelaId: doc.id,
-    			localId: data.local_origem_id,
-    			itemNome: p.item_nome || p.itemNome 
-				}));
+                const pendenciasComRastreabilidade = data.pendencias_ativas.map(p => {
+    // Captura o nome de todas as fontes possíveis identificadas nos seus logs
+    const nomeReal = data.destinatario_original_nome || data.militar_completo_receptor || data.destinatario || "Militar";
+    const uidReal = data.destinatario_uid || data.receptor_uid || "";
+
+    return {
+        ...p,
+        // Injetamos em múltiplas chaves para evitar erro de leitura no Modal
+        gestor_alvo_nome: nomeReal,
+        solicitante_nome: nomeReal,
+        gestor_alvo_uid: uidReal,
+        solicitante_uid: uidReal,
+        cautelaId: doc.id,
+        localId: data.local_origem_id,
+        itemNome: p.item_nome || p.itemNome || "Item"
+    };
+});
 
                 if (pendenciasComRastreabilidade.length > 0) {
                     totalPendenciasTroca += pendenciasComRastreabilidade.length;
@@ -7696,17 +7704,25 @@ async function abrirGestaoPendenciasCautela() {
         const data = JSON.parse(decodeURIComponent(dataJson));
         console.log("=== Dados brutos recebidos no Modal ===", data);
 
-        // 1. NORMALIZAÇÃO DE RASTREABILIDADE (Onde o "Militar" morria)
-        // Garante que o Nome e UID do responsável sejam capturados independente da chave do banco
-        data.gestor_alvo_nome = data.gestor_alvo_nome || data.solicitante_nome || data.militar_nome || "Militar";
-        data.gestor_alvo_uid = data.gestor_alvo_uid || data.solicitante_uid || data.militar_uid || "";
+        // 1. NORMALIZAÇÃO DE RASTREABILIDADE (Ajustada para o seu banco real)
+        // Adicionamos 'destinatario_original_nome' na fila de prioridade
+        data.gestor_alvo_nome = data.gestor_alvo_nome || 
+                                data.destinatario_original_nome || 
+                                data.solicitante_nome || 
+                                data.militar_nome || 
+                                "Militar";
+
+        data.gestor_alvo_uid = data.gestor_alvo_uid || 
+                               data.destinatario_uid || 
+                               data.solicitante_uid || 
+                               "";
         
-        // Normaliza o nome do item (aceita item_nome ou itemNome)
+        // Normaliza nomes de itens e motivos
         data.itemNome = data.item_nome || data.itemNome || "Item sem nome";
         data.motivo = data.motivo || "Avaria relatada";
 
         // 2. CORREÇÃO DE IDS ESPECÍFICOS (Pé de Cabra / EPR)
-        if (!data.uidItem || data.uidItem.includes('undefined')) {
+        if (!data.uidItem || (data.uidItem && data.uidItem.includes('undefined'))) {
             const nomeUpper = data.itemNome.toUpperCase();
             if (nomeUpper.includes("PÉ DE CABRA")) {
                 data.uidItem = "56911524-65986249";
@@ -7736,7 +7752,7 @@ async function abrirGestaoPendenciasCautela() {
                     <b style="color: #800020; font-size: 1.1em;">${data.itemNome}</b><br>
                     <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; font-size: 0.95em;">
                         ${identificadorHtml}<br>
-                        <b>Relatado por:</b> ${data.gestor_alvo_nome}<br>
+                        <b>Relatado por:</b> <span style="color: blue; font-weight: bold;">${data.gestor_alvo_nome}</span><br>
                         <b>Motivo:</b> <span style="color:#d32f2f; font-weight: bold;">${data.motivo}</span>
                     </div>
                 </div>
@@ -7748,7 +7764,7 @@ async function abrirGestaoPendenciasCautela() {
 
     } catch (e) {
         console.error("Erro crítico ao abrir modal de decisão:", e);
-        alert("Erro ao processar dados da pendência. Verifique o console.");
+        alert("Erro ao processar dados da pendência.");
     }
 }
 		async function executarRecolhimentoApenas() {
