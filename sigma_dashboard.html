@@ -7976,34 +7976,34 @@ async function abrirSeletorGlobalSubstituicao() {
 	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem) {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
-    
-    if (!nomeItemOrigem) {
-        alert("Erro: Nome do item não identificado.");
-        return;
-    }
     const nomeLimpo = nomeItemOrigem.trim().toUpperCase();
-
-    console.log("🚀 Iniciando Troca Blindada para:", nomeLimpo);
 
     try {
         const batch = db.batch();
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const listaOrigemRef = db.collection('listas_conferencia').doc(localIdOrigem);
 
-        // --- 1. ATUALIZAÇÃO DA CAUTELA (Card e Registro) ---
         const docC = await cautelaRef.get();
         if (docC.exists) {
             const d = docC.data();
+            const antes = (d.pendencias_ativas || []).length;
             
-            // AJUSTE CIRÚRGICO: Uso das chaves corretas (item_nome e item_id_base)
+            // --- AQUI ESTÁ A CORREÇÃO REAL (Chaves item_nome e item_id_base) ---
             const pAtivas = (d.pendencias_ativas || []).filter(pa => {
-                const nomeNaPendencia = (pa.item_nome || "").trim().toUpperCase();
-                const idNaPendencia = pa.item_id_base || "";
+                // Normaliza os dados vindos do banco (Snake Case)
+                const nomeNoBanco = (pa.item_nome || "").trim().toUpperCase();
+                const idNoBanco = pa.item_id_base || "";
                 
-                // Mantém na lista apenas o que NÃO for o item atual
-                return nomeNaPendencia !== nomeLimpo && idNaPendencia !== idBaseOrigem;
+                // Só mantém se NÃO for o item que estamos resolvendo agora
+                const matchNome = nomeNoBanco === nomeLimpo;
+                const matchId = idNoBanco === idBaseOrigem;
+
+                return !(matchNome || matchId); 
             });
 
+            console.log(`Filtro: Antes ${antes} itens, Depois ${pAtivas.length} itens.`);
+
+            // Atualiza os itens da cautela para refletir a troca física
             const itensC = (d.itens || []).map(it => {
                 if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
@@ -8022,7 +8022,7 @@ async function abrirSeletorGlobalSubstituicao() {
             });
         }
 
-        // --- 2. ATUALIZAÇÃO DO ESTOQUE (Carimbo Vermelho) ---
+        // --- ATUALIZAÇÃO DO ESTOQUE (Carimbo Vermelho) ---
         const docL = await listaOrigemRef.get();
         if (docL.exists) {
             const listData = docL.data().list.map(setor => ({
@@ -8033,12 +8033,12 @@ async function abrirSeletorGlobalSubstituicao() {
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
                             quantidade: 1,
-                            descricao: `AVARIADO (TROCA CRUZADA - CAUTELA ${cautelaId})`,
+                            descricao: `AVARIADO (RETORNO DE TROCA - CAUTELA ${cautelaId})`,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA"
                         });
-
+                        
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             data: dataFormatada,
@@ -8054,12 +8054,12 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert("✅ Sucesso! O card de pendência foi removido.");
+        alert("✅ Sucesso! O card de pendência foi removido e o estoque atualizado.");
         location.reload();
 
     } catch (e) {
-        console.error("Erro fatal:", e);
-        alert("Erro ao gravar: " + e.message);
+        console.error("Erro fatal na gravação:", e);
+        alert("Erro ao gravar dados: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
