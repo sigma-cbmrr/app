@@ -7973,7 +7973,7 @@ async function abrirSeletorGlobalSubstituicao() {
         container.innerHTML = "<p>Erro ao processar busca global.</p>";
     }
 }
-	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem) {
+	async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem, motivoMilitar, uidResponsavel) {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
     const nomeLimpo = nomeItemOrigem.trim().toUpperCase();
@@ -7986,24 +7986,15 @@ async function abrirSeletorGlobalSubstituicao() {
         const docC = await cautelaRef.get();
         if (docC.exists) {
             const d = docC.data();
-            const antes = (d.pendencias_ativas || []).length;
             
-            // --- AQUI ESTÁ A CORREÇÃO REAL (Chaves item_nome e item_id_base) ---
+            // Filtro para remover a pendência ativa usando as chaves snake_case do seu banco
             const pAtivas = (d.pendencias_ativas || []).filter(pa => {
-                // Normaliza os dados vindos do banco (Snake Case)
                 const nomeNoBanco = (pa.item_nome || "").trim().toUpperCase();
                 const idNoBanco = pa.item_id_base || "";
-                
-                // Só mantém se NÃO for o item que estamos resolvendo agora
-                const matchNome = nomeNoBanco === nomeLimpo;
-                const matchId = idNoBanco === idBaseOrigem;
-
-                return !(matchNome || matchId); 
+                return !(nomeNoBanco === nomeLimpo || idNoBanco === idBaseOrigem); 
             });
 
-            console.log(`Filtro: Antes ${antes} itens, Depois ${pAtivas.length} itens.`);
-
-            // Atualiza os itens da cautela para refletir a troca física
+            // Atualiza os itens da cautela com o novo item doador
             const itensC = (d.itens || []).map(it => {
                 if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
@@ -8016,34 +8007,38 @@ async function abrirSeletorGlobalSubstituicao() {
                 itens: itensC,
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                     data: dataFormatada,
-                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído. Avariado retornou ao estoque.`,
+                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído. Relato militar: "${motivoMilitar}".`,
                     militar: "Gestor"
                 })
             });
         }
 
-        // --- ATUALIZAÇÃO DO ESTOQUE (Carimbo Vermelho) ---
+        // --- ATUALIZAÇÃO DO ESTOQUE (Carimbo Detalhado) ---
         const docL = await listaOrigemRef.get();
         if (docL.exists) {
             const listData = docL.data().list.map(setor => ({
                 ...setor,
-                itens: setor.itens.map(it => {
+                itens: (setor.itens || []).map(it => {
                     if (it.nome.trim().toUpperCase() === nomeLimpo || it.id === idBaseOrigem) {
                         if (!it.pendencias_ids) it.pendencias_ids = [];
+                        
                         it.pendencias_ids.push({
                             id: "PEND-" + Date.now(),
                             quantidade: 1,
-                            descricao: `AVARIADO (RETORNO DE TROCA - CAUTELA ${cautelaId})`,
+                            // Descrição personalizada: OBS + CAUTELA
+                            descricao: `${motivoMilitar.toUpperCase()} (TROCA CRUZADA - CAUTELA ${cautelaId})`,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
-                            tipo: "PENDENCIA"
+                            tipo: "PENDENCIA",
+                            // UID do militar que estava com a cautela (Dono)
+                            autor_uid: uidResponsavel 
                         });
                         
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             data: dataFormatada,
                             evento: "RETORNO_TROCA",
-                            detalhes: `Unidade avariada retornou da Cautela ${cautelaId}.`,
+                            detalhes: `Militar (UID: ${uidResponsavel}) relatou: ${motivoMilitar}. Item avariado retornou ao estoque.`,
                             quem: "Gestor"
                         });
                     }
@@ -8054,7 +8049,7 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert("✅ Sucesso! O card de pendência foi removido e o estoque atualizado.");
+        alert("✅ Troca Cruzada concluída com sucesso!");
         location.reload();
 
     } catch (e) {
@@ -8077,12 +8072,14 @@ async function abrirSeletorGlobalSubstituicao() {
         const partes = idReferencia.split('-');
         let dnaBusca = partes.length > 2 ? partes.slice(0, 2).join('-') : idReferencia;
         
+        // --- NOVOS DADOS PARA RASTREABILIDADE ---
+        const motivoMilitar = (p.motivo || "Avaria reportada").replace(/'/g, "\\'");
+        const uidResponsavel = p.gestor_alvo_uid || ""; // UID do militar (dono da cautela)
+        const nomeEscapado = p.itemNome.replace(/'/g, "\\'");
+
         const snapshot = await db.collection('listas_conferencia').get();
         let htmlAcumulado = '';
         let totalEncontrado = 0;
-
-        // Escapar o nome do item para evitar erros no onclick
-        const nomeEscapado = p.itemNome.replace(/'/g, "\\'");
 
         snapshot.forEach(docLista => {
             const dadosLista = docLista.data();
@@ -8118,7 +8115,7 @@ async function abrirSeletorGlobalSubstituicao() {
                                                         style="width: 55px; padding: 8px; border: 1px solid #1b8a3e; border-radius: 5px; text-align: center; font-weight: bold;">
                                                 </div>
                                                 <button class="btn-resolver" style="height: 42px; padding: 0 20px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight: bold;" 
-                                                    onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}', '${p.cautelaId}', '${p.localId}', '${p.id_base || p.uidItem}', '${nomeEscapado}')">
+                                                    onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}', '${p.cautelaId}', '${p.localId}', '${p.id_base || p.uidItem}', '${nomeEscapado}', '${motivoMilitar}', '${uidResponsavel}')">
                                                     Selecionar
                                                 </button>
                                             </div>
@@ -8144,7 +8141,7 @@ async function abrirSeletorGlobalSubstituicao() {
                                                     <small style="color: #666;">${item.nome}</small>
                                                 </div>
                                                 <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
-                                                    onclick="confirmarTrocaCruzada('${idCompleto}', '${docLista.id}', '${t.tomb}', '${p.cautelaId}', '${p.localId}', '${p.id_base || p.uidItem}', '${nomeEscapado}')">
+                                                    onclick="confirmarTrocaCruzada('${idCompleto}', '${docLista.id}', '${t.tomb}', '${p.cautelaId}', '${p.localId}', '${p.id_base || p.uidItem}', '${nomeEscapado}', '${motivoMilitar}', '${uidResponsavel}')">
                                                     Selecionar
                                                 </button>
                                             </div>`;
