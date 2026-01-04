@@ -3005,6 +3005,10 @@ function renderAdminGestorCards(canViewDashboardCards) {
 
                 if (docMestra.exists) {
                     const dataMestra = docMestra.data().list || [];
+                    
+                    // Criamos um set de IDs de cautela para buscar as observações em lote se necessário
+                    const idsCautelasNoEstoque = new Set();
+
                     dataMestra.forEach(setor => {
                         setor.itens.forEach(it => {
                             // 1. PENDÊNCIAS (Vermelhas)
@@ -3014,21 +3018,24 @@ function renderAdminGestorCards(canViewDashboardCards) {
                                 }));
                             }
 
-                            // 2. CAUTELAS (Laranjas)
+                            // 2. CAUTELAS (Laranjas) - Itens SINGLE
                             if (it.tipo === 'single' && it.cautelas && it.cautelas.length > 0) {
-                                it.cautelas.forEach(c => pendenciasReais.push({
-                                    id: c.id, 
-                                    itemNome: it.nome, 
-                                    itemId: it.id,
-                                    quantidade: c.quantidade,
-                                    autor_nome: c.emitente || "Sistema", 
-                                    destinatario: c.destinatario || "Militar",
-                                    descricao: c.obs_item || "Em posse do militar", // Obs original do emitente
-                                    status_gestao: 'CAUTELADO',
-                                    tipoRegistro: 'CAUTELA'
-                                }));
+                                it.cautelas.forEach(c => {
+                                    pendenciasReais.push({
+                                        id: c.id, 
+                                        itemNome: it.nome, 
+                                        itemId: it.id,
+                                        quantidade: c.quantidade,
+                                        autor_nome: c.emitente || "Sistema", 
+                                        destinatario: c.destinatario || "Militar",
+                                        descricao: c.obs_item || "", // Aqui virá a obs do carimbo
+                                        status_gestao: 'CAUTELADO',
+                                        tipoRegistro: 'CAUTELA'
+                                    });
+                                });
                             }
 
+                            // 2.1 CAUTELAS - Itens MULTI (Tombamentos)
                             if (it.tipo === 'multi' && it.tombamentos) {
                                 it.tombamentos.forEach(t => {
                                     if (t.pendencias_ids && t.pendencias_ids.length > 0) {
@@ -3045,7 +3052,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
                                             quantidade: 1,
                                             autor_nome: t.cautela.emitente || "Sistema",
                                             destinatario: t.cautela.destinatario || "Militar",
-                                            descricao: t.cautela.obs_item || "Em posse do militar", // Obs original do emitente
+                                            descricao: t.cautela.obs_item || "",
                                             status_gestao: 'CAUTELADO',
                                             tipoRegistro: 'CAUTELA'
                                         });
@@ -3107,10 +3114,9 @@ function renderAdminGestorCards(canViewDashboardCards) {
         unitHeader.innerHTML = `<div class="unit-flex-title"><i class="fas fa-building"></i> <span>${unit}</span></div>`;
         container.appendChild(unitHeader); 
         
-        cardsList = groupedCards[unit];
+        const cardsList = groupedCards[unit];
         cardsList.forEach(d => {
             const allItems = d.items || [];
-            // Regra 1: Conta TUDO como alteração (Pendência + Cautela)
             const countTotal = allItems.length;
             const temAlteracao = countTotal > 0;
             
@@ -3897,25 +3903,27 @@ function reimprimirPDF(data) {
         pendenciasReais.forEach(p => {
             const tr = tbody.insertRow();
             
-            // Regra 3: Itens single exibem quantidade em destaque (Cautelado ou Pendente)
+            // Regra: Itens single exibem quantidade. Itens multi exibem tombamento.
             const identificadorFisico = p.tombamento 
                 ? `<br><small style="color:#800020">Tomb: ${p.tombamento}</small>` 
-                : `<br><small style="color:#d90f23; font-weight:bold;">Qtd: ${p.quantidade} un.</small>`;
+                : `<br><small style="color:#d90f23; font-weight:bold;">Qtd em Alteração: ${p.quantidade} un.</small>`;
             
             const statusG = p.status_gestao || 'PENDENTE';
             const badgeClass = p.tipoRegistro === 'CAUTELA' ? 'badge-cautela' : ('badge-' + statusG.toLowerCase().replace(/\s/g, '-'));
 
             let htmlAlteracao = '';
             if (p.tipoRegistro === 'CAUTELA') {
-                // Regra 2: Exibe a Obs original do emitente da cautela
+                // Captura a observação. Se estiver vazio no carimbo, usa um texto padrão digno.
+                const obsFinal = (p.descricao && p.descricao !== "") ? p.descricao : "Material em carga individual.";
+                
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b style="color:#f57c00;">Emitente:</b> ${p.autor_nome}<br>
-                        <b style="color:#2c7399;">Destinatário:</b> ${p.destinatario}<br>
-                        <small><b>Obs do Emitente:</b> ${p.descricao}</small>
+                        <b style="color:#2c7399;">Detentor:</b> ${p.destinatario}<br>
+                        <small><b>Obs:</b> ${obsFinal}</small>
                     </div>`;
             } else {
-                // Pendência de Conferência/Recolhimento
+                // Para pendências de conferência ou recolhimento
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b>Relatado por ${p.autor_nome}:</b><br>
@@ -3926,11 +3934,11 @@ function reimprimirPDF(data) {
             tr.innerHTML = `
                 <td>
                     <strong>${p.itemNome}</strong>${identificadorFisico}<br>
-                    <small style="color:#666">RefDoc: ${p.id}</small>
+                    <small style="color:#666">Ref: ${p.id}</small>
                 </td>
                 <td><span class="status-badge ${badgeClass}">${statusG}</span></td>
                 <td style="text-align:left;">${htmlAlteracao}</td>
-                <td><small><b>Última Conf:</b><br>${data.conferente}<br>${data.date}</small></td>
+                <td><small><b>Referência:</b><br>${data.conferente}<br>${data.date}</small></td>
             `;
 
             const tdAcao = tr.insertCell();
