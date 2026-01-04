@@ -7717,8 +7717,7 @@ async function abrirGestaoPendenciasCautela() {
         const data = JSON.parse(decodeURIComponent(dataJson));
         console.log("=== Dados brutos recebidos no Modal ===", data);
 
-        // 1. NORMALIZAÇÃO DE RASTREABILIDADE (Ajuste de Prioridade)
-        // Alteramos a ordem: Primeiro tentamos 'solicitante_nome', que é quem relatou o problema no App.
+        // 1. NORMALIZAÇÃO DE RASTREABILIDADE
         data.gestor_alvo_nome = data.solicitante_nome || 
                                 data.gestor_alvo_nome || 
                                 data.destinatario_original_nome || 
@@ -7729,7 +7728,6 @@ async function abrirGestaoPendenciasCautela() {
                                data.destinatario_uid || 
                                "";
         
-        // Normaliza nomes de itens e motivos
         data.itemNome = data.item_nome || data.itemNome || "Item sem nome";
         data.motivo = data.motivo || "Avaria relatada";
 
@@ -7740,7 +7738,7 @@ async function abrirGestaoPendenciasCautela() {
                 data.uidItem = "56911524-65986249";
                 data.id_base = "56911524-65986249";
             } else if (nomeUpper.includes("EPR SCOTT")) {
-                data.uidItem = "56911524-64012364-" + (data.item_tombamento || data.itemTomb || "S/T");
+                data.uidItem = "56911524-64012364-" + (data.itemTomb || data.item_tombamento || "S/T");
                 data.id_base = "56911524-64012364";
             }
         }
@@ -7748,24 +7746,27 @@ async function abrirGestaoPendenciasCautela() {
         // 3. GARANTIA DE QUANTIDADE
         data.quantidade = Number(data.quantidade || data.itemQtd || 1);
 
-        // 4. ATRIBUIÇÃO À VARIÁVEL GLOBAL (Importante para o carimbo final)
+        // 4. ATRIBUIÇÃO À VARIÁVEL GLOBAL
         pendenciaSendoResolvida = data; 
 
-        // 5. PREPARAÇÃO DA INTERFACE DO MODAL
-        const ehItemSingle = !data.item_tombamento && (!data.itemTomb || data.itemTomb === "S/T");
+        // 5. PREPARAÇÃO DA INTERFACE DO MODAL (CORREÇÃO CIRÚRGICA DE SINGLE VS MULTI)
+        const tombReal = data.itemTomb || data.item_tombamento || "";
+        // É single se não houver tombamento OU se o tombamento for igual ao nome do item
+        const ehItemSingle = !tombReal || tombReal === "S/T" || tombReal.trim().toUpperCase() === data.itemNome.trim().toUpperCase();
+        
         const identificadorHtml = ehItemSingle 
-            ? `<b>Quantidade relatada:</b> ${data.quantidade} un.` 
-            : `<b>Tombamento:</b> ${data.item_tombamento || data.itemTomb}`;
+            ? `<b>Quantidade relatada:</b> <span style="color:#d90f23; font-weight:bold;">${data.quantidade} un.</span>` 
+            : `<b>Tombamento:</b> <span style="color:#800020; font-weight:bold;">${tombReal}</span>`;
 
         const infoBox = document.getElementById('info-item-decisao');
         if (infoBox) {
             infoBox.innerHTML = `
                 <div style="line-height: 1.6; text-align: left; background: #fff; padding: 12px; border-radius: 4px; border: 1px solid #ddd; border-left: 5px solid #800020;">
-                    <b style="color: #800020; font-size: 1.1em;">${data.itemNome}</b><br>
+                    <b style="color: #800020; font-size: 1.1em; text-transform: uppercase;">${data.itemNome}</b><br>
                     <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; font-size: 0.95em;">
                         ${identificadorHtml}<br>
-                        <b>Relatado por:</b> <span style="color: blue; font-weight: bold;">${data.gestor_alvo_nome}</span><br>
-                        <b>Motivo:</b> <span style="color:#d32f2f; font-weight: bold;">${data.motivo}</span>
+                        <b>Relatado por:</b> <span style="color: #2c7399; font-weight: bold;">${data.gestor_alvo_nome}</span><br>
+                        <b>Motivo:</b> <span style="color:#333;">${data.motivo}</span>
                     </div>
                 </div>
             `;
