@@ -3007,13 +3007,14 @@ function renderAdminGestorCards(canViewDashboardCards) {
                     const dataMestra = docMestra.data().list || [];
                     dataMestra.forEach(setor => {
                         setor.itens.forEach(it => {
-                            // 1. COLETA PENDÊNCIAS (Vermelhas - Avaria/Recolhimento)
+                            // 1. PENDÊNCIAS (Vermelhas)
                             if (it.pendencias_ids && it.pendencias_ids.length > 0) {
-                                it.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, itemId: it.id, tipoRegistro: 'PENDENCIA' }));
+                                it.pendencias_ids.forEach(p => pendenciasReais.push({ 
+                                    ...p, itemNome: it.nome, itemId: it.id, tipoRegistro: 'PENDENCIA' 
+                                }));
                             }
 
-                            // 2. COLETA CAUTELAS (Laranjas - Posse de Militar)
-                            // Caso A: Item Single (Array de cautelas)
+                            // 2. CAUTELAS (Laranjas)
                             if (it.tipo === 'single' && it.cautelas && it.cautelas.length > 0) {
                                 it.cautelas.forEach(c => pendenciasReais.push({
                                     id: c.id, 
@@ -3022,20 +3023,19 @@ function renderAdminGestorCards(canViewDashboardCards) {
                                     quantidade: c.quantidade,
                                     autor_nome: c.emitente || "Sistema", 
                                     destinatario: c.destinatario || "Militar",
-                                    descricao: c.obs_item || "Em posse do militar",
+                                    descricao: c.obs_item || "Em posse do militar", // Obs original do emitente
                                     status_gestao: 'CAUTELADO',
                                     tipoRegistro: 'CAUTELA'
                                 }));
                             }
 
-                            // Caso B: Item Multi (Objeto cautela dentro do tombamento)
                             if (it.tipo === 'multi' && it.tombamentos) {
                                 it.tombamentos.forEach(t => {
-                                    // Pendências no tombamento
                                     if (t.pendencias_ids && t.pendencias_ids.length > 0) {
-                                        t.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, tipoRegistro: 'PENDENCIA' }));
+                                        t.pendencias_ids.forEach(p => pendenciasReais.push({ 
+                                            ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, tipoRegistro: 'PENDENCIA' 
+                                        }));
                                     }
-                                    // Cautela no tombamento
                                     if (t.cautela) {
                                         pendenciasReais.push({
                                             id: t.cautela.id,
@@ -3045,7 +3045,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
                                             quantidade: 1,
                                             autor_nome: t.cautela.emitente || "Sistema",
                                             destinatario: t.cautela.destinatario || "Militar",
-                                            descricao: t.cautela.obs_item || "Em posse do militar",
+                                            descricao: t.cautela.obs_item || "Em posse do militar", // Obs original do emitente
                                             status_gestao: 'CAUTELADO',
                                             tipoRegistro: 'CAUTELA'
                                         });
@@ -3101,41 +3101,30 @@ function renderAdminGestorCards(canViewDashboardCards) {
 
     const sortedUnits = Object.keys(groupedCards).sort();
     sortedUnits.forEach(unit => {
-        const cardsList = groupedCards[unit];
-        
         const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
         unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
         unitHeader.innerHTML = `<div class="unit-flex-title"><i class="fas fa-building"></i> <span>${unit}</span></div>`;
         container.appendChild(unitHeader); 
         
+        cardsList = groupedCards[unit];
         cardsList.forEach(d => {
             const allItems = d.items || [];
-            
-            // ✅ SEPARAÇÃO CIRÚRGICA DE CONTAGEM:
-            // 1. Pendências (Avarias/Recolhimentos - Badge Vermelho)
-            const countPendencias = allItems.filter(i => i.tipoRegistro === 'PENDENCIA').length;
-            // 2. Cautelas (Posse de Militar - Badge Laranja/Informativo)
-            const countCautelas = allItems.filter(i => i.tipoRegistro === 'CAUTELA').length;
-            
-            // O Card fica "Alerta" (Vermelho) se houver qualquer pendência real de manutenção
-            const temAlertaCritico = countPendencias > 0;
+            // Regra 1: Conta TUDO como alteração (Pendência + Cautela)
+            const countTotal = allItems.length;
+            const temAlteracao = countTotal > 0;
             
             const div = document.createElement('div');
-            div.className = `sector-card ${temAlertaCritico ? 'status-alert' : 'status-ok'}`;
+            div.className = `sector-card ${temAlteracao ? 'status-alert' : 'status-ok'}`;
             
-            // Se não houver pendência mas houver cautela, mudamos o ícone para indicar "Carga incompleta por cautela"
-            const iconeStatus = temAlertaCritico ? 'fa-exclamation-triangle' : (countCautelas > 0 ? 'fa-info-circle' : 'fa-check-circle');
-            const corIcone = temAlertaCritico ? '#d90f23' : (countCautelas > 0 ? '#f57c00' : '#1b8a3e');
-
             div.innerHTML = `
                 <h3>${d.local}</h3>
                 <div class="main-stat">
-                    <div>
-                        <span class="count-value" style="color: ${temAlertaCritico ? '#d90f23' : '#333'}">${countPendencias === 0 ? 'OK' : countPendencias}</span>
-                        ${countCautelas > 0 ? `<span style="font-size: 0.9em; color: #f57c00; margin-left: 5px; font-weight: bold;">+ ${countCautelas} C/A</span>` : ''}
-                    </div>
-                    <i class="fas ${iconeStatus}" style="color: ${corIcone}; opacity:0.2; font-size: 1.5em;"></i>
+                    <span class="count-value" style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}">
+                        ${countTotal === 0 ? 'OK' : countTotal}
+                    </span>
+                    <i class="fas ${temAlteracao ? 'fa-exclamation-triangle' : 'fa-check-circle'}" 
+                       style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}; opacity:0.2; font-size: 1.5em;"></i>
                 </div>
                 <div class="card-footer">
                     <strong>Última Conf.: ${d.conferente}</strong><br>${d.date}
@@ -3145,10 +3134,6 @@ function renderAdminGestorCards(canViewDashboardCards) {
             container.appendChild(div);
         });
     });
-    
-    if (container.children.length === 0) {
-        container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada para sua unidade ou permissão.</p>';
-    }
 }
         // --- 4. NOVA CONFERÊNCIA ---
         async function carregarListasParaNovaConferencia() {
@@ -3912,26 +3897,29 @@ function reimprimirPDF(data) {
         pendenciasReais.forEach(p => {
             const tr = tbody.insertRow();
             
-            const identificadorFisico = p.tombamento ? `<br><small style="color:#800020">Tomb: ${p.tombamento}</small>` : '';
+            // Regra 3: Itens single exibem quantidade em destaque (Cautelado ou Pendente)
+            const identificadorFisico = p.tombamento 
+                ? `<br><small style="color:#800020">Tomb: ${p.tombamento}</small>` 
+                : `<br><small style="color:#d90f23; font-weight:bold;">Qtd: ${p.quantidade} un.</small>`;
             
-            // Define a cor do badge: Laranja para Cautelas, cores padrão para Pendências
             const statusG = p.status_gestao || 'PENDENTE';
             const badgeClass = p.tipoRegistro === 'CAUTELA' ? 'badge-cautela' : ('badge-' + statusG.toLowerCase().replace(/\s/g, '-'));
 
-            // Lógica de conteúdo dinâmico para a coluna Alteração
             let htmlAlteracao = '';
             if (p.tipoRegistro === 'CAUTELA') {
+                // Regra 2: Exibe a Obs original do emitente da cautela
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
-                        <b style="color:#f57c00;">De:</b> ${p.autor_nome}<br>
-                        <b style="color:#2c7399;">Para:</b> ${p.destinatario}<br>
-                        <small><b>Obs:</b> ${p.descricao}</small>
+                        <b style="color:#f57c00;">Emitente:</b> ${p.autor_nome}<br>
+                        <b style="color:#2c7399;">Destinatário:</b> ${p.destinatario}<br>
+                        <small><b>Obs do Emitente:</b> ${p.descricao}</small>
                     </div>`;
             } else {
+                // Pendência de Conferência/Recolhimento
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b>Relatado por ${p.autor_nome}:</b><br>
-                        ${p.quantidade > 1 ? '<span style="color:red; font-weight:bold;">('+p.quantidade+' un.)</span> ' : ''}${p.descricao}
+                        ${p.descricao}
                     </div>`;
             }
 
@@ -3946,9 +3934,6 @@ function reimprimirPDF(data) {
             `;
 
             const tdAcao = tr.insertCell();
-            
-            // Só exibe o botão gerenciar se for uma PENDÊNCIA. 
-            // Cautelas são apenas para ciência no Dashboard (gerenciadas na aba Cautelas).
             if (p.tipoRegistro === 'PENDENCIA') {
                 const btnData = {
                     docId: data.docId,
@@ -3962,7 +3947,7 @@ function reimprimirPDF(data) {
                 };
                 tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestaoID(${JSON.stringify(btnData)})'>Gerenciar</button>`;
             } else {
-                tdAcao.innerHTML = `<small style="color:#999; font-style:italic;">Uso pessoal</small>`;
+                tdAcao.innerHTML = `<small style="color:#999; font-style:italic;">Posse Pessoal</small>`;
             }
         });
     }
