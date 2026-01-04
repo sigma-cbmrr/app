@@ -8025,33 +8025,25 @@ async function abrirSeletorGlobalSubstituicao() {
         const docC = await cautelaRef.get();
         if (docC.exists) {
             const d = docC.data();
-            
-            // Remove a pendência que acaba de ser resolvida
-            const pAtivas = (d.pendencias_ativas || []).filter(pa => {
-                const nomeNoBanco = (pa.item_nome || "").trim().toUpperCase();
-                return nomeNoBanco !== nomeLimpo; 
-            });
-
-            // Atualiza o item na carga do militar com o NOVO ID e NOVO Tombamento
+            const pAtivas = (d.pendencias_ativas || []).filter(pa => (pa.item_nome || "").trim().toUpperCase() !== nomeLimpo);
             const itensC = (d.itens || []).map(it => {
                 if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
                 }
                 return it;
             });
-
-            batch.update(cautelaRef, {
-                pendencias_ativas: pAtivas,
+            batch.update(cautelaRef, { 
+                pendencias_ativas: pAtivas, 
                 itens: itensC,
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                     data: dataFormatada,
-                    descricao: `Troca Cruzada: Item ${nomeItemOrigem} substituído pelo tombamento ${tombamentoNovo}. Motivo: ${motivoMilitar}`,
+                    descricao: `Troca Cruzada: Substituído pelo tombamento ${tombamentoNovo}.`,
                     militar: "Gestor"
                 })
             });
         }
 
-        // 2. ATUALIZAÇÃO DO ESTOQUE (MÁGICA PARA ITENS MULTI)
+        // 2. ATUALIZAÇÃO DO ESTOQUE (DANÇA DOS CARIMBOS MULTI)
         const docL = await listaOrigemRef.get();
         if (docL.exists) {
             const listData = docL.data().list.map(setor => ({
@@ -8060,39 +8052,47 @@ async function abrirSeletorGlobalSubstituicao() {
                     if (it.id === idBaseOrigem || it.nome.trim().toUpperCase() === nomeLimpo) {
                         
                         let objetoCautelaParaMover = null;
+                        const novoIdPendencia = "PEND-" + Date.now();
 
-                        // Se for MULTI, fazemos o "Swap" (Troca) de cautela entre os tombamentos
                         if (it.tipo === "multi" && it.tombamentos) {
                             it.tombamentos = it.tombamentos.map(t => {
-                                // A. Localiza o antigo (quebrado) que estava na cautela e "recorta" a cautela dele
+                                // A. TRATA O ANTIGO (AVARIADO)
+                                // Se este tombamento tem a cautela, extraímos ela e colocamos a PENDÊNCIA
                                 if (t.cautela && t.cautela.id === cautelaId) {
                                     objetoCautelaParaMover = t.cautela; 
-                                    delete t.cautela; // Limpa o tombamento avariado
+                                    delete t.cautela; // Remove o carimbo laranja
+                                    
+                                    // Adiciona o carimbo vermelho DENTRO do tombamento
+                                    if (!t.pendencias_ids) t.pendencias_ids = [];
+                                    t.pendencias_ids.push({
+                                        id: novoIdPendencia,
+                                        quantidade: 1,
+                                        descricao: `${motivoMilitar.toUpperCase()} (AVARIA IDENTIFICADA NA TROCA)`,
+                                        data_criacao: dataSimples,
+                                        status_gestao: "PENDENTE",
+                                        tipo: "PENDENCIA",
+                                        autor_nome: nomeMilitar
+                                    });
                                 }
                                 return t;
                             }).map(t => {
-                                // B. Localiza o novo (reserva) e "cola" o objeto da cautela nele
+                                // B. TRATA O NOVO (RESERVA)
                                 if (t.tomb === tombamentoNovo) {
-                                    t.cautela = objetoCautelaParaMover;
+                                    t.cautela = objetoCautelaParaMover; // Herda o carimbo laranja
                                 }
                                 return t;
                             });
-                        } 
-                        // Se for SINGLE, removemos a cautela antiga do array (o novo é somado via app se necessário)
-                        else if (it.tipo === "single" && it.cautelas) {
-                            it.cautelas = it.cautelas.filter(c => c.id !== cautelaId);
                         }
 
-                        // 3. INSERÇÃO DO CARIMBO DE PENDÊNCIA (Vermelho) no item que voltou pro estoque
+                        // C. CARIMBO DE PENDÊNCIA NA RAIZ (Igual ao single, para o Dashboard ver)
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         it.pendencias_ids.push({
-                            id: "PEND-" + Date.now(),
+                            id: novoIdPendencia,
                             quantidade: 1,
-                            descricao: `${motivoMilitar.toUpperCase()} (RETORNO DE TROCA CRUZADA - CAUTELA ${cautelaId})`,
+                            descricao: `${motivoMilitar.toUpperCase()} (TOMB: ${tombamentoNovo} SAIU / ANTIGO RETORNOU)`,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA",
-                            autor_uid: uidMilitar,
                             autor_nome: nomeMilitar
                         });
 
@@ -8100,7 +8100,7 @@ async function abrirSeletorGlobalSubstituicao() {
                         it.historico_vida.push({
                             data: dataFormatada,
                             evento: "RETORNO_TROCA",
-                            detalhes: `Item substituído. Novo tombamento em carga: ${tombamentoNovo}. Item antigo retornou como pendência de ${nomeMilitar}.`,
+                            detalhes: `Troca multi: ${tombamentoNovo} (Novo) <-> Antigo (Avariado).`,
                             quem: "Gestor"
                         });
                     }
@@ -8111,12 +8111,11 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert("✅ Troca Cruzada MULTI concluída!\n\nResponsabilidade transferida para o tombamento: " + tombamentoNovo);
+        alert("✅ Troca Cruzada MULTI Sincronizada!\n\nCarimbos de cautela e pendência atualizados.");
         location.reload();
-
     } catch (e) {
-        console.error("Erro na Troca Cruzada:", e);
-        alert("Erro ao gravar dados: " + e.message);
+        console.error(e);
+        alert("Erro: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
