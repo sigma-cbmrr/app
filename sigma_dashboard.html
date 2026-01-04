@@ -3006,11 +3006,10 @@ function renderAdminGestorCards(canViewDashboardCards) {
                 if (docMestra.exists) {
                     const dataMestra = docMestra.data().list || [];
                     
-                    // Criamos um set de IDs de cautela para buscar as observações em lote se necessário
-                    const idsCautelasNoEstoque = new Set();
-
-                    dataMestra.forEach(setor => {
-                        setor.itens.forEach(it => {
+                    // Loop assíncrono para buscar observações reais das cautelas
+                    for (const setor of dataMestra) {
+                        for (const it of (setor.itens || [])) {
+                            
                             // 1. PENDÊNCIAS (Vermelhas)
                             if (it.pendencias_ids && it.pendencias_ids.length > 0) {
                                 it.pendencias_ids.forEach(p => pendenciasReais.push({ 
@@ -3018,57 +3017,57 @@ function renderAdminGestorCards(canViewDashboardCards) {
                                 }));
                             }
 
-                            // 2. CAUTELAS (Laranjas) - Itens SINGLE
-                            if (it.tipo === 'single' && it.cautelas && it.cautelas.length > 0) {
-                                it.cautelas.forEach(c => {
+                            // 2. FUNÇÃO AUXILIAR PARA BUSCAR OBSERVAÇÃO REAL NA COLEÇÃO 'cautelas_abertas'
+                            const getObsReal = async (cautelaId) => {
+                                try {
+                                    const cDoc = await db.collection('cautelas_abertas').doc(String(cautelaId)).get();
+                                    return cDoc.exists ? cDoc.data().observacoes_emissao : "Material em carga individual.";
+                                } catch (err) { return "Material em carga individual."; }
+                            };
+
+                            // CAUTELAS - Itens SINGLE
+                            if (it.tipo === 'single' && it.cautelas) {
+                                for (const c of it.cautelas) {
+                                    const obsReal = await getObsReal(c.id);
                                     pendenciasReais.push({
-                                        id: c.id, 
-                                        itemNome: it.nome, 
-                                        itemId: it.id,
+                                        id: c.id, itemNome: it.nome, itemId: it.id,
                                         quantidade: c.quantidade,
                                         autor_nome: c.emitente || "Sistema", 
                                         destinatario: c.destinatario || "Militar",
-                                        descricao: c.obs_item || "", // Aqui virá a obs do carimbo
+                                        descricao: obsReal, // <--- BUSCA CIRÚRGICA NO BANCO
                                         status_gestao: 'CAUTELADO',
                                         tipoRegistro: 'CAUTELA'
                                     });
-                                });
+                                }
                             }
 
-                            // 2.1 CAUTELAS - Itens MULTI (Tombamentos)
+                            // CAUTELAS - Itens MULTI (Tombamentos)
                             if (it.tipo === 'multi' && it.tombamentos) {
-                                it.tombamentos.forEach(t => {
-                                    if (t.pendencias_ids && t.pendencias_ids.length > 0) {
-                                        t.pendencias_ids.forEach(p => pendenciasReais.push({ 
-                                            ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, tipoRegistro: 'PENDENCIA' 
-                                        }));
+                                for (const t of it.tombamentos) {
+                                    if (t.pendencias_ids) {
+                                        t.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, tipoRegistro: 'PENDENCIA' }));
                                     }
                                     if (t.cautela) {
+                                        const obsReal = await getObsReal(t.cautela.id);
                                         pendenciasReais.push({
-                                            id: t.cautela.id,
-                                            itemNome: it.nome,
-                                            tombamento: t.tomb,
-                                            itemId: it.id,
+                                            id: t.cautela.id, itemNome: it.nome, tombamento: t.tomb, itemId: it.id,
                                             quantidade: 1,
                                             autor_nome: t.cautela.emitente || "Sistema",
                                             destinatario: t.cautela.destinatario || "Militar",
-                                            descricao: t.cautela.obs_item || "",
+                                            descricao: obsReal, // <--- BUSCA CIRÚRGICA NO BANCO
                                             status_gestao: 'CAUTELADO',
                                             tipoRegistro: 'CAUTELA'
                                         });
                                     }
-                                });
+                                }
                             }
-                        });
-                    });
+                        }
+                    }
                 }
 
                 map[listaId] = { 
-                    docId: d.id, 
-                    lista_id: listaId,
-                    local: d.local, 
-                    conferente: d.conferente, 
-                    date: d.timestamp.toDate().toLocaleString(), 
+                    docId: d.id, lista_id: listaId, local: d.local, 
+                    conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), 
                     items: pendenciasReais 
                 };
             }
@@ -3903,7 +3902,7 @@ function reimprimirPDF(data) {
         pendenciasReais.forEach(p => {
             const tr = tbody.insertRow();
             
-            // Regra: Itens single exibem quantidade. Itens multi exibem tombamento.
+            // Regra: Exibe tombamento para multi ou Quantidade para single
             const identificadorFisico = p.tombamento 
                 ? `<br><small style="color:#800020">Tomb: ${p.tombamento}</small>` 
                 : `<br><small style="color:#d90f23; font-weight:bold;">Qtd em Alteração: ${p.quantidade} un.</small>`;
@@ -3913,17 +3912,15 @@ function reimprimirPDF(data) {
 
             let htmlAlteracao = '';
             if (p.tipoRegistro === 'CAUTELA') {
-                // Captura a observação. Se estiver vazio no carimbo, usa um texto padrão digno.
-                const obsFinal = (p.descricao && p.descricao !== "") ? p.descricao : "Material em carga individual.";
-                
+                // Exibe a observação real buscada na coleção cautelas_abertas
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b style="color:#f57c00;">Emitente:</b> ${p.autor_nome}<br>
                         <b style="color:#2c7399;">Detentor:</b> ${p.destinatario}<br>
-                        <small><b>Obs:</b> ${obsFinal}</small>
+                        <small><b>Obs:</b> ${p.descricao}</small>
                     </div>`;
             } else {
-                // Para pendências de conferência ou recolhimento
+                // Para pendências (Conferência ou Recolhimento)
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b>Relatado por ${p.autor_nome}:</b><br>
