@@ -2977,59 +2977,69 @@ function renderAdminGestorCards(canViewDashboardCards) {
     loading.style.display = 'block';
     
     try {
-        // --- INSERÇÃO DA NOVA LÓGICA DE PENDÊNCIAS DE CAUTELA ---
         await loadCautelaPendencies(); 
-        // -------------------------------------------------------
 
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
-        const listToUnitMap = {};
-        
-        // Objeto para mapear o ID ÚNICO da ROTA/LISTA ao nome da Unidade
-        Object.keys(rotas).forEach(key => {
-            // key é o ID da lista (ex: "alfa_permanencia")
-            if (!key.toLowerCase().includes('bravo 5') && rotas[key].ativo !== false) {
-                listToUnitMap[key] = rotas[key].unidade || 'GERAL';
-            }
-        });
         
         const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
-        
-        // ALTERAÇÃO CRÍTICA: 'map' agora usará o LISTA_ID como chave, não o NOME do local.
         const map = {}; 
         const docs = [];
         snap.forEach(d => docs.push({id:d.id, ...d.data()}));
         
-        // Ordenação por tempo (mais recente primeiro)
         docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
 
-        docs.forEach(d => {
-            const listaId = d.lista_id; // Usamos o ID único do resultado
-            
-            // Condição crucial: Só processa se a lista existir no mapa filtrado (rotas)
-            if (!rotas[listaId]) return; 
-
-            // Filtro de segurança (para Gestores)
+        // 1. FILTRAGEM INICIAL POR UNIDADE
+        const filteredDocs = docs.filter(d => {
+            const listaId = d.lista_id;
+            if (!rotas[listaId]) return false;
             const listUnit = rotas[listaId].unidade || 'GERAL';
-            if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return;
+            if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return false;
+            return true;
+        });
 
-            // CORREÇÃO: Usamos o listaId como chave para garantir unicidade.
-            // A primeira a ser encontrada (a mais recente) é a que prevalece.
+        // 2. BUSCA DINÂMICA DA LISTA MESTRA PARA CADA VIATURA/SETOR
+        // Usamos Promise.all para buscar todas as pendências reais do estoque simultaneamente
+        await Promise.all(filteredDocs.map(async (d) => {
+            const listaId = d.lista_id;
             if (!map[listaId]) {
+                // Busca a lista mestra atualizada para ver pendências de troca/recolhimento
+                const docMestra = await db.collection(COLECAO_LISTAS).doc(listaId).get();
+                let pendenciasReais = [];
+
+                if (docMestra.exists) {
+                    const dataMestra = docMestra.data().list || [];
+                    dataMestra.forEach(setor => {
+                        setor.itens.forEach(it => {
+                            // Coleta pendências de itens SINGLE ou MULTI (tombamentos)
+                            if (it.pendencias_ids && it.pendencias_ids.length > 0) {
+                                it.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, itemId: it.id }));
+                            }
+                            if (it.tipo === 'multi' && it.tombamentos) {
+                                it.tombamentos.forEach(t => {
+                                    if (t.pendencias_ids && t.pendencias_ids.length > 0) {
+                                        t.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id }));
+                                    }
+                                });
+                            }
+                        });
+                    });
+                }
+
                 map[listaId] = { 
                     docId: d.id, 
+                    lista_id: listaId, // Garantindo o ID da lista para o renderCards
                     local: d.local, 
                     conferente: d.conferente, 
                     date: d.timestamp.toDate().toLocaleString(), 
-                    items: d.itensCaa || [] 
+                    items: pendenciasReais // Substituímos os itens do relatório pelas pendências REAIS do estoque
                 };
             }
-        });
+        }));
         
-        // Passamos o novo mapa baseado em ID para renderizar os cards
         renderCards(map); 
     } catch (e) { 
-        console.error(e); 
+        console.error("Erro ao carregar CAA Data:", e); 
         container.innerHTML = 'Erro ao carregar.';
     } finally { 
         loading.style.display = 'none';
@@ -3039,6 +3049,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
        
         async function renderCards(map) {
     const container = document.getElementById('cards-container');
+    if (!container) return;
     container.innerHTML = '';
     const keys = Object.keys(map);
     
@@ -3055,7 +3066,6 @@ function renderAdminGestorCards(canViewDashboardCards) {
     const groupedCards = {};
     keys.forEach(listaId => {
         const d = map[listaId];
-        // Busca a Unidade associada a esta lista_id na coleção 'rotas'
         const unit = rotas[listaId]?.unidade || 'GERAL'; 
         
         if (!groupedCards[unit]) {
@@ -3064,19 +3074,16 @@ function renderAdminGestorCards(canViewDashboardCards) {
         groupedCards[unit].push(d);
     });
 
-    // 3. RENDERIZAR AGRUPADO POR UNIDADE (Restaura o agrupamento e o empilhamento)
+    // 3. RENDERIZAR AGRUPADO POR UNIDADE
     const sortedUnits = Object.keys(groupedCards).sort();
-sortedUnits.forEach(unit => {
+    sortedUnits.forEach(unit => {
         const cardsList = groupedCards[unit];
         
         // --- Cabeçalho da Unidade ---
-       const unitHeader = document.createElement('h3');
+        const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
-        
-        // Restaura as regras inline necessárias (removendo as que causavam o erro de JS)
         unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
         
-        // NOVO HTML: Usa a estrutura Flexbox para o alinhamento vertical
         unitHeader.innerHTML = `
             <div class="unit-flex-title">
                 <i class="fas fa-building"></i>
@@ -3086,25 +3093,26 @@ sortedUnits.forEach(unit => {
         container.appendChild(unitHeader); 
         
         // --- Container dos Cards da Unidade ---
-        // Aqui não precisamos criar um novo grid, apenas adicionamos os cards ao container principal (container).
         cardsList.forEach(d => {
+            // ✅ ALTERAÇÃO CIRÚRGICA: O count agora reflete o total de pendências REAIS (IDs) 
+            // que foram extraídas da lista mestra no loadCaaData.
             const items = d.items || [];
-            const count = items.filter(i => i.statusAdmin !== 'Solucionado').length; 
+            const count = items.length; 
             
             const div = document.createElement('div');
-            // O CSS para .sector-card (flex: 0 0 280px) permite que ele se organize lado a lado
             div.className = `sector-card ${count === 0 ? 'status-ok' : 'status-alert'}`;
             div.innerHTML = `
                 <h3>${d.local}</h3>
                 <div class="main-stat">
                     <span class="count-value">${count === 0 ? 'OK' : count}</span>
+                    <i class="fas ${count === 0 ? 'fa-check-circle' : 'fa-exclamation-triangle'}" style="opacity:0.2; font-size: 1.5em;"></i>
                 </div>
                 <div class="card-footer">
-                    <strong>${d.conferente}</strong><br>${d.date}
+                    <strong>Última Conf.: ${d.conferente}</strong><br>${d.date}
                 </div>
             `;
             div.onclick = () => mostrarTabela(d);
-            container.appendChild(div); // Adiciona o card ao container principal (que é um flexbox)
+            container.appendChild(div);
         });
     });
     
@@ -3862,55 +3870,55 @@ function reimprimirPDF(data) {
     document.getElementById('table-title').textContent = `Detalhes: ${data.local}`;
     tbody.innerHTML = '';
 
-    const items = data.items || [];
-    // Filtra itens que possuem pendências ativas (IDs no array)
-    const itemsWithIssues = items.filter(i => i.pendencias_ids && i.pendencias_ids.length > 0);
+    // Agora 'data.items' já contém a lista consolidada de pendências da Lista Mestra
+    const pendenciasReais = data.items || [];
 
-    if (itemsWithIssues.length === 0) {
+    if (pendenciasReais.length === 0) {
         wrapper.querySelector('table').style.display = 'none';
         document.getElementById('no-issues-msg').style.display = 'block';
     } else {
         wrapper.querySelector('table').style.display = 'table';
         document.getElementById('no-issues-msg').style.display = 'none';
 
-        itemsWithIssues.forEach(item => {
-            // Para cada item, vamos percorrer seus IDs de pendência
-            item.pendencias_ids.forEach(p => {
-                const tr = tbody.insertRow();
-                
-                // Status visual para o Gestor (Baseado no campo status_gestao do ID)
-                const statusG = p.status_gestao || 'PENDENTE';
-                const badgeClass = 'badge-' + statusG.toLowerCase().replace(/\s/g, '-');
+        pendenciasReais.forEach(p => {
+            const tr = tbody.insertRow();
+            
+            // Identifica se é item com tombamento para exibição
+            const identificadorFisico = p.tombamento ? `<br><small style="color:#800020">Tomb: ${p.tombamento}</small>` : '';
+            
+            // Status visual para o Gestor
+            const statusG = p.status_gestao || 'PENDENTE';
+            const badgeClass = 'badge-' + statusG.toLowerCase().replace(/\s/g, '-');
 
-                tr.innerHTML = `
-                    <td>
-                        <strong>${item.nomeCompleto}</strong><br>
-                        <small style="color:#666">ID: ${p.id}</small>
-                    </td>
-                    <td><span class="status-badge ${badgeClass}">${statusG}</span></td>
-                    <td style="text-align:left;">
-                        <div style="font-size:0.9em;">
-                            <b>Por ${p.autor_nome}:</b><br>
-                            ${p.quantidade > 1 ? '<span style="color:red">('+p.quantidade+' un.)</span> ' : ''}${p.descricao}
-                        </div>
-                    </td>
-                    <td><small>${data.conferente}<br>${data.date}</small></td>
-                `;
+            tr.innerHTML = `
+                <td>
+                    <strong>${p.itemNome}</strong>${identificadorFisico}<br>
+                    <small style="color:#666">ID Pendência: ${p.id}</small>
+                </td>
+                <td><span class="status-badge ${badgeClass}">${statusG}</span></td>
+                <td style="text-align:left;">
+                    <div style="font-size:0.9em;">
+                        <b>Relatado por ${p.autor_nome}:</b><br>
+                        ${p.quantidade > 1 ? '<span style="color:red; font-weight:bold;">('+p.quantidade+' un.)</span> ' : ''}${p.descricao}
+                    </div>
+                </td>
+                <td><small><b>Última Conf:</b><br>${data.conferente}<br>${data.date}</small></td>
+            `;
 
-                // Botão de Gerenciar vinculado ao ID específico
-                const tdAcao = tr.insertCell();
-                const btnData = {
-                    docId: data.docId,      // ID do documento em resultados_conferencias
-                    listaId: data.lista_id, // ID da lista mestra para refletir a solução
-                    itemId: item.id,        // ID do item (single ou multi)
-                    pendenciaId: p.id,      // O ID específico da pendência
-                    nome: item.nomeCompleto,
-                    descricao: p.descricao,
-                    qtd: p.quantidade
-                };
+            // Botão de Gerenciar vinculado aos dados reais da pendência
+            const tdAcao = tr.insertCell();
+            const btnData = {
+                docId: data.docId,      // Referência do último resultado
+                listaId: data.lista_id, // ID da lista mestra para salvar a solução
+                itemId: p.itemId,       // ID base do item
+                pendenciaId: p.id,      // ID específico da pendência (carimbo vermelho)
+                nome: p.itemNome,
+                tombamento: p.tombamento || "",
+                descricao: p.descricao,
+                qtd: p.quantidade
+            };
 
-                tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestaoID(${JSON.stringify(btnData)})'>Gerenciar</button>`;
-            });
+            tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestaoID(${JSON.stringify(btnData)})'>Gerenciar</button>`;
         });
     }
     wrapper.style.display = 'block';
