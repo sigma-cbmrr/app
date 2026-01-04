@@ -6147,30 +6147,32 @@ async function iniciarFluxoSubstituicao() {
 
         const data = doc.data();
         itensDaCautelaAtual = data.itens || [];
-        
-        // --- TRAVA DE DUPLICIDADE ---
-        // Pega os índices de itens que já estão no array de pendências ativas
         const pendenciasAtivas = data.pendencias_ativas || [];
         const indicesBloqueados = pendenciasAtivas.map(p => p.item_index);
 
-        // --- IDENTIFICAÇÃO DA UNIDADE VIA ROTA ---
         let unidadeAlvo = data.unidade_destino || "";
         if (!unidadeAlvo && data.local_origem_id) {
             const rotasDoc = await db.collection('config_geral').doc('rotas').get();
             const rotas = rotasDoc.data() || {};
-            if (rotas[data.local_origem_id]) {
-                unidadeAlvo = rotas[data.local_origem_id].unidade;
-            }
+            if (rotas[data.local_origem_id]) unidadeAlvo = rotas[data.local_origem_id].unidade;
         }
         if (!unidadeAlvo) unidadeAlvo = currentUserData.unidade;
 
         const container = document.getElementById('lista-itens-reporte');
         
-        // 1. Renderiza a lista com lógica de bloqueio visual
+        // --- CORREÇÃO CIRÚRGICA INICIA AQUI ---
         container.innerHTML = itensDaCautelaAtual.map((item, index) => {
             const estaBloqueado = indicesBloqueados.includes(index);
             const corFundo = estaBloqueado ? '#fff5f5' : '#fff';
             const corTexto = estaBloqueado ? '#999' : '#000';
+            
+            // 1. Identifica se é MULTI (tem tombamento real e diferente do nome)
+            const ehMulti = item.tombamento && item.tombamento !== "" && item.tombamento !== item.nome;
+
+            // 2. Monta o texto de exibição do nome (Sem repetir se for single)
+            const textoExibicao = ehMulti 
+                ? `${item.nome} <span style="color:#800020;">[Tomb: ${item.tombamento}]</span>` 
+                : `${item.nome} (Carga: ${item.quantidade} un)`;
 
             return `
             <div style="margin-bottom: 10px; padding: 10px; border: 1px solid ${estaBloqueado ? '#ffcccc' : '#ddd'}; background: ${corFundo}; border-radius:6px; opacity: ${estaBloqueado ? '0.8' : '1'};">
@@ -6178,24 +6180,26 @@ async function iniciarFluxoSubstituicao() {
                     <input type="checkbox" class="check-item-reporte" data-index="${index}" 
                            ${estaBloqueado ? 'disabled' : ''} 
                            style="margin-right: 10px;" onchange="toggleObsInput(${index})">
-                    ${item.nome} ${item.tombamento ? `[Tomb: ${item.tombamento}]` : `(${item.quantidade} un)`}
+                    ${textoExibicao}
                     ${estaBloqueado ? '<span style="margin-left:auto; color:#d90f23; font-size:0.7em;"><i class="fas fa-clock"></i> EM ANÁLISE</span>' : ''}
                 </label>
                 <div id="div-obs-${index}" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
-                    ${!item.tombamento ? `
-                        <label style="font-size: 0.8em; color:#d90f23; font-weight:bold;">QTD COM DEFEITO:</label>
-                        <input type="number" id="qtd-obs-${index}" value="1" min="1" max="${item.quantidade}" style="width: 100%; padding: 5px; margin-bottom: 8px; border: 1px solid #ccc; border-radius:4px;">
+                    ${!ehMulti ? `
+                        <label style="font-size: 0.8em; color:#d90f23; font-weight:bold;">QUANTIDADE COM PROBLEMA:</label>
+                        <input type="number" id="qtd-obs-${index}" value="1" min="1" max="${item.quantidade}" 
+                               style="width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius:4px; box-sizing: border-box;">
                     ` : `<input type="hidden" id="qtd-obs-${index}" value="1">`}
+                    
                     <label style="font-size: 0.8em; font-weight:bold;">MOTIVO DO RELATO:</label>
-                    <textarea id="text-obs-${index}" placeholder="Descreva o que houve..." style="width: 100%; height: 50px; font-size: 0.85em; padding: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"></textarea>
+                    <textarea id="text-obs-${index}" placeholder="Descreva o que houve..." 
+                              style="width: 100%; height: 50px; font-size: 0.85em; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"></textarea>
                 </div>
             </div>
         `}).join('');
+        // --- FIM DA CORREÇÃO ---
 
-        // 2. Busca os Gestores
         const selectGestor = document.getElementById('select-gestor-alvo');
         selectGestor.innerHTML = '<option value="" disabled selected>Buscando gestores...</option>';
-
         const gestoresSnap = await db.collection('usuarios').where('unidade', '==', unidadeAlvo).get();
         let options = '<option value="" disabled selected>Selecione o Gestor...</option>';
         let encontrouAlguem = false;
@@ -6215,9 +6219,7 @@ async function iniciarFluxoSubstituicao() {
                 encontrouAlguem = true;
             });
         }
-
         selectGestor.innerHTML = encontrouAlguem ? options : '<option value="" disabled selected>Nenhum gestor disponível</option>';
-
         document.getElementById('cautelaDetailsModal').style.display = 'none';
         document.getElementById('modalReportarItem').style.display = 'flex';
 
