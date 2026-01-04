@@ -7816,23 +7816,25 @@ function abrirDecisaoGestor(dataJson) {
             nomeGestorLogado = currentUserData.nome_militar_completo;
         }
 
-        // 1. ATUALIZAÇÃO DA CARGA DO MILITAR (CAUTELA)
-        // Filtra para remover a pendência que está sendo resolvida
+        // 1. ATUALIZAÇÃO DA CARGA DO MILITAR (CAUTELA) - CORREÇÃO CIRÚRGICA DE QUANTIDADE
         const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
             String(item.id_solicitacao) !== String(p.solicitacaoId)
         );
 
-        let novosItensCautela = [...(dataCautela.itens || [])];
         const qtdBaixa = Number(p.quantidade) || 1;
+        let novosItensCautela = [];
 
         if (p.itemTomb && p.itemTomb !== "S/T") {
-            // ITEM MULTI: Remove o objeto pelo tombamento
-            novosItensCautela = novosItensCautela.filter(it => it.tombamento !== p.itemTomb);
+            // ITEM MULTI: Remove o objeto pelo tombamento específico
+            novosItensCautela = (dataCautela.itens || []).filter(it => it.tombamento !== p.itemTomb);
         } else {
-            // ITEM SINGLE: Subtrai a quantidade ou remove se chegar a zero
-            novosItensCautela = novosItensCautela.map(it => {
-                if (it.nome.trim().toUpperCase() === nomeLimpo || it.id === p.id_base) {
-                    const novaQtd = it.quantidade - qtdBaixa;
+            // ITEM SINGLE: Subtrai apenas a quantidade reportada, preservando o restante
+            novosItensCautela = (dataCautela.itens || []).map(it => {
+                const isMesmoItem = it.id === p.id_base || it.id === p.uidItem || it.nome.trim().toUpperCase() === nomeLimpo;
+
+                if (isMesmoItem) {
+                    const novaQtd = (Number(it.quantidade) || 0) - qtdBaixa;
+                    // Se ainda sobrar quantidade, mantém o item com o novo valor. Se zerar, retorna null para o filter.
                     return novaQtd > 0 ? { ...it, quantidade: novaQtd } : null;
                 }
                 return it;
@@ -7870,7 +7872,7 @@ function abrirDecisaoGestor(dataJson) {
                         });
                     }
 
-                    // B. TRATA ITENS SINGLE (Redução de carimbo laranja)
+                    // B. TRATA ITENS SINGLE (Redução de carimbo laranja no estoque)
                     if (it.tipo === 'single' && it.cautelas) {
                         it.cautelas = it.cautelas.map(c => {
                             if (c.id === p.cautelaId) {
@@ -7881,7 +7883,7 @@ function abrirDecisaoGestor(dataJson) {
                         }).filter(c => c !== null);
                     }
 
-                    // C. CARIMBO DE PENDÊNCIA (Vermelho)
+                    // C. CARIMBO DE PENDÊNCIA GERAL (Vermelho)
                     if (!it.pendencias_ids) it.pendencias_ids = [];
                     it.pendencias_ids.push({
                         id: novoIdPendencia,
@@ -7908,7 +7910,7 @@ function abrirDecisaoGestor(dataJson) {
 
         const batch = db.batch();
         
-        // Update Cautela com o padrão visual padronizado
+        // Update Cautela
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: pendenciasRestantes,
@@ -7926,9 +7928,8 @@ function abrirDecisaoGestor(dataJson) {
         });
 
         await batch.commit();
-        alert(`✅ Recolhimento concluído!\nOperação realizada por: ${nomeGestorLogado}`);
+        alert(`✅ Recolhimento concluído!\nSaldo atualizado na carga do militar.`);
         
-        // Fechamento de interfaces
         if (document.getElementById('modalDecisaoGestor')) document.getElementById('modalDecisaoGestor').style.display = 'none';
         if (typeof fecharTabela === 'function') fecharTabela(); 
         if (typeof loadCaaData === 'function') await loadCaaData(); 
