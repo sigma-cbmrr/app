@@ -8015,32 +8015,45 @@ async function abrirSeletorGlobalSubstituicao() {
     const dataFormatada = new Date().toLocaleString('pt-BR');
     const dataSimples = new Date().toLocaleDateString('pt-BR');
     const nomeLimpo = (nomeItemOrigem || "").trim().toUpperCase();
-    const nomeMilitar = nomeResponsavel || "Militar";
-    const uidMilitar = uidResponsavel || "";
+    const nomeMilitarRelator = nomeResponsavel || "Militar";
+    const uidMilitarRelator = uidResponsavel || "";
+
+    // 🛑 BUSCA O NOME REAL DO GESTOR LOGADO NO DASHBOARD
+    let nomeGestorLogado = "Gestor";
+    if (typeof currentUserData !== 'undefined' && currentUserData.nome_militar_completo) {
+        nomeGestorLogado = currentUserData.nome_militar_completo;
+    }
 
     try {
         const batch = db.batch();
         const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
         const listaOrigemRef = db.collection('listas_conferencia').doc(localIdOrigem);
 
-        // 1. ATUALIZAÇÃO DA CAUTELA (CARGA DO MILITAR) - Mantido Íntegro
+        // 1. ATUALIZAÇÃO DA CAUTELA (CARGA DO MILITAR)
         const docC = await cautelaRef.get();
         if (docC.exists) {
             const d = docC.data();
             const pAtivas = (d.pendencias_ativas || []).filter(pa => (pa.item_nome || "").trim().toUpperCase() !== nomeLimpo);
+            
+            // Identifica se o novo item é multi ou single para formatar a descrição do histórico
+            const ehMulti = tombamentoNovo && tombamentoNovo !== "" && tombamentoNovo !== nomeItemOrigem;
+            const identificadorNovo = ehMulti ? `tombamento ${tombamentoNovo}` : `${uidNovo.split('-').pop()} unidades`;
+
             const itensC = (d.itens || []).map(it => {
                 if (it.nome.trim().toUpperCase() === nomeLimpo) {
                     return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
                 }
                 return it;
             });
+
             batch.update(cautelaRef, { 
                 pendencias_ativas: pAtivas, 
                 itens: itensC,
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                     data: dataFormatada,
-                    descricao: `Troca Cruzada: Substituído pelo tombamento ${tombamentoNovo}.`,
-                    militar: "Gestor"
+                    // ✅ MUDANÇA: "🔄Substituição:" e correção do texto de identificação
+                    descricao: `🔄Substituição: Item ${nomeItemOrigem} substituído por ${identificadorNovo}.`,
+                    militar: nomeGestorLogado // ✅ MUDANÇA: Agora aparece CAP QPCBM VIDO (ou quem estiver logado)
                 })
             });
         }
@@ -8055,57 +8068,49 @@ async function abrirSeletorGlobalSubstituicao() {
                         
                         let objetoCautelaParaMover = null;
                         const novoIdPendencia = "PEND-" + Date.now();
-                        const descricaoPadrao = `${motivoMilitar} (PENDÊNCIA ORIGINADA EM: ${cautelaId})`;
+                        // Aqui mantivemos o padrão solicitado anteriormente para o carimbo vermelho
+                        const descricaoPadrao = `${motivoMilitar} (TROCA CRUZADA - CAUTELA ${cautelaId})`;
 
-                        // LÓGICA ESPECÍFICA PARA MULTI (EPR, etc)
                         if (it.tipo === "multi" && it.tombamentos) {
                             it.tombamentos = it.tombamentos.map(t => {
-                                // A. Localiza o antigo (quebrado) e converte Carimbo Laranja em Vermelho
                                 if (t.cautela && t.cautela.id === cautelaId) {
                                     objetoCautelaParaMover = t.cautela; 
-                                    delete t.cautela; // Remove Laranja
-                                    
+                                    delete t.cautela;
                                     if (!t.pendencias_ids) t.pendencias_ids = [];
                                     t.pendencias_ids.push({
                                         id: novoIdPendencia,
                                         quantidade: 1,
-                                        descricao: descricaoPadrao, // Padronizado conforme solicitado
+                                        descricao: descricaoPadrao,
                                         data_criacao: dataSimples,
                                         status_gestao: "PENDENTE",
                                         tipo: "PENDENCIA",
-                                        autor_nome: nomeMilitar,
-                                        autor_uid: uidMilitar
+                                        autor_nome: nomeMilitarRelator
                                     });
                                 }
                                 return t;
                             }).map(t => {
-                                // B. Localiza o novo e injeta o Carimbo Laranja herdado
-                                if (t.tomb === tombamentoNovo) {
-                                    t.cautela = objetoCautelaParaMover; 
-                                }
+                                if (t.tomb === tombamentoNovo) t.cautela = objetoCautelaParaMover; 
                                 return t;
                             });
                         }
 
-                        // C. CARIMBO DE PENDÊNCIA NA RAIZ (Single e Multi - Para visão do Dashboard)
                         if (!it.pendencias_ids) it.pendencias_ids = [];
                         it.pendencias_ids.push({
                             id: novoIdPendencia,
                             quantidade: 1,
-                            descricao: descricaoPadrao, // Padronizado conforme solicitado
+                            descricao: descricaoPadrao,
                             data_criacao: dataSimples,
                             status_gestao: "PENDENTE",
                             tipo: "PENDENCIA",
-                            autor_nome: nomeMilitar,
-                            autor_uid: uidMilitar
+                            autor_nome: nomeMilitarRelator
                         });
 
                         if (!it.historico_vida) it.historico_vida = [];
                         it.historico_vida.push({
                             data: dataFormatada,
                             evento: "RETORNO_TROCA",
-                            detalhes: `Troca efetuada: ${tombamentoNovo} saiu para o militar. Antigo retornou com pendência.`,
-                            quem: "Gestor"
+                            detalhes: `🔄Substituição efetuada por ${nomeGestorLogado}.`,
+                            quem: nomeGestorLogado
                         });
                     }
                     return it;
@@ -8115,11 +8120,11 @@ async function abrirSeletorGlobalSubstituicao() {
         }
 
         await batch.commit();
-        alert("✅ Troca Cruzada concluída com sucesso!\nO padrão de carimbos foi aplicado a todos os itens.");
+        alert(`✅ Substituição concluída!\nRegistrado por: ${nomeGestorLogado}`);
         location.reload();
     } catch (e) {
-        console.error("Erro na Troca Cruzada:", e);
-        alert("Erro ao gravar dados: " + e.message);
+        console.error(e);
+        alert("Erro: " + e.message);
     }
 }
 	async function prepararSubstituicaoFisica() {
