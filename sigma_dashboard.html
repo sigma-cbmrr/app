@@ -7638,6 +7638,18 @@ async function abrirGestaoPendenciasCautela() {
     const tbody = document.getElementById('ca-list-body');
     if (!wrapper || !tbody) return;
 
+    // 1. AJUSTE DO CABEÇALHO DA TABELA (Substituindo Status por Cautela ID)
+    const thead = wrapper.querySelector('thead tr');
+    if (thead) {
+        thead.innerHTML = `
+            <th>Material / Origem</th>
+            <th>Cautela ID</th>
+            <th>Alteração / Motivo</th>
+            <th>Conferente</th>
+            <th>Ação</th>
+        `;
+    }
+
     document.getElementById('table-title').innerHTML = `<i class="fas fa-exchange-alt"></i> Substituições Pendentes`;
     tbody.innerHTML = '';
     wrapper.querySelector('table').style.display = 'table';
@@ -7647,29 +7659,44 @@ async function abrirGestaoPendenciasCautela() {
         cautela.pendencias.forEach(p => {
             const tr = tbody.insertRow();
             
-            // 1. Coluna Material
+            // --- BLOCO DE SEGURANÇA: NORMALIZAÇÃO DE DADOS (Restaurado e Íntegro) ---
+            const itemNome = (p.item_nome || p.itemNome || "").trim().toUpperCase();
+            const itemTomb = (p.item_tombamento || p.itemTomb || "S/T").trim().toUpperCase();
+            const itemQtd = p.quantidade || p.itemQtd || 1;
+            
+            // Recuperação cirúrgica de IDs para itens específicos (Pé de Cabra / EPR)
+            let uidItemFinal = p.id_item || p.uidItem || "";
+            let idBaseFinal = p.id_base || "";
+
+            if (!uidItemFinal || String(uidItemFinal).includes('undefined')) {
+                if (itemNome.includes("PÉ DE CABRA")) {
+                    uidItemFinal = "56911524-65986249";
+                    idBaseFinal = "56911524-65986249";
+                } else if (itemNome.includes("EPR SCOTT")) {
+                    uidItemFinal = "56911524-64012364-" + (itemTomb !== "S/T" ? itemTomb : "S/T");
+                    idBaseFinal = "56911524-64012364";
+                }
+            }
+            // -----------------------------------------------------------------------
+
+            // 2. Coluna Material e Local
             const tdMaterial = tr.insertCell();
             tdMaterial.innerHTML = `
-                <strong>${p.item_nome}</strong><br>
-                <small style="color:#800020">Origem: ${cautela.local_origem || 'Não especificado'}</small><br>
-                <small class="status-badge badge-cautela">${cautela.id}</small>
+                <div style="text-align:left;">
+                    <strong>${p.item_nome}</strong><br>
+                    <small style="color:#666"><i class="fas fa-map-marker-alt"></i> ${cautela.local_origem || 'N/D'}</small>
+                </div>
             `;
 
-            // 2. Coluna Status
-            const tdStatus = tr.insertCell();
-            tdStatus.innerHTML = `<span class="status-badge badge-pendente">AGUARDANDO TROCA</span>`;
+            // 3. Coluna Cautela ID
+            const tdCautela = tr.insertCell();
+            tdCautela.innerHTML = `<span class="status-badge badge-cautela" style="font-family: monospace; font-size: 0.95em;">${cautela.id}</span>`;
 
-            // 3. Coluna Alteração (CORREÇÃO CIRÚRGICA DE SINGLE VS MULTI)
+            // 4. Coluna Alteração (Lógica Single vs Multi)
             const tdAlteracao = tr.insertCell();
             tdAlteracao.style.textAlign = "left";
-            
-            const itemNome = (p.item_nome || "").trim().toUpperCase();
-            const itemTomb = (p.item_tombamento || "S/T").trim().toUpperCase();
-            const itemQtd = p.quantidade || 1;
-
-            // Lógica para detectar se é item de estoque (Single)
             const ehItemSingle = !p.item_tombamento || itemTomb === "S/T" || itemTomb === itemNome;
-
+            
             const labelIdentificador = ehItemSingle 
                 ? `<b style="color:#666;">Qtd:</b> ${itemQtd} un.` 
                 : `<b style="color:#666;">Tomb:</b> ${p.item_tombamento}`;
@@ -7681,28 +7708,25 @@ async function abrirGestaoPendenciasCautela() {
                 </div>
             `;
 
-            // 4. Coluna Solicitante e Data
+            // 5. Coluna Solicitante e Data
             const tdMilitar = tr.insertCell();
-            let dataFormatada = "Data indisponível";
+            let dataFormatada = "N/D";
             if (p.timestamp) {
                 const d = p.timestamp.seconds ? new Date(p.timestamp.seconds * 1000) : new Date(p.timestamp);
-                if (!isNaN(d.getTime())) dataFormatada = d.toLocaleString('pt-BR');
+                if (!isNaN(d.getTime())) dataFormatada = d.toLocaleDateString('pt-BR') + " " + d.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
             }
             tdMilitar.innerHTML = `<small><b>${p.solicitante_nome}</b><br>${dataFormatada}</small>`;
 
-            // 5. Preparação dos dados para o botão de ação
-            const idItemReal = p.id_item || "";
-            const idBaseReal = p.id_base || "";
-            const tombReal = p.item_tombamento || "";
-
+            // 6. Preparação dos dados para o botão de ação (Garantindo UIDs íntegros)
             const btnData = encodeURIComponent(JSON.stringify({
                 cautelaId: cautela.id,
                 solicitacaoId: p.id_solicitacao,
                 itemNome: p.item_nome,
-                itemTomb: tombReal,
+                itemTomb: itemTomb,
                 localId: cautela.local_origem_id,
                 motivo: p.motivo,
-                uidItem: idItemReal || (idBaseReal ? `${idBaseReal}-${tombReal}` : ""),
+                uidItem: uidItemFinal || (idBaseFinal ? `${idBaseFinal}-${itemTomb}` : ""),
+                id_base: idBaseFinal,
                 solicitante_nome: p.solicitante_nome || "Militar", 
                 gestor_alvo_nome: p.solicitante_nome || "Militar",
                 gestor_alvo_uid: p.solicitante_uid || "",
@@ -7711,7 +7735,7 @@ async function abrirGestaoPendenciasCautela() {
 
             const tdAcao = tr.insertCell();
             tdAcao.innerHTML = `
-                <button class="btn-modern-action" style="background-color: #f57c00; padding: 5px 10px; cursor:pointer;" 
+                <button class="btn-modern-action" style="background-color: #f57c00; padding: 6px 12px; display: flex; align-items: center; gap: 5px; cursor:pointer;" 
                     onclick="abrirDecisaoGestor('${btnData}')">
                     <i class="fas fa-tools"></i> Resolver
                 </button>
@@ -7721,74 +7745,6 @@ async function abrirGestaoPendenciasCautela() {
 
     wrapper.style.display = 'block';
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-		function abrirDecisaoGestor(dataJson) {
-    try {
-        const data = JSON.parse(decodeURIComponent(dataJson));
-        console.log("=== Dados brutos recebidos no Modal ===", data);
-
-        // 1. NORMALIZAÇÃO DE RASTREABILIDADE
-        data.gestor_alvo_nome = data.solicitante_nome || 
-                                data.gestor_alvo_nome || 
-                                data.destinatario_original_nome || 
-                                "Militar";
-
-        data.gestor_alvo_uid = data.solicitante_uid || 
-                               data.gestor_alvo_uid || 
-                               data.destinatario_uid || 
-                               "";
-        
-        data.itemNome = data.item_nome || data.itemNome || "Item sem nome";
-        data.motivo = data.motivo || "Avaria relatada";
-
-        // 2. CORREÇÃO DE IDS ESPECÍFICOS (Pé de Cabra / EPR)
-        if (!data.uidItem || (data.uidItem && String(data.uidItem).includes('undefined'))) {
-            const nomeUpper = data.itemNome.toUpperCase();
-            if (nomeUpper.includes("PÉ DE CABRA")) {
-                data.uidItem = "56911524-65986249";
-                data.id_base = "56911524-65986249";
-            } else if (nomeUpper.includes("EPR SCOTT")) {
-                data.uidItem = "56911524-64012364-" + (data.itemTomb || data.item_tombamento || "S/T");
-                data.id_base = "56911524-64012364";
-            }
-        }
-
-        // 3. GARANTIA DE QUANTIDADE
-        data.quantidade = Number(data.quantidade || data.itemQtd || 1);
-
-        // 4. ATRIBUIÇÃO À VARIÁVEL GLOBAL
-        pendenciaSendoResolvida = data; 
-
-        // 5. PREPARAÇÃO DA INTERFACE DO MODAL (CORREÇÃO CIRÚRGICA DE SINGLE VS MULTI)
-        const tombReal = data.itemTomb || data.item_tombamento || "";
-        // É single se não houver tombamento OU se o tombamento for igual ao nome do item
-        const ehItemSingle = !tombReal || tombReal === "S/T" || tombReal.trim().toUpperCase() === data.itemNome.trim().toUpperCase();
-        
-        const identificadorHtml = ehItemSingle 
-            ? `<b>Quantidade relatada:</b> <span style="color:#d90f23; font-weight:bold;">${data.quantidade} un.</span>` 
-            : `<b>Tombamento:</b> <span style="color:#800020; font-weight:bold;">${tombReal}</span>`;
-
-        const infoBox = document.getElementById('info-item-decisao');
-        if (infoBox) {
-            infoBox.innerHTML = `
-                <div style="line-height: 1.6; text-align: left; background: #fff; padding: 12px; border-radius: 4px; border: 1px solid #ddd; border-left: 5px solid #800020;">
-                    <b style="color: #800020; font-size: 1.1em; text-transform: uppercase;">${data.itemNome}</b><br>
-                    <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; font-size: 0.95em;">
-                        ${identificadorHtml}<br>
-                        <b>Relatado por:</b> <span style="color: #2c7399; font-weight: bold;">${data.gestor_alvo_nome}</span><br>
-                        <b>Motivo:</b> <span style="color:#333;">${data.motivo}</span>
-                    </div>
-                </div>
-            `;
-        }
-
-        const modal = document.getElementById('modalDecisaoGestor');
-        if (modal) modal.style.display = 'flex';
-
-    } catch (e) {
-        console.error("Erro crítico ao abrir modal de decisão:", e);
-        alert("Erro ao processar dados da pendência.");
-    }
 }
 		async function executarRecolhimentoApenas() {
     if (!pendenciaSendoResolvida) return;
