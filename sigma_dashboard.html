@@ -7824,7 +7824,11 @@ function abrirDecisaoGestor(dataJson) {
         const qtdBaixa = Number(p.quantidade) || 1;
         let novosItensCautela = [];
 
-        if (p.itemTomb && p.itemTomb !== "S/T") {
+        // Lógica para detectar se é item de estoque (Single)
+        const itemTombReal = (p.itemTomb || "S/T").trim().toUpperCase();
+        const ehItemSingle = !p.itemTomb || itemTombReal === "S/T" || itemTombReal === nomeLimpo;
+
+        if (!ehItemSingle) {
             // ITEM MULTI: Remove o objeto pelo tombamento específico
             novosItensCautela = (dataCautela.itens || []).filter(it => it.tombamento !== p.itemTomb);
         } else {
@@ -7834,7 +7838,6 @@ function abrirDecisaoGestor(dataJson) {
 
                 if (isMesmoItem) {
                     const novaQtd = (Number(it.quantidade) || 0) - qtdBaixa;
-                    // Se ainda sobrar quantidade, mantém o item com o novo valor. Se zerar, retorna null para o filter.
                     return novaQtd > 0 ? { ...it, quantidade: novaQtd } : null;
                 }
                 return it;
@@ -7855,7 +7858,7 @@ function abrirDecisaoGestor(dataJson) {
                         it.tombamentos = it.tombamentos.map(t => {
                             if (t.tomb === p.itemTomb) {
                                 delete t.cautela; // Remove carimbo LARANJA
-                                t.status = 'pending'; // Sinaliza pendência no objeto
+                                t.status = 'pending'; 
                                 
                                 if (!t.pendencias_ids) t.pendencias_ids = [];
                                 t.pendencias_ids.push({
@@ -7908,15 +7911,18 @@ function abrirDecisaoGestor(dataJson) {
             })
         }));
 
+        // --- PREPARAÇÃO DO TEXTO DO HISTÓRICO DA CAUTELA ---
+        const prefixoDescricao = ehItemSingle ? `${qtdBaixa}un de ` : "Item ";
+
         const batch = db.batch();
         
-        // Update Cautela
+        // Update Cautela com menção à quantidade
         batch.update(cautelaRef, {
             itens: novosItensCautela,
             pendencias_ativas: pendenciasRestantes,
             historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                 data: dataRegistro,
-                descricao: `📥Recolhimento: Item ${p.itemNome} removido da carga. Motivo: ${p.motivo}`,
+                descricao: `📥Recolhimento: ${prefixoDescricao}${p.itemNome} removido da carga. Motivo: ${p.motivo}`,
                 militar: nomeGestorLogado
             })
         });
