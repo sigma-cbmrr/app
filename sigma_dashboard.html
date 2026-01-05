@@ -8871,7 +8871,7 @@ async function verDetalhesItemAlmox(docId) {
 /**
  * Função que renderiza os carimbos originais do Conferencia App dentro do modal
  */
-function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
+function mostrarCarimbos(titulo, dataJson, tipo, listaId = null, nomeItemLimpo = "") {
     const dados = JSON.parse(dataJson);
     const modal = document.getElementById('modal-detalhe-carimbos');
     const corpo = document.getElementById('corpo-modal-carimbo');
@@ -8880,13 +8880,12 @@ function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
     if (!modal || !corpo) return;
 
     h3.textContent = titulo;
-    // Ajusta a cor da borda do modal conforme o tipo
     modal.querySelector('.modal-content').style.borderTop = tipo === 'cautela' ? '5px solid #f57c00' : '5px solid #d90f23';
     
     let html = '';
     dados.forEach(item => {
         if (tipo === 'cautela') {
-            const cId = item.id; // ID da cautela_aberta
+            const cId = item.id;
             html += `
                 <div style="border: 1px solid #eee; padding: 12px; margin-bottom: 12px; border-radius: 8px; border-left: 5px solid #f57c00; background: #fffaf5;">
                     <div style="display:flex; justify-content:space-between; align-items: flex-start; margin-bottom:8px;">
@@ -8904,6 +8903,9 @@ function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
                     </div>
                 </div>`;
         } else {
+            // Pega o ID único da pendência para a busca cirúrgica
+            const pId = item.id || item.pendencia_id; 
+
             html += `
                 <div style="border: 1px solid #eee; padding: 12px; margin-bottom: 12px; border-radius: 8px; border-left: 5px solid #d90f23; background: #fff5f5;">
                     <div style="display:flex; justify-content:space-between; align-items: flex-start; margin-bottom:8px;">
@@ -8918,9 +8920,9 @@ function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
                     </div>
                     <div style="text-align: right; margin-top: 10px; border-top: 1px solid #ffdada; padding-top: 8px;">
                         <button class="btn-modern-action" style="font-size: 0.75em; padding: 5px 10px; background-color: #d90f23;" 
-        onclick="atalhoGestaoPendencia('${listaId}', '${titulo.split(' em ')[0].replace('Pendências em ', '')}')">
-    <i class="fas fa-wrench"></i> Resolver na Viatura
-</button>
+                                onclick="atalhoGestaoPendencia('${listaId}', '${nomeItemLimpo}', '${pId}')">
+                            <i class="fas fa-wrench"></i> Resolver na Viatura
+                        </button>
                     </div>
                 </div>`;
         }
@@ -8929,7 +8931,6 @@ function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
     corpo.innerHTML = html || '<p style="text-align:center; color:#999;">Nenhum registro detalhado encontrado.</p>';
     modal.style.display = 'flex';
 }
-
 /**
  * ATALHO 1: Direciona para a aba de Cautelas e abre o detalhe da cautela
  */
@@ -9020,54 +9021,50 @@ async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
  * Localiza o item na tabela, com sistema de espera (polling) 
  * para garantir que a renderização terminou.
  */
-function destacarItemNaTabela(nomeItem) {
-    const alvo = nomeItem.trim().toUpperCase();
+function destacarItemNaTabela(nomeItem, pendenciaId) {
     let tentativas = 0;
-    const maxTentativas = 20; // Tenta por 4 segundos (20 * 200ms)
 
     const intervalBusca = setInterval(() => {
         const rows = document.querySelectorAll('#ca-list-body tr');
         let linhaEncontrada = null;
 
         rows.forEach(row => {
-            const textoMaterial = row.cells[0]?.textContent.toUpperCase() || "";
-            if (textoMaterial.includes(alvo)) {
-                linhaEncontrada = row;
+            // BUSCA PELO ID (Muito mais seguro)
+            if (pendenciaId) {
+                // Procura o ID dentro do onclick dos botões daquela linha
+                const btnGerenciar = row.querySelector('button[onclick*="' + pendenciaId + '"]');
+                if (btnGerenciar) linhaEncontrada = row;
+            } 
+            
+            // BUSCA PELO NOME (Fallback caso o ID falhe)
+            if (!linhaEncontrada && nomeItem) {
+                const texto = row.cells[0]?.innerText.toUpperCase();
+                if (texto.includes(nomeItem.toUpperCase())) linhaEncontrada = row;
             }
         });
 
         if (linhaEncontrada) {
-            clearInterval(intervalBusca); // Para de procurar
-            
-            // EXECUTA O VISUAL
+            clearInterval(intervalBusca);
             linhaEncontrada.scrollIntoView({ behavior: 'smooth', block: 'center' });
             
+            // Efeito visual potente
             linhaEncontrada.style.backgroundColor = "#fff3cd";
-            linhaEncontrada.style.border = "2px solid #f57c00";
-            linhaEncontrada.style.transition = "all 0.3s";
+            linhaEncontrada.style.outline = "3px solid #f57c00";
             
-            // Efeito de pulso
-            let flashes = 0;
-            const pulse = setInterval(() => {
-                linhaEncontrada.style.opacity = (flashes % 2 === 0) ? "0.5" : "1";
-                flashes++;
-                if (flashes === 10) {
-                    clearInterval(pulse);
-                    linhaEncontrada.style.opacity = "1";
-                    setTimeout(() => {
-                        linhaEncontrada.style.backgroundColor = "";
-                        linhaEncontrada.style.border = "none";
-                    }, 4000);
-                }
-            }, 200);
+            linhaEncontrada.animate([
+                { transform: 'scale(1)', boxShadow: 'none' },
+                { transform: 'scale(1.02)', boxShadow: '0 0 15px #f57c00' },
+                { transform: 'scale(1)', boxShadow: 'none' }
+            ], { duration: 500, iterations: 4 });
 
-        } else if (tentativas >= maxTentativas) {
-            clearInterval(intervalBusca);
-            console.warn("Destaque: Item não encontrado após várias tentativas.");
-        }
+            setTimeout(() => {
+                linhaEncontrada.style.backgroundColor = "";
+                linhaEncontrada.style.outline = "none";
+            }, 5000);
+        } else if (tentativas >= 20) clearInterval(intervalBusca);
         
         tentativas++;
-    }, 200); // Tenta a cada 200ms
+    }, 200);
 }
 		function toggleAlmoxDestino() {
     const tipo = document.getElementById('almox-operacao-tipo').value;
