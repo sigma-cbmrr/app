@@ -8778,14 +8778,14 @@ async function verDetalhesItemAlmox(docId) {
                 </div>`;
         }
 
-        // 2. Cabeçalhos (Multi mantido | Single renovado)
+        // 2. Cabeçalhos
         if (ehMulti) {
             thead.innerHTML = `
                 <tr>
                     <th style="text-align:left;">Tombamento</th>
                     <th style="text-align:left;">Local Atual</th>
                     <th style="text-align:center;">Status</th>
-                    <th style="text-align:left;">Detentor / Observação</th>
+                    <th style="text-align:left;">Ações / Detalhes</th>
                 </tr>`;
         } else {
             thead.innerHTML = `
@@ -8816,27 +8816,30 @@ async function verDetalhesItemAlmox(docId) {
                     if (it.nome.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
                         
                         if (ehMulti) {
-                            // LOGICA MULTI MANTIDA CONFORME SOLICITADO
+                            // LÓGICA MULTI: Adicionado botões de lupa para abrir carimbos individuais
                             (it.tombamentos || []).forEach(t => {
                                 let statusTag = '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
-                                let info = '-';
+                                let acaoBotao = '-';
+
                                 if (t.cautela) {
                                     statusTag = '<span class="status-badge badge-cautela">CAUTELADO</span>';
-                                    info = t.cautela.destinatario;
+                                    const stringC = JSON.stringify([t.cautela]).replace(/"/g, '&quot;');
+                                    acaoBotao = `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Detalhe Tombamento ${t.tomb}', '${stringC}', 'cautela', '${listaId}')"><i class="fas fa-search"></i> Ver Cautela</button>`;
                                 } else if (t.pendencias_ids && t.pendencias_ids.length > 0) {
                                     statusTag = '<span class="status-badge badge-pendente">PENDENTE</span>';
-                                    info = t.pendencias_ids[0].descricao;
+                                    const stringP = JSON.stringify(t.pendencias_ids).replace(/"/g, '&quot;');
+                                    acaoBotao = `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Detalhe Tombamento ${t.tomb}', '${stringP}', 'pendencia', '${listaId}')"><i class="fas fa-wrench"></i> Ver Pendência</button>`;
                                 }
-                                htmlRows += `<tr><td><b>${t.tomb}</b></td><td>${localNome}</td><td style="text-align:center;">${statusTag}</td><td>${info}</td></tr>`;
+
+                                htmlRows += `<tr><td><b>${t.tomb}</b></td><td>${localNome}</td><td style="text-align:center;">${statusTag}</td><td>${acaoBotao}</td></tr>`;
                             });
                         } else {
-                            // LÓGICA SINGLE: Transformando números em gatilhos clicáveis
+                            // LÓGICA SINGLE: Inclusão do listaId nos gatilhos para os atalhos funcionarem
                             const total = Number(it.quantidadeEsperada || it.quantidade) || 0;
                             const nCautelas = (it.cautelas || []).reduce((s, v) => s + (Number(v.quantidade) || 0), 0);
                             const nPendencias = (it.pendencias_ids || []).reduce((s, v) => s + (Number(v.quantidade) || 0), 0);
                             const disponivel = total - nCautelas - nPendencias;
 
-                            // Criamos os carimbos em String JSON para passar para a função do modal
                             const stringCautelas = JSON.stringify(it.cautelas || []).replace(/"/g, '&quot;');
                             const stringPendencias = JSON.stringify(it.pendencias_ids || []).replace(/"/g, '&quot;');
 
@@ -8847,10 +8850,10 @@ async function verDetalhesItemAlmox(docId) {
                                         <td style="text-align:center;">${total}</td>
                                         <td style="text-align:center; font-weight:bold; color:#1b8a3e;">${disponivel}</td>
                                         <td style="text-align:center;">
-                                            ${nCautelas > 0 ? `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Cautelas em ${localNome}', '${stringCautelas}', 'cautela')">${nCautelas}</button>` : '0'}
+                                            ${nCautelas > 0 ? `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Cautelas em ${localNome}', '${stringCautelas}', 'cautela', '${listaId}')">${nCautelas}</button>` : '0'}
                                         </td>
                                         <td style="text-align:center;">
-                                            ${nPendencias > 0 ? `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Pendências em ${localNome}', '${stringPendencias}', 'pendencia')">${nPendencias}</button>` : '0'}
+                                            ${nPendencias > 0 ? `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Pendências em ${localNome}', '${stringPendencias}', 'pendencia', '${listaId}')">${nPendencias}</button>` : '0'}
                                         </td>
                                         <td style="text-align:center;">
                                             <button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.7em;" onclick="abrirEditor('${listaId}', '${data.nome_local}', '${data.unidade}')">Abrir</button>
@@ -8865,45 +8868,105 @@ async function verDetalhesItemAlmox(docId) {
         tbody.innerHTML = htmlRows || '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum exemplar localizado.</td></tr>';
     } catch (e) { console.error(e); }
 }
-
 /**
  * Função que renderiza os carimbos originais do Conferencia App dentro do modal
  */
-function mostrarCarimbos(titulo, dataJson, tipo) {
+function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
     const dados = JSON.parse(dataJson);
     const modal = document.getElementById('modal-detalhe-carimbos');
     const corpo = document.getElementById('corpo-modal-carimbo');
     const h3 = document.getElementById('titulo-modal-carimbo');
 
+    if (!modal || !corpo) return;
+
     h3.textContent = titulo;
-    modal.style.borderTopColor = tipo === 'cautela' ? '#f57c00' : '#d90f23';
+    // Ajusta a cor da borda do modal conforme o tipo
+    modal.querySelector('.modal-content').style.borderTop = tipo === 'cautela' ? '5px solid #f57c00' : '5px solid #d90f23';
     
     let html = '';
     dados.forEach(item => {
         if (tipo === 'cautela') {
+            const cId = item.id; // ID da cautela_aberta
             html += `
-                <div style="border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 5px; border-left: 5px solid #f57c00;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                        <b>${item.destinatario}</b>
-                        <span class="badge-cautela" style="padding:2px 8px;">${item.quantidade} un</span>
+                <div style="border: 1px solid #eee; padding: 12px; margin-bottom: 12px; border-radius: 8px; border-left: 5px solid #f57c00; background: #fffaf5;">
+                    <div style="display:flex; justify-content:space-between; align-items: flex-start; margin-bottom:8px;">
+                        <div>
+                            <b style="font-size: 1.1em; color: #333;">${item.destinatario}</b><br>
+                            <small style="color:#666;"><i class="far fa-calendar-alt"></i> Cautelado em: ${item.data || 'N/D'}</small>
+                        </div>
+                        <span class="badge-cautela" style="background:#f57c00; color:white; padding:4px 10px; border-radius:15px; font-weight:bold;">${item.quantidade || 1} un</span>
                     </div>
-                    <small style="color:#666;"><i class="far fa-calendar-alt"></i> Data: ${item.data || 'N/D'}</small>
+                    <div style="text-align: right; margin-top: 10px; border-top: 1px solid #ffe0b2; padding-top: 8px;">
+                        <button class="btn-modern-action" style="font-size: 0.75em; padding: 5px 10px; background-color: #f57c00;" 
+                                onclick="atalhoGestaoCautela('${cId}')">
+                            <i class="fas fa-external-link-alt"></i> Ver Ficha da Cautela
+                        </button>
+                    </div>
                 </div>`;
         } else {
             html += `
-                <div style="border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 5px; border-left: 5px solid #d90f23;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                        <b>Relatado por: ${item.autor_nome}</b>
-                        <span class="badge-pendente" style="padding:2px 8px;">${item.quantidade} un</span>
+                <div style="border: 1px solid #eee; padding: 12px; margin-bottom: 12px; border-radius: 8px; border-left: 5px solid #d90f23; background: #fff5f5;">
+                    <div style="display:flex; justify-content:space-between; align-items: flex-start; margin-bottom:8px;">
+                        <div>
+                            <b style="font-size: 1.1em; color: #333;">Relatado por: ${item.autor_nome}</b><br>
+                            <small style="color:#666;"><i class="far fa-calendar-alt"></i> ${item.data_criacao || 'N/D'}</small>
+                        </div>
+                        <span class="badge-pendente" style="background:#d90f23; color:white; padding:4px 10px; border-radius:15px; font-weight:bold;">${item.quantidade || 1} un</span>
                     </div>
-                    <div style="font-size:0.9em; margin:5px 0;">"${item.descricao}"</div>
-                    <small style="color:#666;"><i class="far fa-calendar-alt"></i> ${item.data_criacao || 'N/D'}</small>
+                    <div style="font-size:0.95em; color: #555; margin:8px 0; padding: 8px; background: white; border-radius: 4px; border: 1px solid #ffdada;">
+                        <i class="fas fa-comment-dots"></i> "${item.descricao}"
+                    </div>
+                    <div style="text-align: right; margin-top: 10px; border-top: 1px solid #ffdada; padding-top: 8px;">
+                        <button class="btn-modern-action" style="font-size: 0.75em; padding: 5px 10px; background-color: #d90f23;" 
+                                onclick="atalhoGestaoPendencia('${listaId}')">
+                            <i class="fas fa-wrench"></i> Resolver na Viatura
+                        </button>
+                    </div>
                 </div>`;
         }
     });
 
-    corpo.innerHTML = html;
+    corpo.innerHTML = html || '<p style="text-align:center; color:#999;">Nenhum registro detalhado encontrado.</p>';
     modal.style.display = 'flex';
+}
+
+/**
+ * ATALHO 1: Direciona para a aba de Cautelas e abre o detalhe da cautela
+ */
+function atalhoGestaoCautela(cId) {
+    document.getElementById('modal-detalhe-carimbos').style.display = 'none';
+    switchView('cautelas');
+    setTimeout(() => {
+        showCautelaDetails(cId);
+    }, 300);
+}
+
+/**
+ * ATALHO 2: Direciona para o Dashboard e abre a tabela de pendências daquela VTR
+ */
+async function atalhoGestaoPendencia(listaId) {
+    if(!listaId) return alert("Erro: ID da lista não identificado.");
+    
+    document.getElementById('modal-detalhe-carimbos').style.display = 'none';
+    switchView('dashboard');
+
+    try {
+        // Buscamos o objeto simplificado da lista para a função mostrarTabela
+        const doc = await db.collection(COLECAO_LISTAS).doc(listaId).get();
+        if(doc.exists) {
+            const data = doc.data();
+            const fakeD = {
+                lista_id: listaId,
+                local: data.nome_local,
+                conferente: "Via Almoxarifado",
+                date: new Date().toLocaleString(),
+                items: [] // A função mostrarTabela irá recarregar os itens reais do banco
+            };
+            setTimeout(() => {
+                mostrarTabela(fakeD);
+            }, 300);
+        }
+    } catch (e) { console.error(e); }
 }
 function toggleAlmoxDestino() {
     const tipo = document.getElementById('almox-operacao-tipo').value;
