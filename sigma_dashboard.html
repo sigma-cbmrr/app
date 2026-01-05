@@ -8918,9 +8918,9 @@ function mostrarCarimbos(titulo, dataJson, tipo, listaId = null) {
                     </div>
                     <div style="text-align: right; margin-top: 10px; border-top: 1px solid #ffdada; padding-top: 8px;">
                         <button class="btn-modern-action" style="font-size: 0.75em; padding: 5px 10px; background-color: #d90f23;" 
-                                onclick="atalhoGestaoPendencia('${listaId}')">
-                            <i class="fas fa-wrench"></i> Resolver na Viatura
-                        </button>
+        onclick="atalhoGestaoPendencia('${listaId}', '${titulo.split(' em ')[0].replace('Pendências em ', '')}')">
+    <i class="fas fa-wrench"></i> Resolver na Viatura
+</button>
                     </div>
                 </div>`;
         }
@@ -8944,14 +8944,14 @@ function atalhoGestaoCautela(cId) {
 /**
  * ATALHO 2: Direciona para o Dashboard e abre a tabela de pendências daquela VTR
  */
-async function atalhoGestaoPendencia(listaId) {
+async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
     if(!listaId) return alert("Erro: ID da lista não identificado.");
     
+    // 1. Fecha o modal atual e muda para o dashboard
     document.getElementById('modal-detalhe-carimbos').style.display = 'none';
     switchView('dashboard');
 
     try {
-        // Buscamos o objeto simplificado da lista para a função mostrarTabela
         const doc = await db.collection(COLECAO_LISTAS).doc(listaId).get();
         if(doc.exists) {
             const data = doc.data();
@@ -8960,15 +8960,51 @@ async function atalhoGestaoPendencia(listaId) {
                 local: data.nome_local,
                 conferente: "Via Almoxarifado",
                 date: new Date().toLocaleString(),
-                items: [] // A função mostrarTabela irá recarregar os itens reais do banco
+                items: [] 
             };
+            
+            // 2. Abre a tabela do dashboard
             setTimeout(() => {
                 mostrarTabela(fakeD);
+                
+                // 3. Aguarda a tabela renderizar e aplica o destaque visual
+                setTimeout(() => {
+                    destacarItemNaTabela(itemNomeAlvo);
+                }, 500);
             }, 300);
         }
     } catch (e) { console.error(e); }
 }
-function toggleAlmoxDestino() {
+
+/**
+ * Função que rola a tela até o item e faz ele piscar para o gestor.
+ */
+function destacarItemNaTabela(nomeItem) {
+    const rows = document.querySelectorAll('#ca-list-body tr');
+    nomeItem = nomeItem.trim().toUpperCase();
+
+    rows.forEach(row => {
+        const textoMaterial = row.cells[0]?.textContent.toUpperCase() || "";
+        if (textoMaterial.includes(nomeItem)) {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Efeito visual de destaque (Piscar)
+            row.style.transition = "background-color 0.5s";
+            row.style.backgroundColor = "#fff3cd"; // Amarelo alerta
+            
+            let flashes = 0;
+            const interval = setInterval(() => {
+                row.style.backgroundColor = (flashes % 2 === 0) ? "#ffdada" : "#fff3cd";
+                flashes++;
+                if (flashes === 6) {
+                    clearInterval(interval);
+                    row.style.backgroundColor = "#fff3cd"; // Mantém destacado
+                }
+            }, 300);
+        }
+    });
+}
+		function toggleAlmoxDestino() {
     const tipo = document.getElementById('almox-operacao-tipo').value;
     const divViatura = document.getElementById('div-almox-viatura');
     if(divViatura) divViatura.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
