@@ -8533,8 +8533,30 @@ async function abrirSeletorGlobalSubstituicao() {
  * Esta função resolve o erro "is not defined" no console.
  */
 async function carregarAlmoxarifadoUI() {
+    const table = document.getElementById('almox-table');
+    const thead = table ? table.querySelector('thead') : null;
     const tbody = document.getElementById('almox-body');
+    const breadcrumb = document.getElementById('almox-breadcrumb');
+
     if (!tbody) return;
+
+    // 1. Restaura o cabeçalho original (caso venha da tela de detalhes)
+    if (thead) {
+        thead.innerHTML = `
+            <tr>
+                <th>Material</th>
+                <th style="text-align: center;">Total Unidade</th>
+                <th style="text-align: center;">Em Carga</th>
+                <th style="text-align: center;">Em Alteração</th>
+                <th style="text-align: center;">Disponível (Estoque)</th>
+                <th style="text-align: center;">Ações</th>
+            </tr>`;
+    }
+
+    // 2. Reseta o breadcrumb para o estado inicial
+    if (breadcrumb) {
+        breadcrumb.innerHTML = `Almoxarifado > Inventário Geral`;
+    }
 
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Carregando inventário...</td></tr>';
 
@@ -8548,7 +8570,7 @@ async function carregarAlmoxarifadoUI() {
         if (snap.empty) {
             html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum item sincronizado nesta unidade. Clique em "Sincronizar Saldos".</td></tr>';
         } else {
-            // Ordena alfabeticamente pelo nome do item
+            // Converte para array e ordena alfabeticamente
             const docs = [];
             snap.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
             docs.sort((a, b) => a.nome.localeCompare(b.nome));
@@ -8556,7 +8578,8 @@ async function carregarAlmoxarifadoUI() {
             docs.forEach(d => {
                 const total = d.total || 0;
                 const disponivel = d.disponivel || 0;
-                // Semáforo de estoque
+                
+                // Semáforo de estoque para o campo Disponível
                 const statusColor = disponivel === 0 ? '#d90f23' : disponivel < (total * 0.2) ? '#f57c00' : '#1b8a3e';
 
                 html += `
@@ -8566,8 +8589,8 @@ async function carregarAlmoxarifadoUI() {
                             <small style="color:#888;">${d.tipo === 'multi' ? 'TOMBAMENTO' : 'QUANTIDADE'}</small>
                         </td>
                         <td style="text-align:center;" data-label="Total">${total}</td>
-                        <td style="text-align:center;" data-label="Em Carga">${d.emCarga}</td>
-                        <td style="text-align:center;" data-label="Em Alteração">${d.emAlteracao}</td>
+                        <td style="text-align:center;" data-label="Em Carga">${d.emCarga || 0}</td>
+                        <td style="text-align:center;" data-label="Em Alteração">${d.emAlteracao || 0}</td>
                         <td style="text-align:center; font-weight:bold; color:${statusColor}; background-color:#fcfcfc;" data-label="Disponível">
                             ${disponivel}
                         </td>
@@ -8576,7 +8599,7 @@ async function carregarAlmoxarifadoUI() {
                                 <button class="btn-modern-action btn-edit" title="Ver Distribuição" onclick="verDetalhesItemAlmox('${d.id}')">
                                     <i class="fas fa-search-plus"></i>
                                 </button>
-                                <button class="btn-modern-action btn-sync" title="Movimentar" onclick="alert('Módulo de transferência em breve')">
+                                <button class="btn-modern-action btn-sync" title="Movimentar" onclick="abrirModalTransferencia('${d.id}')">
                                     <i class="fas fa-exchange-alt"></i>
                                 </button>
                             </div>
@@ -8586,17 +8609,12 @@ async function carregarAlmoxarifadoUI() {
             });
         }
         tbody.innerHTML = html;
-        
-        // Reseta o breadcrumb ao carregar a lista geral
-        const breadcrumb = document.getElementById('almox-breadcrumb');
-        if(breadcrumb) breadcrumb.textContent = "Almoxarifado > Inventário Geral";
 
     } catch (e) {
         console.error("Erro ao carregar UI do Almoxarifado:", e);
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao carregar dados da unidade.</td></tr>';
     }
 }
-
 /**
  * Filtro de pesquisa em tempo real para o Almoxarifado.
  */
@@ -8695,84 +8713,97 @@ async function executarMovimentacaoAlmox() {
  * listando sua distribuição geográfica em todas as listas da unidade.
  */
 async function verDetalhesItemAlmox(docId) {
+    const table = document.getElementById('almox-table');
+    const thead = table.querySelector('thead');
     const tbody = document.getElementById('almox-body');
     const breadcrumb = document.getElementById('almox-breadcrumb');
     
     try {
-        // 1. Busca o nome real do item a partir do ID do documento
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
         if (!almoxDoc.exists) return;
         const itemNome = almoxDoc.data().nome;
 
-        // 2. Prepara a UI
-        if(breadcrumb) breadcrumb.textContent = `Almoxarifado > Detalhes > ${itemNome}`;
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;"><i class="fas fa-spinner fa-spin"></i> Mapeando distribuição...</td></tr>`;
+        // 1. Ajuste do Botão Voltar e Breadcrumb
+        if(breadcrumb) {
+            breadcrumb.innerHTML = `
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button class="btn-modern-action btn-secondary" onclick="carregarAlmoxarifadoUI()" style="padding: 5px 10px; font-size: 0.8em;">
+                        <i class="fas fa-arrow-left"></i> Voltar
+                    </button>
+                    <span>Almoxarifado > Detalhes > <b>${itemNome}</b></span>
+                </div>`;
+        }
+
+        // 2. Troca Cirúrgica do Cabeçalho
+        thead.innerHTML = `
+            <tr>
+                <th style="text-align:left;">Local / Viatura</th>
+                <th style="text-align:center;">Total Carga</th>
+                <th style="text-align:center; color:#1b8a3e;">Disponível</th>
+                <th style="text-align:center; color:#f57c00;">Cautelados</th>
+                <th style="text-align:center; color:#d90f23;">Pendências</th>
+                <th style="text-align:center;">Ação</th>
+            </tr>`;
+
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Mapeando distribuição...</td></tr>`;
 
         const unitListIds = await getUnitListIds();
         let distribuicaoHtml = '';
 
-        // 3. Varre as listas procurando o item pelo NOME (Higiene de Nomes que discutimos)
         for (const listaId of unitListIds) {
             const doc = await db.collection('listas_conferencia').doc(listaId).get();
             if (!doc.exists) continue;
             
             const data = doc.data();
             const list = data.list || [];
-            let totalNoLocal = 0;
-            let infoAdicional = '';
+            
+            let totalNoLocal = 0, disponivel = 0, cautelados = 0, pendentes = 0;
 
             list.forEach(setor => {
                 setor.itens.forEach(it => {
                     if (it.nome.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
                         if (it.tipo === 'single') {
                             const esperado = Number(it.quantidadeEsperada || it.quantidade) || 0;
-                            const cautelado = (it.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
-                            const pendente = (it.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
+                            const c = (it.cautelas || []).reduce((s, val) => s + (Number(val.quantidade) || 0), 0);
+                            const p = (it.pendencias_ids || []).reduce((s, val) => s + (Number(val.quantidade) || 0), 0);
                             
-                            const saldo = esperado - cautelado - pendente;
-                            totalNoLocal += saldo;
-                            if (cautelado > 0) infoAdicional += `<br><small style="color:#f57c00;">${cautelado}un Cautelados</small>`;
-                            if (pendente > 0) infoAdicional += `<br><small style="color:#d90f23;">${pendente}un Pendentes</small>`;
+                            totalNoLocal += esperado;
+                            cautelados += c;
+                            pendentes += p;
+                            disponivel += (esperado - c - p);
                         } else {
-                            // Multi
-                            const disponiveis = (it.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
-                            const cautelados = (it.tombamentos || []).filter(t => t.cautela).length;
-                            totalNoLocal += disponiveis;
-                            if (cautelados > 0) infoAdicional += `<br><small style="color:#f57c00;">${cautelados}un Cautelados</small>`;
+                            const tmb = it.tombamentos || [];
+                            totalNoLocal += tmb.length;
+                            cautelados += tmb.filter(t => t.cautela).length;
+                            pendentes += tmb.filter(t => t.pendencias_ids && t.pendencias_ids.length > 0).length;
+                            disponivel += tmb.filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
                         }
                     }
                 });
             });
 
-            if (totalNoLocal > 0 || infoAdicional !== '') {
+            if (totalNoLocal > 0) {
                 distribuicaoHtml += `
                     <tr>
-                        <td colspan="2"><b>${data.posto} - ${data.nome_local}</b></td>
+                        <td><b>${data.posto} - ${data.nome_local}</b></td>
                         <td style="text-align:center;">${totalNoLocal}</td>
-                        <td colspan="2">${infoAdicional || '<span style="color:green;">Carga Íntegra</span>'}</td>
+                        <td style="text-align:center; font-weight:bold; color:#1b8a3e;">${disponivel}</td>
+                        <td style="text-align:center; color:#f57c00;">${cautelados}</td>
+                        <td style="text-align:center; color:#d90f23;">${pendentes}</td>
                         <td style="text-align:center;">
-                            <button class="btn-modern-action" style="padding:4px 8px; font-size:0.7em;" onclick="abrirEditor('${listaId}', '${data.nome_local}', '${data.unidade}')">Editar Lista</button>
+                            <button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.75em;" 
+                                onclick="abrirEditor('${listaId}', '${data.nome_local}', '${data.unidade}')">
+                                <i class="fas fa-external-link-alt"></i> Abrir
+                            </button>
                         </td>
                     </tr>`;
             }
         }
 
-        // 4. Botão de Voltar e Renderização Final
-        tbody.innerHTML = `
-            <tr style="background-color: #f8f9fa;">
-                <td colspan="6">
-                    <button class="btn-secondary" onclick="carregarAlmoxarifadoUI()">
-                        <i class="fas fa-arrow-left"></i> Voltar ao Inventário Geral
-                    </button>
-                    <strong style="margin-left: 20px; color:#800020;">Distribuição do Material: ${itemNome}</strong>
-                </td>
-            </tr>
-            ${distribuicaoHtml || '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum exemplar em carga nas viaturas.</td></tr>'}
-        `;
+        tbody.innerHTML = distribuicaoHtml || '<tr><td colspan="6" style="text-align:center; padding:20px;">Item não encontrado em nenhuma viatura/setor.</td></tr>';
 
     } catch (e) {
-        console.error("Erro ao detalhar item:", e);
-        alert("Erro ao mapear distribuição do material.");
+        console.error("Erro ao detalhar:", e);
     }
 }
 
