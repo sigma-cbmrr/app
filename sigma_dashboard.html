@@ -8760,6 +8760,12 @@ async function verDetalhesItemAlmox(docId) {
         const itemNome = itemData.nome;
         const ehMulti = itemData.tipo === 'multi';
 
+        // Variáveis para o Totalizador Geral
+        let acumTotal = 0;
+        let acumDisp = 0;
+        let acumCaut = 0;
+        let acumPend = 0;
+
         // 1. UI: Navegação
         if(breadcrumb) {
             breadcrumb.innerHTML = `
@@ -8773,23 +8779,9 @@ async function verDetalhesItemAlmox(docId) {
 
         // 2. Cabeçalhos
         if (ehMulti) {
-            thead.innerHTML = `
-                <tr>
-                    <th style="text-align:left;">Tombamento</th>
-                    <th style="text-align:left;">Local Atual</th>
-                    <th style="text-align:center;">Status</th>
-                    <th style="text-align:left;">Ações / Detalhes</th>
-                </tr>`;
+            thead.innerHTML = `<tr><th>Tombamento</th><th>Local Atual</th><th style="text-align:center;">Status</th><th>Ações / Detalhes</th></tr>`;
         } else {
-            thead.innerHTML = `
-                <tr>
-                    <th style="text-align:left;">Local / Viatura</th>
-                    <th style="text-align:center;">Total</th>
-                    <th style="text-align:center; color:#1b8a3e;">Disponível</th>
-                    <th style="text-align:center; color:#f57c00;">Cautelados</th>
-                    <th style="text-align:center; color:#d90f23;">Pendências</th>
-                    <th style="text-align:center;">Ação</th>
-                </tr>`;
+            thead.innerHTML = `<tr><th>Local / Viatura</th><th style="text-align:center;">Total Carga</th><th style="text-align:center; color:#1b8a3e;">Disponível</th><th style="text-align:center; color:#f57c00;">Cautelados</th><th style="text-align:center; color:#d90f23;">Pendências</th><th style="text-align:center;">Ação</th></tr>`;
         }
 
         tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Mapeando ativos...</td></tr>`;
@@ -8807,24 +8799,24 @@ async function verDetalhesItemAlmox(docId) {
             list.forEach(setor => {
                 setor.itens.forEach(it => {
                     if (it.nome.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
-                        
                         if (ehMulti) {
                             (it.tombamentos || []).forEach(t => {
+                                acumTotal++; // Conta exemplares
                                 let statusTag = '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
                                 let acaoBotao = '-';
-
                                 if (t.cautela) {
+                                    acumCaut++;
                                     statusTag = '<span class="status-badge badge-cautela">CAUTELADO</span>';
                                     const stringC = JSON.stringify([t.cautela]).replace(/"/g, '&quot;');
-                                    // Adicionado itemNome como 5º parâmetro
                                     acaoBotao = `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Detalhe Tombamento ${t.tomb}', '${stringC}', 'cautela', '${listaId}', '${itemNome}')"><i class="fas fa-search"></i> Ver Cautela</button>`;
                                 } else if (t.pendencias_ids && t.pendencias_ids.length > 0) {
+                                    acumPend++;
                                     statusTag = '<span class="status-badge badge-pendente">PENDENTE</span>';
                                     const stringP = JSON.stringify(t.pendencias_ids).replace(/"/g, '&quot;');
-                                    // Adicionado itemNome como 5º parâmetro
                                     acaoBotao = `<button class="btn-link-detalhe" onclick="mostrarCarimbos('Detalhe Tombamento ${t.tomb}', '${stringP}', 'pendencia', '${listaId}', '${itemNome}')"><i class="fas fa-wrench"></i> Ver Pendência</button>`;
+                                } else {
+                                    acumDisp++;
                                 }
-
                                 htmlRows += `<tr><td><b>${t.tomb}</b></td><td>${localNome}</td><td style="text-align:center;">${statusTag}</td><td>${acaoBotao}</td></tr>`;
                             });
                         } else {
@@ -8832,6 +8824,12 @@ async function verDetalhesItemAlmox(docId) {
                             const nCautelas = (it.cautelas || []).reduce((s, v) => s + (Number(v.quantidade) || 0), 0);
                             const nPendencias = (it.pendencias_ids || []).reduce((s, v) => s + (Number(v.quantidade) || 0), 0);
                             const disponivel = total - nCautelas - nPendencias;
+
+                            // Acumuladores Single
+                            acumTotal += total;
+                            acumDisp += disponivel;
+                            acumCaut += nCautelas;
+                            acumPend += nPendencias;
 
                             const stringCautelas = JSON.stringify(it.cautelas || []).replace(/"/g, '&quot;');
                             const stringPendencias = JSON.stringify(it.pendencias_ids || []).replace(/"/g, '&quot;');
@@ -8858,7 +8856,33 @@ async function verDetalhesItemAlmox(docId) {
                 });
             });
         }
-        tbody.innerHTML = htmlRows || '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum exemplar localizado.</td></tr>';
+
+        // 3. Inclusão da Linha de Totalizador Geral
+        let rowTotalizador = "";
+        if (ehMulti) {
+            rowTotalizador = `
+                <tr style="background-color: #eee; font-weight: bold; border-top: 2px solid #333;">
+                    <td colspan="2">TOTALIZAÇÃO GERAL</td>
+                    <td style="text-align:center; font-size: 0.85em;">
+                        <span style="color:#1b8a3e;">BOAS: ${acumDisp}</span> | 
+                        <span style="color:#f57c00;">CAUT: ${acumCaut}</span> | 
+                        <span style="color:#d90f23;">PEND: ${acumPend}</span>
+                    </td>
+                    <td>${acumTotal} Itens</td>
+                </tr>`;
+        } else {
+            rowTotalizador = `
+                <tr style="background-color: #eee; font-weight: bold; border-top: 2px solid #333;">
+                    <td>TOTALIZAÇÃO GERAL</td>
+                    <td style="text-align:center; font-size: 1.1em;">${acumTotal}</td>
+                    <td style="text-align:center; color:#1b8a3e; font-size: 1.1em;">${acumDisp}</td>
+                    <td style="text-align:center; color:#f57c00; font-size: 1.1em;">${acumCaut}</td>
+                    <td style="text-align:center; color:#d90f23; font-size: 1.1em;">${acumPend}</td>
+                    <td style="text-align:center;"><i class="fas fa-sigma"></i></td>
+                </tr>`;
+        }
+
+        tbody.innerHTML = (htmlRows + rowTotalizador) || '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum exemplar localizado.</td></tr>';
     } catch (e) { console.error(e); }
 }
 /**
