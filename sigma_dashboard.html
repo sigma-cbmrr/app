@@ -9016,45 +9016,59 @@ async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
  */
 function destacarItemNaTabela(nomeItem, pendenciaId) {
     let tentativas = 0;
+    const alvoNome = nomeItem ? nomeItem.trim().toUpperCase() : null;
 
     const intervalBusca = setInterval(() => {
         const rows = document.querySelectorAll('#ca-list-body tr');
         let linhaEncontrada = null;
 
         rows.forEach(row => {
-            // BUSCA PELO ID (Muito mais seguro)
+            if (linhaEncontrada) return; // Se já achou, ignora o resto
+
+            // 1. PRIORIDADE MÁXIMA: Busca pelo ID da Pendência em qualquer lugar da linha
             if (pendenciaId) {
-                // Procura o ID dentro do onclick dos botões daquela linha
-                const btnGerenciar = row.querySelector('button[onclick*="' + pendenciaId + '"]');
-                if (btnGerenciar) linhaEncontrada = row;
+                // Procura o ID no HTML da linha toda (botões, inputs hidden, textos)
+                if (row.innerHTML.includes(pendenciaId)) {
+                    linhaEncontrada = row;
+                }
             } 
             
-            // BUSCA PELO NOME (Fallback caso o ID falhe)
-            if (!linhaEncontrada && nomeItem) {
-                const texto = row.cells[0]?.innerText.toUpperCase();
-                if (texto.includes(nomeItem.toUpperCase())) linhaEncontrada = row;
+            // 2. SEGUNDA PRIORIDADE: Busca por Nome + Texto "PENDENTE" 
+            // Isso evita focar no item "CAUTELADO" se o objetivo é resolver pendência
+            if (!linhaEncontrada && alvoNome) {
+                const textoLinha = row.innerText.toUpperCase();
+                // Verifica se na mesma linha tem o Nome do Item E a palavra PENDENTE
+                if (textoLinha.includes(alvoNome) && textoLinha.includes("PENDENTE")) {
+                    linhaEncontrada = row;
+                }
             }
         });
 
         if (linhaEncontrada) {
             clearInterval(intervalBusca);
+            
+            // Centraliza e destaca
             linhaEncontrada.scrollIntoView({ behavior: 'smooth', block: 'center' });
             
-            // Efeito visual potente
+            // Estilo visual de impacto
             linhaEncontrada.style.backgroundColor = "#fff3cd";
-            linhaEncontrada.style.outline = "3px solid #f57c00";
+            linhaEncontrada.style.outline = "3px solid #d90f23"; // Vermelho para pendência
             
             linhaEncontrada.animate([
                 { transform: 'scale(1)', boxShadow: 'none' },
-                { transform: 'scale(1.02)', boxShadow: '0 0 15px #f57c00' },
+                { transform: 'scale(1.01)', boxShadow: '0 0 20px #d90f23' },
                 { transform: 'scale(1)', boxShadow: 'none' }
-            ], { duration: 500, iterations: 4 });
+            ], { duration: 400, iterations: 5 });
 
             setTimeout(() => {
                 linhaEncontrada.style.backgroundColor = "";
                 linhaEncontrada.style.outline = "none";
-            }, 5000);
-        } else if (tentativas >= 20) clearInterval(intervalBusca);
+            }, 6000);
+
+        } else if (tentativas >= 25) {
+            clearInterval(intervalBusca);
+            console.warn("Destaque: Falha ao localizar o item alvo.");
+        }
         
         tentativas++;
     }, 200);
