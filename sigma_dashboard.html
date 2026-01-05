@@ -8942,16 +8942,18 @@ function atalhoGestaoCautela(cId) {
 }
 
 /**
- * ATALHO 2 (CORRIGIDO): Localiza a última conferência real e abre a tabela oficial do Dashboard.
+ * ATALHO 2: Simula o clique exato no card de pendência do Dashboard.
  */
 async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
     if(!listaId) return alert("Erro: ID da lista não identificado.");
     
+    // 1. Fecha o modal do Almoxarifado e muda para o Dashboard
     document.getElementById('modal-detalhe-carimbos').style.display = 'none';
     switchView('dashboard');
 
     try {
-        // 1. Busca a ÚLTIMA conferência real dessa viatura
+        // 2. Buscamos a última conferência real desta lista no banco
+        // Isso garante que os dados (conferente, data, itens) sejam os OFICIAIS
         const snap = await db.collection(COLECAO_RESULTADOS)
                              .where('lista_id', '==', listaId)
                              .orderBy('timestamp', 'desc')
@@ -8960,23 +8962,28 @@ async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
 
         if(!snap.empty) {
             const docReal = snap.docs[0];
-            const dadosReais = { id: docReal.id, ...docReal.data() };
+            const dadosOficiais = { id: docReal.id, ...docReal.data() };
+            
+            // Injetamos o nome do local se estiver faltando para a função mostrarTabela
+            if(!dadosOficiais.local) {
+                const rotaDoc = await db.collection('config_geral').doc('rotas').get();
+                dadosOficiais.local = rotaDoc.data()[listaId]?.nome || "Viatura";
+            }
 
-            // 2. Chama a sua função oficial com os dados verdadeiros
+            // 3. Executa a função oficial do seu Dashboard
             setTimeout(() => {
-                mostrarTabela(dadosReais);
+                mostrarTabela(dadosOficiais);
                 
-                // 3. Aplica o destaque no item alvo
+                // 4. Apenas aponta visualmente o item para facilitar a vida do gestor
                 setTimeout(() => {
                     destacarItemNaTabela(itemNomeAlvo);
                 }, 600);
             }, 300);
         } else {
-            alert("Não encontramos conferências registradas para esta viatura.");
+            alert("Não foram encontradas conferências para esta viatura no Dashboard.");
         }
-    } catch (e) { 
-        console.error("Erro no atalho:", e);
-        alert("Erro ao localizar conferência real. Verifique o console.");
+    } catch (e) {
+        console.error("Erro ao simular clique no card:", e);
     }
 }
 /**
