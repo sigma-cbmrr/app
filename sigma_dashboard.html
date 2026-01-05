@@ -8423,13 +8423,16 @@ async function abrirSeletorGlobalSubstituicao() {
 		async function sincronizarAlmoxarifado() {
     if(!confirm("Deseja recalcular o saldo global baseado em todas as listas da unidade?")) return;
     
-    const almoxRef = db.collection('almoxarifado_central');
-    const unitListIds = await getUnitListIds(); // Reutilizando sua função existente
-    
-    // Objeto temporário para somar tudo
-    const inventario = {};
+    // Feedback visual de carregamento
+    const tbody = document.getElementById('almox-body');
+    if(tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Sincronizando dados das viaturas...</td></tr>';
 
+    const almoxRef = db.collection('almoxarifado_central');
+    
     try {
+        const unitListIds = await getUnitListIds(); 
+        const inventario = {};
+
         for (const listaId of unitListIds) {
             const doc = await db.collection('listas_conferencia').doc(listaId).get();
             if (!doc.exists) continue;
@@ -8439,7 +8442,7 @@ async function abrirSeletorGlobalSubstituicao() {
                 setor.itens.forEach(item => {
                     const nome = item.nome.trim().toUpperCase();
                     if (!inventario[nome]) {
-                        inventario[nome] = { total: 0, emCarga: 0, emAlteracao: 0, disponivel: 0, tipo: item.tipo };
+                        inventario[nome] = { total: 0, emCarga: 0, emAlteracao: 0, tipo: item.tipo };
                     }
                     
                     if (item.tipo === 'single') {
@@ -8451,7 +8454,6 @@ async function abrirSeletorGlobalSubstituicao() {
                         inventario[nome].emCarga += (esperado - cautelado - pendente);
                         inventario[nome].emAlteracao += (cautelado + pendente);
                     } else {
-                        // Multi (Tombamentos)
                         const tombamentos = item.tombamentos || [];
                         inventario[nome].total += tombamentos.length;
                         inventario[nome].emCarga += tombamentos.filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
@@ -8461,26 +8463,119 @@ async function abrirSeletorGlobalSubstituicao() {
             });
         }
 
-        // Salva os resultados processados no Almoxarifado Central
         const batch = db.batch();
+        // Prefixo para garantir que uma unidade não sobrescreva a outra no Firestore
+        const prefixo = currentUserData.unidade.replace(/[^a-zA-Z0-9]/g, '_');
+
         for (const [nome, dados] of Object.entries(inventario)) {
-            // O disponível é o que sobra na matemática real (Ponto 1 da sua abordagem)
-            dados.disponivel = 0; // Inicialmente assumimos que o almoxarifado físico está vazio e tudo está nas viaturas
-            batch.set(almoxRef.doc(nome.replace(/\//g, '_')), {
+            const safeNome = nome.replace(/[^a-zA-Z0-9]/g, '_');
+            const docId = `${prefixo}_${safeNome}`;
+
+            batch.set(almoxRef.doc(docId), {
                 nome: nome,
-                ...dados,
+                total: dados.total,
+                emCarga: dados.emCarga,
+                emAlteracao: dados.emAlteracao,
                 unidade: currentUserData.unidade,
                 lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
-            });
+                // Nota: NÃO zeramos o 'disponivel' aqui para não perder o que já foi guardado fisicamente
+            }, { merge: true }); 
         }
+
         await batch.commit();
-        alert("Sincronização concluída! Estoque central atualizado.");
+        alert("✅ Sincronização concluída! Inventário das viaturas atualizado.");
         carregarAlmoxarifadoUI();
+
     } catch (e) {
-        console.error(e);
-        alert("Erro na sincronização.");
+        console.error("Erro na sincronização:", e);
+        alert("Erro ao sincronizar. Verifique o console.");
+        carregarAlmoxarifadoUI(); // Tenta recarregar a UI mesmo com erro
     }
 }
+	/**
+ * Renderiza a interface da tabela de Almoxarifado.
+ * Esta função resolve o erro "is not defined" no console.
+ */
+async function carregarAlmoxarifadoUI() {
+    const tbody = document.getElementById('almox-body');
+    if (!tbody) return;
+
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Carregando inventário...</td></tr>';
+
+    try {
+        // Busca apenas os itens da unidade do Gestor logado
+        const snap = await db.collection('almoxarifado_central')
+                             .where('unidade', '==', currentUserData.unidade)
+                             .get();
+        
+        let html = '';
+        if (snap.empty) {
+            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum item sincronizado nesta unidade. Clique em "Sincronizar Saldos".</td></tr>';
+        } else {
+            // Ordena alfabeticamente pelo nome do item
+            const docs = [];
+            snap.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
+            docs.sort((a, b) => a.nome.localeCompare(b.nome));
+
+            docs.forEach(d => {
+                const total = d.total || 0;
+                const disponivel = d.disponivel || 0;
+                // Semáforo de estoque
+                const statusColor = disponivel === 0 ? '#d90f23' : disponivel < (total * 0.2) ? '#f57c00' : '#1b8a3e';
+
+                html += `
+                    <tr>
+                        <td data-label="Material">
+                            <strong>${d.nome}</strong><br>
+                            <small style="color:#888;">${d.tipo === 'multi' ? 'TOMBAMENTO' : 'QUANTIDADE'}</small>
+                        </td>
+                        <td style="text-align:center;" data-label="Total">${total}</td>
+                        <td style="text-align:center;" data-label="Em Carga">${d.emCarga}</td>
+                        <td style="text-align:center;" data-label="Em Alteração">${d.emAlteracao}</td>
+                        <td style="text-align:center; font-weight:bold; color:${statusColor}; background-color:#fcfcfc;" data-label="Disponível">
+                            ${disponivel}
+                        </td>
+                        <td style="text-align:center;" data-label="Ações">
+                            <div style="display:flex; gap:5px; justify-content:center;">
+                                <button class="btn-modern-action btn-edit" title="Ver Distribuição" onclick="verDetalhesItemAlmox('${d.id}')">
+                                    <i class="fas fa-search-plus"></i>
+                                </button>
+                                <button class="btn-modern-action btn-sync" title="Movimentar" onclick="alert('Módulo de transferência em breve')">
+                                    <i class="fas fa-exchange-alt"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+        tbody.innerHTML = html;
+        
+        // Reseta o breadcrumb ao carregar a lista geral
+        const breadcrumb = document.getElementById('almox-breadcrumb');
+        if(breadcrumb) breadcrumb.textContent = "Almoxarifado > Inventário Geral";
+
+    } catch (e) {
+        console.error("Erro ao carregar UI do Almoxarifado:", e);
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao carregar dados da unidade.</td></tr>';
+    }
+}
+
+/**
+ * Filtro de pesquisa em tempo real para o Almoxarifado.
+ */
+function filtrarAlmoxarifado() {
+    const searchTerm = document.getElementById('almox-search').value.toUpperCase();
+    const categoryTerm = document.getElementById('almox-cat-filter').value;
+    const rows = document.querySelectorAll('#almox-body tr');
+
+    rows.forEach(row => {
+        const textMaterial = row.cells[0]?.textContent.toUpperCase() || "";
+        // No futuro, se adicionarmos categoria aos itens, filtraremos aqui também
+        const matchesSearch = textMaterial.includes(searchTerm);
+        row.style.display = matchesSearch ? "" : "none";
+    });
+}	
     </script>
 </body>
 </html>
