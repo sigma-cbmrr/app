@@ -2312,7 +2312,43 @@
             </div>
         </div>
     </div>
+	<div id="modal-almox-transferencia" class="modal-overlay">
+    <div class="modal-content" style="max-width: 450px; border-top: 5px solid #1b8a3e;">
+        <button class="close-btn" onclick="document.getElementById('modal-almox-transferencia').style.display='none'"><i class="fas fa-times"></i></button>
+        <h2 id="almox-transf-titulo">Movimentar Material</h2>
+        <p id="almox-transf-item-nome" style="font-weight: bold; color: #800020; margin-bottom: 20px;"></p>
 
+        <div class="form-group">
+            <label>Tipo de Operação</label>
+            <select id="almox-operacao-tipo" onchange="toggleAlmoxDestino()">
+                <option value="ENTRADA">Entrada de Novo Estoque (Aumentar Total)</option>
+                <option value="ENVIO">Enviar do Almoxarifado para Viatura</option>
+                <option value="RECOLHIMENTO">Recolher da Viatura para Almoxarifado</option>
+                <option value="BAIXA">Baixa Definitiva (Inservível/Perda)</option>
+            </select>
+        </div>
+
+        <div id="div-almox-viatura" class="form-group" style="display:none;">
+            <label>Viatura / Local Alvo</label>
+            <select id="almox-viatura-alvo" class="filter-input"></select>
+        </div>
+
+        <div class="form-group">
+            <label>Quantidade</label>
+            <input type="number" id="almox-transf-qtd" min="1" value="1" class="filter-input">
+        </div>
+
+        <div class="form-group">
+            <label>Justificativa / Nota Fiscal / Ofício</label>
+            <textarea id="almox-transf-obs" placeholder="Ex: NF 123, Recebido do almoxarifado central, etc." style="height: 80px;"></textarea>
+        </div>
+
+        <div class="modal-buttons">
+            <button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-almox-transferencia').style.display='none'">Cancelar</button>
+            <button class="btn-modern-action btn-sync" onclick="executarMovimentacaoAlmox()"><i class="fas fa-check"></i> Confirmar</button>
+        </div>
+    </div>
+</div>
     <div id="modal-unit-manager" class="modal-overlay">
         <div class="modal-content">
             <button class="close-btn" onclick="document.getElementById('modal-unit-manager').style.display='none'"><i class="fas fa-times"></i></button>
@@ -8575,7 +8611,91 @@ function filtrarAlmoxarifado() {
         const matchesSearch = textMaterial.includes(searchTerm);
         row.style.display = matchesSearch ? "" : "none";
     });
-}	
+}
+		/**
+ * Abre o modal e configura as opções para movimentar o item selecionado.
+ */
+async function abrirModalTransferencia(docId) {
+    const doc = await db.collection('almoxarifado_central').doc(docId).get();
+    if (!doc.exists) return;
+    const item = doc.data();
+
+    document.getElementById('almox-transf-item-nome').textContent = item.nome;
+    document.getElementById('almox-transf-item-nome').setAttribute('data-docid', docId);
+    
+    // Carrega as viaturas da unidade no select
+    const unitListIds = await getUnitListIds();
+    const selectViatura = document.getElementById('almox-viatura-alvo');
+    selectViatura.innerHTML = '<option value="" disabled selected>Selecione a viatura...</option>';
+    
+    const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+    const rotas = rotasDoc.data();
+
+    unitListIds.forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = rotas[id].nome;
+        selectViatura.appendChild(opt);
+    });
+
+    document.getElementById('modal-almox-transferencia').style.display = 'flex';
+}
+
+function toggleAlmoxDestino() {
+    const tipo = document.getElementById('almox-operacao-tipo').value;
+    const divViatura = document.getElementById('div-almox-viatura');
+    divViatura.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
+}
+
+/**
+ * Função Mestra de Movimentação: 
+ * Altera o estoque central e a lista mestra da viatura simultaneamente.
+ */
+async function executarMovimentacaoAlmox() {
+    const tipo = document.getElementById('almox-operacao-tipo').value;
+    const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
+    const qtd = parseInt(document.getElementById('almox-transf-qtd').value);
+    const localAlvoId = document.getElementById('almox-viatura-alvo').value;
+    const obs = document.getElementById('almox-transf-obs').value.trim();
+
+    if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
+    if ((tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') && !localAlvoId) return alert("Selecione uma viatura.");
+    if (!obs) return alert("Informe a justificativa da movimentação.");
+
+    try {
+        const almoxRef = db.collection('almoxarifado_central').doc(docId);
+        const logData = {
+            data: new Date().toLocaleString('pt-BR'),
+            evento: tipo,
+            quantidade: qtd,
+            quem: currentUserData.nome_militar_completo,
+            detalhes: obs
+        };
+
+        await db.runTransaction(async (transaction) => {
+            const almoxDoc = await transaction.get(almoxRef);
+            const aData = almoxDoc.data();
+
+            if (tipo === 'ENTRADA') {
+                transaction.update(almoxRef, {
+                    total: (aData.total || 0) + qtd,
+                    disponivel: (aData.disponivel || 0) + qtd,
+                    historico: firebase.firestore.FieldValue.arrayUnion(logData)
+                });
+            } 
+            // Implementaremos ENVIO e RECOLHIMENTO no próximo passo, 
+            // pois eles exigem mexer na coleção 'listas_conferencia'
+        });
+
+        alert("Operação realizada!");
+        document.getElementById('modal-almox-transferencia').style.display = 'none';
+        carregarAlmoxarifadoUI();
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao processar movimentação.");
+    }
+}
     </script>
 </body>
 </html>
