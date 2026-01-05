@@ -8696,6 +8696,133 @@ async function executarMovimentacaoAlmox() {
         alert("Erro ao processar movimentação.");
     }
 }
+		/**
+ * Abre os detalhes de um item específico do Almoxarifado, 
+ * listando sua distribuição geográfica em todas as listas da unidade.
+ */
+async function verDetalhesItemAlmox(docId) {
+    const tbody = document.getElementById('almox-body');
+    const breadcrumb = document.getElementById('almox-breadcrumb');
+    
+    try {
+        // 1. Busca o nome real do item a partir do ID do documento
+        const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
+        if (!almoxDoc.exists) return;
+        const itemNome = almoxDoc.data().nome;
+
+        // 2. Prepara a UI
+        if(breadcrumb) breadcrumb.textContent = `Almoxarifado > Detalhes > ${itemNome}`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;"><i class="fas fa-spinner fa-spin"></i> Mapeando distribuição...</td></tr>`;
+
+        const unitListIds = await getUnitListIds();
+        let distribuicaoHtml = '';
+
+        // 3. Varre as listas procurando o item pelo NOME (Higiene de Nomes que discutimos)
+        for (const listaId of unitListIds) {
+            const doc = await db.collection('listas_conferencia').doc(listaId).get();
+            if (!doc.exists) continue;
+            
+            const data = doc.data();
+            const list = data.list || [];
+            let totalNoLocal = 0;
+            let infoAdicional = '';
+
+            list.forEach(setor => {
+                setor.itens.forEach(it => {
+                    if (it.nome.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
+                        if (it.tipo === 'single') {
+                            const esperado = Number(it.quantidadeEsperada || it.quantidade) || 0;
+                            const cautelado = (it.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
+                            const pendente = (it.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
+                            
+                            const saldo = esperado - cautelado - pendente;
+                            totalNoLocal += saldo;
+                            if (cautelado > 0) infoAdicional += `<br><small style="color:#f57c00;">${cautelado}un Cautelados</small>`;
+                            if (pendente > 0) infoAdicional += `<br><small style="color:#d90f23;">${pendente}un Pendentes</small>`;
+                        } else {
+                            // Multi
+                            const disponiveis = (it.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
+                            const cautelados = (it.tombamentos || []).filter(t => t.cautela).length;
+                            totalNoLocal += disponiveis;
+                            if (cautelados > 0) infoAdicional += `<br><small style="color:#f57c00;">${cautelados}un Cautelados</small>`;
+                        }
+                    }
+                });
+            });
+
+            if (totalNoLocal > 0 || infoAdicional !== '') {
+                distribuicaoHtml += `
+                    <tr>
+                        <td colspan="2"><b>${data.posto} - ${data.nome_local}</b></td>
+                        <td style="text-align:center;">${totalNoLocal}</td>
+                        <td colspan="2">${infoAdicional || '<span style="color:green;">Carga Íntegra</span>'}</td>
+                        <td style="text-align:center;">
+                            <button class="btn-modern-action" style="padding:4px 8px; font-size:0.7em;" onclick="abrirEditor('${listaId}', '${data.nome_local}', '${data.unidade}')">Editar Lista</button>
+                        </td>
+                    </tr>`;
+            }
+        }
+
+        // 4. Botão de Voltar e Renderização Final
+        tbody.innerHTML = `
+            <tr style="background-color: #f8f9fa;">
+                <td colspan="6">
+                    <button class="btn-secondary" onclick="carregarAlmoxarifadoUI()">
+                        <i class="fas fa-arrow-left"></i> Voltar ao Inventário Geral
+                    </button>
+                    <strong style="margin-left: 20px; color:#800020;">Distribuição do Material: ${itemNome}</strong>
+                </td>
+            </tr>
+            ${distribuicaoHtml || '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum exemplar em carga nas viaturas.</td></tr>'}
+        `;
+
+    } catch (e) {
+        console.error("Erro ao detalhar item:", e);
+        alert("Erro ao mapear distribuição do material.");
+    }
+}
+
+/**
+ * Abre o modal de transferência e carrega as viaturas da unidade para o select.
+ */
+async function abrirModalTransferencia(docId) {
+    try {
+        const doc = await db.collection('almoxarifado_central').doc(docId).get();
+        if (!doc.exists) return;
+        const item = doc.data();
+
+        document.getElementById('almox-transf-item-nome').textContent = item.nome;
+        document.getElementById('almox-transf-item-nome').setAttribute('data-docid', docId);
+        
+        const unitListIds = await getUnitListIds();
+        const selectViatura = document.getElementById('almox-viatura-alvo');
+        if(!selectViatura) return;
+        
+        selectViatura.innerHTML = '<option value="" disabled selected>Selecione a viatura...</option>';
+        
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        const rotas = rotasDoc.data() || {};
+
+        unitListIds.forEach(id => {
+            if(rotas[id]) {
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = `${rotas[id].posto} - ${rotas[id].nome}`;
+                selectViatura.appendChild(opt);
+            }
+        });
+
+        document.getElementById('modal-almox-transferencia').style.display = 'flex';
+    } catch (e) {
+        console.error("Erro ao abrir modal de transferência:", e);
+    }
+}
+
+function toggleAlmoxDestino() {
+    const tipo = document.getElementById('almox-operacao-tipo').value;
+    const divViatura = document.getElementById('div-almox-viatura');
+    if(divViatura) divViatura.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
+}
     </script>
 </body>
 </html>
