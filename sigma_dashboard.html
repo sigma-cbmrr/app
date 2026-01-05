@@ -8947,13 +8947,11 @@ function atalhoGestaoCautela(cId) {
 async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
     if(!listaId) return alert("Erro: ID da lista não identificado.");
     
-    // 1. Fecha o modal do Almoxarifado e muda para o Dashboard
     document.getElementById('modal-detalhe-carimbos').style.display = 'none';
     switchView('dashboard');
 
     try {
-        // 2. Buscamos a última conferência real desta lista no banco
-        // Isso garante que os dados (conferente, data, itens) sejam os OFICIAIS
+        // 1. Busca a última conferência (O Cabeçalho)
         const snap = await db.collection(COLECAO_RESULTADOS)
                              .where('lista_id', '==', listaId)
                              .orderBy('timestamp', 'desc')
@@ -8962,28 +8960,60 @@ async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
 
         if(!snap.empty) {
             const docReal = snap.docs[0];
-            const dadosOficiais = { id: docReal.id, ...docReal.data() };
+            const d = docReal.data();
             
-            // Injetamos o nome do local se estiver faltando para a função mostrarTabela
-            if(!dadosOficiais.local) {
-                const rotaDoc = await db.collection('config_geral').doc('rotas').get();
-                dadosOficiais.local = rotaDoc.data()[listaId]?.nome || "Viatura";
+            // 2. Prepara o objeto exatamente como a sua função mostrarTabela espera
+            // Note que usamos d.timestamp.toDate().toLocaleString() para evitar o 'undefined'
+            const objetoParaTabela = {
+                id: docReal.id,
+                lista_id: listaId,
+                local: d.local || "Viatura",
+                conferente: d.conferente,
+                date: d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'Data N/D',
+                items: [] // Vamos preencher abaixo
+            };
+
+            // 3. Busca a Lista Mestra para extrair as Pendências/Cautelas Reais
+            // Esse é o segredo para não aparecer "Tudo OK"
+            const docMestra = await db.collection('listas_conferencia').doc(listaId).get();
+            if (docMestra.exists) {
+                const dataMestra = docMestra.data().list || [];
+                const pendenciasReais = [];
+
+                for (const setor of dataMestra) {
+                    for (const it of (setor.itens || [])) {
+                        // Pendências Single
+                        if (it.pendencias_ids) {
+                            it.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, itemId: it.id, tipoRegistro: 'PENDENCIA' }));
+                        }
+                        // Cautelas Single
+                        if (it.cautelas) {
+                            it.cautelas.forEach(c => pendenciasReais.push({ ...c, itemNome: it.nome, itemId: it.id, status_gestao: 'CAUTELADO', tipoRegistro: 'CAUTELA' }));
+                        }
+                        // Itens Multi (Tombamentos)
+                        if (it.tipo === 'multi' && it.tombamentos) {
+                            it.tombamentos.forEach(t => {
+                                if (t.pendencias_ids) t.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, tipoRegistro: 'PENDENCIA' }));
+                                if (t.cautela) pendenciasReais.push({ ...t.cautela, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, status_gestao: 'CAUTELADO', tipoRegistro: 'CAUTELA' });
+                            });
+                        }
+                    }
+                }
+                objetoParaTabela.items = pendenciasReais;
             }
 
-            // 3. Executa a função oficial do seu Dashboard
+            // 4. Agora sim, chama a função com os dados completos e processados
             setTimeout(() => {
-                mostrarTabela(dadosOficiais);
+                mostrarTabela(objetoParaTabela);
                 
-                // 4. Apenas aponta visualmente o item para facilitar a vida do gestor
+                // 5. Aponta o item alvo
                 setTimeout(() => {
                     destacarItemNaTabela(itemNomeAlvo);
                 }, 600);
             }, 300);
-        } else {
-            alert("Não foram encontradas conferências para esta viatura no Dashboard.");
         }
     } catch (e) {
-        console.error("Erro ao simular clique no card:", e);
+        console.error("Erro no atalho:", e);
     }
 }
 /**
