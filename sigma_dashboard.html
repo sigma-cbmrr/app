@@ -9017,50 +9017,57 @@ async function atalhoGestaoPendencia(listaId, itemNomeAlvo) {
     }
 }
 /**
- * Localiza o item na tabela do Dashboard, rola até ele e aplica um destaque visual forte.
+ * Localiza o item na tabela, com sistema de espera (polling) 
+ * para garantir que a renderização terminou.
  */
 function destacarItemNaTabela(nomeItem) {
-    const rows = document.querySelectorAll('#ca-list-body tr');
     const alvo = nomeItem.trim().toUpperCase();
+    let tentativas = 0;
+    const maxTentativas = 20; // Tenta por 4 segundos (20 * 200ms)
 
-    let linhaEncontrada = null;
+    const intervalBusca = setInterval(() => {
+        const rows = document.querySelectorAll('#ca-list-body tr');
+        let linhaEncontrada = null;
 
-    rows.forEach(row => {
-        const textoMaterial = row.cells[0]?.textContent.toUpperCase() || "";
-        // Verifica se o nome do material ou o tombamento batem com o alvo
-        if (textoMaterial.includes(alvo)) {
-            linhaEncontrada = row;
-        }
-    });
-
-    if (linhaEncontrada) {
-        // 1. Rola a página suavemente até o item
-        linhaEncontrada.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        // 2. Aplica o estilo de destaque (Dourado com borda vermelha)
-        linhaEncontrada.style.transition = "all 0.5s ease-in-out";
-        linhaEncontrada.style.backgroundColor = "#fff3cd";
-        linhaEncontrada.style.outline = "3px solid #f57c00";
-        linhaEncontrada.style.boxShadow = "0 0 20px rgba(245, 124, 0, 0.5)";
-        linhaEncontrada.style.zIndex = "10";
-
-        // 3. Efeito de pulsação para chamar a atenção do olho
-        let flashes = 0;
-        const interval = setInterval(() => {
-            linhaEncontrada.style.transform = (flashes % 2 === 0) ? "scale(1.02)" : "scale(1)";
-            flashes++;
-            if (flashes === 10) {
-                clearInterval(interval);
-                linhaEncontrada.style.transform = "scale(1)";
-                // Mantém a cor de fundo por 5 segundos e depois volta ao normal
-                setTimeout(() => {
-                    linhaEncontrada.style.outline = "none";
-                    linhaEncontrada.style.boxShadow = "none";
-                    linhaEncontrada.style.backgroundColor = "";
-                }, 5000);
+        rows.forEach(row => {
+            const textoMaterial = row.cells[0]?.textContent.toUpperCase() || "";
+            if (textoMaterial.includes(alvo)) {
+                linhaEncontrada = row;
             }
-        }, 200);
-    }
+        });
+
+        if (linhaEncontrada) {
+            clearInterval(intervalBusca); // Para de procurar
+            
+            // EXECUTA O VISUAL
+            linhaEncontrada.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            linhaEncontrada.style.backgroundColor = "#fff3cd";
+            linhaEncontrada.style.border = "2px solid #f57c00";
+            linhaEncontrada.style.transition = "all 0.3s";
+            
+            // Efeito de pulso
+            let flashes = 0;
+            const pulse = setInterval(() => {
+                linhaEncontrada.style.opacity = (flashes % 2 === 0) ? "0.5" : "1";
+                flashes++;
+                if (flashes === 10) {
+                    clearInterval(pulse);
+                    linhaEncontrada.style.opacity = "1";
+                    setTimeout(() => {
+                        linhaEncontrada.style.backgroundColor = "";
+                        linhaEncontrada.style.border = "none";
+                    }, 4000);
+                }
+            }, 200);
+
+        } else if (tentativas >= maxTentativas) {
+            clearInterval(intervalBusca);
+            console.warn("Destaque: Item não encontrado após várias tentativas.");
+        }
+        
+        tentativas++;
+    }, 200); // Tenta a cada 200ms
 }
 		function toggleAlmoxDestino() {
     const tipo = document.getElementById('almox-operacao-tipo').value;
