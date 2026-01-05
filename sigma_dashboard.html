@@ -8722,8 +8722,8 @@ async function executarMovimentacaoAlmox() {
     }
 }
 		/**
- * Abre os detalhes de um item específico do Almoxarifado, 
- * listando sua distribuição geográfica em todas as listas da unidade.
+ * Abre os detalhes de um item, adaptando a tabela para Multi (Tombamentos) 
+ * ou Single (Saldos por Local), com rastreio de detentores.
  */
 async function verDetalhesItemAlmox(docId) {
     const table = document.getElementById('almox-table');
@@ -8734,91 +8734,130 @@ async function verDetalhesItemAlmox(docId) {
     try {
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
         if (!almoxDoc.exists) return;
-        const itemNome = almoxDoc.data().nome;
+        const itemData = almoxDoc.data();
+        const itemNome = itemData.nome;
+        const ehMulti = itemData.tipo === 'multi';
 
-        // 1. Ajuste do Botão Voltar e Breadcrumb
+        // 1. UI: Botão Voltar e Breadcrumb
         if(breadcrumb) {
             breadcrumb.innerHTML = `
                 <div style="display:flex; align-items:center; gap:10px;">
-                    <button class="btn-modern-action" 
-       					onclick="carregarAlmoxarifadoUI()" 
-        				style="padding: 5px 12px; font-size: 0.8em; background-color: #2c3e50; color: white !important;">
-    					<i class="fas fa-arrow-left"></i> Voltar
-					</button>
+                    <button class="btn-secondary" onclick="carregarAlmoxarifadoUI()" style="padding: 5px 12px; font-size: 0.8em;">
+                        <i class="fas fa-arrow-left"></i> Voltar
+                    </button>
                     <span>Almoxarifado > Detalhes > <b>${itemNome}</b></span>
                 </div>`;
         }
 
-        // 2. Troca Cirúrgica do Cabeçalho
-        thead.innerHTML = `
-            <tr>
-                <th style="text-align:left;">Local / Viatura</th>
-                <th style="text-align:center;">Total Carga</th>
-                <th style="text-align:center; color:#1b8a3e;">Disponível</th>
-                <th style="text-align:center; color:#f57c00;">Cautelados</th>
-                <th style="text-align:center; color:#d90f23;">Pendências</th>
-                <th style="text-align:center;">Ação</th>
-            </tr>`;
+        // 2. Cabeçalho Dinâmico conforme sua sugestão
+        if (ehMulti) {
+            thead.innerHTML = `
+                <tr>
+                    <th style="text-align:left;">Tombamento</th>
+                    <th style="text-align:left;">Local Atual</th>
+                    <th style="text-align:center;">Status</th>
+                    <th style="text-align:left;">Detentor / Observação</th>
+                </tr>`;
+        } else {
+            thead.innerHTML = `
+                <tr>
+                    <th style="text-align:left;">Local / Viatura</th>
+                    <th style="text-align:center;">Qtd. Total</th>
+                    <th style="text-align:center; color:#1b8a3e;">Disponível</th>
+                    <th style="text-align:center; color:#f57c00;">Cautelados</th>
+                    <th style="text-align:center; color:#d90f23;">Pendências</th>
+                    <th style="text-align:left;">Observações</th>
+                </tr>`;
+        }
 
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Mapeando distribuição...</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Mapeando ativos...</td></tr>`;
 
         const unitListIds = await getUnitListIds();
-        let distribuicaoHtml = '';
+        let htmlRows = '';
 
+        // 3. Processamento dos Dados
         for (const listaId of unitListIds) {
             const doc = await db.collection('listas_conferencia').doc(listaId).get();
             if (!doc.exists) continue;
-            
             const data = doc.data();
             const list = data.list || [];
-            
-            let totalNoLocal = 0, disponivel = 0, cautelados = 0, pendentes = 0;
+            const localNome = `${data.posto} - ${data.nome_local}`;
 
             list.forEach(setor => {
                 setor.itens.forEach(it => {
                     if (it.nome.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
-                        if (it.tipo === 'single') {
-                            const esperado = Number(it.quantidadeEsperada || it.quantidade) || 0;
-                            const c = (it.cautelas || []).reduce((s, val) => s + (Number(val.quantidade) || 0), 0);
-                            const p = (it.pendencias_ids || []).reduce((s, val) => s + (Number(val.quantidade) || 0), 0);
-                            
-                            totalNoLocal += esperado;
-                            cautelados += c;
-                            pendentes += p;
-                            disponivel += (esperado - c - p);
+                        
+                        if (ehMulti) {
+                            // Visão Multi: Uma linha por Tombamento
+                            (it.tombamentos || []).forEach(t => {
+                                let statusTag = '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
+                                let detentor = '<span style="color:#999;">-</span>';
+
+                                if (t.cautela) {
+                                    statusTag = '<span class="status-badge badge-cautela">CAUTELADO</span>';
+                                    detentor = `<i class="fas fa-user"></i> ${t.cautela.destinatario || 'Militar'}`;
+                                } else if (t.pendencias_ids && t.pendencias_ids.length > 0) {
+                                    statusTag = '<span class="status-badge badge-pendente">PENDENTE</span>';
+                                    detentor = `<i class="fas fa-tools"></i> ${t.pendencias_ids[0].descricao}`;
+                                }
+
+                                htmlRows += `
+                                    <tr>
+                                        <td><b>${t.tomb}</b></td>
+                                        <td>${localNome}</td>
+                                        <td style="text-align:center;">${statusTag}</td>
+                                        <td><small>${detentor}</small></td>
+                                    </tr>`;
+                            });
                         } else {
-                            const tmb = it.tombamentos || [];
-                            totalNoLocal += tmb.length;
-                            cautelados += tmb.filter(t => t.cautela).length;
-                            pendentes += tmb.filter(t => t.pendencias_ids && t.pendencias_ids.length > 0).length;
-                            disponivel += tmb.filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
+                            // Visão Single: Uma linha por Local
+                            const total = Number(it.quantidadeEsperada || it.quantidade) || 0;
+                            const cautelados = (it.cautelas || []).reduce((s, val) => s + (Number(val.quantidade) || 0), 0);
+                            const pendentes = (it.pendencias_ids || []).reduce((s, val) => s + (Number(val.quantidade) || 0), 0);
+                            const disponivel = total - cautelados - pendentes;
+                            
+                            let detentoresSingle = (it.cautelas || []).map(c => c.destinatario).join(', ');
+
+                            if (total > 0) {
+                                htmlRows += `
+                                    <tr>
+                                        <td><b>${localNome}</b></td>
+                                        <td style="text-align:center;">${total}</td>
+                                        <td style="text-align:center; font-weight:bold; color:#1b8a3e;">${disponivel}</td>
+                                        <td style="text-align:center; color:#f57c00;">${cautelados}</td>
+                                        <td style="text-align:center; color:#d90f23;">${pendentes}</td>
+                                        <td><small>${detentoresSingle ? 'Com: ' + detentoresSingle : '-'}</small></td>
+                                    </tr>`;
+                            }
                         }
                     }
                 });
             });
+        }
 
-            if (totalNoLocal > 0) {
-                distribuicaoHtml += `
-                    <tr>
-                        <td><b>${data.posto} - ${data.nome_local}</b></td>
-                        <td style="text-align:center;">${totalNoLocal}</td>
-                        <td style="text-align:center; font-weight:bold; color:#1b8a3e;">${disponivel}</td>
-                        <td style="text-align:center; color:#f57c00;">${cautelados}</td>
-                        <td style="text-align:center; color:#d90f23;">${pendentes}</td>
-                        <td style="text-align:center;">
-                            <button class="btn-modern-action btn-edit" style="padding:4px 8px; font-size:0.75em;" 
-                                onclick="abrirEditor('${listaId}', '${data.nome_local}', '${data.unidade}')">
-                                <i class="fas fa-external-link-alt"></i> Abrir
-                            </button>
-                        </td>
-                    </tr>`;
+        // 4. Inclusão dos itens que estão no Almoxarifado Central (Prateleira)
+        const saldoAlmox = itemData.disponivel || 0;
+        if (saldoAlmox > 0) {
+            if (ehMulti) {
+                // Implementação para tombamentos no estoque central virá quando fizermos o RECOLHIMENTO
+            } else {
+                htmlRows = `
+                    <tr style="background-color: #f6fff6;">
+                        <td><i class="fas fa-warehouse"></i> <b>ESTOQUE CENTRAL (Prateleira)</b></td>
+                        <td style="text-align:center;">${saldoAlmox}</td>
+                        <td style="text-align:center; font-weight:bold; color:#1b8a3e;">${saldoAlmox}</td>
+                        <td style="text-align:center;">0</td>
+                        <td style="text-align:center;">0</td>
+                        <td><small>Material pronto para uso</small></td>
+                    </tr>` + htmlRows;
             }
         }
 
-        tbody.innerHTML = distribuicaoHtml || '<tr><td colspan="6" style="text-align:center; padding:20px;">Item não encontrado em nenhuma viatura/setor.</td></tr>';
+        tbody.innerHTML = htmlRows || '<tr><td colspan="6" style="text-align:center; padding:20px;">Nenhum exemplar localizado.</td></tr>';
 
     } catch (e) {
         console.error("Erro ao detalhar:", e);
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao processar detalhes.</td></tr>';
     }
 }
 
