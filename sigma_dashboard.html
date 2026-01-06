@@ -8894,8 +8894,17 @@ async function abrirModalTransferencia(docId) {
     if (!doc.exists) return;
     const item = doc.data();
 
-    document.getElementById('almox-transf-item-nome').textContent = item.nome;
-    document.getElementById('almox-transf-item-nome').setAttribute('data-docid', docId);
+    const tituloNome = document.getElementById('almox-transf-item-nome');
+    tituloNome.textContent = item.nome;
+    tituloNome.setAttribute('data-docid', docId);
+    
+    // 🛑 LINHA CRUCIAL: Salva o tipo (multi ou single) para o modal saber o que fazer
+    tituloNome.setAttribute('data-tipo', item.tipo); 
+
+    // Reseta o modal para estado inicial
+    document.getElementById('almox-transf-qtd').value = '';
+    document.getElementById('div-aporte-multi').style.display = 'none';
+    document.getElementById('lista-inputs-tombamento').innerHTML = '';
     
     // Carrega as viaturas da unidade no select
     const unitListIds = await getUnitListIds();
@@ -8914,7 +8923,6 @@ async function abrirModalTransferencia(docId) {
 
     document.getElementById('modal-almox-transferencia').style.display = 'flex';
 }
-
 /**
  * Função Mestra de Movimentação: 
  * Altera o estoque central e a lista mestra da viatura simultaneamente.
@@ -9539,26 +9547,28 @@ async function salvarCadastroGlobal() {
  */
 document.getElementById('almox-transf-qtd').addEventListener('input', function() {
     const operacao = document.getElementById('almox-operacao-tipo').value;
-    const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
+    const infoItem = document.getElementById('almox-transf-item-nome');
+    const ehMulti = infoItem.getAttribute('data-tipo') === 'multi';
+    
     const containerMulti = document.getElementById('div-aporte-multi');
     const listaInputs = document.getElementById('lista-inputs-tombamento');
-    
-    // Precisamos saber se o item atual é Multi. 
-    // Como docId é "UNIDADE_UID", podemos buscar no objeto global ou via data-attribute
-    const ehMulti = document.getElementById('almox-transf-item-nome').getAttribute('data-tipo') === 'multi';
 
     if (operacao === 'ENTRADA' && ehMulti) {
-        containerMulti.style.display = 'block';
-        listaInputs.innerHTML = '';
         const qtd = parseInt(this.value) || 0;
         
-        for (let i = 1; i <= qtd; i++) {
-            listaInputs.innerHTML += `
-                <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                    <span style="padding: 8px; background: #800020; color: white; border-radius: 4px; font-size: 0.8em;">${i}</span>
-                    <input type="text" class="g-cat-input input-tomb-valor" placeholder="Tombamento ou Nº Série" required>
-                </div>
-            `;
+        if (qtd > 0) {
+            containerMulti.style.display = 'block';
+            listaInputs.innerHTML = '';
+            for (let i = 1; i <= qtd; i++) {
+                listaInputs.innerHTML += `
+                    <div style="display: flex; gap: 5px; margin-bottom: 8px; align-items: center;">
+                        <div style="background: #800020; color: white; padding: 10px; border-radius: 4px; font-size: 0.8em; font-weight: bold; min-width: 25px; text-align: center;">${i}</div>
+                        <input type="text" class="g-cat-input input-tomb-valor" placeholder="Digite o Tombamento ou Nº Série" style="flex: 1; margin-bottom: 0 !important;" required>
+                    </div>
+                `;
+            }
+        } else {
+            containerMulti.style.display = 'none';
         }
     } else {
         containerMulti.style.display = 'none';
