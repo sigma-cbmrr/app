@@ -9015,7 +9015,7 @@ async function verDetalhesItemAlmox(docId) {
         if (!almoxDoc.exists) return;
         const itemData = almoxDoc.data();
         const itemNome = itemData.nome;
-        const uidAlvo = itemData.uid_global; // Chave de busca técnica
+        const uidAlvo = itemData.uid_global;
         const ehMulti = itemData.tipo === 'multi';
 
         let acumTotal = 0, acumDisp = 0, acumCaut = 0, acumPend = 0;
@@ -9030,7 +9030,6 @@ async function verDetalhesItemAlmox(docId) {
                 </div>`;
         }
 
-        // Cabeçalhos Dinâmicos
         thead.innerHTML = ehMulti 
             ? `<tr><th>Tombamento / Série</th><th>Localização Atual</th><th style="text-align:center;">Status</th><th style="text-align:center;">Detalhes</th></tr>`
             : `<tr><th>Localização / Viatura</th><th style="text-align:center;">Total Carga</th><th style="text-align:center; color:#1b8a3e;">Disponível</th><th style="text-align:center; color:#f57c00;">Cautelados</th><th style="text-align:center; color:#d90f23;">Pendências</th><th style="text-align:center;">Ação</th></tr>`;
@@ -9038,16 +9037,16 @@ async function verDetalhesItemAlmox(docId) {
         tbody.innerHTML = '';
         let htmlRows = '';
 
-        // --- PARTE 1: INJETAR O ALMOXARIFADO COMO PRIMEIRO LOCAL ---
+        // --- PARTE 1: ALMOXARIFADO ---
         if (ehMulti) {
-            const tombNoAlmox = (itemData.tombamentos || []).filter(t => !t.viatura_id); // Itens que não saíram
+            const tombNoAlmox = (itemData.tombamentos || []).filter(t => !t.viatura_id);
             tombNoAlmox.forEach(t => {
                 acumTotal++; acumDisp++;
                 htmlRows += `
                     <tr style="background-color: #f0fdf4;">
                         <td><b>${t.tomb}</b><br><small>S/N: ${t.serie || 'N/A'}</small></td>
-                        <td><i class="fas fa-warehouse"></i> Almoxarifado Central</td>
-                        <td style="text-align:center;"><span class="status-badge badge-solucao">PRONTO P/ USO</span></td>
+                        <td><i class="fas fa-warehouse"></i> ALMOXARIFADO</td>
+                        <td style="text-align:center;"><span class="status-badge badge-solucao" style="background:#1b8a3e; color:white;">DISPONÍVEL</span></td>
                         <td style="text-align:center;">-</td>
                     </tr>`;
             });
@@ -9056,7 +9055,7 @@ async function verDetalhesItemAlmox(docId) {
                 acumTotal += itemData.disponivel; acumDisp += itemData.disponivel;
                 htmlRows += `
                     <tr style="background-color: #f0fdf4;">
-                        <td><i class="fas fa-warehouse"></i> <b>Almoxarifado Central</b> (Prateleira)</td>
+                        <td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO</b></td>
                         <td style="text-align:center;">${itemData.disponivel}</td>
                         <td style="text-align:center; font-weight:bold; color:#1b8a3e;">${itemData.disponivel}</td>
                         <td style="text-align:center;">0</td><td style="text-align:center;">0</td><td style="text-align:center;">-</td>
@@ -9064,7 +9063,7 @@ async function verDetalhesItemAlmox(docId) {
             }
         }
 
-        // --- PARTE 2: VARRER VIATURAS ---
+        // --- PARTE 2: VIATURAS ---
         const unitListIds = await getUnitListIds();
         for (const listaId of unitListIds) {
             const doc = await db.collection('listas_conferencia').doc(listaId).get();
@@ -9074,17 +9073,15 @@ async function verDetalhesItemAlmox(docId) {
 
             data.list.forEach(setor => {
                 setor.itens.forEach(it => {
-                    // Busca por UID Global (Primário) ou Nome (Legado)
                     if (it.uid_global === uidAlvo || it.nome.trim().toUpperCase() === itemNome.trim().toUpperCase()) {
                         if (ehMulti) {
                             (it.tombamentos || []).forEach(t => {
                                 acumTotal++;
                                 let statusTag = '<span class="status-badge badge-solucao" style="background:#2c7399">EM CARGA</span>';
-                                let acao = '-';
                                 if (t.cautela) { acumCaut++; statusTag = '<span class="status-badge badge-cautela">CAUTELADO</span>'; }
                                 if (t.pendencias_ids?.length > 0) { acumPend++; statusTag = '<span class="status-badge badge-pendente">PENDENTE</span>'; }
                                 
-                                htmlRows += `<tr><td><b>${t.tomb}</b></td><td><i class="fas fa-truck-moving"></i> ${localNome}</td><td style="text-align:center;">${statusTag}</td><td style="text-align:center;">${acao}</td></tr>`;
+                                htmlRows += `<tr><td><b>${t.tomb}</b></td><td><i class="fas fa-truck-moving"></i> ${localNome}</td><td style="text-align:center;">${statusTag}</td><td style="text-align:center;">-</td></tr>`;
                             });
                         } else {
                             const total = Number(it.quantidadeEsperada || it.quantidade) || 0;
@@ -9110,10 +9107,25 @@ async function verDetalhesItemAlmox(docId) {
             });
         }
 
-        // --- PARTE 3: TOTALIZADOR ---
+        // --- PARTE 3: TOTAL GERAL ---
         let rowTotal = ehMulti ? 
-            `<tr style="background:#f8f9fa; font-weight:bold; border-top:2px solid #333;"><td colspan="2">TOTALIZAÇÃO GERAL</td><td style="text-align:center;"><span style="color:#1b8a3e;">D:${acumDisp}</span> | <span style="color:#f57c00;">C:${acumCaut}</span> | <span style="color:#d90f23;">P:${acumPend}</span></td><td style="text-align:center;">${acumTotal} un</td></tr>` :
-            `<tr style="background:#f8f9fa; font-weight:bold; border-top:2px solid #333;"><td>TOTALIZAÇÃO GERAL</td><td style="text-align:center;">${acumTotal}</td><td style="text-align:center; color:#1b8a3e;">${acumDisp}</td><td style="text-align:center; color:#f57c00;">${acumCaut}</td><td style="text-align:center; color:#d90f23;">${acumPend}</td><td style="text-align:center;"><i class="fas fa-sigma"></i></td></tr>`;
+            `<tr style="background:#f8f9fa; font-weight:bold; border-top:2px solid #333;">
+                <td colspan="2">TOTAL GERAL</td>
+                <td style="text-align:center;">
+                    <span style="color:#1b8a3e;">DISPONÍVEL: ${acumDisp}</span> | 
+                    <span style="color:#f57c00;">CAUTELADOS: ${acumCaut}</span> | 
+                    <span style="color:#d90f23;">PENDÊNCIAS: ${acumPend}</span>
+                </td>
+                <td style="text-align:center;">${acumTotal} Itens</td>
+            </tr>` :
+            `<tr style="background:#f8f9fa; font-weight:bold; border-top:2px solid #333;">
+                <td>TOTAL GERAL</td>
+                <td style="text-align:center;">${acumTotal}</td>
+                <td style="text-align:center; color:#1b8a3e;">${acumDisp}</td>
+                <td style="text-align:center; color:#f57c00;">${acumCaut}</td>
+                <td style="text-align:center; color:#d90f23;">${acumPend}</td>
+                <td style="text-align:center;"><i class="fas fa-sigma"></i></td>
+            </tr>`;
 
         tbody.innerHTML = htmlRows + rowTotal;
     } catch (e) { console.error(e); }
