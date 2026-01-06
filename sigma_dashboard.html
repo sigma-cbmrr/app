@@ -2465,7 +2465,11 @@
             <label>Quantidade</label>
             <input type="number" id="almox-transf-qtd" min="1" value="1" class="filter-input">
         </div>
-
+		<div id="div-aporte-multi" style="display:none; margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; border: 1px dashed #800020;">
+    		<label style="font-weight: bold; color: #800020; font-size: 0.85em;">Identificação dos Itens (Tombamentos/Série):</label>
+    		<div id="lista-inputs-tombamento" style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
+        	</div>
+		</div>
         <div class="form-group">
             <label>Justificativa / Nota Fiscal / Ofício</label>
             <textarea id="almox-transf-obs" placeholder="Ex: NF 123, Recebido do almoxarifado central, etc." style="height: 80px;"></textarea>
@@ -8919,45 +8923,61 @@ async function executarMovimentacaoAlmox() {
     const tipo = document.getElementById('almox-operacao-tipo').value;
     const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
     const qtd = parseInt(document.getElementById('almox-transf-qtd').value);
-    const localAlvoId = document.getElementById('almox-viatura-alvo').value;
     const obs = document.getElementById('almox-transf-obs').value.trim();
+    const ehMulti = document.getElementById('almox-transf-item-nome').getAttribute('data-tipo') === 'multi';
 
     if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
-    if ((tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') && !localAlvoId) return alert("Selecione uma viatura.");
-    if (!obs) return alert("Informe a justificativa da movimentação.");
+    if (!obs) return alert("Informe a justificativa/NF.");
 
     try {
         const almoxRef = db.collection('almoxarifado_central').doc(docId);
-        const logData = {
-            data: new Date().toLocaleString('pt-BR'),
-            evento: tipo,
-            quantidade: qtd,
-            quem: currentUserData.nome_militar_completo,
-            detalhes: obs
-        };
+        const dataRegistro = new Date().toLocaleString('pt-BR');
 
         await db.runTransaction(async (transaction) => {
             const almoxDoc = await transaction.get(almoxRef);
             const aData = almoxDoc.data();
 
             if (tipo === 'ENTRADA') {
+                let novosTombamentos = [];
+                
+                if (ehMulti) {
+                    const inputs = document.querySelectorAll('.input-tomb-valor');
+                    inputs.forEach(input => {
+                        const valor = input.value.trim().toUpperCase();
+                        if (valor) {
+                            novosTombamentos.push({
+                                tomb: valor,
+                                situacao: "DISPONÍVEL",
+                                status_conferencia: "OK",
+                                historico_vida: [{
+                                    data: dataRegistro,
+                                    evento: "ENTRADA_ALMOX",
+                                    detalhes: `Entrada via NF/Aporte: ${obs}`,
+                                    quem: currentUserData.nome_militar_completo
+                                }]
+                            });
+                        }
+                    });
+                }
+
+                // Atualiza o Saldo do Almoxarifado
                 transaction.update(almoxRef, {
                     total: (aData.total || 0) + qtd,
                     disponivel: (aData.disponivel || 0) + qtd,
-                    historico: firebase.firestore.FieldValue.arrayUnion(logData)
+                    // Se for multi, concatena os novos objetos de tombamento
+                    tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : null,
+                    lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
                 });
-            } 
-            // Implementaremos ENVIO e RECOLHIMENTO no próximo passo, 
-            // pois eles exigem mexer na coleção 'listas_conferencia'
+            }
         });
 
-        alert("Operação realizada!");
+        alert("Aporte realizado com sucesso!");
         document.getElementById('modal-almox-transferencia').style.display = 'none';
         carregarAlmoxarifadoUI();
 
     } catch (e) {
         console.error(e);
-        alert("Erro ao processar movimentação.");
+        alert("Erro no aporte: " + e.message);
     }
 }
 
@@ -9514,6 +9534,36 @@ async function salvarCadastroGlobal() {
         btn.innerHTML = `<i class="fas fa-save"></i> Gravar no Catálogo`;
     }
 }	
+	/**
+ * Monitora a quantidade no aporte para gerar campos de tombamento se o item for MULTI
+ */
+document.getElementById('almox-transf-qtd').addEventListener('input', function() {
+    const operacao = document.getElementById('almox-operacao-tipo').value;
+    const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
+    const containerMulti = document.getElementById('div-aporte-multi');
+    const listaInputs = document.getElementById('lista-inputs-tombamento');
+    
+    // Precisamos saber se o item atual é Multi. 
+    // Como docId é "UNIDADE_UID", podemos buscar no objeto global ou via data-attribute
+    const ehMulti = document.getElementById('almox-transf-item-nome').getAttribute('data-tipo') === 'multi';
+
+    if (operacao === 'ENTRADA' && ehMulti) {
+        containerMulti.style.display = 'block';
+        listaInputs.innerHTML = '';
+        const qtd = parseInt(this.value) || 0;
+        
+        for (let i = 1; i <= qtd; i++) {
+            listaInputs.innerHTML += `
+                <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                    <span style="padding: 8px; background: #800020; color: white; border-radius: 4px; font-size: 0.8em;">${i}</span>
+                    <input type="text" class="g-cat-input input-tomb-valor" placeholder="Tombamento ou Nº Série" required>
+                </div>
+            `;
+        }
+    } else {
+        containerMulti.style.display = 'none';
+    }
+});
     </script>
 </body>
 </html>
