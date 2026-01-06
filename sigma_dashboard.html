@@ -2810,7 +2810,9 @@
                 <div class="g-cat-form-grid">
                     <div class="g-cat-field-group" style="grid-column: span 2;">
                         <label>Nome Técnico (Padrão Patrimonial/NF)</label>
-                        <input type="text" id="cat-nome-tecnico" class="g-cat-input" placeholder="Ex: Equipamento de Proteção Respiratória Autônomo" required>
+                        <input type="text" id="cat-nome-tecnico" class="g-cat-input" 
+       						placeholder="Ex: Equipamento de Proteção Respiratória Autônomo" 
+       						oninput="buscarNoCatalogoGlobal(this.value)" required>
                     </div>
                     <div class="g-cat-field-group">
                         <label>Sigla / Nome Comum</label>
@@ -9379,6 +9381,138 @@ document.addEventListener('change', function(e) {
         }
     }
 });
+	/**
+ * 1. AUTOCOMPLETE: Busca em tempo real no Catálogo Global
+ * Acoplado ao campo 'cat-nome-tecnico' do modal
+ */
+async function buscarNoCatalogoGlobal(termo) {
+    const input = document.getElementById('cat-nome-tecnico');
+    const suggestionsList = document.getElementById('cautela-suggestions-list'); // Reutilizando seu container de sugestões
+    const suggestionsBox = document.getElementById('cautela-suggestions-box');
+    
+    if (termo.length < 3) {
+        if(suggestionsBox) suggestionsBox.style.display = 'none';
+        return;
+    }
+
+    try {
+        const termoUpper = termo.toUpperCase();
+        const snap = await db.collection('catalogo_global')
+            .where('nome_tecnico', '>=', termoUpper)
+            .where('nome_tecnico', '<=', termoUpper + '\uf8ff')
+            .limit(5).get();
+
+        if (snap.empty) {
+            if(suggestionsBox) suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        let html = '';
+        snap.forEach(doc => {
+            const data = doc.data();
+            html += `<li onclick="selecionarItemDoCatalogo('${doc.id}')" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #eee;">
+                        <i class="fas fa-search"></i> <b>${data.nome_tecnico}</b> <small>(${data.tipo_controle})</small>
+                     </li>`;
+        });
+
+        if(suggestionsBox) {
+            suggestionsList.innerHTML = html;
+            suggestionsBox.style.display = 'block';
+        }
+    } catch (e) {
+        console.error("Erro na busca global:", e);
+    }
+}
+
+/**
+ * 2. SELEÇÃO: Preenche e trava o formulário se o item já existe
+ */
+async function selecionarItemDoCatalogo(uid) {
+    const doc = await db.collection('catalogo_global').doc(uid).get();
+    if (!doc.exists) return;
+
+    const data = doc.data();
+    document.getElementById('cat-nome-tecnico').value = data.nome_tecnico;
+    document.getElementById('cat-categoria').value = data.categoria;
+    
+    // Marca o rádio button correto (Single ou Multi)
+    document.querySelector(`input[name="cat-tipo"][value="${data.tipo_controle}"]`).checked = true;
+
+    // Se não for ADMIN, trava os campos para evitar duplicidade de DNA
+    if (currentUserData.role !== 'admin') {
+        document.getElementById('cat-nome-tecnico').readOnly = true;
+        document.getElementById('cat-categoria').disabled = true;
+        document.querySelectorAll('input[name="cat-tipo"]').forEach(r => r.disabled = true);
+        
+        const btnSalvar = document.querySelector('.btn-sync');
+        btnSalvar.innerHTML = `<i class="fas fa-check-circle"></i> Habilitar no meu Almoxarifado`;
+    }
+
+    document.getElementById('cautela-suggestions-box').style.display = 'none';
+}
+
+/**
+ * 3. SALVAMENTO: Cria o DNA (Global) e o Saldo (Local)
+ */
+async function salvarCadastroGlobal() {
+    const nome = document.getElementById('cat-nome-tecnico').value.trim().toUpperCase();
+    const categoria = document.getElementById('cat-categoria').value;
+    const tipo = document.querySelector('input[name="cat-tipo"]:checked').value;
+    const unidadeGestor = currentUserData.unidade;
+
+    if (!nome || !categoria) return alert("Preencha o nome técnico e a categoria.");
+
+    // Gera o UID baseado no nome: "EPR Scott 75i" -> "epr_scott_75i"
+    const uidGlobal = nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, '_').replace(/[^\w]/g, '');
+    
+    // ID do documento no Almoxarifado: "CCI_epr_scott_75i"
+    const unidadeSlug = unidadeGestor.replace(/\s+/g, '_').replace(/[^\w]/g, '');
+    const docIdAlmox = `${unidadeSlug}_${uidGlobal}`;
+
+    const btn = document.querySelector('.btn-sync');
+    btn.disabled = true; btn.textContent = "Gravando...";
+
+    try {
+        const batch = db.batch();
+
+        // Referência A: O Catálogo (DNA)
+        const refGlobal = db.collection('catalogo_global').doc(uidGlobal);
+        batch.set(refGlobal, {
+            uid: uidGlobal,
+            nome_tecnico: nome,
+            tipo_controle: tipo,
+            categoria: categoria,
+            criado_por: currentUserData.nome_militar_completo,
+            timestamp_criacao: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        // Referência B: O Almoxarifado Local (Saldo)
+        const refAlmox = db.collection('almoxarifado_central').doc(docIdAlmox);
+        batch.set(refAlmox, {
+            uid_global: uidGlobal,
+            nome: nome,
+            unidade: unidadeGestor,
+            total: 0,
+            disponivel: 0,
+            emCarga: 0,
+            emAlteracao: 0,
+            tipo: tipo
+        }, { merge: true });
+
+        await batch.commit();
+        alert(`Sucesso! O item "${nome}" foi integrado ao Catálogo e habilitado no Almoxarifado da unidade ${unidadeGestor}.`);
+        
+        fecharModalCadastroGlobal();
+        if (typeof carregarAlmoxarifadoUI === 'function') carregarAlmoxarifadoUI();
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao salvar: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fas fa-save"></i> Gravar no Catálogo`;
+    }
+}	
     </script>
 </body>
 </html>
