@@ -8929,10 +8929,11 @@ async function abrirModalTransferencia(docId) {
  */
 async function executarMovimentacaoAlmox() {
     const tipo = document.getElementById('almox-operacao-tipo').value;
-    const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
+    const docElement = document.getElementById('almox-transf-item-nome');
+    const docId = docElement.getAttribute('data-docid');
+    const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
     const qtd = parseInt(document.getElementById('almox-transf-qtd').value);
     const obs = document.getElementById('almox-transf-obs').value.trim();
-    const ehMulti = document.getElementById('almox-transf-item-nome').getAttribute('data-tipo') === 'multi';
 
     if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
     if (!obs) return alert("Informe a justificativa/NF.");
@@ -8943,49 +8944,63 @@ async function executarMovimentacaoAlmox() {
 
         await db.runTransaction(async (transaction) => {
             const almoxDoc = await transaction.get(almoxRef);
+            if (!almoxDoc.exists) throw new Error("Item não encontrado no banco.");
+            
             const aData = almoxDoc.data();
 
             if (tipo === 'ENTRADA') {
                 let novosTombamentos = [];
                 
                 if (ehMulti) {
-                    const inputs = document.querySelectorAll('.input-tomb-valor');
-                    inputs.forEach(input => {
-                        const valor = input.value.trim().toUpperCase();
-                        if (valor) {
+                    // 🛑 AJUSTE CIRÚRGICO: Seleciona as linhas do grid para pegar Tomb e Série juntos
+                    const linhas = document.querySelectorAll('.linha-aporte-tomb');
+                    
+                    linhas.forEach(linha => {
+                        const tombVal = linha.querySelector('.input-tomb-valor').value.trim().toUpperCase();
+                        const serieVal = linha.querySelector('.input-sn-valor').value.trim().toUpperCase();
+
+                        if (tombVal) {
                             novosTombamentos.push({
-                                tomb: valor,
+                                tomb: tombVal,
+                                serie: serieVal || "N/A", // Salva N/A se o S/N estiver vazio
                                 situacao: "DISPONÍVEL",
                                 status_conferencia: "OK",
                                 historico_vida: [{
                                     data: dataRegistro,
                                     evento: "ENTRADA_ALMOX",
-                                    detalhes: `Entrada via NF/Aporte: ${obs}`,
+                                    detalhes: `Aporte via NF: ${obs} | S/N: ${serieVal || 'Não informado'}`,
                                     quem: currentUserData.nome_militar_completo
                                 }]
                             });
                         }
                     });
+
+                    // Validação de segurança: impede salvar se faltar algum tombamento obrigatório
+                    if (novosTombamentos.length < qtd) {
+                        throw new Error("Preencha todos os números de tombamento gerados.");
+                    }
                 }
 
                 // Atualiza o Saldo do Almoxarifado
                 transaction.update(almoxRef, {
                     total: (aData.total || 0) + qtd,
                     disponivel: (aData.disponivel || 0) + qtd,
-                    // Se for multi, concatena os novos objetos de tombamento
-                    tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : null,
+                    // Se for multi, usa arrayUnion para anexar os novos objetos ao array existente
+                    tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : (aData.tombamentos || []),
                     lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
                 });
             }
+            
+            // Aqui você poderá adicionar os blocos 'ENVIO' e 'RECOLHIMENTO' futuramente
         });
 
-        alert("Aporte realizado com sucesso!");
+        alert("✅ Aporte realizado com sucesso!");
         document.getElementById('modal-almox-transferencia').style.display = 'none';
         carregarAlmoxarifadoUI();
 
     } catch (e) {
-        console.error(e);
-        alert("Erro no aporte: " + e.message);
+        console.error("Erro no aporte:", e);
+        alert("❌ Erro: " + e.message);
     }
 }
 
@@ -9553,17 +9568,30 @@ document.getElementById('almox-transf-qtd').addEventListener('input', function()
     const containerMulti = document.getElementById('div-aporte-multi');
     const listaInputs = document.getElementById('lista-inputs-tombamento');
 
+    // Só exibe se for operação de ENTRADA e o item for do tipo MULTI (Tombado)
     if (operacao === 'ENTRADA' && ehMulti) {
         const qtd = parseInt(this.value) || 0;
         
         if (qtd > 0) {
             containerMulti.style.display = 'block';
-            listaInputs.innerHTML = '';
+            listaInputs.innerHTML = ''; // Limpa antes de gerar novos
+            
             for (let i = 1; i <= qtd; i++) {
+                // Criamos um wrapper com display grid para alinhar os dois campos lado a lado
                 listaInputs.innerHTML += `
-                    <div style="display: flex; gap: 5px; margin-bottom: 8px; align-items: center;">
-                        <div style="background: #800020; color: white; padding: 10px; border-radius: 4px; font-size: 0.8em; font-weight: bold; min-width: 25px; text-align: center;">${i}</div>
-                        <input type="text" class="g-cat-input input-tomb-valor" placeholder="Digite o Tombamento ou Nº Série" style="flex: 1; margin-bottom: 0 !important;" required>
+                    <div class="linha-aporte-tomb" style="display: grid; grid-template-columns: 35px 1fr 1fr; gap: 8px; margin-bottom: 10px; align-items: center;">
+                        <div style="background: #800020; color: white; padding: 10px 0; border-radius: 4px; font-size: 0.8em; font-weight: bold; text-align: center;">${i}</div>
+                        
+                        <input type="text" 
+                               class="g-cat-input input-tomb-valor" 
+                               placeholder="Tombamento" 
+                               style="margin-bottom: 0 !important; font-size: 0.85em;" 
+                               required>
+                        
+                        <input type="text" 
+                               class="g-cat-input input-sn-valor" 
+                               placeholder="Nº Série (Opcional)" 
+                               style="margin-bottom: 0 !important; font-size: 0.85em;">
                     </div>
                 `;
             }
