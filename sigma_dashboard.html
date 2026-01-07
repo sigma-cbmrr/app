@@ -9016,7 +9016,6 @@ async function verDetalhesItemAlmox(docId) {
         if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
         document.getElementById('rastreio-title').innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
 
-        // CABEÇALHO (O mesmo para ambos, mas a 1ª coluna muda o nome dinamicamente no Single se preferir, manteremos Localização por consistência)
         theadRastreio.innerHTML = `
             <tr>
                 <th>${ehMulti ? 'Tombamento' : 'Localização Atual'}</th>
@@ -9025,43 +9024,10 @@ async function verDetalhesItemAlmox(docId) {
                 <th style="text-align:right;">Ações</th>
             </tr>`;
 
-        let html = '';
+        let htmlViaturas = '';
         let cDisp = 0, cCaut = 0, cPend = 0, cUso = 0;
 
-        // --- PALCO A: ALMOXARIFADO CENTRAL ---
-        if (ehMulti) {
-            // ... (Código do Multi mantido íntegro conforme sua regra)
-            (itemData.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
-                const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
-                let statusHTML = temPendencia 
-                    ? '<span class="status-badge" style="background:#ffebee; color:#c62828; border:1px solid #ffcdd2;">PENDENTE</span>' 
-                    : '<span class="status-badge" style="background:#e8f5e9; color:#2e7d32; border:1px solid #c8e6c9;">DISPONÍVEL</span>';
-                if (temPendencia) cPend++; else cDisp++;
-                html += `<tr style="background:#f0f7fa; border-left: 5px solid #2c7399;"><td><strong>${t.tomb}</strong></td><td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td><td style="text-align:center;">${statusHTML}</td><td style="text-align:right;"><button onclick="prepararMovimentacao('${docId}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background-color:rgba(44,115,153,0.12)!important;color:#2c7399!important;border:1px solid rgba(44,115,153,0.4)!important;padding:8px 12px!important;"><i class="fas fa-paper-plane"></i></button> <button onclick="prepararMovimentacao('${docId}','BAIXA','${t.tomb}')" class="btn-modern-action" style="background-color:rgba(217,15,35,0.12)!important;color:#d90f23!important;border:1px solid rgba(217,15,35,0.4)!important;padding:8px 12px!important;"><i class="fas fa-minus-circle"></i></button></td></tr>`;
-            });
-        } else {
-            // LÓGICA ITEM SINGLE: ALMOXARIFADO CENTRAL
-            const dispSede = itemData.disponivel || 0;
-            if (dispSede > 0) {
-                cDisp += dispSede;
-                html += `
-                    <tr style="background:#f0f7fa; border-left: 5px solid #2c7399;">
-                        <td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td>
-                        <td><b>${dispSede} UNIDADES</b></td>
-                        <td style="text-align:center;">
-                            <div style="font-size:0.85em; text-align:left; display:inline-block;">
-                                <span style="color:#2e7d32; font-weight:bold;">● ${dispSede} UN DISPONÍVEL</span>
-                            </div>
-                        </td>
-                        <td style="text-align:right;">
-                            <button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" title="Enviar" style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important;"><i class="fas fa-paper-plane"></i></button>
-                            <button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" title="Baixa" style="background-color: rgba(217, 15, 35, 0.12) !important; color: #d90f23 !important; border: 1px solid rgba(217, 15, 35, 0.4) !important; padding: 8px 12px !important;"><i class="fas fa-minus-circle"></i></button>
-                        </td>
-                    </tr>`;
-            }
-        }
-
-        // --- PALCO B: VIATURAS ---
+        // --- 1. VARREDURA NAS VIATURAS (PROCESSA PRIMEIRO PARA OBTER O TOTAL 'EM USO') ---
         const unitListIds = await getUnitListIds();
         for (const listaId of unitListIds) {
             const vtrDoc = await db.collection('listas_conferencia').doc(listaId).get();
@@ -9073,68 +9039,93 @@ async function verDetalhesItemAlmox(docId) {
                 if (!itNaVtr) return;
 
                 if (ehMulti) {
-                    // ... (Código do Multi mantido íntegro)
                     (itNaVtr.tombamentos || []).forEach(t => {
-                        const temCautela = !!t.cautela; const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
-                        let statusHTML = '';
-                        if (temPendencia) { statusHTML = '<span class="status-badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2;">PENDENTE</span>'; cPend++; }
-                        else if (temCautela) { statusHTML = '<span class="status-badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffe0b2;">CAUTELADO</span>'; cCaut++; }
-                        else { statusHTML = '<span class="status-badge" style="background:#f5f5f5;color:#616161;border:1px solid #e0e0e0;">EM USO</span>'; cUso++; }
-                        html += `<tr><td><strong>${t.tomb}</strong></td><td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td><td style="text-align:center;">${statusHTML}</td><td style="text-align:right;"><button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO','${t.tomb}','${listaId}')" class="btn-modern-action" style="background-color:rgba(245,124,0,0.12)!important;color:#f57c00!important;border:1px solid rgba(245,124,0,0.4)!important;padding:8px 12px!important;"><i class="fas fa-arrow-down"></i></button></td></tr>`;
+                        const temCautela = !!t.cautela; 
+                        const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
+                        let sH = '';
+                        if (temPendencia) { sH = '<span class="status-badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2;">PENDENTE</span>'; cPend++; }
+                        else if (temCautela) { sH = '<span class="status-badge" style="background:#fff3e0;color:#e65100;border:1px solid #ffe0b2;">CAUTELADO</span>'; cCaut++; }
+                        else { sH = '<span class="status-badge" style="background:#f5f5f5;color:#616161;border:1px solid #e0e0e0;">EM USO</span>'; cUso++; }
+                        
+                        htmlViaturas += `<tr><td><strong>${t.tomb}</strong></td><td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td><td style="text-align:center;">${sH}</td><td style="text-align:right;"><button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO','${t.tomb}','${listaId}')" class="btn-modern-action" title="Recolher" style="background-color:rgba(245,124,0,0.12)!important;color:#f57c00!important;border:1px solid rgba(245,124,0,0.4)!important;padding:8px 12px!important;"><i class="fas fa-arrow-down"></i></button></td></tr>`;
                     });
                 } else if (itNaVtr.quantidadeEsperada > 0) {
-    				// LÓGICA ITEM SINGLE: VIATURAS (Visão do Gestor: Material em campo)
-    				const totalVtr = Number(itNaVtr.quantidadeEsperada) || 0;
-    				const pendVtr = Number(itNaVtr.quantidadePendencia || 0);
-    				const cautVtr = Number(itNaVtr.quantidadeCautelada || 0);
-    
-    				// O que está na viatura mas NÃO está cautelado nem pendente é considerado "EM USO"
-    				const emUsoVtr = totalVtr - pendVtr - cautVtr;
+                    const totalVtr = Number(itNaVtr.quantidadeEsperada) || 0;
+                    const pendVtr = Number(itNaVtr.quantidadePendencia || 0);
+                    const cautVtr = Number(itNaVtr.quantidadeCautelada || 0);
+                    const emUsoVtr = totalVtr - pendVtr - cautVtr;
 
-    				cPend += pendVtr;
-    				cCaut += cautVtr;
-    				cUso += emUsoVtr; // Incrementa o contador de "Em Uso" para o resumo do topo
+                    cPend += pendVtr; cCaut += cautVtr; cUso += emUsoVtr;
 
-    				let statusLinhas = [];
-    				if (emUsoVtr > 0) statusLinhas.push(`<span style="color:#616161; font-weight:bold; display:block;">● ${emUsoVtr} UN EM USO</span>`);
-    				if (cautVtr > 0) statusLinhas.push(`<span style="color:#e65100; font-weight:bold; display:block;">● ${cautVtr} UN CAUTELADO</span>`);
-    				if (pendVtr > 0) statusLinhas.push(`<span style="color:#c62828; font-weight:bold; display:block;">● ${pendVtr} UN PENDENTE</span>`);
+                    let sL = [];
+                    if (emUsoVtr > 0) sL.push(`<span style="color:#616161; font-weight:bold; display:block;">● ${emUsoVtr} UN EM USO</span>`);
+                    if (cautVtr > 0) sL.push(`<span style="color:#e65100; font-weight:bold; display:block;">● ${cautVtr} UN CAUTELADO</span>`);
+                    if (pendVtr > 0) sL.push(`<span style="color:#c62828; font-weight:bold; display:block;">● ${pendVtr} UN PENDENTE</span>`);
 
-    				html += `
-        				<tr>
-            				<td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
-            				<td><b>${totalVtr} UNIDADES</b></td>
-            				<td style="text-align:center;">
-                				<div style="font-size:0.85em; text-align:left; display:inline-block;">
-                    				${statusLinhas.join('')}
-                				</div>
-            				</td>
-            				<td style="text-align:right;">
-                				<button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', null, '${listaId}')" class="btn-modern-action" title="Recolher" 
-                    				style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-                    				<i class="fas fa-arrow-down"></i>
-                				</button>
-            				</td>
-        				</tr>`;
-				}
+                    htmlViaturas += `
+                        <tr>
+                            <td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
+                            <td><b>${totalVtr} UNIDADES</b></td>
+                            <td style="text-align:center;">
+                                <div style="font-size:0.85em; text-align:left; display:inline-block;">${sL.join('')}</div>
+                            </td>
+                            <td style="text-align:right;">
+                                <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', null, '${listaId}')" class="btn-modern-action" title="Recolher" 
+                                    style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
+                                    <i class="fas fa-arrow-down"></i>
+                                </button>
+                            </td>
+                        </tr>`;
+                }
             });
         }
 
-        // 3. RENDERIZAÇÃO DO RESUMO NO TOPO (Igual para ambos)
-        const totalGeral = cDisp + cUso + cCaut + cPend;
+        // --- 2. LINHA DO ALMOXARIFADO CENTRAL ---
+        let htmlAlmox = '';
+        if (ehMulti) {
+            (itemData.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
+                const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
+                let sH = temP ? '<span class="status-badge" style="background:#ffebee;color:#c62828;border:1px solid #ffcdd2;">PENDENTE</span>' : '<span class="status-badge" style="background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9;">DISPONÍVEL</span>';
+                if (temP) cPend++; else cDisp++;
+                htmlAlmox += `<tr style="background:#f0f7fa; border-left: 5px solid #2c7399;"><td><strong>${t.tomb}</strong></td><td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td><td style="text-align:center;">${sH}</td><td style="text-align:right;"><button onclick="prepararMovimentacao('${docId}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background-color:rgba(44,115,153,0.12)!important;color:#2c7399!important;border:1px solid rgba(44,115,153,0.4)!important;padding:8px 12px!important;"><i class="fas fa-paper-plane"></i></button> <button onclick="prepararMovimentacao('${docId}','BAIXA','${t.tomb}')" class="btn-modern-action" style="background-color:rgba(217,15,35,0.12)!important;color:#d90f23!important;border:1px solid rgba(217,15,35,0.4)!important;padding:8px 12px!important;"><i class="fas fa-minus-circle"></i></button></td></tr>`;
+            });
+        } else {
+            const dispSede = Number(itemData.disponivel) || 0;
+            const totalGeralItem = Number(itemData.total) || 0;
+            cDisp += dispSede;
+
+            htmlAlmox = `
+                <tr style="background:#f0f7fa; border-left: 5px solid #2c7399;">
+                    <td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td>
+                    <td><b>${totalGeralItem} UNIDADES (TOTAL)</b></td>
+                    <td style="text-align:center;">
+                        <div style="font-size:0.85em; text-align:left; display:inline-block;">
+                            <span style="color:#2e7d32; font-weight:bold; display:block;">● ${dispSede} UN DISPONÍVEL</span>
+                            ${cUso > 0 ? `<span style="color:#616161; font-weight:bold; display:block;">● ${cUso} UN EM USO</span>` : ''}
+                        </div>
+                    </td>
+                    <td style="text-align:right;">
+                        <button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" title="Enviar" style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important;"><i class="fas fa-paper-plane"></i></button>
+                        <button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" title="Baixa" style="background-color: rgba(217, 15, 35, 0.12) !important; color: #d90f23 !important; border: 1px solid rgba(217, 15, 35, 0.4) !important; padding: 8px 12px !important;"><i class="fas fa-minus-circle"></i></button>
+                    </td>
+                </tr>`;
+        }
+
+        // --- 3. CONSOLIDAR HTML E RESUMO SUPERIOR ---
+        tbodyRastreio.innerHTML = htmlAlmox + htmlViaturas;
+
+        const totalFinal = cDisp + cUso + cCaut + cPend;
         const resumoDiv = `
             <div id="almox-resumo-topo" style="display: flex; gap: 10px; margin-bottom: 15px; padding: 10px; background: #fff; border: 1px solid #eee; border-radius: 8px; justify-content: space-around; flex-wrap: wrap;">
                 <div style="text-align:center;"><small style="color:#2e7d32; font-weight:bold; display:block;">DISPONÍVEL</small><b style="font-size:1.2em;">${cDisp}</b></div>
-                ${ehMulti ? `<div style="text-align:center;"><small style="color:#616161; font-weight:bold; display:block;">EM USO</small><b style="font-size:1.2em;">${cUso}</b></div>` : ''}
+                <div style="text-align:center;"><small style="color:#616161; font-weight:bold; display:block;">EM USO</small><b style="font-size:1.2em;">${cUso}</b></div>
                 <div style="text-align:center;"><small style="color:#e65100; font-weight:bold; display:block;">CAUTELADO</small><b style="font-size:1.2em;">${cCaut}</b></div>
                 <div style="text-align:center;"><small style="color:#c62828; font-weight:bold; display:block;">PENDENTE</small><b style="font-size:1.2em;">${cPend}</b></div>
-                <div style="text-align:center; border-left: 1px solid #ddd; padding-left:15px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL GERAL</small><b style="font-size:1.2em;">${totalGeral}</b></div>
+                <div style="text-align:center; border-left: 1px solid #ddd; padding-left:15px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL GERAL</small><b style="font-size:1.2em;">${totalFinal}</b></div>
             </div>`;
 
-        tbodyRastreio.innerHTML = html || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro localizado.</td></tr>';
-        
-        const resumoAntigo = document.getElementById('almox-resumo-topo');
-        if(resumoAntigo) resumoAntigo.remove();
+        const rAntigo = document.getElementById('almox-resumo-topo');
+        if(rAntigo) rAntigo.remove();
         document.querySelector('#almox-rastreio-wrapper table').insertAdjacentHTML('beforebegin', resumoDiv);
 
     } catch (e) {
