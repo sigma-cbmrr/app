@@ -9827,7 +9827,7 @@ async function configurarInterfaceMovimentacao() {
     const containerQtd = inputQtd.closest('.form-group'); 
     const labelQtd = containerQtd.querySelector('label');
 
-    // --- RESET CIRÚRGICO DE INTERFACE (Limpa a "sujeira" da ação anterior) ---
+    // Reset padrão de interface
     divVtr.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
     divSetor.style.display = (tipo === 'ENVIO') ? 'block' : 'none';
     divAporteMulti.style.display = 'none';
@@ -9836,9 +9836,9 @@ async function configurarInterfaceMovimentacao() {
     labelQtd.innerHTML = `Quantidade`;
     document.getElementById('lista-checks-tombamento').innerHTML = '';
 
-    // Busca dados no Almox
-    const docSnap = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
-    const dAlmox = docSnap.data() || {};
+    // Busca dados no Almoxarifado para referência
+    const docAlmox = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
+    const dAlmox = docAlmox.data() || {};
 
     // --- LÓGICA DE ENVIO ---
     if (tipo === 'ENVIO') {
@@ -9849,12 +9849,12 @@ async function configurarInterfaceMovimentacao() {
         } else {
             containerQtd.style.display = 'none'; 
             divEnvioMulti.style.display = 'block';
-            const disponiveis = (dAlmox.tombamentos || []).filter(t => !t.viatura_id && t.situacao !== "AVARIADO");
+            const disponiveis = (dAlmox.tombamentos || []).filter(t => !t.viatura_id);
             document.getElementById('lista-checks-tombamento').innerHTML = gerarHtmlChecks(disponiveis, 'azul');
         }
     }
 
-    // --- LÓGICA DE RECOLHIMENTO ---
+    // --- LÓGICA DE RECOLHIMENTO (CORREÇÃO DA EXIBIÇÃO DE SALDO) ---
     if (tipo === 'RECOLHIMENTO') {
         if (!viaturaId) {
             if (ehMulti) {
@@ -9870,7 +9870,7 @@ async function configurarInterfaceMovimentacao() {
             let itemNaVtr = null;
             const setores = vtrSnap.data().list || [];
 
-            // Busca resiliente (UID ou Nome)
+            // Busca o item na viatura (UID ou Nome)
             for (const setor of setores) {
                 const busca = (setor.itens || []).find(it => 
                     (it.uid_global && it.uid_global === dAlmox.uid_global) || (it.nome === dAlmox.nome)
@@ -9879,16 +9879,19 @@ async function configurarInterfaceMovimentacao() {
             }
 
             if (itemNaVtr) {
+                const saldoVtr = itemNaVtr.quantidadeEsperada || 0;
+
                 if (ehMulti) {
                     containerQtd.style.display = 'none';
                     divEnvioMulti.style.display = 'block';
                     const tombVtr = (itemNaVtr.tombamentos || []);
                     document.getElementById('lista-checks-tombamento').innerHTML = gerarHtmlChecks(tombVtr, 'laranja');
                 } else {
-                    const saldoVtr = itemNaVtr.quantidadeEsperada || 0;
+                    // EXIBE O SALDO EXISTENTE NA VIATURA PARA ITENS SINGLE
                     labelQtd.innerHTML = `Quantidade <span style="float:right; font-size:0.75em; background:rgba(245, 124, 0, 0.12); color:#f57c00; padding:2px 8px; border-radius:4px; border:1px solid rgba(245, 124, 0, 0.3); font-weight:bold;">Na Viatura: ${saldoVtr}</span>`;
                     inputQtd.max = saldoVtr;
-                    inputQtd.value = saldoVtr;
+                    inputQtd.placeholder = `Máximo: ${saldoVtr}`;
+                    inputQtd.value = saldoVtr; // Sugere recolher tudo por padrão
                 }
             } else {
                 if (ehMulti) {
@@ -9896,6 +9899,8 @@ async function configurarInterfaceMovimentacao() {
                     divEnvioMulti.style.display = 'block';
                 }
                 document.getElementById('lista-checks-tombamento').innerHTML = '<p style="padding:15px; font-size:0.85em; color:#d90f23; font-weight:bold;">Este item não consta na carga desta viatura.</p>';
+                inputQtd.value = '';
+                inputQtd.max = 0;
             }
         }
     }
