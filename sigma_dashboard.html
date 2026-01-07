@@ -2511,10 +2511,12 @@
             <textarea id="almox-transf-obs" placeholder="Ex: NF 123, Recebido do almoxarifado central, etc." style="height: 80px;"></textarea>
         </div>
 
-        <div class="modal-buttons">
-            <button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-almox-transferencia').style.display='none'">Cancelar</button>
-            <button class="btn-modern-action btn-sync" onclick="executarMovimentacaoAlmox()"><i class="fas fa-check"></i> Confirmar</button>
-        </div>
+       <div class="modal-buttons">
+    		<button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-almox-transferencia').style.display='none'">Cancelar</button>
+    		<button id="btn-confirmar-movimentacao" class="btn-modern-action btn-sync btn-executar-mov" onclick="rotearSalvamentoAlmox()">
+        		<i class="fas fa-check"></i> Confirmar
+   			</button>
+		</div>
     </div>
 </div>
     <div id="modal-unit-manager" class="modal-overlay">
@@ -8458,6 +8460,14 @@ function abrirDecisaoGestor(dataJson) {
         alert("❌ Erro ao processar recolhimento: " + e.message);
     }
 }
+		function rotearSalvamentoAlmox() {
+    const tipo = document.getElementById('almox-operacao-tipo').value;
+    const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
+    
+    if (tipo === 'ENVIO') executarEnvio(docId);
+    else if (tipo === 'RECOLHIMENTO') executarRecolhimento(docId);
+    else if (tipo === 'BAIXA') alert("Função de Baixa em desenvolvimento.");
+}
 		
 // FUNÇÕES AUXILIARES PARA LIMPEZA DE CÓDIGO
 function transformarEmAvariado(item, tomb, cautelaId, motivo, relator) {
@@ -9845,25 +9855,16 @@ async function executarAporteEstoque() {
     } catch (e) {
         alert("❌ Erro: " + e.message);
     }
-		async function executarMovimentacaoAlmox() {
-    const tipo = document.getElementById('almox-operacao-tipo').value;
-    const docElement = document.getElementById('almox-transf-item-nome');
-    const docIdAlmox = docElement.getAttribute('data-docid');
-    const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
+		async function executarEnvio(docIdAlmox) {
     const viaturaId = document.getElementById('almox-viatura-alvo').value;
     const setorAlvo = document.getElementById('almox-setor-alvo').value;
     const obs = document.getElementById('almox-transf-obs').value.trim();
+    const tombFocado = document.getElementById('almox-tombamento-focado')?.value; // Pego da preparação
     const dataRegistro = new Date().toLocaleString('pt-BR');
     
     let qtd = parseInt(document.getElementById('almox-transf-qtd').value);
-    let tombamentosSelecionados = [];
 
-    if (ehMulti && (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO')) {
-        const checks = document.querySelectorAll('.check-envio-tomb:checked');
-        tombamentosSelecionados = Array.from(checks).map(c => c.value);
-        qtd = tombamentosSelecionados.length;
-    }
-
+    if (!viaturaId || !setorAlvo) return alert("Selecione o destino completo.");
     if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
 
     try {
@@ -9872,90 +9873,121 @@ async function executarAporteEstoque() {
 
         await db.runTransaction(async (transaction) => {
             const snapAlmox = await transaction.get(almoxRef);
-            if (!snapAlmox.exists) throw new Error("Item não encontrado.");
             const dAlmox = snapAlmox.data();
+            const ehMulti = dAlmox.tipo === 'multi';
 
-            // --- LÓGICA DE ENVIO (ALMOX -> VTR) ---
-            if (tipo === 'ENVIO') {
-                if (dAlmox.disponivel < qtd) throw new Error("Saldo insuficiente no Almoxarifado.");
-                const snapVtr = await transaction.get(vtrRef);
-                let listVtr = snapVtr.data().list || [];
-                let itensParaVtr = [];
+            if (dAlmox.disponivel < qtd) throw new Error("Saldo insuficiente no Almoxarifado.");
 
-                let arrayTombAlmox = dAlmox.tombamentos || [];
-                if (ehMulti) {
-                    arrayTombAlmox = arrayTombAlmox.map(t => {
-                        if (tombamentosSelecionados.includes(t.tomb)) {
-                            const tAtu = { ...t, viatura_id: viaturaId, situacao: "EM CARGA" };
-                            tAtu.historico_vida = [...(t.historico_vida || []), { data: dataRegistro, evento: "ENVIO_VTR", detalhes: `Para ${viaturaId}`, quem: conferente }];
-                            itensParaVtr.push(tAtu); return tAtu;
-                        }
-                        return t;
-                    });
-                }
+            const snapVtr = await transaction.get(vtrRef);
+            let listVtr = snapVtr.data().list || [];
+            let itensParaVtr = [];
 
-                let itemJaNaVtr = false;
-                listVtr = listVtr.map(setor => {
-                    if (setor.nome === setorAlvo) {
-                        setor.itens = (setor.itens || []).map(it => {
-                            if (it.uid_global === dAlmox.uid_global || it.nome === dAlmox.nome) {
-                                itemJaNaVtr = true;
-                                if (ehMulti) { it.tombamentos = [...(it.tombamentos || []), ...itensParaVtr]; it.quantidadeEsperada = it.tombamentos.length; }
-                                else { it.quantidadeEsperada = (Number(it.quantidadeEsperada) || 0) + qtd; }
-                            }
-                            return it;
-                        });
-                        if (!itemJaNaVtr) setor.itens.push({ id: dAlmox.uid_global + "_" + Date.now(), uid_global: dAlmox.uid_global, nome: dAlmox.nome, tipo: dAlmox.tipo, quantidadeEsperada: qtd, tombamentos: ehMulti ? itensParaVtr : [] });
+            // Trata Tombamentos se for Multi
+            let arrayTombAlmox = dAlmox.tombamentos || [];
+            if (ehMulti) {
+                // Se veio de um tombamento específico ou de checkboxes (mantendo compatibilidade)
+                const selecionados = tombFocado ? [tombFocado] : Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
+                
+                arrayTombAlmox = arrayTombAlmox.map(t => {
+                    if (selecionados.includes(t.tomb)) {
+                        const tAtu = { ...t, viatura_id: viaturaId, situacao: "EM CARGA" };
+                        tAtu.historico_vida = [...(t.historico_vida || []), { data: dataRegistro, evento: "ENVIO_VTR", detalhes: `Para ${viaturaId}. Obs: ${obs}`, quem: conferente }];
+                        itensParaVtr.push(tAtu); 
+                        return tAtu;
                     }
-                    return setor;
+                    return t;
                 });
-
-                transaction.update(almoxRef, { disponivel: dAlmox.disponivel - qtd, emCarga: (dAlmox.emCarga || 0) + qtd, tombamentos: ehMulti ? arrayTombAlmox : [] });
-                transaction.update(vtrRef, { list: listVtr });
             }
 
-            // --- LÓGICA DE RECOLHIMENTO (VTR -> ALMOX) ---
-            if (tipo === 'RECOLHIMENTO') {
-                const snapVtr = await transaction.get(vtrRef);
-                let listVtr = snapVtr.data().list || [];
-                listVtr = listVtr.map(setor => {
+            // Injeta na Lista da Viatura
+            let itemJaNaVtr = false;
+            listVtr = listVtr.map(setor => {
+                if (setor.nome === setorAlvo) {
                     setor.itens = (setor.itens || []).map(it => {
                         if (it.uid_global === dAlmox.uid_global || it.nome === dAlmox.nome) {
-                            if (ehMulti) { it.tombamentos = it.tombamentos.filter(t => !tombamentosSelecionados.includes(t.tomb)); it.quantidadeEsperada = it.tombamentos.length; }
-                            else { it.quantidadeEsperada -= qtd; }
+                            itemJaNaVtr = true;
+                            if (ehMulti) { it.tombamentos = [...(it.tombamentos || []), ...itensParaVtr]; it.quantidadeEsperada = it.tombamentos.length; }
+                            else { it.quantidadeEsperada = (Number(it.quantidadeEsperada) || 0) + qtd; }
                         }
                         return it;
-                    }).filter(it => it.quantidadeEsperada > 0);
-                    return setor;
-                });
-                let arrayTombAlmox = dAlmox.tombamentos || [];
-                if (ehMulti) {
-                    arrayTombAlmox = arrayTombAlmox.map(t => {
-                        if (tombamentosSelecionados.includes(t.tomb)) return { ...t, viatura_id: null, situacao: "DISPONÍVEL", historico_vida: [...(t.historico_vida || []), { data: dataRegistro, evento: "RECOLHIMENTO", detalhes: `Recolhido de ${viaturaId}`, quem: conferente }] };
-                        return t;
                     });
+                    if (!itemJaNaVtr) setor.itens.push({ id: dAlmox.uid_global + "_" + Date.now(), uid_global: dAlmox.uid_global, nome: dAlmox.nome, tipo: dAlmox.tipo, quantidadeEsperada: qtd, tombamentos: ehMulti ? itensParaVtr : [] });
                 }
-                transaction.update(almoxRef, { disponivel: (dAlmox.disponivel || 0) + qtd, emCarga: (dAlmox.emCarga || 0) - qtd, tombamentos: ehMulti ? arrayTombAlmox : dAlmox.tombamentos });
-                transaction.update(vtrRef, { list: listVtr });
-            }
+                return setor;
+            });
 
-            // --- LÓGICA DE BAIXA DEFINITIVA ---
-            if (tipo === 'BAIXA') {
-                 if (dAlmox.disponivel < qtd) throw new Error("Só é possível dar baixa em itens DISPONÍVEIS no Almoxarifado.");
-                 // Lógica de baixa: remove do total e do disponível
-                 transaction.update(almoxRef, { 
-                     total: dAlmox.total - qtd, 
-                     disponivel: dAlmox.disponivel - qtd 
-                 });
-                 // Nota: Se for multi, aqui precisaríamos filtrar e remover os tombamentos do array também.
-            }
+            transaction.update(almoxRef, { 
+                disponivel: dAlmox.disponivel - qtd, 
+                emCarga: (dAlmox.emCarga || 0) + qtd, 
+                tombamentos: ehMulti ? arrayTombAlmox : dAlmox.tombamentos 
+            });
+            transaction.update(vtrRef, { list: listVtr });
         });
 
-        alert(`✅ Operação concluída!`);
+        alert("✅ Envio realizado com sucesso!");
         document.getElementById('modal-almox-transferencia').style.display = 'none';
         carregarAlmoxarifadoUI();
-    } catch (e) { alert("❌ Erro: " + e.message); }
+    } catch (e) { alert("❌ Erro no envio: " + e.message); }
 }
+	async function executarRecolhimento(docIdAlmox) {
+    const viaturaId = document.getElementById('almox-viatura-alvo').value; // Estará disabled mas o valor existe
+    const tombFocado = document.getElementById('almox-tombamento-focado')?.value;
+    const dataRegistro = new Date().toLocaleString('pt-BR');
+    let qtd = parseInt(document.getElementById('almox-transf-qtd').value);
+
+    try {
+        const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
+        const vtrRef = db.collection('listas_conferencia').doc(viaturaId);
+
+        await db.runTransaction(async (transaction) => {
+            const snapAlmox = await transaction.get(almoxRef);
+            const dAlmox = snapAlmox.data();
+            const ehMulti = dAlmox.tipo === 'multi';
+
+            const snapVtr = await transaction.get(vtrRef);
+            let listVtr = snapVtr.data().list || [];
+            
+            const selecionados = ehMulti ? (tombFocado ? [tombFocado] : Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value)) : [];
+
+            // Remove da Viatura
+            listVtr = listVtr.map(setor => {
+                setor.itens = (setor.itens || []).map(it => {
+                    if (it.uid_global === dAlmox.uid_global || it.nome === dAlmox.nome) {
+                        if (ehMulti) { 
+                            it.tombamentos = (it.tombamentos || []).filter(t => !selecionados.includes(t.tomb)); 
+                            it.quantidadeEsperada = it.tombamentos.length; 
+                        } else { 
+                            it.quantidadeEsperada = Math.max(0, it.quantidadeEsperada - qtd); 
+                        }
+                    }
+                    return it;
+                }).filter(it => it.quantidadeEsperada > 0 || (it.tombamentos && it.tombamentos.length > 0));
+                return setor;
+            });
+
+            // Devolve ao Almoxarifado
+            let arrayTombAlmox = dAlmox.tombamentos || [];
+            if (ehMulti) {
+                arrayTombAlmox = arrayTombAlmox.map(t => {
+                    if (selecionados.includes(t.tomb)) {
+                        return { ...t, viatura_id: null, situacao: "DISPONÍVEL", historico_vida: [...(t.historico_vida || []), { data: dataRegistro, evento: "RECOLHIMENTO", detalhes: `Recolhido da vtr ${viaturaId}`, quem: conferente }] };
+                    }
+                    return t;
+                });
+            }
+
+            transaction.update(almoxRef, { 
+                disponivel: (dAlmox.disponivel || 0) + qtd, 
+                emCarga: Math.max(0, (dAlmox.emCarga || 0) - qtd), 
+                tombamentos: ehMulti ? arrayTombAlmox : dAlmox.tombamentos 
+            });
+            transaction.update(vtrRef, { list: listVtr });
+        });
+
+        alert("✅ Material recolhido para o estoque!");
+        document.getElementById('modal-almox-transferencia').style.display = 'none';
+        carregarAlmoxarifadoUI();
+    } catch (e) { alert("❌ Erro no recolhimento: " + e.message); }
 }
 	async function abrirModalTransferencia(docId) {
     // 1. Limpa o modal de qualquer resquício de uso anterior
