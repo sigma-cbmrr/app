@@ -2458,7 +2458,7 @@
 
         <div id="div-almox-viatura" class="form-group" style="display:none;">
             <label>Viatura / Local Alvo</label>
-            <select id="almox-viatura-alvo" class="filter-input" onchange="carregarSetoresDestino(this.value)"></select>
+            <select id="almox-viatura-alvo" class="filter-input" onchange="carregarSetoresDestino(this.value); configurarInterfaceMovimentacao();"></select>
         </div>
 
         <div id="div-almox-setor" class="form-group" style="display:none;">
@@ -9846,7 +9846,6 @@ async function configurarInterfaceMovimentacao() {
     const docIdAlmox = infoItem.getAttribute('data-docid');
     const viaturaId = document.getElementById('almox-viatura-alvo').value;
 
-    // Referências dos elementos
     const divVtr = document.getElementById('div-almox-viatura');
     const divSetor = document.getElementById('div-almox-setor');
     const divAporteMulti = document.getElementById('div-aporte-multi');
@@ -9856,7 +9855,7 @@ async function configurarInterfaceMovimentacao() {
     const containerQtd = inputQtd.closest('.form-group'); 
     const labelQtd = containerQtd.querySelector('label');
 
-    // Reset padrão de visibilidade
+    // Reset padrão
     divVtr.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
     divSetor.style.display = (tipo === 'ENVIO') ? 'block' : 'none';
     divAporteMulti.style.display = 'none';
@@ -9864,6 +9863,7 @@ async function configurarInterfaceMovimentacao() {
     containerQtd.style.display = 'block'; 
     labelQtd.innerHTML = `Quantidade`; 
 
+    // Busca dados no Almox (necessário para todos os fluxos)
     const docSnap = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
     const dAlmox = docSnap.data() || {};
 
@@ -9881,8 +9881,18 @@ async function configurarInterfaceMovimentacao() {
         }
     }
 
-    // --- LÓGICA DE RECOLHIMENTO (CIRÚRGICA) ---
-    if (tipo === 'RECOLHIMENTO' && viaturaId) {
+    // --- LÓGICA DE RECOLHIMENTO ---
+    if (tipo === 'RECOLHIMENTO') {
+        if (!viaturaId) {
+            // Se não escolheu a Vtr, avisa no local da lista se for Multi
+            if (ehMulti) {
+                containerQtd.style.display = 'none';
+                divEnvioMulti.style.display = 'block';
+                document.getElementById('lista-checks-tombamento').innerHTML = '<p style="padding:15px; font-size:0.85em; color:#666;">Selecione a viatura acima...</p>';
+            }
+            return;
+        }
+
         const vtrSnap = await db.collection('listas_conferencia').doc(viaturaId).get();
         if (vtrSnap.exists) {
             let itemNaVtr = null;
@@ -9895,7 +9905,6 @@ async function configurarInterfaceMovimentacao() {
                 if (ehMulti) {
                     containerQtd.style.display = 'none';
                     divEnvioMulti.style.display = 'block';
-                    // Filtra tombamentos que pertencem especificamente a esta viatura
                     const tombVtr = (itemNaVtr.tombamentos || []);
                     document.getElementById('lista-checks-tombamento').innerHTML = gerarHtmlChecks(tombVtr, 'laranja');
                 } else {
@@ -9905,6 +9914,11 @@ async function configurarInterfaceMovimentacao() {
                     inputQtd.value = saldoVtr;
                 }
             } else {
+                // Caso o item não esteja na viatura escolhida
+                if (ehMulti) {
+                    containerQtd.style.display = 'none';
+                    divEnvioMulti.style.display = 'block';
+                }
                 document.getElementById('lista-checks-tombamento').innerHTML = '<p style="padding:15px; font-size:0.85em; color:#d90f23; font-weight:bold;">Este item não consta na carga desta viatura.</p>';
             }
         }
@@ -9915,7 +9929,6 @@ async function configurarInterfaceMovimentacao() {
         divAporteMulti.style.display = 'block';
     }
 }
-
 // Função auxiliar para manter o código limpo
 function gerarHtmlChecks(lista, tema) {
     const corRef = tema === 'azul' ? '#2c7399' : '#f57c00';
