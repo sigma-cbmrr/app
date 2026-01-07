@@ -9836,9 +9836,10 @@ async function configurarInterfaceMovimentacao() {
     labelQtd.innerHTML = `Quantidade`;
     document.getElementById('lista-checks-tombamento').innerHTML = '';
 
-    // Busca dados no Almoxarifado para referência
+    // Busca dados no Almoxarifado para referência (UID Global)
     const docAlmox = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
     const dAlmox = docAlmox.data() || {};
+    const uidBuscado = dAlmox.uid_global || docIdAlmox; // Fallback para o ID do doc
 
     // --- LÓGICA DE ENVIO ---
     if (tipo === 'ENVIO') {
@@ -9854,7 +9855,7 @@ async function configurarInterfaceMovimentacao() {
         }
     }
 
-    // --- LÓGICA DE RECOLHIMENTO (CORREÇÃO DA EXIBIÇÃO DE SALDO) ---
+    // --- LÓGICA DE RECOLHIMENTO ---
     if (tipo === 'RECOLHIMENTO') {
         if (!viaturaId) {
             if (ehMulti) {
@@ -9870,10 +9871,11 @@ async function configurarInterfaceMovimentacao() {
             let itemNaVtr = null;
             const setores = vtrSnap.data().list || [];
 
-            // Busca o item na viatura (UID ou Nome)
+            // Busca cirúrgica: Compara UID Global do Almox com o UID do item na Vtr
             for (const setor of setores) {
                 const busca = (setor.itens || []).find(it => 
-                    (it.uid_global && it.uid_global === dAlmox.uid_global) || (it.nome === dAlmox.nome)
+                    (it.uid_global && it.uid_global === uidBuscado) || 
+                    (it.nome === infoItem.textContent)
                 );
                 if (busca) { itemNaVtr = busca; break; }
             }
@@ -9887,11 +9889,11 @@ async function configurarInterfaceMovimentacao() {
                     const tombVtr = (itemNaVtr.tombamentos || []);
                     document.getElementById('lista-checks-tombamento').innerHTML = gerarHtmlChecks(tombVtr, 'laranja');
                 } else {
-                    // EXIBE O SALDO EXISTENTE NA VIATURA PARA ITENS SINGLE
-                    labelQtd.innerHTML = `Quantidade <span style="float:right; font-size:0.75em; background:rgba(245, 124, 0, 0.12); color:#f57c00; padding:2px 8px; border-radius:4px; border:1px solid rgba(245, 124, 0, 0.3); font-weight:bold;">Na Viatura: ${saldoVtr}</span>`;
+                    // INJETANDO O BADGE E O VALOR
+                    labelQtd.innerHTML = `Quantidade <span style="float:right; font-size:0.75em; background:rgba(245, 124, 0, 0.12); color:#f57c00; padding:2px 8px; border-radius:4px; border:1px solid rgba(245, 124, 0, 0.4); font-weight:bold;">Na Viatura: ${saldoVtr}</span>`;
                     inputQtd.max = saldoVtr;
-                    inputQtd.placeholder = `Máximo: ${saldoVtr}`;
-                    inputQtd.value = saldoVtr; // Sugere recolher tudo por padrão
+                    inputQtd.value = saldoVtr; 
+                    inputQtd.placeholder = `Máx: ${saldoVtr}`;
                 }
             } else {
                 if (ehMulti) {
