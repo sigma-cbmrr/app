@@ -9836,25 +9836,35 @@ async function configurarInterfaceMovimentacao() {
     const divAporteMulti = document.getElementById('div-aporte-multi');
     const divEnvioMulti = document.getElementById('div-selecao-envio-multi');
     
-    // Pegamos o container do input de quantidade (o form-group pai)
     const inputQtd = document.getElementById('almox-transf-qtd');
     const containerQtd = inputQtd.closest('.form-group'); 
+    const labelQtd = containerQtd.querySelector('label');
 
     // Reset padrão de visibilidade
     divVtr.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
     divSetor.style.display = (tipo === 'ENVIO') ? 'block' : 'none';
     divAporteMulti.style.display = 'none';
     divEnvioMulti.style.display = 'none';
-    containerQtd.style.display = 'block'; // Padrão é visível
+    containerQtd.style.display = 'block'; 
+    labelQtd.innerHTML = `Quantidade`; // Reset do label
 
-    // REGRA DE OURO: Se for ENVIO de item MULTI, esconde a Quantidade manual
+    // Busca dados do item para exibir saldo se for SINGLE e ENVIO
+    const docSnap = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
+    const dAlmox = docSnap.data() || {};
+
+    // REGRA 1: Se for ENVIO de item SINGLE, mostra o badge de saldo disponível
+    if (tipo === 'ENVIO' && !ehMulti) {
+        const saldo = dAlmox.disponivel || 0;
+        labelQtd.innerHTML = `Quantidade <span style="float:right; font-size:0.75em; background:rgba(44, 115, 153, 0.12); color:#2c7399; padding:2px 8px; border-radius:4px; border:1px solid rgba(44, 115, 153, 0.3); font-weight:bold;">Disponível: ${saldo}</span>`;
+        inputQtd.max = saldo; // Trava o máximo do input para o saldo real
+    }
+
+    // REGRA 2: Se for ENVIO de item MULTI, esconde a Quantidade manual e mostra checks
     if (tipo === 'ENVIO' && ehMulti) {
-        containerQtd.style.display = 'none'; // Remove a poluição visual
+        containerQtd.style.display = 'none'; 
         divEnvioMulti.style.display = 'block';
         
-        // Carrega os itens do estoque
-        const doc = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
-        const tombamentos = doc.data().tombamentos || [];
+        const tombamentos = dAlmox.tombamentos || [];
         const disponiveis = tombamentos.filter(t => !t.viatura_id && t.situacao !== "AVARIADO");
 
         const container = document.getElementById('lista-checks-tombamento');
