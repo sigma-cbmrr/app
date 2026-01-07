@@ -8986,31 +8986,28 @@ function filtrarAlmoxarifado() {
 }
 		
 async function verDetalhesItemAlmox(docId) {
-    // 1. Referências dos Palcos (Garantindo que os IDs batam com o HTML corrigido)
+    // 1. Referências dos Palcos
     const palcoPrincipal = document.getElementById('container-tabela-principal');
     const palcoRastreio = document.getElementById('almox-rastreio-wrapper');
     const tbodyRastreio = document.getElementById('almox-rastreio-body');
     const theadRastreio = document.getElementById('almox-rastreio-thead');
     const breadcrumb = document.getElementById('almox-breadcrumb');
-    
-    // Busca o card de filtros especificamente pelo ID unificado que criamos
     const filterCard = document.getElementById('almox-filtros-container');
 
     if (!palcoPrincipal || !palcoRastreio) return;
 
-    // 2. TROCA DE TELA: Limpeza absoluta para evitar poluição visual em outras telas
+    // 2. TROCA DE TELA
     palcoPrincipal.style.display = 'none';
     if (filterCard) filterCard.style.display = 'none';
-    
     palcoRastreio.style.display = 'block';
     
-    // 3. PROTEÇÃO DE LAYOUT: Define limites para não estourar o iframe do SIGMA
+    // 3. PROTEÇÃO DE LAYOUT
     palcoRastreio.style.maxHeight = "calc(100vh - 220px)"; 
     palcoRastreio.style.overflowY = "auto";
     palcoRastreio.style.borderTop = "4px solid #2c7399";
 
     // 4. FEEDBACK DE CARREGAMENTO
-    tbodyRastreio.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
+    tbodyRastreio.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
 
     try {
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
@@ -9020,48 +9017,49 @@ async function verDetalhesItemAlmox(docId) {
         const ehMulti = itemData.tipo === 'multi';
         const uidGlobal = itemData.uid_global;
 
-        // Atualiza Navegação Superior
-        if (breadcrumb) {
-            breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
-        }
+        if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
         document.getElementById('rastreio-title').innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
 
-        // Define Cabeçalho da Tabela de Rastreio
+        // NOVO CABEÇALHO: Tombamento na primeira coluna
         theadRastreio.innerHTML = `
             <tr>
+                <th>Tombamento</th>
                 <th>Localização Atual</th>
-                <th style="text-align:center;">Total</th>
-                <th style="text-align:center;">Disponível</th>
                 <th style="text-align:center;">Status</th>
                 <th style="text-align:right;">Ações</th>
             </tr>`;
 
         let html = '';
 
-        // --- PALCO A: LOCALIZAÇÃO NO ALMOXARIFADO CENTRAL ---
-        const dispAlmox = itemData.disponivel || 0;
-        if (ehMulti || dispAlmox > 0) {
-            html += `
-    			<tr style="background:#f0f7fa; border-left: 5px solid #2c7399;">
-        			<td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td>
-        			<td style="text-align:center;">${itemData.total || 0}</td>
-        			<td style="text-align:center; color:green; font-weight:bold;">${dispAlmox}</td>
-        			<td style="text-align:center;"><small>${ehMulti ? 'Estoque Sede' : '-'}</small></td>
-        			<td style="text-align:right; white-space:nowrap;">
-            			<button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" title="Enviar para Viatura"
-                			style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-                			<i class="fas fa-paper-plane"></i>
-            			</button>
-            
-            			<button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" title="Dar Baixa Definitiva (Inservível/Perda)"
-    						style="background-color: rgba(217, 15, 35, 0.12) !important; color: #d90f23 !important; border: 1px solid rgba(217, 15, 35, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-    						<i class="fas fa-minus-circle"></i>
-						</button>
-        			</td>
-    			</tr>`;
+        // --- PALCO A: ALMOXARIFADO CENTRAL (ITENS MULTI) ---
+        if (ehMulti) {
+            const noAlmox = (itemData.tombamentos || []).filter(t => !t.viatura_id);
+            noAlmox.forEach(t => {
+                const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
+                const statusHTML = temPendencia 
+                    ? '<span class="status-badge badge-pendente">PENDENTE</span>' 
+                    : '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
+
+                html += `
+                    <tr style="background:#f0f7fa; border-left: 5px solid #2c7399;">
+                        <td><strong>${t.tomb}</strong></td>
+                        <td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td>
+                        <td style="text-align:center;">${statusHTML}</td>
+                        <td style="text-align:right; white-space:nowrap;">
+                            <button onclick="prepararMovimentacao('${docId}', 'ENVIO', '${t.tomb}')" class="btn-modern-action" title="Enviar para Viatura"
+                                style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                            <button onclick="prepararMovimentacao('${docId}', 'BAIXA', '${t.tomb}')" class="btn-modern-action" title="Baixa Definitiva"
+                                style="background-color: rgba(217, 15, 35, 0.12) !important; color: #d90f23 !important; border: 1px solid rgba(217, 15, 35, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
+                                <i class="fas fa-minus-circle"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+            });
         }
 
-        // --- PALCO B: LOCALIZAÇÃO NAS VIATURAS (Varredura por Unidade) ---
+        // --- PALCO B: VIATURAS (ITENS MULTI) ---
         const unitListIds = await getUnitListIds();
         for (const listaId of unitListIds) {
             const vtrDoc = await db.collection('listas_conferencia').doc(listaId).get();
@@ -9069,32 +9067,38 @@ async function verDetalhesItemAlmox(docId) {
             const vtrData = vtrDoc.data();
 
             vtrData.list.forEach(setor => {
-                // Busca precisa pelo UID global
-                const it = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
-                
-                if (it && it.quantidadeEsperada > 0) {
-                    html += `
-    					<tr>
-        					<td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
-        					<td style="text-align:center;">${it.quantidadeEsperada}</td>
-        					<td style="text-align:center;">${it.quantidadeEsperada}</td>
-        					<td style="text-align:center;"><small>${ehMulti ? 'Tombamentos' : 'EM CARGA'}</small></td>
-        					<td style="text-align:right;">
-            					<button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', null, '${listaId}')" class="btn-modern-action" title="Recolher para Almoxarifado"
-                					style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-                					<i class="fas fa-arrow-down"></i>
-            					</button>
-        					</td>
-    					</tr>`;
+                const itNaVtr = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
+                if (itNaVtr && ehMulti) {
+                    (itNaVtr.tombamentos || []).forEach(t => {
+                        const temCautela = !!t.cautela;
+                        const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
+                        
+                        let statusHTML = '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
+                        if (temCautela) statusHTML = '<span class="status-badge badge-cautela">CAUTELADO</span>';
+                        if (temPendencia) statusHTML = '<span class="status-badge badge-pendente">PENDENTE</span>';
+
+                        html += `
+                            <tr>
+                                <td><strong>${t.tomb}</strong></td>
+                                <td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
+                                <td style="text-align:center;">${statusHTML}</td>
+                                <td style="text-align:right;">
+                                    <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', '${t.tomb}', '${listaId}')" class="btn-modern-action" title="Recolher para Almoxarifado"
+                                        style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </button>
+                                </td>
+                            </tr>`;
+                    });
                 }
             });
         }
 
-        tbodyRastreio.innerHTML = html || '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum registro de carga localizado.</td></tr>';
+        tbodyRastreio.innerHTML = html || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro Multi localizado.</td></tr>';
 
     } catch (e) {
-        console.error("Erro ao carregar detalhes:", e);
-        tbodyRastreio.innerHTML = `<tr><td colspan="5" style="color:red; text-align:center; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        console.error("Erro:", e);
+        tbodyRastreio.innerHTML = `<tr><td colspan="4" style="color:red; text-align:center; padding:20px;">Erro: ${e.message}</td></tr>`;
     }
 }
 /**
