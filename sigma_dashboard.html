@@ -9163,27 +9163,58 @@ function filtrarRastreioMulti() {
 /**
  * Função de ponte que prepara o modal de transferência com os dados clicados na lupa
  */
-function prepararMovimentacao(docId, operacao, tombamento = null, viaturaId = null) {
-    // Reutiliza a sua função de abrir modal já existente
+async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaId = null) {
+    // 1. Abre o modal base
     abrirModalTransferencia(docId);
     
-    // Pequeno atraso para o modal carregar os elementos e o JS poder manipular
+    // 2. Aguarda o carregamento dos elementos para desmembrar a interface
     setTimeout(() => {
         const selectTipo = document.getElementById('almox-operacao-tipo');
+        const tituloModal = document.getElementById('modalTransferenciaLabel') || document.querySelector('.modal-title');
+        const containerTipo = selectTipo ? selectTipo.closest('.form-group') || selectTipo.parentElement : null;
+
         if (selectTipo) {
+            // Define o tipo e esconde o seletor para o usuário não mudar
             selectTipo.value = operacao;
-            // Dispara o evento de mudança para carregar a interface (badges, campos, etc)
+            if (containerTipo) containerTipo.style.display = 'none'; 
+            
+            // Dispara a configuração da interface (badges, campos específicos)
             configurarInterfaceMovimentacao();
         }
 
-        if (viaturaId) {
-            const selectVtr = document.getElementById('almox-viatura-alvo');
-            if (selectVtr) {
-                selectVtr.value = viaturaId;
-                // Carrega os setores daquela viatura específica
-                carregarSetoresDestino(viaturaId);
+        // 3. Customização de Título e Cores por Operação
+        if (operacao === 'ENVIO') {
+            if (tituloModal) tituloModal.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar para Viatura ${tombamento ? `(Tomb: ${tombamento})` : ''}`;
+            // Se houver um botão de confirmação, garantir a cor azul
+            const btnConfirma = document.querySelector('.btn-executar-mov');
+            if (btnConfirma) btnConfirma.style.backgroundColor = '#2c7399';
+        } 
+        else if (operacao === 'RECOLHIMENTO') {
+            if (tituloModal) tituloModal.innerHTML = `<i class="fas fa-arrow-down"></i> Recolher para Almoxarifado ${tombamento ? `(Tomb: ${tombamento})` : ''}`;
+            const btnConfirma = document.querySelector('.btn-executar-mov');
+            if (btnConfirma) btnConfirma.style.backgroundColor = '#f57c00';
+            
+            // No recolhimento, a viatura de origem já é fixa
+            if (viaturaId) {
+                const selectVtr = document.getElementById('almox-viatura-alvo');
+                if (selectVtr) {
+                    selectVtr.value = viaturaId;
+                    selectVtr.disabled = true; // Trava para não recolher da VTR errada
+                    carregarSetoresDestino(viaturaId);
+                }
             }
         }
+
+        // 4. Injeta o tombamento em um campo oculto para o salvamento saber o que está movendo
+        let inputTomb = document.getElementById('almox-tombamento-focado');
+        if (!inputTomb) {
+            inputTomb = document.createElement('input');
+            inputTomb.type = 'hidden';
+            inputTomb.id = 'almox-tombamento-focado';
+            document.getElementById('modal-movimentacao-corpo')?.appendChild(inputTomb);
+        }
+        inputTomb.value = tombamento || '';
+
     }, 400);
 }
 /**
@@ -9976,7 +10007,87 @@ async function executarAporteEstoque() {
         console.error("Erro ao abrir modal de transferência:", e);
         alert("Erro ao carregar dados do item.");
     }
-}	
+}
+		async function abrirModalEnvio(docId, tomb = null) {
+    const modal = document.getElementById('modal-movimentacao-almox'); // Usaremos o ID do modal, mas mudaremos o conteúdo interno
+    const titulo = document.getElementById('modal-movimentacao-titulo');
+    const corpo = document.getElementById('modal-movimentacao-corpo');
+
+    titulo.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Material para Viatura`;
+    titulo.style.color = "#2c7399";
+
+    // Busca dados do item para saber se é Single ou Multi
+    const doc = await db.collection('almoxarifado_central').doc(docId).get();
+    const item = doc.data();
+
+    corpo.innerHTML = `
+        <div style="padding: 15px;">
+            <p>Item: <b>${item.nome}</b> ${tomb ? `| Tomb: <b>${tomb}</b>` : ''}</p>
+            
+            <label>Selecione o Destino:</label>
+            <select id="envio-destino-vtr" class="form-control" style="margin-bottom:15px;">
+                <option value="">Carregando viaturas...</option>
+            </select>
+
+            ${!tomb ? `
+                <label>Quantidade a Enviar (Máx: ${item.disponivel}):</label>
+                <input type="number" id="envio-qtd" class="form-control" min="1" max="${item.disponivel}" value="1">
+            ` : `<input type="hidden" id="envio-qtd" value="1">`}
+
+            <label style="margin-top:10px;">Observações/Motivo:</label>
+            <textarea id="envio-obs" class="form-control" rows="2" placeholder="Ex: Carga de material para serviço diário"></textarea>
+            
+            <div style="margin-top:20px; text-align:right;">
+                <button onclick="fecharModalMov()" class="btn-cancelar">Cancelar</button>
+                <button onclick="executarEnvio('${docId}', '${tomb || ''}')" class="btn-confirmar" style="background:#2c7399;">Confirmar Envio</button>
+            </div>
+        </div>
+    `;
+
+    // Popular o select de viaturas (reutilizando sua lógica de listas_conferencia)
+    popularSelectViaturas('envio-destino-vtr');
+    $(modal).modal('show');
+}
+		async function abrirModalRecolhimento(docId, tomb, listaIdOrigem) {
+    const modal = document.getElementById('modal-movimentacao-almox');
+    const titulo = document.getElementById('modal-movimentacao-titulo');
+    const corpo = document.getElementById('modal-movimentacao-corpo');
+
+    titulo.innerHTML = `<i class="fas fa-arrow-down"></i> Recolher para Almoxarifado`;
+    titulo.style.color = "#f57c00";
+
+    const doc = await db.collection('almoxarifado_central').doc(docId).get();
+    const item = doc.data();
+    
+    // Busca o nome da viatura de origem para exibir no modal
+    const vtrDoc = await db.collection('listas_conferencia').doc(listaIdOrigem).get();
+    const vtrNome = vtrDoc.exists ? vtrDoc.data().nome_local : "Viatura de Origem";
+
+    corpo.innerHTML = `
+        <div style="padding: 15px;">
+            <p>Origem: <b style="color:#f57c00;">${vtrNome}</b></p>
+            <p>Item: <b>${item.nome}</b> ${tomb ? `| Tomb: <b>${tomb}</b>` : ''}</p>
+
+            ${!tomb ? `
+                <label>Quantidade a Recolher:</label>
+                <input type="number" id="recolha-qtd" class="form-control" min="1" value="1">
+            ` : `<input type="hidden" id="recolha-qtd" value="1">`}
+
+            <label style="margin-top:10px;">Estado do Material:</label>
+            <select id="recolha-estado" class="form-control">
+                <option value="perfeito">Em perfeito estado (Disponível)</option>
+                <option value="danificado">Danificado (Gerar Pendência)</option>
+            </select>
+            
+            <div style="margin-top:20px; text-align:right;">
+                <button onclick="fecharModalMov()" class="btn-cancelar">Cancelar</button>
+                <button onclick="executarRecolhimento('${docId}', '${tomb || ''}', '${listaIdOrigem}')" class="btn-confirmar" style="background:#f57c00;">Confirmar Recolhimento</button>
+            </div>
+        </div>
+    `;
+
+    $(modal).modal('show');
+}
     </script>
 </body>
 </html>
