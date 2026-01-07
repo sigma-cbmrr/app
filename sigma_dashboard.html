@@ -8986,7 +8986,6 @@ function filtrarAlmoxarifado() {
 }
 		
 async function verDetalhesItemAlmox(docId) {
-    // 1. Referências dos Palcos
     const palcoPrincipal = document.getElementById('container-tabela-principal');
     const palcoRastreio = document.getElementById('almox-rastreio-wrapper');
     const tbodyRastreio = document.getElementById('almox-rastreio-body');
@@ -8996,17 +8995,14 @@ async function verDetalhesItemAlmox(docId) {
 
     if (!palcoPrincipal || !palcoRastreio) return;
 
-    // 2. TROCA DE TELA
     palcoPrincipal.style.display = 'none';
     if (filterCard) filterCard.style.display = 'none';
     palcoRastreio.style.display = 'block';
     
-    // 3. PROTEÇÃO DE LAYOUT
     palcoRastreio.style.maxHeight = "calc(100vh - 220px)"; 
     palcoRastreio.style.overflowY = "auto";
     palcoRastreio.style.borderTop = "4px solid #2c7399";
 
-    // 4. FEEDBACK DE CARREGAMENTO
     tbodyRastreio.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
 
     try {
@@ -9020,7 +9016,6 @@ async function verDetalhesItemAlmox(docId) {
         if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
         document.getElementById('rastreio-title').innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
 
-        // NOVO CABEÇALHO: Tombamento na primeira coluna
         theadRastreio.innerHTML = `
             <tr>
                 <th>Tombamento</th>
@@ -9030,15 +9025,22 @@ async function verDetalhesItemAlmox(docId) {
             </tr>`;
 
         let html = '';
+        // Variáveis para o Resumo Final
+        let cDisp = 0, cCaut = 0, cPend = 0, cUso = 0;
 
-        // --- PALCO A: ALMOXARIFADO CENTRAL (ITENS MULTI) ---
+        // --- PALCO A: ALMOXARIFADO CENTRAL ---
         if (ehMulti) {
-            const noAlmox = (itemData.tombamentos || []).filter(t => !t.viatura_id);
-            noAlmox.forEach(t => {
+            (itemData.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
                 const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
-                const statusHTML = temPendencia 
-                    ? '<span class="status-badge badge-pendente">PENDENTE</span>' 
-                    : '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
+                let statusHTML = '';
+
+                if (temPendencia) {
+                    statusHTML = '<span class="status-badge" style="background:#ffebee; color:#c62828; border:1px solid #ffcdd2;">PENDENTE</span>';
+                    cPend++;
+                } else {
+                    statusHTML = '<span class="status-badge" style="background:#e8f5e9; color:#2e7d32; border:1px solid #c8e6c9;">DISPONÍVEL</span>';
+                    cDisp++;
+                }
 
                 html += `
                     <tr style="background:#f0f7fa; border-left: 5px solid #2c7399;">
@@ -9046,20 +9048,14 @@ async function verDetalhesItemAlmox(docId) {
                         <td><i class="fas fa-warehouse"></i> <b>ALMOXARIFADO CENTRAL</b></td>
                         <td style="text-align:center;">${statusHTML}</td>
                         <td style="text-align:right; white-space:nowrap;">
-                            <button onclick="prepararMovimentacao('${docId}', 'ENVIO', '${t.tomb}')" class="btn-modern-action" title="Enviar para Viatura"
-                                style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-                                <i class="fas fa-paper-plane"></i>
-                            </button>
-                            <button onclick="prepararMovimentacao('${docId}', 'BAIXA', '${t.tomb}')" class="btn-modern-action" title="Baixa Definitiva"
-                                style="background-color: rgba(217, 15, 35, 0.12) !important; color: #d90f23 !important; border: 1px solid rgba(217, 15, 35, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-                                <i class="fas fa-minus-circle"></i>
-                            </button>
+                            <button onclick="prepararMovimentacao('${docId}', 'ENVIO', '${t.tomb}')" class="btn-modern-action" title="Enviar para Viatura" style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;"><i class="fas fa-paper-plane"></i></button>
+                            <button onclick="prepararMovimentacao('${docId}', 'BAIXA', '${t.tomb}')" class="btn-modern-action" title="Baixa Definitiva" style="background-color: rgba(217, 15, 35, 0.12) !important; color: #d90f23 !important; border: 1px solid rgba(217, 15, 35, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;"><i class="fas fa-minus-circle"></i></button>
                         </td>
                     </tr>`;
             });
         }
 
-        // --- PALCO B: VIATURAS (ITENS MULTI) ---
+        // --- PALCO B: VIATURAS ---
         const unitListIds = await getUnitListIds();
         for (const listaId of unitListIds) {
             const vtrDoc = await db.collection('listas_conferencia').doc(listaId).get();
@@ -9073,9 +9069,17 @@ async function verDetalhesItemAlmox(docId) {
                         const temCautela = !!t.cautela;
                         const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
                         
-                        let statusHTML = '<span class="status-badge badge-solucao">DISPONÍVEL</span>';
-                        if (temCautela) statusHTML = '<span class="status-badge badge-cautela">CAUTELADO</span>';
-                        if (temPendencia) statusHTML = '<span class="status-badge badge-pendente">PENDENTE</span>';
+                        let statusHTML = '';
+                        if (temPendencia) {
+                            statusHTML = '<span class="status-badge" style="background:#ffebee; color:#c62828; border:1px solid #ffcdd2;">PENDENTE</span>';
+                            cPend++;
+                        } else if (temCautela) {
+                            statusHTML = '<span class="status-badge" style="background:#fff3e0; color:#e65100; border:1px solid #ffe0b2;">CAUTELADO</span>';
+                            cCaut++;
+                        } else {
+                            statusHTML = '<span class="status-badge" style="background:#f5f5f5; color:#616161; border:1px solid #e0e0e0;">EM USO</span>';
+                            cUso++;
+                        }
 
                         html += `
                             <tr>
@@ -9083,10 +9087,7 @@ async function verDetalhesItemAlmox(docId) {
                                 <td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
                                 <td style="text-align:center;">${statusHTML}</td>
                                 <td style="text-align:right;">
-                                    <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', '${t.tomb}', '${listaId}')" class="btn-modern-action" title="Recolher para Almoxarifado"
-                                        style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;">
-                                        <i class="fas fa-arrow-down"></i>
-                                    </button>
+                                    <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', '${t.tomb}', '${listaId}')" class="btn-modern-action" title="Recolher para Almoxarifado" style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important; box-shadow: none !important;"><i class="fas fa-arrow-down"></i></button>
                                 </td>
                             </tr>`;
                     });
@@ -9094,7 +9095,22 @@ async function verDetalhesItemAlmox(docId) {
             });
         }
 
-        tbodyRastreio.innerHTML = html || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro Multi localizado.</td></tr>';
+        // --- LINHA DE RESUMO FINAL ---
+        const resumoHtml = `
+            <tr style="background: #f8f9fa; border-top: 2px solid #ddd; font-weight: bold;">
+                <td colspan="2" style="text-align:right; color:#555; text-transform: uppercase; font-size: 0.85em;">Resumo da Carga:</td>
+                <td colspan="2" style="text-align:left; padding-left: 20px;">
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <small style="color:#2e7d32;">● DISP: ${cDisp}</small>
+                        <small style="color:#616161;">● USO: ${cUso}</small>
+                        <small style="color:#e65100;">● CAUT: ${cCaut}</small>
+                        <small style="color:#c62828;">● PEND: ${cPend}</small>
+                        <small style="color:#800020; border-left: 1px solid #ccc; padding-left: 10px;">TOTAL: ${cDisp + cUso + cCaut + cPend}</small>
+                    </div>
+                </td>
+            </tr>`;
+
+        tbodyRastreio.innerHTML = html ? (html + resumoHtml) : '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro Multi localizado.</td></tr>';
 
     } catch (e) {
         console.error("Erro:", e);
