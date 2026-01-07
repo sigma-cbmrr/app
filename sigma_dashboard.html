@@ -8941,43 +8941,57 @@ function filtrarAlmoxarifado() {
 }
 		
 async function verDetalhesItemAlmox(docId) {
+    // Referências do seu HTML
     const wrapper = document.getElementById('ca-table-wrapper');
-    const tbody = document.getElementById('ca-list-body');
+    const tbody = document.getElementById('ca-list-body'); // Onde os detalhes serão inseridos
     const tableTitle = document.getElementById('table-title');
+    const breadcrumb = document.getElementById('almox-breadcrumb');
     
+    // 1. Abre o container de detalhes e limpa o anterior
+    if (!wrapper || !tbody) return;
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
     wrapper.style.display = 'block';
 
     try {
-        // 1. Busca dados do item no Almoxarifado Central
+        // 2. Busca dados do item no Almoxarifado Central
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
         if (!almoxDoc.exists) return;
         const itemData = almoxDoc.data();
         const ehMulti = itemData.tipo === 'multi';
 
-        tableTitle.innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
+        // Atualiza o título e o breadcrumb para navegação
+        if (tableTitle) tableTitle.innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
+        if (breadcrumb) {
+            breadcrumb.innerHTML = `
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <button class="btn-secondary" onclick="carregarAlmoxarifadoUI()" style="padding: 5px 12px; font-size: 0.8em;">
+                        <i class="fas fa-arrow-left"></i> Voltar ao Inventário
+                    </button>
+                    <span>Almoxarifado > Rastreio > <b>${itemData.nome}</b></span>
+                </div>`;
+        }
 
         let html = '';
 
-        // --- LINHA DO ALMOXARIFADO (O que está fisicamente no estoque central) ---
+        // --- LINHA DO ALMOXARIFADO CENTRAL ---
         html += `
             <tr style="background-color: #f8fafc;">
                 <td data-label="Localização"><b><i class="fas fa-warehouse"></i> ALMOXARIFADO CENTRAL</b></td>
                 <td data-label="Total" style="text-align:center;">${itemData.total || 0}</td>
                 <td data-label="Disponível" style="text-align:center; font-weight:bold; color:#1b8a3e;">${itemData.disponivel || 0}</td>
-                <td data-label="Status" style="text-align:center;">${ehMulti ? '<small>Diversos Tomb.</small>' : '-'}</td>
+                <td data-label="Status" style="text-align:center;"><small>${ehMulti ? 'Estoque Central' : '-'}</small></td>
                 <td data-label="Ação" style="text-align:right;">
                     <button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" style="padding:5px 10px; font-size:0.75em; background-color:#2c7399 !important;">
                         <i class="fas fa-paper-plane"></i> ENVIAR
                     </button>
                     <button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" style="padding:5px 10px; font-size:0.75em; background-color:#d90f23 !important;">
-                        <i class="fas fa-arrow-down"></i> BAIXA
+                        <i class="fas fa-trash-alt"></i> BAIXA
                     </button>
                 </td>
             </tr>
         `;
 
-        // 2. Busca em todas as listas de conferência (Viaturas/Postos) da unidade
+        // 3. Busca o item em todas as Viaturas (listas_conferencia)
         const unitListIds = await getUnitListIds();
         
         for (const listaId of unitListIds) {
@@ -8985,28 +8999,23 @@ async function verDetalhesItemAlmox(docId) {
             if (!vtrDoc.exists) continue;
             
             const vtrData = vtrDoc.data();
-            let qtdNaVtr = 0;
-            let statusTexto = ehMulti ? "" : "EM CARGA";
+            let itemNaVtr = null;
 
-            // Varre os setores da viatura para somar a quantidade do item específico
+            // Procura o item em qualquer setor da viatura
             vtrData.list.forEach(setor => {
-                setor.itens.forEach(it => {
-                    if (it.uid_global === itemData.uid_global || it.nome === itemData.nome) {
-                        qtdNaVtr += Number(it.quantidadeEsperada) || 0;
-                        if (ehMulti && it.tombamentos) {
-                            statusTexto += it.tombamentos.map(t => t.tomb).join(', ');
-                        }
-                    }
-                });
+                const achado = (setor.itens || []).find(it => it.uid_global === itemData.uid_global || it.nome === itemData.nome);
+                if (achado) itemNaVtr = achado;
             });
 
-            if (qtdNaVtr > 0) {
+            if (itemNaVtr && itemNaVtr.quantidadeEsperada > 0) {
+                let infoStatus = ehMulti ? (itemNaVtr.tombamentos || []).map(t => t.tomb).join(', ') : "EM CARGA";
+                
                 html += `
                     <tr>
                         <td data-label="Localização"><i class="fas fa-truck"></i> ${vtrData.posto} - ${vtrData.nome_local}</td>
-                        <td data-label="Total" style="text-align:center;">${qtdNaVtr}</td>
-                        <td data-label="Disponível" style="text-align:center;">${qtdNaVtr}</td>
-                        <td data-label="Status" style="text-align:center;"><small>${statusTexto}</small></td>
+                        <td data-label="Total" style="text-align:center;">${itemNaVtr.quantidadeEsperada}</td>
+                        <td data-label="Disponível" style="text-align:center;">${itemNaVtr.quantidadeEsperada}</td>
+                        <td data-label="Status" style="text-align:center;"><small>${infoStatus}</small></td>
                         <td data-label="Ação" style="text-align:right;">
                             <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', null, '${listaId}')" class="btn-modern-action" style="padding:5px 10px; font-size:0.75em; background-color:#f57c00 !important;">
                                 <i class="fas fa-undo"></i> RECOLHER
@@ -9022,10 +9031,9 @@ async function verDetalhesItemAlmox(docId) {
 
     } catch (error) {
         console.error("Erro ao rastrear material:", error);
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados de rastreio.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados.</td></tr>';
     }
 }
-
 /**
  * Função de ponte que prepara o modal de transferência com os dados clicados na lupa
  */
@@ -9570,11 +9578,27 @@ function atualizarQtdEnvio() {
     document.getElementById('almox-transf-qtd').value = selecionados;
 }
 		function resetarVisibilidadeModal() {
+    // Reseta visibilidade dos blocos
     document.getElementById('div-almox-viatura').style.display = 'none';
     document.getElementById('div-almox-setor').style.display = 'none';
     document.getElementById('div-aporte-multi').style.display = 'none';
     document.getElementById('div-selecao-envio-multi').style.display = 'none';
-    document.getElementById('almox-transf-qtd').closest('.form-group').style.display = 'block';
+    
+    const inputQtd = document.getElementById('almox-transf-qtd');
+    if(inputQtd) inputQtd.closest('.form-group').style.display = 'block';
+
+    // 🛑 ADIÇÃO CIRÚRGICA: Destrava os selects para a próxima operação
+    const selectTipo = document.getElementById('almox-operacao-tipo');
+    const selectVtr = document.getElementById('almox-viatura-alvo');
+    
+    if (selectTipo) {
+        selectTipo.disabled = false;
+        selectTipo.style.backgroundColor = '';
+    }
+    if (selectVtr) {
+        selectVtr.disabled = false;
+        selectVtr.style.backgroundColor = '';
+    }
 }
 		async function prepararAporte(docId) {
     const doc = await db.collection('almoxarifado_central').doc(docId).get();
