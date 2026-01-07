@@ -9823,38 +9823,36 @@ async function configurarInterfaceMovimentacao() {
     const ehMulti = infoItem.getAttribute('data-tipo') === 'multi';
     const docIdAlmox = infoItem.getAttribute('data-docid');
 
-    // Referências de Elementos
+    // Referências dos elementos
     const divVtr = document.getElementById('div-almox-viatura');
     const divSetor = document.getElementById('div-almox-setor');
     const divAporteMulti = document.getElementById('div-aporte-multi');
     const divEnvioMulti = document.getElementById('div-selecao-envio-multi');
+    
+    // Pegamos o container do input de quantidade (o form-group pai)
     const inputQtd = document.getElementById('almox-transf-qtd');
+    const containerQtd = inputQtd.closest('.form-group'); 
 
-    // Reset padrão
+    // Reset padrão de visibilidade
     divVtr.style.display = (tipo === 'ENVIO' || tipo === 'RECOLHIMENTO') ? 'block' : 'none';
     divSetor.style.display = (tipo === 'ENVIO') ? 'block' : 'none';
     divAporteMulti.style.display = 'none';
     divEnvioMulti.style.display = 'none';
-    inputQtd.readOnly = false;
+    containerQtd.style.display = 'block'; // Padrão é visível
 
-    // Lógica para ENTRADA (Aporte de novos itens)
-    if (tipo === 'ENTRADA' && ehMulti) {
-        inputQtd.dispatchEvent(new Event('input')); // Dispara o gerador de campos de texto
-    } 
-    
-    // Lógica para ENVIO (Retirar do Almox para Viatura)
+    // REGRA DE OURO: Se for ENVIO de item MULTI, esconde a Quantidade manual
     if (tipo === 'ENVIO' && ehMulti) {
-        inputQtd.readOnly = true;
+        containerQtd.style.display = 'none'; // Remove a poluição visual
         divEnvioMulti.style.display = 'block';
         
+        // Carrega os itens do estoque
         const doc = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
         const tombamentos = doc.data().tombamentos || [];
-        // Filtra apenas o que está "na prateleira" (sem viatura_id)
         const disponiveis = tombamentos.filter(t => !t.viatura_id && t.situacao !== "AVARIADO");
 
         const container = document.getElementById('lista-checks-tombamento');
         container.innerHTML = disponiveis.map(t => `
-            <label style="display: flex; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid #eee; cursor:pointer; background: white; margin-bottom: 2px;">
+            <label style="display: flex; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid #eee; cursor:pointer; background: white;">
                 <input type="checkbox" class="check-envio-tomb" value="${t.tomb}" onchange="atualizarQtdEnvio()">
                 <span style="font-size:0.9em; color:#333;">
                     <i class="fas fa-barcode" style="color:#800020"></i> <b>${t.tomb}</b> 
@@ -9862,6 +9860,12 @@ async function configurarInterfaceMovimentacao() {
                 </span>
             </label>
         `).join('') || '<p style="padding:15px; font-size:0.85em; color:#d90f23; font-weight:bold;">Nenhum item disponível no estoque físico.</p>';
+    } 
+
+    // Lógica para ENTRADA (Gerador de campos)
+    if (tipo === 'ENTRADA' && ehMulti) {
+        inputQtd.dispatchEvent(new Event('input'));
+        divAporteMulti.style.display = 'block';
     }
 }
 
