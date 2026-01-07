@@ -8854,8 +8854,22 @@ async function abrirSeletorGlobalSubstituicao() {
  * Esta função resolve o erro "is not defined" no console.
  */
 async function carregarAlmoxarifadoUI() {
-	document.getElementById('almox-table').style.display = 'table';
-    document.getElementById('ca-table-wrapper').style.display = 'none';
+    // 1. Controle de Visibilidade: Restaura a lista e esconde os rastreios/detalhes
+    document.getElementById('almox-table').style.display = 'table';
+    
+    // Esconde o wrapper de pendências antigo e o novo wrapper de rastreio
+    if (document.getElementById('ca-table-wrapper')) {
+        document.getElementById('ca-table-wrapper').style.display = 'none';
+    }
+    if (document.getElementById('almox-rastreio-wrapper')) {
+        document.getElementById('almox-rastreio-wrapper').style.display = 'none';
+    }
+
+    // Restaura a visibilidade dos filtros
+    const filterCard = document.querySelector('.modern-filter-card');
+    if (filterCard) filterCard.style.display = 'flex';
+
+    // 2. Definição de elementos
     const table = document.getElementById('almox-table');
     const thead = table ? table.querySelector('thead') : null;
     const tbody = document.getElementById('almox-body');
@@ -8863,7 +8877,7 @@ async function carregarAlmoxarifadoUI() {
 
     if (!tbody) return;
 
-    // 1. Restaura o cabeçalho original (caso venha da tela de detalhes)
+    // 3. Restaura o cabeçalho original da tabela principal
     if (thead) {
         thead.innerHTML = `
             <tr>
@@ -8876,7 +8890,7 @@ async function carregarAlmoxarifadoUI() {
             </tr>`;
     }
 
-    // 2. Reseta o breadcrumb para o estado inicial
+    // 4. Reseta o breadcrumb para o estado inicial
     if (breadcrumb) {
         breadcrumb.innerHTML = `Almoxarifado > Inventário Geral`;
     }
@@ -8891,9 +8905,8 @@ async function carregarAlmoxarifadoUI() {
         
         let html = '';
         if (snap.empty) {
-            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum item sincronizado nesta unidade. Clique em "Sincronizar Saldos".</td></tr>';
+            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum item sincronizado nesta unidade. Clique em "Sincronizar".</td></tr>';
         } else {
-            // Converte para array e ordena alfabeticamente
             const docs = [];
             snap.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
             docs.sort((a, b) => a.nome.localeCompare(b.nome));
@@ -8901,51 +8914,44 @@ async function carregarAlmoxarifadoUI() {
             docs.forEach(d => {
                 const total = d.total || 0;
                 const disponivel = d.disponivel || 0;
-                
-                // Semáforo de estoque para o campo Disponível
                 const statusColor = disponivel === 0 ? '#d90f23' : disponivel < (total * 0.2) ? '#f57c00' : '#1b8a3e';
 
-              html += `
-    <tr>
-        <td data-label="Material">
-            <strong>${d.nome}</strong><br>
-            <small style="color:#888;">${d.tipo === 'multi' ? 'TOMBAMENTO' : 'QUANTIDADE'}</small>
-        </td>
-        <td style="text-align:center;" data-label="Total">${total}</td>
-        <td style="text-align:center;" data-label="Em Carga">${d.emCarga || 0}</td>
-        <td style="text-align:center;" data-label="Em Alteração">${d.emAlteracao || 0}</td>
-        <td style="text-align:center; font-weight:bold; color:${statusColor}; background-color:#fcfcfc;" data-label="Disponível">
-            ${disponivel}
-        </td>
-        <td style="text-align:center;" data-label="Ações">
-            <div style="display:flex; gap:8px; justify-content:center;">
-                
-                <button class="btn-modern-action" title="Ver Rastreabilidade" onclick="verDetalhesItemAlmox('${d.id}')" 
-                        style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; box-shadow: none !important; padding: 8px 12px !important;">
-                    <i class="fas fa-search-plus"></i>
-                </button>
-                
-                <button class="btn-modern-action" title="Adicionar Novo Estoque" onclick="prepararAporte('${d.id}')" 
-                        style="background-color: rgba(27, 138, 62, 0.12) !important; color: #1b8a3e !important; border: 1px solid rgba(27, 138, 62, 0.4) !important; box-shadow: none !important; padding: 8px 12px !important;">
-                    <i class="fas fa-plus"></i>
-                </button>
-
-                <button class="btn-modern-action" title="Histórico de Vida" onclick="verHistoricoVida('${d.id}')" 
-                        style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; box-shadow: none !important; padding: 8px 12px !important;">
-                    <i class="fas fa-history"></i>
-                </button>
-                
-            </div>
-        </td>
-    </tr>
-`;
+                html += `
+                <tr>
+                    <td data-label="Material">
+                        <strong>${d.nome}</strong><br>
+                        <small style="color:#888;">${d.tipo === 'multi' ? 'TOMBAMENTO' : 'QUANTIDADE'}</small>
+                    </td>
+                    <td style="text-align:center;" data-label="Total">${total}</td>
+                    <td style="text-align:center;" data-label="Em Carga">${d.emCarga || 0}</td>
+                    <td style="text-align:center;" data-label="Em Alteração">${d.emAlteracao || 0}</td>
+                    <td style="text-align:center; font-weight:bold; color:${statusColor}; background-color:#fcfcfc;" data-label="Disponível">
+                        ${disponivel}
+                    </td>
+                    <td style="text-align:center;" data-label="Ações">
+                        <div style="display:flex; gap:8px; justify-content:center;">
+                            <button class="btn-modern-action" title="Ver Rastreabilidade" onclick="verDetalhesItemAlmox('${d.id}')" 
+                                    style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; box-shadow: none !important; padding: 8px 12px !important;">
+                                <i class="fas fa-search-plus"></i>
+                            </button>
+                            <button class="btn-modern-action" title="Adicionar Novo Estoque" onclick="prepararAporte('${d.id}')" 
+                                    style="background-color: rgba(27, 138, 62, 0.12) !important; color: #1b8a3e !important; border: 1px solid rgba(27, 138, 62, 0.4) !important; box-shadow: none !important; padding: 8px 12px !important;">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <button class="btn-modern-action" title="Histórico de Vida" onclick="verHistoricoVida('${d.id}')" 
+                                    style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; box-shadow: none !important; padding: 8px 12px !important;">
+                                <i class="fas fa-history"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>`;
             });
         }
         tbody.innerHTML = html;
 
     } catch (e) {
         console.error("Erro ao carregar UI do Almoxarifado:", e);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao carregar dados da unidade.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao carregar dados.</td></tr>';
     }
 }
 /**
@@ -8965,23 +8971,33 @@ function filtrarAlmoxarifado() {
 }
 		
 async function verDetalhesItemAlmox(docId) {
-    // Apontando para o NOVO wrapper exclusivo que criamos no passo anterior
+    // 1. Definição dos elementos de interface
     const wrapper = document.getElementById('almox-rastreio-wrapper');
     const tbody = document.getElementById('almox-rastreio-body');
     const title = document.getElementById('rastreio-title');
+    const mainTable = document.getElementById('almox-table');
+    const filterCard = document.querySelector('.modern-filter-card');
     
     if (!wrapper || !tbody) return;
 
-    // Esconde a tabela principal de inventário para dar lugar ao rastro
-    document.getElementById('almox-table').style.display = 'none';
+    // 2. LIMPEZA DE PALCO: Esconde o inventário e filtros para focar no rastro
+    if (mainTable) mainTable.style.display = 'none';
+    if (filterCard) filterCard.style.display = 'none';
+
+    // 3. Configura o Wrapper para não extrapolar o iframe/tela
     wrapper.style.display = 'block';
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Rastreando...</td></tr>';
+    wrapper.style.maxHeight = "75vh"; // Limita a altura a 75% da visão
+    wrapper.style.overflowY = "auto"; // Ativa scroll interno se necessário
+    
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
 
     try {
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
         const itemData = almoxDoc.data();
         const ehMulti = itemData.tipo === 'multi';
-        title.innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
+        const uidGlobal = itemData.uid_global;
+
+        if (title) title.innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
 
         let html = '';
 
@@ -8995,7 +9011,7 @@ async function verDetalhesItemAlmox(docId) {
                         <td style="text-align:center;">1</td>
                         <td style="text-align:center;">1</td>
                         <td style="text-align:center;"><small>Tomb: ${t.tomb}</small></td>
-                        <td style="text-align:right;">
+                        <td style="text-align:right; white-space:nowrap;">
                             <button onclick="prepararMovimentacao('${docId}', 'ENVIO', '${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px; font-size:0.7em;">ENVIAR</button>
                             <button onclick="prepararMovimentacao('${docId}', 'BAIXA', '${t.tomb}')" class="btn-modern-action" style="background:#d90f23!important; padding:5px 10px; font-size:0.7em;">BAIXA</button>
                         </td>
@@ -9008,7 +9024,7 @@ async function verDetalhesItemAlmox(docId) {
                     <td style="text-align:center;">${itemData.disponivel}</td>
                     <td style="text-align:center; color:green; font-weight:bold;">${itemData.disponivel}</td>
                     <td style="text-align:center;">-</td>
-                    <td style="text-align:right;">
+                    <td style="text-align:right; white-space:nowrap;">
                         <button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px; font-size:0.7em;">ENVIAR</button>
                         <button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" style="background:#d90f23!important; padding:5px 10px; font-size:0.7em;">BAIXA</button>
                     </td>
@@ -9023,7 +9039,8 @@ async function verDetalhesItemAlmox(docId) {
             const vtrData = vtrDoc.data();
 
             vtrData.list.forEach(setor => {
-                const itemNoSetor = (setor.itens || []).find(it => it.uid_global === itemData.uid_global || it.nome === itemData.nome);
+                // Busca cirúrgica pelo UID global ou Nome
+                const itemNoSetor = (setor.itens || []).find(it => it.uid_global === uidGlobal || it.nome === itemData.nome);
                 
                 if (itemNoSetor) {
                     if (ehMulti) {
@@ -9039,7 +9056,7 @@ async function verDetalhesItemAlmox(docId) {
                                     </td>
                                 </tr>`;
                         });
-                    } else {
+                    } else if (itemNoSetor.quantidadeEsperada > 0) {
                         html += `
                             <tr>
                                 <td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
@@ -9054,8 +9071,11 @@ async function verDetalhesItemAlmox(docId) {
                 }
             });
         }
-        tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum rastro encontrado.</td></tr>';
-    } catch (e) { console.error(e); }
+        tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum registro de carga encontrado.</td></tr>';
+    } catch (e) { 
+        console.error("Erro no rastro:", e);
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red;">Erro ao carregar dados.</td></tr>';
+    }
 }
 /**
  * Função de ponte que prepara o modal de transferência com os dados clicados na lupa
