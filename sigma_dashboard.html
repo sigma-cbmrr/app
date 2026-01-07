@@ -2948,6 +2948,28 @@
         </div>
     </div>
 </div>
+	<div id="almox-rastreio-wrapper" class="ca-table-container" style="display: none; border-top: 4px solid #2c7399;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <h2 id="rastreio-title" style="margin:0; color:#800020;">Rastreio de Localização</h2>
+        <button onclick="carregarAlmoxarifadoUI()" class="btn-modern-action btn-secondary">
+            <i class="fas fa-times"></i> Fechar Rastreio
+        </button>
+    </div>
+
+    <table class="ca-table">
+        <thead id="almox-rastreio-thead">
+            <tr>
+                <th>Localização Atual</th>
+                <th style="text-align:center;">Total</th>
+                <th style="text-align:center;">Disponível</th>
+                <th style="text-align:center;">Status/Tomb</th>
+                <th style="text-align:right;">Ações</th>
+            </tr>
+        </thead>
+        <tbody id="almox-rastreio-body">
+            </tbody>
+    </table>
+</div>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
@@ -8832,6 +8854,8 @@ async function abrirSeletorGlobalSubstituicao() {
  * Esta função resolve o erro "is not defined" no console.
  */
 async function carregarAlmoxarifadoUI() {
+	document.getElementById('almox-table').style.display = 'table';
+    document.getElementById('ca-table-wrapper').style.display = 'none';
     const table = document.getElementById('almox-table');
     const thead = table ? table.querySelector('thead') : null;
     const tbody = document.getElementById('almox-body');
@@ -8941,98 +8965,97 @@ function filtrarAlmoxarifado() {
 }
 		
 async function verDetalhesItemAlmox(docId) {
-    // Referências do seu HTML
-    const wrapper = document.getElementById('ca-table-wrapper');
-    const tbody = document.getElementById('ca-list-body'); // Onde os detalhes serão inseridos
-    const tableTitle = document.getElementById('table-title');
-    const breadcrumb = document.getElementById('almox-breadcrumb');
+    // Apontando para o NOVO wrapper exclusivo que criamos no passo anterior
+    const wrapper = document.getElementById('almox-rastreio-wrapper');
+    const tbody = document.getElementById('almox-rastreio-body');
+    const title = document.getElementById('rastreio-title');
     
-    // 1. Abre o container de detalhes e limpa o anterior
     if (!wrapper || !tbody) return;
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
+
+    // Esconde a tabela principal de inventário para dar lugar ao rastro
+    document.getElementById('almox-table').style.display = 'none';
     wrapper.style.display = 'block';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Rastreando...</td></tr>';
 
     try {
-        // 2. Busca dados do item no Almoxarifado Central
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
-        if (!almoxDoc.exists) return;
         const itemData = almoxDoc.data();
         const ehMulti = itemData.tipo === 'multi';
-
-        // Atualiza o título e o breadcrumb para navegação
-        if (tableTitle) tableTitle.innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
-        if (breadcrumb) {
-            breadcrumb.innerHTML = `
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <button class="btn-secondary" onclick="carregarAlmoxarifadoUI()" style="padding: 5px 12px; font-size: 0.8em;">
-                        <i class="fas fa-arrow-left"></i> Voltar ao Inventário
-                    </button>
-                    <span>Almoxarifado > Rastreio > <b>${itemData.nome}</b></span>
-                </div>`;
-        }
+        title.innerHTML = `<i class="fas fa-search-location"></i> Rastreio: ${itemData.nome}`;
 
         let html = '';
 
-        // --- LINHA DO ALMOXARIFADO CENTRAL ---
-        html += `
-            <tr style="background-color: #f8fafc;">
-                <td data-label="Localização"><b><i class="fas fa-warehouse"></i> ALMOXARIFADO CENTRAL</b></td>
-                <td data-label="Total" style="text-align:center;">${itemData.total || 0}</td>
-                <td data-label="Disponível" style="text-align:center; font-weight:bold; color:#1b8a3e;">${itemData.disponivel || 0}</td>
-                <td data-label="Status" style="text-align:center;"><small>${ehMulti ? 'Estoque Central' : '-'}</small></td>
-                <td data-label="Ação" style="text-align:right;">
-                    <button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" style="padding:5px 10px; font-size:0.75em; background-color:#2c7399 !important;">
-                        <i class="fas fa-paper-plane"></i> ENVIAR
-                    </button>
-                    <button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" style="padding:5px 10px; font-size:0.75em; background-color:#d90f23 !important;">
-                        <i class="fas fa-trash-alt"></i> BAIXA
-                    </button>
-                </td>
-            </tr>
-        `;
+        // --- 1. LOCALIZAÇÃO: ALMOXARIFADO CENTRAL ---
+        if (ehMulti) {
+            const noAlmox = (itemData.tombamentos || []).filter(t => !t.viatura_id);
+            noAlmox.forEach(t => {
+                html += `
+                    <tr style="background:#f8fafc; border-left: 5px solid #2c7399;">
+                        <td><b>ALMOXARIFADO CENTRAL</b></td>
+                        <td style="text-align:center;">1</td>
+                        <td style="text-align:center;">1</td>
+                        <td style="text-align:center;"><small>Tomb: ${t.tomb}</small></td>
+                        <td style="text-align:right;">
+                            <button onclick="prepararMovimentacao('${docId}', 'ENVIO', '${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px; font-size:0.7em;">ENVIAR</button>
+                            <button onclick="prepararMovimentacao('${docId}', 'BAIXA', '${t.tomb}')" class="btn-modern-action" style="background:#d90f23!important; padding:5px 10px; font-size:0.7em;">BAIXA</button>
+                        </td>
+                    </tr>`;
+            });
+        } else if (itemData.disponivel > 0) {
+            html += `
+                <tr style="background:#f8fafc; border-left: 5px solid #2c7399;">
+                    <td><b>ALMOXARIFADO CENTRAL</b></td>
+                    <td style="text-align:center;">${itemData.disponivel}</td>
+                    <td style="text-align:center; color:green; font-weight:bold;">${itemData.disponivel}</td>
+                    <td style="text-align:center;">-</td>
+                    <td style="text-align:right;">
+                        <button onclick="prepararMovimentacao('${docId}', 'ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px; font-size:0.7em;">ENVIAR</button>
+                        <button onclick="prepararMovimentacao('${docId}', 'BAIXA')" class="btn-modern-action" style="background:#d90f23!important; padding:5px 10px; font-size:0.7em;">BAIXA</button>
+                    </td>
+                </tr>`;
+        }
 
-        // 3. Busca o item em todas as Viaturas (listas_conferencia)
+        // --- 2. LOCALIZAÇÃO: VIATURAS (SETOR POR SETOR) ---
         const unitListIds = await getUnitListIds();
-        
         for (const listaId of unitListIds) {
             const vtrDoc = await db.collection('listas_conferencia').doc(listaId).get();
             if (!vtrDoc.exists) continue;
-            
             const vtrData = vtrDoc.data();
-            let itemNaVtr = null;
 
-            // Procura o item em qualquer setor da viatura
             vtrData.list.forEach(setor => {
-                const achado = (setor.itens || []).find(it => it.uid_global === itemData.uid_global || it.nome === itemData.nome);
-                if (achado) itemNaVtr = achado;
-            });
-
-            if (itemNaVtr && itemNaVtr.quantidadeEsperada > 0) {
-                let infoStatus = ehMulti ? (itemNaVtr.tombamentos || []).map(t => t.tomb).join(', ') : "EM CARGA";
+                const itemNoSetor = (setor.itens || []).find(it => it.uid_global === itemData.uid_global || it.nome === itemData.nome);
                 
-                html += `
-                    <tr>
-                        <td data-label="Localização"><i class="fas fa-truck"></i> ${vtrData.posto} - ${vtrData.nome_local}</td>
-                        <td data-label="Total" style="text-align:center;">${itemNaVtr.quantidadeEsperada}</td>
-                        <td data-label="Disponível" style="text-align:center;">${itemNaVtr.quantidadeEsperada}</td>
-                        <td data-label="Status" style="text-align:center;"><small>${infoStatus}</small></td>
-                        <td data-label="Ação" style="text-align:right;">
-                            <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', null, '${listaId}')" class="btn-modern-action" style="padding:5px 10px; font-size:0.75em; background-color:#f57c00 !important;">
-                                <i class="fas fa-undo"></i> RECOLHER
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            }
+                if (itemNoSetor) {
+                    if (ehMulti) {
+                        (itemNoSetor.tombamentos || []).forEach(t => {
+                            html += `
+                                <tr>
+                                    <td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
+                                    <td style="text-align:center;">1</td>
+                                    <td style="text-align:center;">${t.cautela ? 0 : 1}</td>
+                                    <td style="text-align:center;"><small>Tomb: ${t.tomb}</small></td>
+                                    <td style="text-align:right;">
+                                        <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', '${t.tomb}', '${listaId}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px; font-size:0.7em;">RECOLHER</button>
+                                    </td>
+                                </tr>`;
+                        });
+                    } else {
+                        html += `
+                            <tr>
+                                <td><i class="fas fa-truck"></i> ${vtrData.nome_local} <br><small>Setor: ${setor.nome}</small></td>
+                                <td style="text-align:center;">${itemNoSetor.quantidadeEsperada}</td>
+                                <td style="text-align:center;">${itemNoSetor.quantidadeEsperada}</td>
+                                <td style="text-align:center;"><small>SINGLE</small></td>
+                                <td style="text-align:right;">
+                                    <button onclick="prepararMovimentacao('${docId}', 'RECOLHIMENTO', null, '${listaId}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px; font-size:0.7em;">RECOLHER</button>
+                                </td>
+                            </tr>`;
+                    }
+                }
+            });
         }
-
-        tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum rastro encontrado em viaturas.</td></tr>';
-        wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-    } catch (error) {
-        console.error("Erro ao rastrear material:", error);
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados.</td></tr>';
-    }
+        tbody.innerHTML = html || '<tr><td colspan="5" style="text-align:center; padding:20px;">Nenhum rastro encontrado.</td></tr>';
+    } catch (e) { console.error(e); }
 }
 /**
  * Função de ponte que prepara o modal de transferência com os dados clicados na lupa
