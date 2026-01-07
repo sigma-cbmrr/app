@@ -9996,6 +9996,130 @@ async function executarAporteEstoque() {
 
     $(modal).modal('show');
 }
+	async function executarRecolhimentoApenas() {
+    if (!pendenciaSendoResolvida) return;
+    
+    const p = pendenciaSendoResolvida;
+    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"?\n\nO item sairá da carga do militar e retornará ao estoque com carimbo de PENDÊNCIA.`);
+    if (!confirmacao) return;
+
+    try {
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const listaRef = db.collection('listas_conferencia').doc(p.localId);
+
+        const [docCautela, docLista] = await Promise.all([
+            cautelaRef.get(),
+            listaRef.get()
+        ]);
+
+        if (!docCautela.exists || !docLista.exists) return alert("Erro: Documentos não localizados.");
+
+        const dataCautela = docCautela.data();
+        const dataRegistro = new Date().toLocaleString('pt-BR');
+        const dataSimples = new Date().toLocaleDateString('pt-BR');
+        const nomeLimpo = (p.itemNome || "").trim().toUpperCase();
+
+        let nomeGestorLogado = currentUserData.nome_militar_completo || "Gestor";
+
+        // 1. ATUALIZAÇÃO DA CARGA DO MILITAR (CAUTELA)
+        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item => 
+            String(item.id_solicitacao) !== String(p.solicitacaoId)
+        );
+
+        const qtdBaixa = Number(p.quantidade) || 1;
+        let novosItensCautela = [];
+        const itemTombReal = (p.itemTomb || "S/T").trim().toUpperCase();
+        const ehItemSingle = !p.itemTomb || itemTombReal === "S/T" || itemTombReal === nomeLimpo;
+
+        if (!ehItemSingle) {
+            novosItensCautela = (dataCautela.itens || []).filter(it => it.tombamento !== p.itemTomb);
+        } else {
+            novosItensCautela = (dataCautela.itens || []).map(it => {
+                const isMesmoItem = it.id === p.id_base || it.id === p.uidItem || it.nome.trim().toUpperCase() === nomeLimpo;
+                if (isMesmoItem) {
+                    const novaQtd = (Number(it.quantidade) || 0) - qtdBaixa;
+                    return novaQtd > 0 ? { ...it, quantity: novaQtd } : null;
+                }
+                return it;
+            }).filter(it => it !== null);
+        }
+
+        // 2. ATUALIZAÇÃO DO ESTOQUE (LISTA MESTRA) - CONVERSÃO PARA PENDÊNCIA
+        const novaListaMestra = docLista.data().list.map(setor => ({
+            ...setor,
+            itens: (setor.itens || []).map(it => {
+                if (it.nome.trim().toUpperCase() === nomeLimpo || it.id === p.id_base) {
+                    const novoIdPendencia = "PEND-" + Date.now();
+                    const descricaoPadrao = `${p.motivo} (RECOLHIDO DE ${p.cautelaId})`;
+
+                    if (it.tipo === 'multi' && it.tombamentos) {
+                        it.tombamentos = it.tombamentos.map(t => {
+                            if (t.tomb === p.itemTomb) {
+                                delete t.cautela; 
+                                t.status = 'pending'; 
+                                if (!t.pendencias_ids) t.pendencias_ids = [];
+                                t.pendencias_ids.push({
+                                    id: novoIdPendencia,
+                                    quantidade: 1,
+                                    descricao: descricaoPadrao,
+                                    data_criacao: dataSimples,
+                                    status_gestao: "PENDENTE",
+                                    autor_nome: p.gestor_alvo_nome || "Militar"
+                                });
+                            }
+                            return t;
+                        });
+                    }
+
+                    if (it.tipo === 'single' && it.cautelas) {
+                        it.cautelas = it.cautelas.map(c => {
+                            if (c.id === p.cautelaId) {
+                                const novaQtdC = (Number(c.quantidade) || 0) - qtdBaixa;
+                                return novaQtdC > 0 ? { ...c, quantidade: novaQtdC } : null;
+                            }
+                            return c;
+                        }).filter(c => c !== null);
+                    }
+
+                    if (!it.pendencias_ids) it.pendencias_ids = [];
+                    it.pendencias_ids.push({
+                        id: novoIdPendencia,
+                        quantidade: qtdBaixa,
+                        descricao: descricaoPadrao,
+                        data_criacao: dataSimples,
+                        status_gestao: "PENDENTE",
+                        autor_nome: p.gestor_alvo_nome || "Militar"
+                    });
+                }
+                return it;
+            })
+        }));
+
+        // 3. EXECUÇÃO EM BATCH
+        const batch = db.batch();
+        batch.update(cautelaRef, {
+            itens: novosItensCautela,
+            pendencias_ativas: pendenciasRestantes,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
+                data: dataRegistro,
+                descricao: `📥Recolhimento: ${ehItemSingle ? qtdBaixa + 'un de ' : ''}${p.itemNome} removido da carga.`,
+                militar: nomeGestorLogado
+            })
+        });
+
+        batch.update(listaRef, { list: novaListaMestra });
+
+        await batch.commit();
+        alert("✅ Recolhimento concluído com sucesso!");
+        document.getElementById('modalDecisaoGestor').style.display = 'none';
+        fecharTabela();
+        loadCaaData();
+
+    } catch (e) {
+        console.error("Erro no recolhimento:", e);
+        alert("Erro: " + e.message);
+    }
+}
     </script>
 </body>
 </html>
