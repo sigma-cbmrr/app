@@ -1255,7 +1255,7 @@
             box-shadow: none; 
         }
         .btn-create {
-            background-color: #2c7399; /* Seu Azul original */
+            background-color: #800020; /* Seu Azul original */
             color: #ffffff !important; 
             border: none;
             padding: 10px 18px;
@@ -2007,7 +2007,7 @@
     border: 1px solid #ddd;
     border-top: 6px solid #800020;
     box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
     overflow: hidden; /* Importante para o ícone não vazar */
     display: flex;
     flex-direction: column;
@@ -2026,13 +2026,15 @@
 .new-local-section {
     transition: all 0.3s ease-in-out;
 }
-
-/* --- RESPONSIVIDADE (Ajuste para telas menores) --- */
-@media (max-width: 1100px) {
-    #units-cards-container {
-        grid-template-columns: repeat(2, 1fr) !important; /* vira 2 colunas */
-    }
-}
+		
+		@keyframes pulse-highlight {
+    		0% { background-color: #fff; transform: scale(1); }
+    		50% { background-color: #ffecec; transform: scale(1.02); border-color: #800020; }
+    		100% { background-color: #fff; transform: scale(1); }
+		}
+		.new-card-pulse {
+    		animation: pulse-highlight 2s ease-in-out;
+		}
 
     </style>
 </head>
@@ -10370,15 +10372,15 @@ async function executarAporteEstoque() {
     });
 }
 		async function salvarUnidade() {
-    // Busca o campo oculto que criamos no formulário (se tiver valor, é EDIÇÃO)
+    // 1. Captura de dados
     const uidEdicao = document.getElementById('new-unit-uid-edit').value;
-    
     const nomeCompleto = document.getElementById('new-unit-full-name').value.trim().toUpperCase();
     const sigla = document.getElementById('new-unit-sigla').value.trim().toUpperCase();
     const comandanteUid = document.getElementById('new-unit-commander-uid').value;
     const comandanteNome = document.getElementById('new-unit-commander-search').value;
     const tipoUnidade = document.getElementById('new-unit-type').value;
 
+    // 2. Validação básica
     if (!nomeCompleto || !sigla || !comandanteUid) {
         return alert("Por favor, preencha todos os campos e selecione um comandante.");
     }
@@ -10386,11 +10388,11 @@ async function executarAporteEstoque() {
     try {
         const batch = db.batch();
         
-        // LOGICA: Se estamos editando, usamos o UID existente. Se é novo, geramos um.
+        // 3. Definição de UID e Referência
         const uidFinal = uidEdicao || ("UNID-" + Date.now());
         const unitRef = db.collection('unidades_estruturadas').doc(uidFinal);
 
-        // Dados base para salvar
+        // 4. Montagem do Objeto
         const dadosUnidade = {
             uid: uidFinal,
             nome_completo: nomeCompleto,
@@ -10401,7 +10403,6 @@ async function executarAporteEstoque() {
             ativo: true
         };
 
-        // Adiciona timestamp de acordo com a operação
         if (!uidEdicao) {
             dadosUnidade.data_criacao = firebase.firestore.FieldValue.serverTimestamp();
         } else {
@@ -10410,19 +10411,47 @@ async function executarAporteEstoque() {
 
         batch.set(unitRef, dadosUnidade, { merge: true });
 
-        // ATUALIZAÇÃO DO LEGADO (Apenas enquanto o resto do sistema ainda lê essa lista de strings)
+        // 5. Atualização do Legado (Opcional, dependendo da sua migração)
         const legacyRef = db.collection('config_geral').doc('unidades');
         batch.update(legacyRef, {
             lista: firebase.firestore.FieldValue.arrayUnion(nomeCompleto)
         });
 
+        // 6. Execução no Banco
         await batch.commit();
 
-        alert(uidEdicao ? `✅ Unidade ${sigla} atualizada!` : `✅ Unidade ${sigla} cadastrada!`);
+        // 7. PÓS-SALVAMENTO: Interface Inteligente (Sem alert travante)
         
-        // Limpa o formulário e reseta o botão
+        // A. Limpa campos e FECHA a aba automaticamente (via sua função limparFormularioUnidade)
         limparFormularioUnidade();
-        carregarUnidadesVisuais();
+
+        // B. Recarrega os cards na tela
+        await carregarUnidadesVisuais();
+
+        // C. Lógica de Feedback Visual Premium (Piscar o card)
+        setTimeout(() => {
+            const cards = document.querySelectorAll('.unit-building-card');
+            cards.forEach(card => {
+                // Localiza o card pela Sigla recém salva dentro do span de destaque
+                if (card.innerText.includes(sigla)) {
+                    // Scroll suave até o card
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    
+                    // Aplica a animação (certifique-se de ter o CSS @keyframes pulse-highlight)
+                    card.style.transition = "all 0.5s ease";
+                    card.style.backgroundColor = "#ffecec";
+                    card.style.transform = "scale(1.05)";
+                    card.style.boxShadow = "0 0 20px rgba(128, 0, 32, 0.4)";
+                    
+                    // Remove o destaque após 2.5 segundos
+                    setTimeout(() => {
+                        card.style.backgroundColor = "#fff";
+                        card.style.transform = "scale(1)";
+                        card.style.boxShadow = "0 4px 10px rgba(0,0,0,0.1)";
+                    }, 2500);
+                }
+            });
+        }, 300); // Pequeno delay para garantir que o DOM renderizou os novos cards
 
     } catch (e) {
         console.error("Erro ao salvar unidade:", e);
