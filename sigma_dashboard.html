@@ -2033,6 +2033,9 @@
         grid-template-columns: repeat(2, 1fr) !important; /* vira 2 colunas */
     }
 }
+		#form-cadastro-unidade:not(.collapsed) {
+    		border: 2px solid #28a745; /* Destaque verde quando estiver editando */
+		}
 
     </style>
 </head>
@@ -2283,18 +2286,29 @@
     </div>
 
     <div id="form-cadastro-unidade" class="new-local-section collapsed" style="border-top: 4px solid #800020; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.3s ease; overflow: hidden;">
-        <h3 style="color: #800020; margin-bottom: 20px; margin-top: 0;"><i class="fas fa-plus-circle"></i> Cadastrar Nova Unidade</h3>
-        <input type="hidden" id="new-unit-uid-edit" value="">
-        <div class="form-grid-2-columns" style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin-bottom: 15px;">
-            <div class="form-group">
-                <label style="font-weight: bold; font-size: 0.85em;">Nome da Unidade</label>
-                <input type="text" id="new-unit-full-name" placeholder="Ex: Companhia de Busca e Salvamento" class="filter-input">
-            </div>
-            <div class="form-group">
-                <label style="font-weight: bold; font-size: 0.85em;">Sigla</label>
-                <input type="text" id="new-unit-sigla" placeholder="Ex: CBS" class="filter-input" style="text-transform: uppercase;">
-            </div>
+    <h3 style="color: #800020; margin-bottom: 20px; margin-top: 0;"><i class="fas fa-plus-circle"></i> Cadastrar Nova Unidade</h3>
+    
+    <input type="hidden" id="new-unit-uid-edit" value="">
+
+    <div class="form-grid-2-columns" style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin-bottom: 15px;">
+        <div class="form-group">
+            <label style="font-weight: bold; font-size: 0.85em;">Nome da Unidade</label>
+            <input type="text" id="new-unit-full-name" placeholder="Ex: Companhia de Busca e Salvamento" class="filter-input">
         </div>
+        <div class="form-group">
+            <label style="font-weight: bold; font-size: 0.85em;">Sigla</label>
+            <input type="text" id="new-unit-sigla" placeholder="Ex: CBS" class="filter-input" style="text-transform: uppercase;">
+        </div>
+    </div>
+
+    <button class="btn-modern-action btn-create" onclick="salvarUnidade()" style="width: 100%; margin-top: 10px; background-color: #800020; color: white; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <i class="fas fa-save"></i> Gravar Unidade no Sistema
+    </button>
+
+    <button class="btn-secondary" onclick="limparFormularioUnidade()" style="width: 100%; margin-top: 10px; background-color: #6c757d; color: white; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: normal; display: flex; align-items: center; justify-content: center; gap: 10px;">
+        <i class="fas fa-times"></i> Cancelar Edição
+    </button>
+</div>
 
         <div class="form-grid-2-columns" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
             <div class="form-group">
@@ -4009,62 +4023,43 @@ html += `
 }
         async function abrirGestaoUnidade(uid) {
     try {
-        // 1. Busca os dados da unidade pelo UID imutável (A chave mestra)
+        // 1. Busca os dados da unidade pelo UID imutável
         const doc = await db.collection('unidades_estruturadas').doc(uid).get();
         if (!doc.exists) {
-            console.error("Unidade não encontrada no banco.");
+            console.error("Unidade não encontrada.");
             return;
         }
-        const unitData = doc.data();
+        const data = doc.data();
 
-        // 2. Alimenta o Modal de Edição com os dados atuais
-        const nameInput = document.getElementById('edit-unit-name-input');
-        const uidInput = document.getElementById('edit-unit-uid-input'); // Renomeado para clareza
-        
-        if(nameInput) nameInput.value = unitData.nome_completo;
-        if(uidInput) uidInput.value = unitData.uid; 
+        // 2. Garante que o formulário de cadastro esteja visível
+        const form = document.getElementById('form-cadastro-unidade');
+        if (form) form.classList.remove('collapsed');
 
-        // 3. Carrega e vincula os Postos/Rotas estritamente pelo UID
-        const checklist = document.getElementById('unit-lists-checklist');
-        if (checklist) {
-            checklist.innerHTML = '<div style="padding:10px;"><i class="fas fa-spinner fa-spin"></i> Sincronizando postos...</div>';
-            
-            // Busca a configuração de rotas/postos
-            const rotasSnap = await db.collection('config_geral').doc('rotas').get();
-            const allRotas = rotasSnap.data() || {};
+        // 3. Preenche os campos do formulário principal com os dados para edição
+        document.getElementById('new-unit-uid-edit').value = data.uid; // ID oculto fundamental
+        document.getElementById('new-unit-full-name').value = data.nome_completo;
+        document.getElementById('new-unit-sigla').value = data.sigla;
+        document.getElementById('new-unit-type').value = data.tipo || 'operacional';
+        document.getElementById('new-unit-commander-uid').value = data.comandante_uid;
+        document.getElementById('new-unit-commander-search').value = data.comandante_nome_estatico;
 
-            checklist.innerHTML = '';
-            
-            // Filtra e exibe os postos
-            Object.entries(allRotas).forEach(([id, r]) => {
-                if(r.ativo === false) return;
-                
-                const div = document.createElement('div');
-                div.className = 'checklist-item';
-                
-                // VÍNCULO LIMPO: Verifica apenas se o UID da unidade bate com o UID salvo na rota
-                const isChecked = (r.unidade_uid === uid) ? 'checked' : '';
-                
-                div.innerHTML = `
-                    <input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> 
-                    <label for="chk-${id}" style="margin:0; font-weight:normal; cursor:pointer;">
-                        ${r.nome} <small style="color:#666;">(${r.posto})</small>
-                    </label>
-                `;
-                checklist.appendChild(div);
-            });
+        // 4. Altera o botão principal para modo "Atualizar"
+        const btn = document.querySelector('.btn-create');
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-sync-alt"></i> Atualizar Unidade';
+            btn.style.backgroundColor = '#28a745'; // Cor verde para indicar edição ativa
+            // Garante que o clique agora chame a salvarUnidade que lida com o UID de edição
+            btn.onclick = salvarUnidade; 
         }
 
-        // 4. Exibe a interface de gestão
-        const modal = document.getElementById('modal-unit-manager');
-        if(modal) modal.style.display = 'flex';
+        // 5. Scroll suave para o topo para facilitar a visualização da edição
+        window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (e) {
-        console.error("Falha na gestão de unidade:", e);
-        alert("Erro crítico ao acessar o banco de dados.");
+        console.error("Erro ao carregar dados para edição:", e);
+        alert("Erro ao carregar dados da unidade.");
     }
 }
-
         async function salvarAlteracoesUnidade() {
             const oldName = document.getElementById('edit-unit-original-name').value;
             const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
