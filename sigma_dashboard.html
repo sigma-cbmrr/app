@@ -2067,6 +2067,53 @@
 		.new-card-pulse {
     		animation: pulse-highlight 2s ease-in-out;
 		}
+		/* Container do Switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+/* Esconde o checkbox padrão */
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* O trilho do switch */
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 24px;
+}
+
+/* A bolinha do switch */
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+/* Cor quando ativado (Roxo do Posto) */
+input:checked + .slider {
+  background-color: #8e44ad;
+}
+
+/* Movimento da bolinha */
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
 
     </style>
 </head>
@@ -2676,34 +2723,41 @@
         </div>
     </div>
 </div>
-
-    <div id="modal-posto-manager" class="modal-overlay">
-    <div class="modal-content">
-        <button class="close-btn" onclick="document.getElementById('modal-posto-manager').style.display='none'"><i class="fas fa-times"></i></button>
-        <h2>Gerenciar Posto</h2>
-        <label>Nome do Posto</label>
-        <input type="text" id="edit-posto-name-input">
-        <input type="hidden" id="edit-posto-original-name">
-                <div id="posto-preview-container" style="
-                    padding: 10px;
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                    background-color: #f9f9f9;
-                    margin-bottom: 20px;
-                ">
-                <p style="margin: 0;">Listas Atualmente Vinculadas: **Carregando...**</p>
+	<div id="modal-gestao-vincos-posto" class="modal" style="display:none; z-index: 2000;">
+    <div class="modal-content" style="max-width: 600px; border-top: 8px solid #8e44ad; border-radius: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+            <div>
+                <h2 id="modal-posto-titulo" style="margin: 0; color: #8e44ad;">Nome do Posto</h2>
+                <p id="modal-posto-endereco" style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">
+                    <i class="fas fa-map-marker-alt"></i> Endereço
+                </p>
             </div>
-            
-            <label style="margin-top:20px;">Vincular Viaturas/Listas a este Posto:</label>
-            <div id="posto-lists-checklist" class="checklist-container">
-            </div>
+            <span class="close" onclick="fecharModalPosto()" style="cursor: pointer; font-size: 1.5em;">&times;</span>
+        </div>
 
-            <div class="modal-buttons" style="justify-content: space-between;">
-                <button class="btn-modern-action btn-delete" onclick="excluirPosto()">Excluir Posto</button>
-                <button class="btn-modern-action btn-sync" onclick="salvarAlteracoesPosto()">Salvar Alterações</button>
+        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <h4 style="margin: 0 0 10px 0; font-size: 0.85em; color: #555; text-transform: uppercase; letter-spacing: 1px;">
+                Suas Viaturas / Listas (Gestão Ativa)
+            </h4>
+            <div id="lista-viaturas-gestao" style="display: flex; flex-direction: column; gap: 10px;">
+                <p style="font-size: 0.8em; color: #999;">Carregando viaturas da unidade...</p>
             </div>
         </div>
+
+        <div style="border-top: 1px solid #eee; padding-top: 15px;">
+            <h4 style="margin: 0 0 10px 0; font-size: 0.85em; color: #999; text-transform: uppercase; letter-spacing: 1px;">
+                Outras Unidades no Local (Apenas Leitura)
+            </h4>
+            <div id="lista-viaturas-leitura" style="display: flex; flex-direction: column; gap: 8px; opacity: 0.7;">
+                <p style="font-size: 0.8em; color: #ccc;">Nenhuma viatura externa vinculada.</p>
+            </div>
+        </div>
+
+        <div style="margin-top: 25px; text-align: right;">
+            <button class="btn-secondary" onclick="fecharModalPosto()">Fechar</button>
+        </div>
     </div>
+</div>
 
     <div id="modal-edicao" class="modal-overlay">
         <div class="modal-content">
@@ -4224,6 +4278,96 @@ html += `
     }
 }
 		//---GESTÃO DE POSTOS--- 08.01.2025
+		async function abrirGestaoPosto(postoUid) {
+    const modal = document.getElementById('modal-gestao-vincos-posto');
+    const containerGestao = document.getElementById('lista-viaturas-gestao');
+    const containerLeitura = document.getElementById('lista-viaturas-leitura');
+    
+    // 1. Busca os dados do Posto para o título
+    try {
+        const postoDoc = await db.collection('postos_estruturados').doc(postoUid).get();
+        if (!postoDoc.exists) return;
+        const postoData = postoDoc.data();
+
+        document.getElementById('modal-posto-titulo').innerText = postoData.nome;
+        document.getElementById('modal-posto-endereco').innerHTML = `<i class="fas fa-map-marker-alt"></i> ${postoData.endereco}`;
+        
+        modal.style.display = 'block';
+        containerGestao.innerHTML = 'Carregando suas listas...';
+        containerLeitura.innerHTML = '';
+
+        // 2. Busca TODAS as listas/viaturas ativas no sistema (Nova Coleção)
+        // No próximo menu, criaremos as listas nesta coleção 'listas_conferencia'
+        const listasSnapshot = await db.collection('listas_conferencia').where('ativo', '==', true).get();
+        
+        let htmlGestao = '';
+        let htmlLeitura = '';
+
+        listasSnapshot.forEach(doc => {
+            const lista = doc.data();
+            const estaNestePosto = (lista.posto_id === postoUid);
+            
+            // FILTRO DE SEGURANÇA: Gestor só mexe na unidade dele
+            const ehMinhaUnidade = (lista.unidade_id === currentUserData.unidade_id);
+
+            if (ehMinhaUnidade) {
+                // Cria linha com Switch (Interruptor)
+                htmlGestao += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid #eee;">
+                        <span style="font-weight: 600; color: #333;">${lista.prefixo} <small style="color:#888; font-weight:normal;">(${lista.placa})</small></span>
+                        <label class="switch">
+                            <input type="checkbox" ${estaNestePosto ? 'checked' : ''} 
+                                   onchange="vincularListaAoPosto('${doc.id}', '${postoUid}', this.checked)">
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                `;
+            } else if (estaNestePosto) {
+                // Se for de outra unidade mas ESTIVER no posto, mostra como leitura
+                htmlLeitura += `
+                    <div style="display: flex; align-items: center; gap: 10px; background: #f0f0f0; padding: 8px; border-radius: 6px; font-size: 0.85em;">
+                        <i class="fas fa-lock" style="color: #ccc;"></i>
+                        <span style="color: #777;">${lista.prefixo} - ${lista.unidade_sigla}</span>
+                    </div>
+                `;
+            }
+        });
+
+        containerGestao.innerHTML = htmlGestao || '<p style="color:#999; font-size:0.8em;">Nenhuma lista encontrada para sua unidade.</p>';
+        containerLeitura.innerHTML = htmlLeitura || '<p style="color:#ccc; font-size:0.8em;">Nenhuma viatura externa.</p>';
+
+    } catch (e) {
+        console.error("Erro ao gerir posto:", e);
+    }
+}
+
+function fecharModalPosto() {
+    document.getElementById('modal-gestao-vincos-posto').style.display = 'none';
+}
+		async function vincularListaAoPosto(listaUid, postoUid, associar) {
+    try {
+        const listaRef = db.collection('listas_conferencia').doc(listaUid);
+        
+        // Se 'associar' for true, grava o UID do posto. 
+        // Se for false, remove o vínculo (seta como null ou remove o campo).
+        await listaRef.update({
+            posto_id: associar ? postoUid : null,
+            ultima_movimentacao_posto: firebase.firestore.FieldValue.serverTimestamp(),
+            movimentado_por: currentUserData.nome_militar_completo
+        });
+
+        console.log(`Vínculo da lista ${listaUid} atualizado: ${associar ? 'Conectado' : 'Desconectado'}`);
+        
+        // Opcional: Atualiza o card de postos no fundo para refletir a nova contagem/lista
+        carregarPostosVisuais();
+
+    } catch (e) {
+        console.error("Erro ao vincular lista:", e);
+        alert("Erro ao salvar o vínculo. Tente novamente.");
+        // Opcional: Recarregar o modal para resetar o switch em caso de erro
+        abrirGestaoPosto(postoUid);
+    }
+}
     	function controlarTogglePosto() {
     		const container = document.getElementById('form-cadastro-posto');
     		const btn = document.getElementById('btn-toggle-posto');
