@@ -2277,9 +2277,9 @@
   <div id="view-unidades" class="view-section">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h1>Gestão de Unidades</h1>
-        <button class="btn-secondary" onclick="document.getElementById('form-cadastro-unidade').classList.toggle('collapsed'); this.innerHTML = this.innerHTML.includes('Novo') ? '<i class=\'fas fa-times\'></i> Fechar' : '<i class=\'fas fa-plus\'></i> Novo Cadastro'" style="font-size: 0.8em;">
-            <i class="fas fa-plus"></i> Novo Cadastro
-        </button>
+        <button id="btn-toggle-unidade" class="btn-secondary" onclick="controlarToggleUnidade()" style="font-size: 0.8em;">
+    		<i class="fas fa-plus"></i> Novo Cadastro
+		</button>
     </div>
 
     <div id="form-cadastro-unidade" class="new-local-section collapsed" style="border-top: 4px solid #800020; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.3s ease; overflow: hidden;">
@@ -3993,17 +3993,29 @@ html += `
        async function abrirGestaoUnidade(uid) {
     try {
         const doc = await db.collection('unidades_estruturadas').doc(uid).get();
-        if (!doc.exists) return;
+        if (!doc.exists) {
+            console.error("Unidade não encontrada.");
+            return;
+        }
         const data = doc.data();
 
-        // 1. Abre o formulário se estiver fechado
+        // 1. Localiza o container e o botão de controle (Toggle)
         const container = document.getElementById('form-cadastro-unidade');
+        // Ajuste o ID abaixo para o ID real do seu botão "Novo Cadastro / Fechar"
+        const btnToggle = document.getElementById('btn-toggle-unidade');
+
+        // 2. Abre o formulário removendo o colapso
         container.classList.remove('collapsed');
 
-        // 2. Muda o título para Edição
+        // 3. Atualiza os textos de controle para o modo Edição
+        if (btnToggle) {
+    		btnToggle.innerHTML = '<i class="fas fa-times"></i> Cancelar Edição';
+    		btnToggle.style.backgroundColor = "#6c757d"; // Cor cinza de cancelamento
+		}
+        
         container.querySelector('h3').innerHTML = '<i class="fas fa-edit"></i> Editar Unidade Existente';
 
-        // 3. Preenche os campos com os dados do Card
+        // 4. Preenche os campos com os dados capturados do Firebase
         document.getElementById('new-unit-uid-edit').value = data.uid;
         document.getElementById('new-unit-full-name').value = data.nome_completo;
         document.getElementById('new-unit-sigla').value = data.sigla;
@@ -4011,19 +4023,22 @@ html += `
         document.getElementById('new-unit-commander-uid').value = data.comandante_uid;
         document.getElementById('new-unit-commander-search').value = data.comandante_nome_estatico;
 
-        // 4. Transforma o botão em "Salvar Alterações"
-        const btn = container.querySelector('.btn-create');
-        btn.innerHTML = '<i class="fas fa-check"></i> Salvar Alterações';
-        btn.style.backgroundColor = "#28a745"; // Verde para diferenciar
-        
-        // 5. Scroll suave para o topo para o usuário ver o formulário preenchido
+        // 5. Configura o botão de ação principal para "Salvar Alterações"
+        const btnSalvar = container.querySelector('.btn-create');
+        if (btnSalvar) {
+            btnSalvar.innerHTML = '<i class="fas fa-check"></i> Salvar Alterações';
+            btnSalvar.style.backgroundColor = "#28a745"; // Verde para diferenciar da criação
+            btnSalvar.onclick = salvarUnidade; // Garante o vínculo com a função de salvamento
+        }
+
+        // 6. Scroll suave para o topo para visualização imediata
         window.scrollTo({ top: 0, behavior: 'smooth' });
 
     } catch (e) {
-        console.error("Erro ao carregar edição:", e);
+        console.error("Erro ao carregar dados da unidade para edição:", e);
+        alert("Erro ao abrir formulário de edição.");
     }
 }
-
         async function salvarAlteracoesUnidade() {
             const oldName = document.getElementById('edit-unit-original-name').value;
             const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
@@ -10407,7 +10422,7 @@ async function executarAporteEstoque() {
 
 // Função auxiliar para resetar o formulário
 function limparFormularioUnidade() {
-    // Limpa todos os campos
+    // 1. Limpa todos os campos de dados
     document.getElementById('new-unit-uid-edit').value = '';
     document.getElementById('new-unit-full-name').value = '';
     document.getElementById('new-unit-sigla').value = '';
@@ -10416,13 +10431,23 @@ function limparFormularioUnidade() {
     
     const container = document.getElementById('form-cadastro-unidade');
     
-    // Volta o título original
+    // 2. Volta o título interno original do formulário
     container.querySelector('h3').innerHTML = '<i class="fas fa-plus-circle"></i> Cadastrar Nova Unidade';
     
-    // Volta o botão original
-    const btn = container.querySelector('.btn-create');
-    btn.innerHTML = '<i class="fas fa-save"></i> Gravar Unidade no Sistema';
-    btn.style.backgroundColor = "#800020"; // Vinho original
+    // 3. Volta o botão de AÇÃO (Gravar) para o estado original
+    const btnAcao = container.querySelector('.btn-create');
+    if (btnAcao) {
+        btnAcao.innerHTML = '<i class="fas fa-save"></i> Gravar Unidade no Sistema';
+        btnAcao.style.backgroundColor = "#800020"; // Vinho original
+    }
+
+    // 4. RESET DO BOTÃO DE CONTROLE (Ajuste cirúrgico aqui)
+    // Devolve o texto e a cor original ao botão que abre/fecha a aba
+    const btnToggle = document.getElementById('btn-toggle-unidade');
+    if (btnToggle) {
+        btnToggle.innerHTML = '<i class="fas fa-plus"></i> Novo Cadastro';
+        btnToggle.style.backgroundColor = ""; // Remove o cinza e volta ao padrão do seu CSS
+    }
 }
 		async function excluirUnidade(uid) {
     if (!confirm("Tem certeza que deseja desativar esta unidade? Itens vinculados a ela podem ficar sem referência.")) return;
@@ -10467,7 +10492,26 @@ function limparFormularioUnidade() {
         alert("Erro ao atualizar unidade.");
     }
 }
-		
+	function controlarToggleUnidade() {
+    const container = document.getElementById('form-cadastro-unidade');
+    const btn = document.getElementById('btn-toggle-unidade');
+    
+    // Alterna a visibilidade (abre/fecha)
+    container.classList.toggle('collapsed');
+    const estaFechado = container.classList.contains('collapsed');
+
+    if (estaFechado) {
+        // Se fechou, resetamos tudo para o padrão original
+        btn.innerHTML = '<i class="fas fa-plus"></i> Novo Cadastro';
+        btn.style.backgroundColor = ""; // Volta cor original do CSS
+        
+        // Aciona a faxina que você já tem pronta
+        limparFormularioUnidade();
+    } else {
+        // Se abriu agora, assume o modo de novo cadastro
+        btn.innerHTML = '<i class="fas fa-times"></i> Fechar';
+    }
+}	
     </script>
 </body>
 </html>
