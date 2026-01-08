@@ -3080,6 +3080,26 @@
             </tbody>
     </table>
 </div>
+	<div id="modal-editar-unidade" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; justify-content:center; align-items:center;">
+    <div style="background:#fff; width:90%; max-width:500px; padding:25px; border-radius:12px; border-top: 8px solid #800020;">
+        <h3 style="color:#800020; margin-top:0;"><i class="fas fa-edit"></i> Editar Unidade</h3>
+        
+        <input type="hidden" id="edit-u-uid"> <label style="display:block; font-weight:bold; margin-top:15px;">Nome Completo</label>
+        <input type="text" id="edit-u-nome" class="filter-input" style="width:100%; padding:8px; margin-top:5px;">
+
+        <label style="display:block; font-weight:bold; margin-top:15px;">Sigla</label>
+        <input type="text" id="edit-u-sigla" class="filter-input" style="width:100%; padding:8px; margin-top:5px; text-transform:uppercase;">
+
+        <div style="display:flex; gap:15px; margin-top:20px;">
+            <button onclick="salvarEdicaoUnidade()" style="flex:1; background:#28a745; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:bold;">
+                <i class="fas fa-check"></i> Salvar Alterações
+            </button>
+            <button onclick="document.getElementById('modal-editar-unidade').style.display='none'" style="flex:1; background:#6c757d; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer;">
+                Cancelar
+            </button>
+        </div>
+    </div>
+</div>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
@@ -4009,59 +4029,19 @@ html += `
 }
         async function abrirGestaoUnidade(uid) {
     try {
-        // 1. Busca os dados da unidade pelo UID imutável (A chave mestra)
         const doc = await db.collection('unidades_estruturadas').doc(uid).get();
-        if (!doc.exists) {
-            console.error("Unidade não encontrada no banco.");
-            return;
-        }
-        const unitData = doc.data();
+        if (!doc.exists) return;
+        const data = doc.data();
 
-        // 2. Alimenta o Modal de Edição com os dados atuais
-        const nameInput = document.getElementById('edit-unit-name-input');
-        const uidInput = document.getElementById('edit-unit-uid-input'); // Renomeado para clareza
-        
-        if(nameInput) nameInput.value = unitData.nome_completo;
-        if(uidInput) uidInput.value = unitData.uid; 
+        // Alimenta o modal de edição
+        document.getElementById('edit-u-uid').value = data.uid;
+        document.getElementById('edit-u-nome').value = data.nome_completo;
+        document.getElementById('edit-u-sigla').value = data.sigla;
 
-        // 3. Carrega e vincula os Postos/Rotas estritamente pelo UID
-        const checklist = document.getElementById('unit-lists-checklist');
-        if (checklist) {
-            checklist.innerHTML = '<div style="padding:10px;"><i class="fas fa-spinner fa-spin"></i> Sincronizando postos...</div>';
-            
-            // Busca a configuração de rotas/postos
-            const rotasSnap = await db.collection('config_geral').doc('rotas').get();
-            const allRotas = rotasSnap.data() || {};
-
-            checklist.innerHTML = '';
-            
-            // Filtra e exibe os postos
-            Object.entries(allRotas).forEach(([id, r]) => {
-                if(r.ativo === false) return;
-                
-                const div = document.createElement('div');
-                div.className = 'checklist-item';
-                
-                // VÍNCULO LIMPO: Verifica apenas se o UID da unidade bate com o UID salvo na rota
-                const isChecked = (r.unidade_uid === uid) ? 'checked' : '';
-                
-                div.innerHTML = `
-                    <input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> 
-                    <label for="chk-${id}" style="margin:0; font-weight:normal; cursor:pointer;">
-                        ${r.nome} <small style="color:#666;">(${r.posto})</small>
-                    </label>
-                `;
-                checklist.appendChild(div);
-            });
-        }
-
-        // 4. Exibe a interface de gestão
-        const modal = document.getElementById('modal-unit-manager');
-        if(modal) modal.style.display = 'flex';
-
+        // Abre o modal
+        document.getElementById('modal-editar-unidade').style.display = 'flex';
     } catch (e) {
-        console.error("Falha na gestão de unidade:", e);
-        alert("Erro crítico ao acessar o banco de dados.");
+        console.error("Erro:", e);
     }
 }
 
@@ -10474,6 +10454,27 @@ function limparFormularioUnidade() {
     } catch (e) {
         console.error("Erro ao excluir:", e);
         alert("Erro ao desativar unidade.");
+    }
+}
+		async function salvarEdicaoUnidade() {
+    const uid = document.getElementById('edit-u-uid').value;
+    const nome = document.getElementById('edit-u-nome').value.trim().toUpperCase();
+    const sigla = document.getElementById('edit-u-sigla').value.trim().toUpperCase();
+
+    if(!nome || !sigla) return alert("Preencha os campos!");
+
+    try {
+        await db.collection('unidades_estruturadas').doc(uid).update({
+            nome_completo: nome,
+            sigla: sigla,
+            ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        alert("Unidade atualizada com sucesso!");
+        document.getElementById('modal-editar-unidade').style.display = 'none';
+        carregarUnidadesVisuais(); // Recarrega os cards
+    } catch (e) {
+        alert("Erro ao atualizar.");
     }
 }
     </script>
