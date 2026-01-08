@@ -2607,24 +2607,6 @@
         </div>
     </div>
 </div>
-    <div id="modal-unit-manager" class="modal-overlay">
-        <div class="modal-content">
-            <button class="close-btn" onclick="document.getElementById('modal-unit-manager').style.display='none'"><i class="fas fa-times"></i></button>
-            <h2>Gerenciar Unidade</h2>
-            <label>Nome da Unidade</label>
-            <input type="text" id="edit-unit-name-input">
-            <input type="hidden" id="edit-unit-original-name">
-            
-            <label style="margin-top:20px;">Vincular Viaturas/Listas:</label>
-            <div id="unit-lists-checklist" class="checklist-container">
-            </div>
-
-            <div class="modal-buttons" style="justify-content: space-between;">
-                <button class="btn-modern-action btn-delete" onclick="excluirUnidade()">Excluir Unidade</button>
-                <button class="btn-modern-action btn-sync" onclick="salvarAlteracoesUnidade()">Salvar Alterações</button>
-            </div>
-        </div>
-    </div>
 
     <div id="modal-posto-manager" class="modal-overlay">
     <div class="modal-content">
@@ -3081,17 +3063,29 @@
     </table>
 </div>
 	<div id="modal-editar-unidade" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; justify-content:center; align-items:center;">
-    <div style="background:#fff; width:90%; max-width:500px; padding:25px; border-radius:12px; border-top: 8px solid #800020;">
+    <div style="background:#fff; width:90%; max-width:500px; padding:25px; border-radius:12px; border-top: 8px solid #800020; max-height: 90vh; overflow-y: auto;">
         <h3 style="color:#800020; margin-top:0;"><i class="fas fa-edit"></i> Editar Unidade</h3>
         
-        <input type="hidden" id="edit-u-uid"> <label style="display:block; font-weight:bold; margin-top:15px;">Nome Completo</label>
+        <input type="hidden" id="edit-u-uid"> 
+
+        <label style="display:block; font-weight:bold; margin-top:15px;">Nome Completo</label>
         <input type="text" id="edit-u-nome" class="filter-input" style="width:100%; padding:8px; margin-top:5px;">
 
         <label style="display:block; font-weight:bold; margin-top:15px;">Sigla</label>
         <input type="text" id="edit-u-sigla" class="filter-input" style="width:100%; padding:8px; margin-top:5px; text-transform:uppercase;">
 
-        <div style="display:flex; gap:15px; margin-top:20px;">
-            <button onclick="salvarEdicaoUnidade()" style="flex:1; background:#28a745; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:bold;">
+        <label style="display:block; font-weight:bold; margin-top:15px;">Natureza da Unidade</label>
+        <select id="edit-u-tipo" class="filter-input" style="width:100%; padding:8px; margin-top:5px;">
+            <option value="operacional">Operacional (Escudo)</option>
+            <option value="administrativo">Administrativo (Prédio)</option>
+        </select>
+
+        <label style="display:block; font-weight:bold; margin-top:15px;">Comandante / Diretor</label>
+        <input type="text" id="edit-u-commander-search" class="filter-input" style="width:100%; padding:8px; margin-top:5px;" placeholder="Nome do Comandante">
+        <input type="hidden" id="edit-u-commander-uid">
+
+        <div style="display:flex; gap:15px; margin-top:25px;">
+            <button onclick="salvarEdicaoUnidade()" style="flex:2; background:#28a745; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:bold;">
                 <i class="fas fa-check"></i> Salvar Alterações
             </button>
             <button onclick="document.getElementById('modal-editar-unidade').style.display='none'" style="flex:1; background:#6c757d; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer;">
@@ -4033,15 +4027,18 @@ html += `
         if (!doc.exists) return;
         const data = doc.data();
 
-        // Alimenta o modal de edição
+        // Alimenta o modal de edição com TODOS os campos da criação
         document.getElementById('edit-u-uid').value = data.uid;
         document.getElementById('edit-u-nome').value = data.nome_completo;
         document.getElementById('edit-u-sigla').value = data.sigla;
+        document.getElementById('edit-u-tipo').value = data.tipo || 'operacional';
+        document.getElementById('edit-u-commander-uid').value = data.comandante_uid || '';
+        document.getElementById('edit-u-commander-search').value = data.comandante_nome_estatico || '';
 
-        // Abre o modal
+        // Abre o modal que definimos acima
         document.getElementById('modal-editar-unidade').style.display = 'flex';
     } catch (e) {
-        console.error("Erro:", e);
+        console.error("Erro ao carregar dados da unidade:", e);
     }
 }
 
@@ -10460,21 +10457,28 @@ function limparFormularioUnidade() {
     const uid = document.getElementById('edit-u-uid').value;
     const nome = document.getElementById('edit-u-nome').value.trim().toUpperCase();
     const sigla = document.getElementById('edit-u-sigla').value.trim().toUpperCase();
+    const tipo = document.getElementById('edit-u-tipo').value;
+    const cmdUid = document.getElementById('edit-u-commander-uid').value;
+    const cmdNome = document.getElementById('edit-u-commander-search').value;
 
-    if(!nome || !sigla) return alert("Preencha os campos!");
+    if(!nome || !sigla) return alert("Preencha Nome e Sigla!");
 
     try {
         await db.collection('unidades_estruturadas').doc(uid).update({
             nome_completo: nome,
             sigla: sigla,
+            tipo: tipo,
+            comandante_uid: cmdUid,
+            comandante_nome_estatico: cmdNome,
             ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
         });
 
         alert("Unidade atualizada com sucesso!");
         document.getElementById('modal-editar-unidade').style.display = 'none';
-        carregarUnidadesVisuais(); // Recarrega os cards
+        carregarUnidadesVisuais(); // Atualiza os cards na tela
     } catch (e) {
-        alert("Erro ao atualizar.");
+        console.error(e);
+        alert("Erro ao atualizar unidade.");
     }
 }
     </script>
