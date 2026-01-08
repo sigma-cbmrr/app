@@ -10248,7 +10248,7 @@ async function executarAporteEstoque() {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Confirmar'; }
     }
 }
-		function configurarBuscaComandanteUnidade() {
+		async function configurarBuscaComandanteUnidade() {
     const input = document.getElementById('new-unit-commander-search');
     const suggestionsBox = document.getElementById('unit-commander-suggestions');
     const suggestionsList = document.getElementById('unit-commander-list');
@@ -10256,31 +10256,57 @@ async function executarAporteEstoque() {
 
     if (!input) return;
 
+    // Garante que temos militares carregados para a busca global
+    // Se o array global allTargetUsers estiver vazio, buscamos todos os militares do banco
+    if (typeof allTargetUsers === 'undefined' || allTargetUsers.length === 0) {
+        console.log("Populando lista global de militares para seleção de comando...");
+        const snap = await db.collection('usuarios').get();
+        allTargetUsers = [];
+        snap.forEach(doc => {
+            const u = doc.data();
+            allTargetUsers.push({
+                id: doc.id,
+                nome: u.nome_militar_completo || u.nome_completo
+            });
+        });
+    }
+
     input.addEventListener('input', () => {
         const termo = input.value.toUpperCase();
         suggestionsList.innerHTML = '';
 
-        if (termo.length < 3) {
+        if (termo.length < 2) {
             suggestionsBox.style.display = 'none';
             return;
         }
 
-        // Filtra militares do seu array global allTargetUsers (que já carregamos no sistema)
-        const filtrados = allTargetUsers.filter(u => u.nome.toUpperCase().includes(termo));
+        const filtrados = allTargetUsers.filter(u => 
+            u.nome.toUpperCase().includes(termo)
+        );
 
         filtrados.forEach(militar => {
             const li = document.createElement('li');
-            li.innerHTML = `<i class="fas fa-user-tie"></i> ${militar.nome}`;
+            li.style.padding = "10px";
+            li.style.cursor = "pointer";
+            li.style.borderBottom = "1px solid #eee";
+            li.innerHTML = `<i class="fas fa-user-shield"></i> ${militar.nome}`;
+            
             li.onclick = () => {
                 input.value = militar.nome;
-                uidInput.value = militar.id; // Salva o UID imutável do militar
+                uidInput.value = militar.id; // Salva o UID imutável (ex: 8snxsQcrahT4...)
                 suggestionsBox.style.display = 'none';
                 input.style.borderColor = '#1b8a3e';
+                console.log("Comandante selecionado:", militar.id);
             };
             suggestionsList.appendChild(li);
         });
 
         suggestionsBox.style.display = filtrados.length > 0 ? 'block' : 'none';
+    });
+
+    // Fecha a lista se clicar fora
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target)) suggestionsBox.style.display = 'none';
     });
 }
 		async function criarUnidade() {
