@@ -3062,39 +3062,7 @@
             </tbody>
     </table>
 </div>
-	<div id="modal-editar-unidade" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; justify-content:center; align-items:center;">
-    <div style="background:#fff; width:90%; max-width:500px; padding:25px; border-radius:12px; border-top: 8px solid #800020; max-height: 90vh; overflow-y: auto;">
-        <h3 style="color:#800020; margin-top:0;"><i class="fas fa-edit"></i> Editar Unidade</h3>
-        
-        <input type="hidden" id="edit-u-uid"> 
-
-        <label style="display:block; font-weight:bold; margin-top:15px;">Nome Completo</label>
-        <input type="text" id="edit-u-nome" class="filter-input" style="width:100%; padding:8px; margin-top:5px;">
-
-        <label style="display:block; font-weight:bold; margin-top:15px;">Sigla</label>
-        <input type="text" id="edit-u-sigla" class="filter-input" style="width:100%; padding:8px; margin-top:5px; text-transform:uppercase;">
-
-        <label style="display:block; font-weight:bold; margin-top:15px;">Natureza da Unidade</label>
-        <select id="edit-u-tipo" class="filter-input" style="width:100%; padding:8px; margin-top:5px;">
-            <option value="operacional">Operacional (Escudo)</option>
-            <option value="administrativo">Administrativo (Prédio)</option>
-        </select>
-
-        <label style="display:block; font-weight:bold; margin-top:15px;">Comandante / Diretor</label>
-        <input type="text" id="edit-u-commander-search" class="filter-input" style="width:100%; padding:8px; margin-top:5px;" placeholder="Nome do Comandante">
-        <input type="hidden" id="edit-u-commander-uid">
-		<div id="edit-u-commander-suggestions" style="background:#fff; border:1px solid #ccc; max-height:150px; overflow-y:auto; position:absolute; width:450px; z-index:10000;"></div>
-
-        <div style="display:flex; gap:15px; margin-top:25px;">
-            <button onclick="salvarEdicaoUnidade()" style="flex:2; background:#28a745; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer; font-weight:bold;">
-                <i class="fas fa-check"></i> Salvar Alterações
-            </button>
-            <button onclick="document.getElementById('modal-editar-unidade').style.display='none'" style="flex:1; background:#6c757d; color:#fff; border:none; padding:12px; border-radius:6px; cursor:pointer;">
-                Cancelar
-            </button>
-        </div>
-    </div>
-</div>
+	
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
@@ -4022,24 +3990,37 @@ html += `
         container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro ao carregar mapa de unidades.</p>';
     }
 }
-        async function abrirGestaoUnidade(uid) {
+       async function abrirGestaoUnidade(uid) {
     try {
         const doc = await db.collection('unidades_estruturadas').doc(uid).get();
         if (!doc.exists) return;
         const data = doc.data();
 
-        // Alimenta o modal de edição com TODOS os campos da criação
-        document.getElementById('edit-u-uid').value = data.uid;
-        document.getElementById('edit-u-nome').value = data.nome_completo;
-        document.getElementById('edit-u-sigla').value = data.sigla;
-        document.getElementById('edit-u-tipo').value = data.tipo || 'operacional';
-        document.getElementById('edit-u-commander-uid').value = data.comandante_uid || '';
-        document.getElementById('edit-u-commander-search').value = data.comandante_nome_estatico || '';
+        // 1. Abre o formulário se estiver fechado
+        const container = document.getElementById('form-cadastro-unidade');
+        container.classList.remove('collapsed');
 
-        // Abre o modal que definimos acima
-        document.getElementById('modal-editar-unidade').style.display = 'flex';
+        // 2. Muda o título para Edição
+        container.querySelector('h3').innerHTML = '<i class="fas fa-edit"></i> Editar Unidade Existente';
+
+        // 3. Preenche os campos com os dados do Card
+        document.getElementById('new-unit-uid-edit').value = data.uid;
+        document.getElementById('new-unit-full-name').value = data.nome_completo;
+        document.getElementById('new-unit-sigla').value = data.sigla;
+        document.getElementById('new-unit-type').value = data.tipo || 'operacional';
+        document.getElementById('new-unit-commander-uid').value = data.comandante_uid;
+        document.getElementById('new-unit-commander-search').value = data.comandante_nome_estatico;
+
+        // 4. Transforma o botão em "Salvar Alterações"
+        const btn = container.querySelector('.btn-create');
+        btn.innerHTML = '<i class="fas fa-check"></i> Salvar Alterações';
+        btn.style.backgroundColor = "#28a745"; // Verde para diferenciar
+        
+        // 5. Scroll suave para o topo para o usuário ver o formulário preenchido
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
     } catch (e) {
-        console.error("Erro ao carregar dados da unidade:", e);
+        console.error("Erro ao carregar edição:", e);
     }
 }
 
@@ -10426,18 +10407,22 @@ async function executarAporteEstoque() {
 
 // Função auxiliar para resetar o formulário
 function limparFormularioUnidade() {
+    // Limpa todos os campos
     document.getElementById('new-unit-uid-edit').value = '';
     document.getElementById('new-unit-full-name').value = '';
     document.getElementById('new-unit-sigla').value = '';
     document.getElementById('new-unit-commander-uid').value = '';
     document.getElementById('new-unit-commander-search').value = '';
     
-    // Reseta o botão para o estado original de "Gravar"
-    const btn = document.querySelector('.btn-create');
-    if (btn) {
-        btn.innerHTML = '<i class="fas fa-save"></i> Gravar Unidade no Sistema';
-        btn.onclick = salvarUnidade;
-    }
+    const container = document.getElementById('form-cadastro-unidade');
+    
+    // Volta o título original
+    container.querySelector('h3').innerHTML = '<i class="fas fa-plus-circle"></i> Cadastrar Nova Unidade';
+    
+    // Volta o botão original
+    const btn = container.querySelector('.btn-create');
+    btn.innerHTML = '<i class="fas fa-save"></i> Gravar Unidade no Sistema';
+    btn.style.backgroundColor = "#800020"; // Vinho original
 }
 		async function excluirUnidade(uid) {
     if (!confirm("Tem certeza que deseja desativar esta unidade? Itens vinculados a ela podem ficar sem referência.")) return;
@@ -10482,45 +10467,7 @@ function limparFormularioUnidade() {
         alert("Erro ao atualizar unidade.");
     }
 }
-		document.getElementById('edit-u-commander-search').addEventListener('input', async function(e) {
-    const termo = e.target.value.toLowerCase();
-    const sugestoesDiv = document.getElementById('edit-u-commander-suggestions'); // Vamos criar essa div abaixo
-    
-    if (termo.length < 3) {
-        sugestoesDiv.innerHTML = '';
-        return;
-    }
-
-    try {
-        const snap = await db.collection('usuarios')
-            .where('ativo', '==', true)
-            .get();
-
-        let html = '';
-        snap.forEach(doc => {
-            const u = doc.data();
-            const nomeCompleto = `${u.posto} ${u.quadro} ${u.nome_guerra}`.toUpperCase();
-            
-            if (nomeCompleto.includes(termo.toUpperCase())) {
-                html += `
-                    <div onclick="selecionarComandanteEdicao('${u.uid}', '${nomeCompleto}')" 
-                         style="padding:10px; border-bottom:1px solid #eee; cursor:pointer; hover:background:#f8f9fa;">
-                        ${nomeCompleto}
-                    </div>`;
-            }
-        });
-        sugestoesDiv.innerHTML = html;
-    } catch (error) {
-        console.error("Erro na busca:", error);
-    }
-});
-
-// Função para preencher os campos após clicar na sugestão
-function selecionarComandanteEdicao(uid, nome) {
-    document.getElementById('edit-u-commander-uid').value = uid;
-    document.getElementById('edit-u-commander-search').value = nome;
-    document.getElementById('edit-u-commander-suggestions').innerHTML = '';
-}
+		
     </script>
 </body>
 </html>
