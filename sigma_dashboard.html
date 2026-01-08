@@ -1986,6 +1986,58 @@
 @keyframes gCatFadeIn {
     from { opacity: 0; transform: translateY(-10px); }
     to { opacity: 1; transform: translateY(0); }
+}
+	.unit-building-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    border: 1px solid #eee;
+    border-top: 6px solid #800020; /* Cor Institucional */
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.unit-building-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+}
+
+.unit-icon-wrapper {
+    font-size: 2.5em;
+    color: #800020;
+    margin-bottom: 10px;
+}
+
+.unit-card-sigla {
+    font-weight: 800;
+    font-size: 1.4em;
+    color: #333;
+    display: block;
+}
+
+.unit-card-name {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 15px;
+    display: block;
+    height: 3em; /* Garante alinhamento mesmo com nomes longos */
+}
+
+.unit-card-footer {
+    border-top: 1px solid #eee;
+    padding-top: 12px;
+    font-size: 0.8em;
+    text-align: left;
+}
+
+.commander-label {
+    font-weight: bold;
+    color: #800020;
+    text-transform: uppercase;
+    font-size: 0.8em;
+    display: block;
 }	
 
     </style>
@@ -2229,20 +2281,40 @@
     </div>
 
     <div id="view-unidades" class="view-section">
-        <h1>Gestão de Unidades</h1>
-        <div class="new-local-section">
-            <h3>Criar Nova Unidade</h3>
-            <div style="display: flex; gap: 10px; align-items: flex-end;">
-                <div class="form-group" style="flex-grow: 1; margin-bottom:0;">
-                    <label>Nome da Unidade (Ex: 1ª CIA, CBS)</label>
-                    <input type="text" id="new-unit-name">
-                </div>
-                <button class="btn-modern-action btn-create" onclick="criarUnidade()">Adicionar</button>
+    <h1>Gestão de Unidades</h1>
+    <div class="new-local-section" style="border-top: 3px solid #800020;">
+        <h3><i class="fas fa-plus-circle"></i> Cadastrar Nova Unidade / Diretoria</h3>
+        
+        <div class="form-grid-2-columns" style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin-bottom: 15px;">
+            <div class="form-group">
+                <label>Nome da Unidade (Ex: Companhia de Combate a Incêndio)</label>
+                <input type="text" id="new-unit-full-name" placeholder="NOME COMPLETO" class="filter-input">
+            </div>
+            <div class="form-group">
+                <label>Sigla (Ex: CCI)</label>
+                <input type="text" id="new-unit-sigla" placeholder="SIGLA" class="filter-input" style="text-transform: uppercase;">
             </div>
         </div>
-        <h3>Unidades Existentes</h3>
-        <div id="units-cards-container" class="cards-grid"></div>
+
+        <div class="form-group">
+            <label>Diretor / Comandante Atual</label>
+            <div class="custom-select-container">
+                <input type="hidden" id="new-unit-commander-uid">
+                <input type="text" id="new-unit-commander-search" placeholder="Pesquise o militar por nome ou posto..." class="filter-input" autocomplete="off">
+                <div id="unit-commander-suggestions" class="suggestions-box" style="display: none;">
+                    <ul id="unit-commander-list"></ul>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn-modern-action btn-create" onclick="criarUnidade()" style="width: 100%; margin-top: 10px;">
+            <i class="fas fa-save"></i> Gravar Unidade no Sistema
+        </button>
     </div>
+
+    <h3><i class="fas fa-landmark"></i> Unidades e Comandos Estruturados</h3>
+    <div id="units-cards-container" class="cards-grid"></div>
+</div>
   
     <div id="view-postos" class="view-section">
         <h1>Gestão de Postos</h1>
@@ -3835,55 +3907,68 @@ window.addEventListener('message', function(event) {
         // --- 6. GESTÃO DE UNIDADES (ADMIN) ---
         async function carregarUnidadesVisuais() {
     const container = document.getElementById('units-cards-container');
-    container.innerHTML = 'Carregando...';
-    
-    // --- Variáveis de Restrição ---
-    const isGestor = currentUserData.role === 'gestor';
-    const unidadeGestor = currentUserData.unidade;
-    // -----------------------------
-    
+    if (!container) return;
+
+    container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:50px;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Mapeando Comandos e Unidades...</div>';
+
     try {
-        const unitsDoc = await db.collection('config_geral').doc('unidades').get();
-        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-        const unidades = unitsDoc.data().lista || [];
-        const rotas = rotasDoc.data() || {};
+        // 1. Busca a nova coleção de unidades estruturadas
+        const snap = await db.collection('unidades_estruturadas')
+                             .where('ativo', '==', true)
+                             .get();
 
-        container.innerHTML = '';
-        unidades.forEach(u => {
-            const listsInUnit = Object.values(rotas).filter(r => r.unidade === u).map(r => r.nome);
-            const card = document.createElement('div');
-            card.className = 'sector-card status-unit';
-            card.innerHTML = `<h3>${u}</h3><div class="card-footer"><strong>Contém:</strong><ul class="sub-list-preview">${listsInUnit.map(l=>`<li>${l}</li>`).join('')}</ul></div>`;
-            card.onclick = () => abrirGestaoUnidade(u, rotas);
-            container.appendChild(card);
-        });
-
-        // --- NOVO: FILTRAGEM DOS LOCAIS PARA O SELECT DO HISTÓRICO GLOBAL ---
-        const sel = document.getElementById('glob-hist-local');
-        // Garante que o elemento existe e reseta com a opção "Todos"
-        if(sel) sel.innerHTML = '<option value="">Todos</option>'; 
-        
-        if(sel) {
-            // 1. Mapeia todas as rotas (viaturas/listas) ativas
-            let locaisFiltrados = Object.values(rotas)
-                .filter(r => r.ativo !== false) 
-                // 2. Aplica a restrição: Se for gestor, só mostra as rotas da sua unidade.
-                .filter(r => !isGestor || r.unidade === unidadeGestor) 
-                .map(r => r.nome); 
-
-            // 3. Remove duplicatas e ordena
-            const locaisUnicos = [...new Set(locaisFiltrados)].sort();
-            
-            locaisUnicos.forEach(l => { 
-                const o = document.createElement('option'); 
-                o.value = l; 
-                o.text = l; 
-                sel.appendChild(o); 
-            });
+        if (snap.empty) {
+            container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; padding:30px;">Nenhuma unidade estruturada encontrada.</p>';
+            return;
         }
-    } catch(e){ 
-        console.error("Erro ao carregar unidades visuais:", e);
-        container.innerHTML='Erro ao carregar dados.';
+
+        let html = '';
+
+        // Usamos um loop for...of para poder usar await dentro dele
+        for (const doc of snap.docs) {
+            const unit = doc.data();
+            
+            // 2. Busca info atualizada do comandante pelo UID
+            let nomeComandante = "Não definido";
+            if (unit.comandante_uid) {
+                const cmdDoc = await db.collection('usuarios').doc(unit.comandante_uid).get();
+                if (cmdDoc.exists) {
+                    const u = cmdDoc.data();
+                    nomeComandante = `${u.posto} ${u.quadro} ${u.nome_guerra}`;
+                } else {
+                    nomeComandante = unit.comandante_nome_estatico; // Fallback
+                }
+            }
+
+            // 3. Define o ícone baseado na Sigla (Ex: Diretorias ganham Landmark, CIAs ganham Shield)
+            const icon = (unit.sigla.includes('DIR') || unit.sigla.includes('CMDO')) ? 'fa-landmark' : 'fa-building-shield';
+
+            html += `
+                <div class="unit-building-card" onclick="abrirGestaoUnidade('${unit.uid}')">
+                    <div class="unit-icon-wrapper">
+                        <i class="fas ${icon}"></i>
+                    </div>
+                    <span class="unit-card-sigla">${unit.sigla}</span>
+                    <span class="unit-card-name">${unit.nome_completo}</span>
+                    
+                    <div class="unit-card-footer">
+                        <span class="commander-label">Comandante / Diretor:</span>
+                        <div style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+                            <i class="fas fa-user-tie" style="color:#666;"></i>
+                            <span style="color:#444; font-weight:500;">${nomeComandante}</span>
+                        </div>
+                    </div>
+                    
+                    <small style="position:absolute; bottom:5px; right:10px; font-size:0.6em; color:#ccc;">${unit.uid}</small>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+
+    } catch (e) {
+        console.error("Erro ao carregar unidades:", e);
+        container.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar mapa de unidades.</p>';
     }
 }
         function abrirGestaoUnidade(unitName, allRotas) {
@@ -4278,6 +4363,8 @@ function reimprimirPDF(data) {
 
     if (v === 'unidades') {
         carregarUnidadesVisuais();
+    	// Inicia o autocomplete de comandante no formulário
+    	configurarBuscaComandanteUnidade();
     }
     
     if (v === 'postos') {
@@ -10159,6 +10246,93 @@ async function executarAporteEstoque() {
         // Se ainda não criou a função de baixa, deixamos um aviso
         alert("A função de Baixa Definitiva está sendo implementada.");
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Confirmar'; }
+    }
+}
+		function configurarBuscaComandanteUnidade() {
+    const input = document.getElementById('new-unit-commander-search');
+    const suggestionsBox = document.getElementById('unit-commander-suggestions');
+    const suggestionsList = document.getElementById('unit-commander-list');
+    const uidInput = document.getElementById('new-unit-commander-uid');
+
+    if (!input) return;
+
+    input.addEventListener('input', () => {
+        const termo = input.value.toUpperCase();
+        suggestionsList.innerHTML = '';
+
+        if (termo.length < 3) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        // Filtra militares do seu array global allTargetUsers (que já carregamos no sistema)
+        const filtrados = allTargetUsers.filter(u => u.nome.toUpperCase().includes(termo));
+
+        filtrados.forEach(militar => {
+            const li = document.createElement('li');
+            li.innerHTML = `<i class="fas fa-user-tie"></i> ${militar.nome}`;
+            li.onclick = () => {
+                input.value = militar.nome;
+                uidInput.value = militar.id; // Salva o UID imutável do militar
+                suggestionsBox.style.display = 'none';
+                input.style.borderColor = '#1b8a3e';
+            };
+            suggestionsList.appendChild(li);
+        });
+
+        suggestionsBox.style.display = filtrados.length > 0 ? 'block' : 'none';
+    });
+}
+		async function criarUnidade() {
+    const nomeCompleto = document.getElementById('new-unit-full-name').value.trim().toUpperCase();
+    const sigla = document.getElementById('new-unit-sigla').value.trim().toUpperCase();
+    const comandanteUid = document.getElementById('new-unit-commander-uid').value;
+    const comandanteNome = document.getElementById('new-unit-commander-search').value;
+
+    if (!nomeCompleto || !sigla || !comandanteUid) {
+        return alert("Por favor, preencha o nome, a sigla e selecione um comandante da lista.");
+    }
+
+    // Gerador de UID Imutável (Prefixo UNID + Timestamp para unicidade absoluta)
+    const novoUidUnidade = "UNID-" + Date.now(); 
+
+    try {
+        const batch = db.batch();
+
+        // 1. Cria o documento da Unidade na nova coleção 'unidades_estruturadas'
+        const unitRef = db.collection('unidades_estruturadas').doc(novoUidUnidade);
+        batch.set(unitRef, {
+            uid: novoUidUnidade,
+            nome_completo: nomeCompleto,
+            sigla: sigla,
+            comandante_uid: comandanteUid,
+            comandante_nome_estatico: comandanteNome, // Apenas para referência rápida
+            data_criacao: firebase.firestore.FieldValue.serverTimestamp(),
+            ativo: true
+        });
+
+        // 2. Mantém o legado no config_geral/unidades para não quebrar o resto do sistema hoje
+        // (Aos poucos vamos remover a dependência deste array de strings)
+        const legacyRef = db.collection('config_geral').doc('unidades');
+        batch.update(legacyRef, {
+            lista: firebase.firestore.FieldValue.arrayUnion(nomeCompleto)
+        });
+
+        await batch.commit();
+
+        alert(`Unidade ${sigla} cadastrada com ID imutável: ${novoUidUnidade}`);
+        
+        // Limpa campos e recarrega
+        document.getElementById('new-unit-full-name').value = '';
+        document.getElementById('new-unit-sigla').value = '';
+        document.getElementById('new-unit-commander-uid').value = '';
+        document.getElementById('new-unit-commander-search').value = '';
+        
+        carregarUnidadesVisuais();
+
+    } catch (e) {
+        console.error("Erro ao criar unidade:", e);
+        alert("Erro técnico ao salvar unidade.");
     }
 }
     </script>
