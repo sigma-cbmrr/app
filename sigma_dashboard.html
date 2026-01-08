@@ -2002,15 +2002,41 @@
 
 /* --- ESTILO DO CARD --- */
 .unit-building-card {
+    position: relative; /* ⬅️ ADICIONADO: Essencial para posicionar a lixeira no canto */
     background: white;
     border-radius: 12px;
     border: 1px solid #ddd;
     border-top: 6px solid #800020;
     box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-    transition: transform 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
-    overflow: hidden; /* Importante para o ícone não vazar */
+    /* Mantive sua transição original abaixo */
+    transition: transform 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease, opacity 0.5s ease; 
+    overflow: hidden;
     display: flex;
     flex-direction: column;
+}
+		.btn-delete-unit-card {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(255, 255, 255, 0.8);
+    color: #ccc; /* Cor apagada inicial */
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    z-index: 10;
+}
+
+.btn-delete-unit-card:hover {
+    background: #d90f23;
+    color: white !important; /* "Acende" em vermelho */
+    transform: scale(1.1);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
 }
 
 .unit-building-card:hover {
@@ -3941,14 +3967,19 @@ html += `
         border: 1px solid #ddd !important; 
         border-top: 6px solid #800020 !important; 
         border-radius: 12px !important; 
-        padding: 0 !important; /* Tiramos o padding geral para controlar as áreas */
+        padding: 0 !important; 
         position: relative !important; 
-        overflow: hidden !important; /* CORREÇÃO: Impede o ícone de vazar para fora */
+        overflow: hidden !important; 
         display: flex; 
         flex-direction: column; 
         min-height: 250px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.1);
     ">
+        
+        <button class="btn-delete-unit-card" title="Excluir Unidade" 
+                onclick="event.stopPropagation(); deletarUnidadeSistema('${unit.uid}', '${unit.sigla}')">
+            <i class="fas fa-trash-alt"></i>
+        </button>
         
         <div style="
             width: 100%; 
@@ -3956,7 +3987,7 @@ html += `
             display: flex !important; 
             align-items: center !important; 
             justify-content: center !important; 
-            background: #fcfcfc; /* Fundo levemente diferente para destacar o topo */
+            background: #fcfcfc; 
             margin: 0 !important;
             padding: 0 !important;
         ">
@@ -3968,7 +3999,7 @@ html += `
                 display: block !important;
                 margin: 0 !important;
                 line-height: 1 !important;
-                position: static !important; /* Força o ícone a não flutuar */
+                position: static !important; 
             "></i>
         </div>
 
@@ -4085,30 +4116,81 @@ html += `
                 alert("Erro: " + e.message);
             }
         }
+		async function deletarUnidadeSistema(uid, sigla) {
+    // 1. Confirmação de Segurança
+    const confirmacao = confirm(`⚠️ ATENÇÃO: Deseja realmente excluir a unidade ${sigla}?\n\nIsso removerá a unidade da lista ativa, mas manterá o histórico de dados para auditoria.`);
+    
+    if (!confirmacao) return;
 
-        async function excluirUnidade() {
-            const name = document.getElementById('edit-unit-original-name').value;
-            if(!confirm(`Excluir a unidade ${name}? As listas perderão o vínculo.`)) return;
-            
-            try {
-                await db.collection('config_geral').doc('unidades').update({ lista: firebase.firestore.FieldValue.arrayRemove(name) });
+    try {
+        const batch = db.batch();
+        const unitRef = db.collection('unidades_estruturadas').doc(uid);
+
+        // 2. Busca o nome completo para limpar o legado simultaneamente
+        const docSnap = await unitRef.get();
+        if (docSnap.exists) {
+            const data = docSnap.data();
+            const nomeLongo = data.nome_completo;
+
+            // A. Remove do legado (Array de strings em config_geral/unidades)
+            const legacyRef = db.collection('config_geral').doc('unidades');
+            batch.update(legacyRef, {
+                lista: firebase.firestore.FieldValue.arrayRemove(nomeLongo)
+            });
+
+            // B. Limpa o campo 'unidade' nas rotas que apontavam para ela
+            const rotasRef = db.collection('config_geral').doc('rotas');
+            const rotasSnap = await rotasRef.get();
+            if (rotasSnap.exists) {
+                const rotasData = rotasSnap.data();
+                let houveAlteracaoRota = false;
                 
-                const rotasRef = db.collection('config_geral').doc('rotas');
-                const s = await rotasRef.get(); 
-                const d = s.data();
-                
-                Object.keys(d).forEach(k => { 
-                    if(d[k].unidade === name) d[k].unidade = null; 
+                Object.keys(rotasData).forEach(key => {
+                    if (rotasData[key].unidade === nomeLongo) {
+                        rotasData[key].unidade = "NÃO VINCULADA";
+                        houveAlteracaoRota = true;
+                    }
                 });
                 
-                await rotasRef.set(d);
-                alert("Excluído."); 
-                document.getElementById('modal-unit-manager').style.display = 'none'; 
-                carregarUnidadesVisuais();
-            } catch(e){ 
-                alert("Erro");
+                if (houveAlteracaoRota) {
+                    batch.set(rotasRef, rotasData);
+                }
             }
         }
+
+        // 3. Arquivamento Lógico (Inativa a unidade no banco novo)
+        batch.update(unitRef, {
+            ativo: false,
+            data_exclusao: firebase.firestore.FieldValue.serverTimestamp(),
+            excluido_por: currentUserData.nome_militar_completo
+        });
+
+        // 4. Executa todas as alterações de uma vez (Atomicidade)
+        await batch.commit();
+
+        // 5. Feedback visual (O card desaparece suavemente da tela)
+        const cards = document.querySelectorAll('.unit-building-card');
+        cards.forEach(card => {
+            if (card.innerText.includes(sigla)) {
+                card.style.transition = "all 0.5s ease";
+                card.style.opacity = "0";
+                card.style.transform = "scale(0.8)";
+                setTimeout(() => {
+                    card.remove();
+                    // Se a lista ficar vazia após remover, recarrega para mostrar mensagem de "vazio"
+                    if(document.querySelectorAll('.unit-building-card').length === 0) {
+                        carregarUnidadesVisuais();
+                    }
+                }, 500);
+            }
+        });
+
+    } catch (e) {
+        console.error("Erro crítico ao excluir unidade:", e);
+        alert("Erro técnico ao excluir unidade. Verifique o console.");
+    }
+}
+    
 
         // --- 6.5 GESTÃO DE POSTOS (NOVO!) ---
         async function carregarPostosVisuais() {
@@ -10494,21 +10576,7 @@ function limparFormularioUnidade() {
         btnToggle.style.backgroundColor = ""; // Remove o cinza/amarelo e volta ao padrão
     }
 }
-		async function excluirUnidade(uid) {
-    if (!confirm("Tem certeza que deseja desativar esta unidade? Itens vinculados a ela podem ficar sem referência.")) return;
-
-    try {
-        await db.collection('unidades_estruturadas').doc(uid).update({
-            ativo: false,
-            data_exclusao: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        alert("Unidade desativada com sucesso.");
-        carregarUnidadesVisuais();
-    } catch (e) {
-        console.error("Erro ao excluir:", e);
-        alert("Erro ao desativar unidade.");
-    }
-}
+		
 		async function salvarEdicaoUnidade() {
     const uid = document.getElementById('edit-u-uid').value;
     const nome = document.getElementById('edit-u-nome').value.trim().toUpperCase();
