@@ -3117,103 +3117,91 @@
         });
 
         function setupUIBasedOnRole() {
-    const role = currentUserData.role || 'operacional';
-    const unit = currentUserData.unidade || 'N/D';
-// --- CORREÇÃO DE SEGURANÇA NA LINHA 301 ---
-    const roleDisplay = document.getElementById('user-role-display');
-// Verifica se o elemento existe antes de tentar definir o texto
-    if (roleDisplay) { 
-        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
-}
-    // ------------------------------------------
+    const role = currentUserData.role || 'operacional';
+    const unit = currentUserData.unidade || 'N/D';
+    const p = currentUserData.permissoes || {};
 
-    atualizarSaudacao(currentUserData);
-// --- 1. Definindo as Permissões Reais de Acesso ---
-    const p = currentUserData.permissoes || {};
-// Objeto de Permissões
-    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
-    const canViewAdminTools = role === 'admin';
-    const canViewDashboardCards = role === 'admin' ||
-    (isGestorOuAdmin && p.canViewDashboardCards);
-    const canViewUnitHistory = role === 'admin' || (isGestorOuAdmin && p.canViewUnitHistory);
-    const canManageUnits = role === 'admin';
-// Assume que Gerenciamento de Unidades é Admin-Only
-    const canManagePosts = role === 'admin' ||
-(isGestorOuAdmin && p.canManagePosts);
-    const canManageUnitUsers = role === 'admin' || (isGestorOuAdmin && p.canManageUnitUsers);
-    const canManageUnitLists = role === 'admin' ||
-(isGestorOuAdmin && p.canManageUnitLists);
-// --- 2. Aplicação das Restrições na UI (Corrigida e Segura) ---
-    
-    // Reseta visibilidade dos links de Admin.
-    document.querySelectorAll('.restricted-admin-only').forEach(el => {
-        if(el) el.style.display = 'block';
-    });
-// Oculta o Rótulo e Links de Admin se for Operacional
-    if (role === 'operacional') {
-        renderOperacionalCards();
- } else {
-        // Para Admin e Gestor
-        renderAdminGestorCards(canViewDashboardCards);
-        // ✅ CORREÇÃO: Removido carregarConferenciasHoje() para evitar TypeError: Cannot set properties of null
+    // --- 1. ATUALIZAÇÃO DO DISPLAY DE PERFIL ---
+    const roleDisplay = document.getElementById('user-role-display');
+    if (roleDisplay) {
+        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
     }
 
-    // --- 2.1 Ajuste Fino dos Links de Gestão (para Gestores e Admin) ---
-    
-    if (!canManageUnits) { 
-        const linkUnidades = document.getElementById('link-unidades');
-        if(linkUnidades) linkUnidades.style.display = 'none';
-    }
-    
-    if (!canManagePosts) { 
-        const linkPostos = document.getElementById('link-postos');
-        if(linkPostos) linkPostos.style.display = 'none';
-    }
-    
-    if (!canManageUnitUsers) { 
-        const linkUsuarios = document.getElementById('link-usuarios');
-        if(linkUsuarios) linkUsuarios.style.display = 'none';
-    }
-    
-    if (!canManageUnitLists) { 
-        const linkListas = document.getElementById('link-listas');
-        if(linkListas) linkListas.style.display = 'none';
-    }
-    
-    // Oculta o Histórico Global se a permissão não estiver marcada
-    const globalHistoryLink = document.getElementById('link-global-history');
-    if (!canViewUnitHistory && globalHistoryLink) {
-        globalHistoryLink.style.display = 'none';
-    }
-    
-    // Ocultar Rótulo Admin se não sobrou nenhum link
-    const adminLinks = ['link-unidades', 'link-postos', 'link-usuarios', 'link-listas'];
-    const anyAdminLinkVisible = adminLinks.some(id => {
-        const el = document.getElementById(id);
-        return el && el.style.display !== 'none';
-    });
-    const rotuloAdmin = document.getElementById('sidebar-rotulo-admin');
-    if (!anyAdminLinkVisible && rotuloAdmin) {
-        rotuloAdmin.style.display = 'none';
-    }
+    atualizarSaudacao(currentUserData);
 
-    // --- 3. Chamadas de Dados Comuns (Manter) ---
-    carregarListasParaNovaConferencia(); // Preenche o modal "Iniciar Conferência"
+    // --- 2. DEFINIÇÃO DAS PERMISSÕES DE ACESSO ---
+    const isAdmin = (role === 'admin');
+    const isGestorOuAdmin = (role === 'gestor' || role === 'admin');
     
-    // ===================================
-    // SOLUÇÃO PARA INICIAR O MENU FECHADO
-    // ===================================
-    closeMenuMobile();
-// --- Trava do Botão Voltar (Mobile/Browser) ---
+    // canManageUnits: TRAVA CIRÚRGICA - Apenas Admin (ou futuro Gestor Geral)
+    const canManageUnits = isAdmin; 
+
+    const canViewDashboardCards = isAdmin || (role === 'gestor' && p.canViewDashboardCards);
+    const canViewUnitHistory = isAdmin || (role === 'gestor' && p.canViewUnitHistory);
+    const canManagePosts = isAdmin || (role === 'gestor' && p.canManagePosts);
+    const canManageUnitUsers = isAdmin || (role === 'gestor' && p.canManageUnitUsers);
+    const canManageUnitLists = isAdmin || (role === 'gestor' && p.canManageUnitLists);
+
+    // --- 3. CONTROLE DE VISIBILIDADE DOS LINKS DA SIDEBAR ---
+    
+    // Primeiro, mostramos os itens básicos de administração para quem for ao menos Gestor
+    document.querySelectorAll('.restricted-admin-only').forEach(el => {
+        if (el) el.style.display = isGestorOuAdmin ? 'block' : 'none';
+    });
+
+    // Ajuste Fino Individual (Sobrescreve a classe se necessário)
+    
+    // Aba UNIDADES: Trava de Segurança para ser Admin-Only
+    const linkUnidades = document.getElementById('link-unidades');
+    if (linkUnidades) {
+        linkUnidades.style.display = canManageUnits ? 'block' : 'none';
+    }
+
+    const linkPostos = document.getElementById('link-postos');
+    if (linkPostos) linkPostos.style.display = canManagePosts ? 'block' : 'none';
+
+    const linkUsuarios = document.getElementById('link-usuarios');
+    if (linkUsuarios) linkUsuarios.style.display = canManageUnitUsers ? 'block' : 'none';
+
+    const linkListas = document.getElementById('link-listas');
+    if (linkListas) linkListas.style.display = canManageUnitLists ? 'block' : 'none';
+
+    const globalHistoryLink = document.getElementById('link-global-history');
+    if (globalHistoryLink) {
+        globalHistoryLink.style.display = canViewUnitHistory ? 'block' : 'none';
+    }
+
+    // --- 4. RENDERIZAÇÃO DOS CARDS DO DASHBOARD ---
+    if (role === 'operacional') {
+        renderOperacionalCards();
+    } else {
+        renderAdminGestorCards(canViewDashboardCards);
+    }
+
+    // --- 5. LÓGICA DE INTERFACE E MENUS ---
+    
+    // Ocultar Rótulo "Administração" se não houver links visíveis abaixo dele
+    const adminLinks = ['link-unidades', 'link-postos', 'link-usuarios', 'link-listas', 'link-almoxarifado'];
+    const anyAdminLinkVisible = adminLinks.some(id => {
+        const el = document.getElementById(id);
+        return el && el.style.display !== 'none';
+    });
+    const rotuloAdmin = document.getElementById('sidebar-rotulo-admin');
+    if (rotuloAdmin) {
+        rotuloAdmin.style.display = anyAdminLinkVisible ? 'block' : 'none';
+    }
+
+    carregarListasParaNovaConferencia();
+    closeMenuMobile();
+
+    // Bloqueio do botão voltar em mobile
     if (window.innerWidth <= 768) {
-        // Adiciona um estado para interceptar o botão Voltar do navegador
         history.pushState(null, null, location.href);
     }
-    // ----------------------------------------------
 
-    // Garante que a visão seja o dashboard ao logar
-    switchView('dashboard');
-    setupMasksForModal();       
+    // Garante inicialização correta
+    switchView('dashboard');
+    if (typeof setupMasksForModal === 'function') setupMasksForModal();
 }
         /**
  * Adiciona listeners de formatação (máscara) aos inputs do modal Gerenciar Militar.
