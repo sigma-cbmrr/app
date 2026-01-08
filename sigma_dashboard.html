@@ -2284,7 +2284,7 @@
 
     <div id="form-cadastro-unidade" class="new-local-section collapsed" style="border-top: 4px solid #800020; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.3s ease; overflow: hidden;">
         <h3 style="color: #800020; margin-bottom: 20px; margin-top: 0;"><i class="fas fa-plus-circle"></i> Cadastrar Nova Unidade</h3>
-        
+        <input type="hidden" id="new-unit-uid-edit" value="">
         <div class="form-grid-2-columns" style="display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin-bottom: 15px;">
             <div class="form-group">
                 <label style="font-weight: bold; font-size: 0.85em;">Nome da Unidade</label>
@@ -2317,7 +2317,7 @@
             </div>
         </div>
 
-        <button class="btn-modern-action btn-create" onclick="criarUnidade()" style="width: 100%; margin-top: 10px;">
+        <button class="btn-modern-action btn-create" onclick="salvarUnidade()" style="width: 100%; margin-top: 10px;">
             <i class="fas fa-save"></i> Gravar Unidade
         </button>
     </div>
@@ -4007,23 +4007,63 @@ html += `
         container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro ao carregar mapa de unidades.</p>';
     }
 }
-        function abrirGestaoUnidade(unitName, allRotas) {
-            document.getElementById('edit-unit-original-name').value = unitName;
-            document.getElementById('edit-unit-name-input').value = unitName;
-            const checklist = document.getElementById('unit-lists-checklist');
+        async function abrirGestaoUnidade(uid) {
+    try {
+        // 1. Busca os dados da unidade pelo UID imutável (A chave mestra)
+        const doc = await db.collection('unidades_estruturadas').doc(uid).get();
+        if (!doc.exists) {
+            console.error("Unidade não encontrada no banco.");
+            return;
+        }
+        const unitData = doc.data();
+
+        // 2. Alimenta o Modal de Edição com os dados atuais
+        const nameInput = document.getElementById('edit-unit-name-input');
+        const uidInput = document.getElementById('edit-unit-uid-input'); // Renomeado para clareza
+        
+        if(nameInput) nameInput.value = unitData.nome_completo;
+        if(uidInput) uidInput.value = unitData.uid; 
+
+        // 3. Carrega e vincula os Postos/Rotas estritamente pelo UID
+        const checklist = document.getElementById('unit-lists-checklist');
+        if (checklist) {
+            checklist.innerHTML = '<div style="padding:10px;"><i class="fas fa-spinner fa-spin"></i> Sincronizando postos...</div>';
+            
+            // Busca a configuração de rotas/postos
+            const rotasSnap = await db.collection('config_geral').doc('rotas').get();
+            const allRotas = rotasSnap.data() || {};
+
             checklist.innerHTML = '';
             
+            // Filtra e exibe os postos
             Object.entries(allRotas).forEach(([id, r]) => {
                 if(r.ativo === false) return;
+                
                 const div = document.createElement('div');
                 div.className = 'checklist-item';
-                const isChecked = (r.unidade === unitName) ? 'checked' : '';
                 
-                div.innerHTML = `<input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> <label for="chk-${id}" style="margin:0;font-weight:normal;">${r.nome} (${r.posto})</label>`;
+                // VÍNCULO LIMPO: Verifica apenas se o UID da unidade bate com o UID salvo na rota
+                const isChecked = (r.unidade_uid === uid) ? 'checked' : '';
+                
+                div.innerHTML = `
+                    <input type="checkbox" id="chk-${id}" ${isChecked} value="${id}"> 
+                    <label for="chk-${id}" style="margin:0; font-weight:normal; cursor:pointer;">
+                        ${r.nome} <small style="color:#666;">(${r.posto})</small>
+                    </label>
+                `;
                 checklist.appendChild(div);
             });
-            document.getElementById('modal-unit-manager').style.display = 'flex';
         }
+
+        // 4. Exibe a interface de gestão
+        const modal = document.getElementById('modal-unit-manager');
+        if(modal) modal.style.display = 'flex';
+
+    } catch (e) {
+        console.error("Falha na gestão de unidade:", e);
+        alert("Erro crítico ao acessar o banco de dados.");
+    }
+}
 
         async function salvarAlteracoesUnidade() {
             const oldName = document.getElementById('edit-unit-original-name').value;
@@ -10345,38 +10385,48 @@ async function executarAporteEstoque() {
         if (!input.contains(e.target)) suggestionsBox.style.display = 'none';
     });
 }
-		async function criarUnidade() {
+		async function salvarUnidade() {
+    // Busca o campo oculto que criamos no formulário (se tiver valor, é EDIÇÃO)
+    const uidEdicao = document.getElementById('new-unit-uid-edit').value;
+    
     const nomeCompleto = document.getElementById('new-unit-full-name').value.trim().toUpperCase();
     const sigla = document.getElementById('new-unit-sigla').value.trim().toUpperCase();
     const comandanteUid = document.getElementById('new-unit-commander-uid').value;
     const comandanteNome = document.getElementById('new-unit-commander-search').value;
-    // Captura o tipo selecionado para definir o ícone (Prédio Administrativo vs Prédio Operacional)
     const tipoUnidade = document.getElementById('new-unit-type').value;
 
     if (!nomeCompleto || !sigla || !comandanteUid) {
-        return alert("Por favor, preencha o nome, a sigla e selecione um comandante da lista.");
+        return alert("Por favor, preencha todos os campos e selecione um comandante.");
     }
-
-    // Gerador de UID Imutável (Invisível ao usuário no dia a dia)
-    const novoUidUnidade = "UNID-" + Date.now(); 
 
     try {
         const batch = db.batch();
+        
+        // LOGICA: Se estamos editando, usamos o UID existente. Se é novo, geramos um.
+        const uidFinal = uidEdicao || ("UNID-" + Date.now());
+        const unitRef = db.collection('unidades_estruturadas').doc(uidFinal);
 
-        // 1. Cria o documento na coleção definitiva com a nova arquitetura
-        const unitRef = db.collection('unidades_estruturadas').doc(novoUidUnidade);
-        batch.set(unitRef, {
-            uid: novoUidUnidade,
+        // Dados base para salvar
+        const dadosUnidade = {
+            uid: uidFinal,
             nome_completo: nomeCompleto,
             sigla: sigla,
-            tipo: tipoUnidade, // 'administrativo' ou 'operacional'
+            tipo: tipoUnidade,
             comandante_uid: comandanteUid,
             comandante_nome_estatico: comandanteNome,
-            data_criacao: firebase.firestore.FieldValue.serverTimestamp(),
             ativo: true
-        });
+        };
 
-        // 2. Mantém compatibilidade com o legado (config_geral/unidades)
+        // Adiciona timestamp de acordo com a operação
+        if (!uidEdicao) {
+            dadosUnidade.data_criacao = firebase.firestore.FieldValue.serverTimestamp();
+        } else {
+            dadosUnidade.ultima_atualizacao = firebase.firestore.FieldValue.serverTimestamp();
+        }
+
+        batch.set(unitRef, dadosUnidade, { merge: true });
+
+        // ATUALIZAÇÃO DO LEGADO (Apenas enquanto o resto do sistema ainda lê essa lista de strings)
         const legacyRef = db.collection('config_geral').doc('unidades');
         batch.update(legacyRef, {
             lista: firebase.firestore.FieldValue.arrayUnion(nomeCompleto)
@@ -10384,20 +10434,46 @@ async function executarAporteEstoque() {
 
         await batch.commit();
 
-        alert(`✅ Unidade ${sigla} cadastrada com sucesso!`);
+        alert(uidEdicao ? `✅ Unidade ${sigla} atualizada!` : `✅ Unidade ${sigla} cadastrada!`);
         
-        // Limpeza dos campos
-        document.getElementById('new-unit-full-name').value = '';
-        document.getElementById('new-unit-sigla').value = '';
-        document.getElementById('new-unit-commander-uid').value = '';
-        document.getElementById('new-unit-commander-search').value = '';
-        
-        // Recarrega os cards com os novos ícones
+        // Limpa o formulário e reseta o botão
+        limparFormularioUnidade();
         carregarUnidadesVisuais();
 
     } catch (e) {
-        console.error("Erro ao criar unidade:", e);
-        alert("Erro técnico ao salvar unidade.");
+        console.error("Erro ao salvar unidade:", e);
+        alert("Erro técnico ao salvar dados.");
+    }
+}
+
+// Função auxiliar para resetar o formulário
+function limparFormularioUnidade() {
+    document.getElementById('new-unit-uid-edit').value = '';
+    document.getElementById('new-unit-full-name').value = '';
+    document.getElementById('new-unit-sigla').value = '';
+    document.getElementById('new-unit-commander-uid').value = '';
+    document.getElementById('new-unit-commander-search').value = '';
+    
+    // Reseta o botão para o estado original de "Gravar"
+    const btn = document.querySelector('.btn-create');
+    if (btn) {
+        btn.innerHTML = '<i class="fas fa-save"></i> Gravar Unidade no Sistema';
+        btn.onclick = salvarUnidade;
+    }
+}
+		async function excluirUnidade(uid) {
+    if (!confirm("Tem certeza que deseja desativar esta unidade? Itens vinculados a ela podem ficar sem referência.")) return;
+
+    try {
+        await db.collection('unidades_estruturadas').doc(uid).update({
+            ativo: false,
+            data_exclusao: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        alert("Unidade desativada com sucesso.");
+        carregarUnidadesVisuais();
+    } catch (e) {
+        console.error("Erro ao excluir:", e);
+        alert("Erro ao desativar unidade.");
     }
 }
     </script>
