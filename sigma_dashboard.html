@@ -11481,31 +11481,39 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
             	}
 			}
 
-        // 3. Lógica do Semáforo: ÓLEO (Exibindo KM e Data)
+        // 3. Lógica do Semáforo: ÓLEO (KM ou Data - O que ocorrer primeiro)
         const elOleo = document.getElementById('status-oleo');
         const kmPrevisto = vtr.manutencao?.oleo_km_prevista || 0;
-        const kmFaltante = kmPrevisto - (vtr.km_atual || 0);
+        const kmAtual = vtr.km_atual || 0;
+        const kmFaltante = kmPrevisto - kmAtual;
+        
+        // Trata a data de troca prevista
         const dataOleoRaw = vtr.manutencao?.oleo_data ? vtr.manutencao.oleo_data.replace(/-/g, '\/') : null;
         const dataOleo = dataOleoRaw ? new Date(dataOleoRaw) : null;
         const dataOleoFmt = dataOleo ? dataOleo.toLocaleDateString('pt-BR') : 'N/D';
         
         let oleoStatusCritico = false;
-
         elOleo.className = 'semaforo-item';
-        if (kmPrevisto === 0) {
+
+        if (kmPrevisto === 0 && !dataOleo) {
             elOleo.querySelector('.semaforo-status').innerText = 'N/D';
         } else {
-            const dataOleoVencida = dataOleo && dataOleo < hoje;
-            if (kmFaltante <= 0 || dataOleoVencida) {
+            // VERIFICAÇÃO DE VENCIMENTO (O QUE OCORRER PRIMEIRO)
+            const vencidoPorKm = kmPrevisto > 0 && kmFaltante <= 0;
+            const vencidoPorData = dataOleo && dataOleo < hoje;
+
+            if (vencidoPorKm || vencidoPorData) {
                 elOleo.classList.add('status-critico');
-                elOleo.querySelector('.semaforo-status').innerHTML = `VENCIDO<br><small>${kmPrevisto}km ou ${dataOleoFmt}</small>`;
+                const motivo = vencidoPorKm ? 'KM EXCEDIDO' : 'DATA VENCIDA';
+                elOleo.querySelector('.semaforo-status').innerHTML = `VENCIDO<br><small>${motivo}<br>${kmPrevisto}km ou ${dataOleoFmt}</small>`;
                 oleoStatusCritico = true;
-            } else if (kmFaltante <= 500) {
+            } else if (kmFaltante <= 500 || (dataOleo && Math.ceil((dataOleo - hoje) / (1000 * 60 * 60 * 24)) <= 15)) {
+                // Alerta se faltar menos de 500km ou menos de 15 dias
                 elOleo.classList.add('status-alerta');
-                elOleo.querySelector('.semaforo-status').innerHTML = `TROCAR EM BREVE<br><small>${kmPrevisto}km</small>`;
+                elOleo.querySelector('.semaforo-status').innerHTML = `TROCAR EM BREVE<br><small>${kmPrevisto}km ou ${dataOleoFmt}</small>`;
             } else {
                 elOleo.classList.add('status-ok');
-                elOleo.querySelector('.semaforo-status').innerHTML = `OK<br><small>${kmPrevisto}km</small>`;
+                elOleo.querySelector('.semaforo-status').innerHTML = `OK<br><small>Troca: ${kmPrevisto}km ou ${dataOleoFmt}</small>`;
             }
         }
 
