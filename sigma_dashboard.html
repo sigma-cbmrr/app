@@ -11071,7 +11071,9 @@ function resetarFormVtrBase() {
     selects.forEach(sel => sel.selectedIndex = 0);
 }
 	async function salvarVtrBase() {
-    const tipo = document.getElementById('btn-salvar-vtr-base').dataset.tipoAtivo;
+    const btn = document.getElementById('btn-salvar-vtr-base');
+    const tipo = btn.dataset.tipoAtivo;
+    const modo = btn.dataset.modo || 'cadastro'; 
     const unidadeUid = document.getElementById('vtr-base-unidade').value;
 
     if (!unidadeUid) {
@@ -11079,11 +11081,14 @@ function resetarFormVtrBase() {
         return;
     }
 
-    const dbRef = db.collection('vtr_bases').doc(unidadeUid);
+    const unitRef = db.collection('vtr_bases').doc(unidadeUid);
+    const subColecao = (tipo === 'viatura') ? 'viaturas' : 'bases';
     
     try {
+        let dados = {};
+
         if (tipo === 'viatura') {
-            const dadosVtr = {
+            dados = {
                 segmento: document.getElementById('vtr-segmento').value,
                 prefixo: document.getElementById('vtr-prefixo').value.toUpperCase(),
                 placa: document.getElementById('vtr-placa').value.toUpperCase(),
@@ -11096,26 +11101,42 @@ function resetarFormVtrBase() {
                     oleo_data: document.getElementById('vtr-oleo-data').value,
                     oleo_km_prevista: parseFloat(document.getElementById('vtr-oleo-km').value) || 0
                 },
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                last_update: firebase.firestore.FieldValue.serverTimestamp()
             };
-
-            await dbRef.collection('viaturas').add(dadosVtr);
         } else {
-            const dadosBase = {
+            dados = {
                 nome: document.getElementById('base-nome').value,
                 endereco: document.getElementById('base-endereco').value,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                last_update: firebase.firestore.FieldValue.serverTimestamp()
             };
-
-            await dbRef.collection('bases').add(dadosBase);
         }
 
-        alert("Ativo cadastrado com sucesso!");
-        controlarToggleVtrBase(); // Fecha o form
-        carregarVtrBasesCards(); // Atualiza a lista
+        if (modo === 'edicao') {
+            const ativoUid = btn.dataset.ativoUid;
+            await unitRef.collection(subColecao).doc(ativoUid).update(dados);
+            alert("Ativo atualizado com sucesso!");
+        } else {
+            dados.timestamp = firebase.firestore.FieldValue.serverTimestamp();
+            await unitRef.collection(subColecao).add(dados);
+            alert("Ativo cadastrado com sucesso!");
+        }
+
+        // === INCLUSÕES CIRÚRGICAS PARA LIMPEZA DE ESTADO ===
+        btn.innerHTML = '<i class="fas fa-save"></i> Gravar Ativo no Sistema';
+        btn.classList.remove('btn-update'); // Remove cor de edição se houver
+        delete btn.dataset.modo;
+        delete btn.dataset.ativoUid;
+        delete btn.dataset.unidadeUid;
+        // =================================================
+
+        // Finalização padrão
+        resetarFormVtrBase();
+        controlarToggleVtrBase(); 
+        carregarVtrBasesCards();  
+        
     } catch (error) {
-        console.error("Erro ao salvar ativo:", error);
-        alert("Erro ao salvar. Verifique o console.");
+        console.error("Erro ao processar ativo:", error);
+        alert("Erro técnico ao salvar. Verifique o console.");
     }
 }
 		async function carregarVtrBasesCards() {
@@ -11124,11 +11145,14 @@ function resetarFormVtrBase() {
 
     container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:50px;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Carregando Ativos...</div>';
 
+    // Definição dos SVGs pequenos para os botões de ação (Lápis e Lixeira)
+    const svgLapiz = '<path d="M410.3 231l11.3-11.3-33.9-33.9-62.1-62.1L291.7 89.8l-11.3 11.3-22.6 22.6L58.6 322.9c-10.4 10.4-18 23.3-22.2 37.4L1 490.7c-3.9 11.3-0.8 23.8 7.9 32.4s21.1 11.8 32.4 7.9l130.4-35.4c14.1-4.2 27-11.8 37.4-22.2L410.3 231zM160 399.4l-9.1 22.7c-4 3.1-8.5 5.4-13.3 6.9L59.4 452l23-78.1c1.4-4.9 3.8-9.4 6.9-13.3l22.7-9.1v32c0 8.8 7.2 16 16 16h32zM362.7 18.7L348.3 33.2 425.7 110.5l14.5-14.5c25-25 25-65.5 0-90.5L453.3 2.7c-25-25-65.5-25-90.5 0z"/>';
+    const svgLixeira = '<path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/>';
+
     try {
         const unidadesSnap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
         let html = '';
 
-        // MAPEAMENTO SVG (Injetando o desenho direto para ignorar bloqueios de rede)
         const iconesVtr = {
             incendio: '<path d="M64 0C28.7 0 0 28.7 0 64V352c0 17.7 14.3 32 32 32H64c0 44.2 35.8 80 80 80s80-35.8 80-80H416c0 44.2 35.8 80 80 80s80-35.8 80-80h32c17.7 0 32-14.3 32-32V288c0-17.7-14.3-32-32-32H608V114.3c0-17-6.7-33.3-18.7-45.3L544 23.7c-12-12-28.3-18.7-45.3-18.7H64zM512 160V64h34.7l45.3 45.3V160H512zM144 352a48 48 0 1 1 0 96 48 48 0 1 1 0-96zm352 48a48 48 0 1 1 96 0 48 48 0 1 1 -96 0z"/>',
             ambulancia: '<path d="M352 32c-17.7 0-32 14.3-32 32v64H256c-17.7 0-32 14.3-32 32v64c0 17.7 14.3 32 32 32h64v64c0 17.7 14.3 32 32 32h64c17.7 0 32-14.3 32-32v-64h64c17.7 0 32-14.3 32-32v-64c0-17.7-14.3-32-32-32h-64V64c0-17.7-14.3-32-32-32H352zM0 128C0 92.7 28.7 64 64 64h160v64H64v256h160v64H64c-35.3 0-64-28.7-64-64V128zm448 320h128c35.3 0 64-28.7 64-64V128c0-35.3-28.7-64-64-64H448v64h128v256H448v64z"/>',
@@ -11152,14 +11176,15 @@ function resetarFormVtrBase() {
                 html += `
                     <div class="unit-building-card">
                         <div class="card-actions-container">
+                            <button class="btn-edit-unit-card" onclick="event.stopPropagation(); prepararEdicaoAtivo('viatura', '${unitUid}', '${doc.id}')">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="height:12px; fill:#fff;">${svgLapiz}</svg>
+                            </button>
                             <button class="btn-delete-unit-card" onclick="event.stopPropagation(); deletarAtivo('${unitUid}', 'viaturas', '${doc.id}', '${vtr.prefixo}')">
-                                <i class="fa-solid fa-trash-can"></i>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" style="height:12px; fill:#fff;">${svgLixeira}</svg>
                             </button>
                         </div>
                         <div style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" style="height:35px; fill:#2c7399;">
-                                ${desenhoPath}
-                            </svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" style="height:35px; fill:#2c7399;">${desenhoPath}</svg>
                         </div>
                         <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column;">
                             <span style="display:block; font-weight:900; font-size:1.1em; color:#333; text-align: center;">${vtr.prefixo}</span>
@@ -11178,8 +11203,11 @@ function resetarFormVtrBase() {
                 html += `
                     <div class="unit-building-card">
                         <div class="card-actions-container">
+                            <button class="btn-edit-unit-card" onclick="event.stopPropagation(); prepararEdicaoAtivo('base', '${unitUid}', '${doc.id}')">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="height:12px; fill:#fff;">${svgLapiz}</svg>
+                            </button>
                             <button class="btn-delete-unit-card" onclick="event.stopPropagation(); deletarAtivo('${unitUid}', 'bases', '${doc.id}', '${base.nome}')">
-                                <i class="fa-solid fa-trash-can"></i>
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" style="height:12px; fill:#fff;">${svgLixeira}</svg>
                             </button>
                         </div>
                         <div style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
@@ -11219,6 +11247,57 @@ async function deletarAtivo(unitUid, subColecao, ativoUid, nomeIdentificador) {
         alert("Erro ao excluir ativo.");
     }
 }
+		async function prepararEdicaoAtivo(tipo, unidadeUid, ativoUid) {
+    // 1. Abre o formulário retrátil (se estiver fechado)
+    const form = document.getElementById('form-cadastro-vtr-base');
+    if (form.classList.contains('collapsed')) {
+        controlarToggleVtrBase();
+    }
+
+    // 2. Aciona o filtro (pula a tela de ícones gigantes)
+    escolherTipoAtivo(tipo);
+
+    // 3. Muda o visual do botão de salvar
+    const btnSalvar = document.getElementById('btn-salvar-vtr-base');
+    btnSalvar.innerHTML = '<i class="fas fa-sync"></i> Atualizar Dados do Ativo';
+    btnSalvar.classList.replace('btn-create', 'btn-update'); // Classe para cor amarela/laranja
+    
+    // 4. Armazena os IDs para uso na hora de gravar
+    btnSalvar.dataset.modo = 'edicao';
+    btnSalvar.dataset.ativoUid = ativoUid;
+    btnSalvar.dataset.unidadeUid = unidadeUid;
+
+    try {
+        // 5. Busca os dados no Firebase
+        const subColecao = (tipo === 'viatura') ? 'viaturas' : 'bases';
+        const doc = await db.collection('vtr_bases').doc(unidadeUid).collection(subColecao).doc(ativoUid).get();
+        
+        if (doc.exists) {
+            const dados = doc.data();
+            
+            // 6. Preenche os campos (Exemplos)
+            document.getElementById('vtr-base-unidade').value = unidadeUid;
+            
+            if (tipo === 'viatura') {
+                document.getElementById('vtr-prefixo').value = dados.prefixo || '';
+                document.getElementById('vtr-placa').value = dados.placa || '';
+                document.getElementById('vtr-modelo').value = dados.modelo || '';
+                document.getElementById('vtr-segmento').value = dados.segmento || '';
+                document.getElementById('vtr-status-operativo').value = dados.status_operativo || '';
+                // Adicione os outros campos da VTR aqui...
+            } else {
+                document.getElementById('base-nome').value = dados.nome || '';
+                document.getElementById('base-endereco').value = dados.endereco || '';
+            }
+            
+            // Rola a tela até o formulário
+            form.scrollIntoView({ behavior: 'smooth' });
+        }
+    } catch (error) {
+        console.error("Erro ao carregar dados para edição:", error);
+    }
+}
+		
     </script>
 </body>
 </html>
