@@ -4834,12 +4834,17 @@ function reimprimirPDF(data) {
 
     if (v === 'unidades') {
         carregarUnidadesVisuais();
-    	// Inicia o autocomplete de comandante no formulário
-    	configurarBuscaComandanteUnidade();
+        // Inicia o autocomplete de comandante no formulário
+        configurarBuscaComandanteUnidade();
     }
     
     if (v === 'postos') {
         carregarPostosVisuais();
+    }
+
+    // ✅ INSERÇÃO CIRÚRGICA: VIATURAS & BASES
+    if (v === 'vtr-bases') {
+        carregarVtrBasesCards();
     }
 
     if (v === 'usuarios') {
@@ -8201,46 +8206,50 @@ function formatarTelefone(input) {
     }
 }
         async function carregarUnidadesSelect(elementId = 'new-user-unit') {
-        const select = document.getElementById(elementId);
-        if (!select) return;
-        select.innerHTML = '<option value="">Carregando...</option>';
-        try {
-            // Busca o documento 'unidades' dentro de 'config_geral'
-            const docRef = db.collection('config_geral').doc('unidades');
-            const doc = await docRef.get();
-            let unidades = [];
-            // Usa a extração segura de dados
-            if (doc.exists) {
-                unidades = doc.data().lista || []; // Pega o array 'lista'
-            }
-
-            // Preenche o dropdown
-            select.innerHTML = '<option value="" disabled selected>Selecione a Unidade</option>';
-            unidades.sort().forEach(unidade => {
-                const option = document.createElement('option');
-                option.value = unidade;
-                option.textContent = unidade;
-                select.appendChild(option);
-            });
-
-            // --- LÓGICA DE PERMISSÃO PARA GESTOR ---
-            const isGestor = currentUserData && currentUserData.role === 'gestor';
-            const gestorUnidade = currentUserData ? currentUserData.unidade : null;
+    const select = document.getElementById(elementId);
+    if (!select) return;
+    select.innerHTML = '<option value="">Carregando...</option>';
+    
+    try {
+        // MUDANÇA CIRÚRGICA: Busca na coleção estruturada para pegar o UID
+        const snap = await db.collection('unidades_estruturadas')
+                             .where('ativo', '==', true)
+                             .get();
         
-            if (isGestor && gestorUnidade) {
-                select.value = gestorUnidade;
-                select.disabled = true;
-                select.style.backgroundColor = '#f0f0f0';
-            } else {
-                select.disabled = false;
-                select.style.backgroundColor = '';
-            }
+        // Preenche o dropdown
+        select.innerHTML = '<option value="" disabled selected>Selecione a Unidade</option>';
+        
+        const unidades = [];
+        snap.forEach(doc => {
+            unidades.push({ uid: doc.id, ...doc.data() });
+        });
 
-        } catch(e) {
-            console.error("Erro CRÍTICO ao carregar unidades:", e);
-            select.innerHTML = '<option value="">Erro ao carregar</option>';
+        // Ordena por sigla
+        unidades.sort((a, b) => a.sigla.localeCompare(b.sigla)).forEach(u => {
+            const option = document.createElement('option');
+            option.value = u.uid; // O VALUE agora é o UID (Essencial para o salvamento)
+            option.textContent = u.sigla; // O TEXTO é a Sigla (Ex: CCI)
+            select.appendChild(option);
+        });
+
+        // --- LÓGICA DE PERMISSÃO PARA GESTOR (Mantida e Adaptada) ---
+        const isGestor = currentUserData && currentUserData.role === 'gestor';
+        
+        if (isGestor) {
+            // Se for gestor, trava no UID da unidade dele
+            select.value = currentUserData.unidade_id; // Assume que você salvou o UID no login
+            select.disabled = true;
+            select.style.backgroundColor = '#f0f0f0';
+        } else {
+            select.disabled = false;
+            select.style.backgroundColor = '';
         }
+
+    } catch(e) {
+        console.error("Erro CRÍTICO ao carregar unidades:", e);
+        select.innerHTML = '<option value="">Erro ao carregar</option>';
     }
+}
         //FUNÇÕES PARA MELHORIA DAS FILTRAGENS POR STATUS E PERFIL NO MENI GESTAO DE CAUTELAS
         async function getUnitListIds() {
     // 1. Obter a unidade do usuário logado
@@ -10975,6 +10984,223 @@ function limparFormularioUnidade() {
         }
         header.style.display = temCardVisivel ? "block" : "none";
     });
+}
+		/*[GESTÃO DE VIATURAS/BASE INÍCIO]*/
+
+		// 1. Controla a abertura do formulário retrátil
+function controlarToggleVtrBase() {
+    const form = document.getElementById('form-cadastro-vtr-base');
+    const btn = document.getElementById('btn-toggle-vtr-base');
+    
+    if (form.classList.contains('collapsed')) {
+        form.classList.remove('collapsed');
+        btn.innerHTML = '<i class="fas fa-times"></i> Cancelar';
+        btn.className = 'btn-secondary btn-cancel';
+        resetarFormVtrBase(); // Garante que comece limpo
+    } else {
+        form.classList.add('collapsed');
+        btn.innerHTML = '<i class="fas fa-plus"></i> Nova Viatura/Base';
+        btn.className = 'btn-secondary';
+    }
+}
+
+// 2. Lógica do Funil de Decisão (O que acontece ao clicar nos cards elegantes)
+function escolherTipoAtivo(tipo) {
+    // Reset visual dos cards de seleção
+    document.querySelectorAll('.selection-card').forEach(card => card.classList.remove('selected'));
+    
+    // Esconde ambos os formulários inicialmente
+    document.getElementById('form-especifico-viatura').style.display = 'none';
+    document.getElementById('form-especifico-base').style.display = 'none';
+    
+    // Mostra os campos comuns (Unidade Responsável) e o botão Salvar
+    document.getElementById('comum-vtr-base').style.display = 'block';
+    document.getElementById('btn-salvar-vtr-base').style.display = 'block';
+
+    if (tipo === 'viatura') {
+        document.querySelector('.selection-card:nth-child(1)').classList.add('selected');
+        document.getElementById('form-especifico-viatura').style.display = 'block';
+        document.getElementById('btn-salvar-vtr-base').dataset.tipoAtivo = 'viatura';
+        // Popular o select de unidades (usando a função que você já tem para usuários)
+        carregarUnidadesSelect('vtr-base-unidade');
+    } else {
+        document.querySelector('.selection-card:nth-child(2)').classList.add('selected');
+        document.getElementById('form-especifico-base').style.display = 'block';
+        document.getElementById('btn-salvar-vtr-base').dataset.tipoAtivo = 'base';
+        carregarUnidadesSelect('vtr-base-unidade');
+    }
+}
+
+// 3. Função auxiliar para resetar o formulário
+function resetarFormVtrBase() {
+    // Esconde tudo e limpa campos
+    document.getElementById('vtr-base-selector').style.display = 'flex';
+    document.getElementById('comum-vtr-base').style.display = 'none';
+    document.getElementById('form-especifico-viatura').style.display = 'none';
+    document.getElementById('form-especifico-base').style.display = 'none';
+    document.getElementById('btn-salvar-vtr-base').style.display = 'none';
+    document.querySelectorAll('.selection-card').forEach(card => card.classList.remove('selected'));
+    
+    // Limpar inputs (exemplo)
+    const inputs = document.querySelectorAll('#form-cadastro-vtr-base input');
+    inputs.forEach(input => input.value = '');
+}
+	async function salvarVtrBase() {
+    const tipo = document.getElementById('btn-salvar-vtr-base').dataset.tipoAtivo;
+    const unidadeUid = document.getElementById('vtr-base-unidade').value;
+
+    if (!unidadeUid) {
+        alert("Por favor, selecione a Unidade Responsável.");
+        return;
+    }
+
+    const dbRef = db.collection('vtr_bases').doc(unidadeUid);
+    
+    try {
+        if (tipo === 'viatura') {
+            const dadosVtr = {
+                segmento: document.getElementById('vtr-segmento').value,
+                prefixo: document.getElementById('vtr-prefixo').value.toUpperCase(),
+                placa: document.getElementById('vtr-placa').value.toUpperCase(),
+                modelo: document.getElementById('vtr-modelo').value,
+                ano: document.getElementById('vtr-ano').value,
+                licenciamento: document.getElementById('vtr-licenciamento').value,
+                status_operativo: document.getElementById('vtr-status-operativo').value,
+                km_atual: parseFloat(document.getElementById('vtr-km-atual').value) || 0,
+                manutencao: {
+                    oleo_data: document.getElementById('vtr-oleo-data').value,
+                    oleo_km_prevista: parseFloat(document.getElementById('vtr-oleo-km').value) || 0
+                },
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            await dbRef.collection('viaturas').add(dadosVtr);
+        } else {
+            const dadosBase = {
+                nome: document.getElementById('base-nome').value,
+                endereco: document.getElementById('base-endereco').value,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            await dbRef.collection('bases').add(dadosBase);
+        }
+
+        alert("Ativo cadastrado com sucesso!");
+        controlarToggleVtrBase(); // Fecha o form
+        carregarVtrBasesCards(); // Atualiza a lista
+    } catch (error) {
+        console.error("Erro ao salvar ativo:", error);
+        alert("Erro ao salvar. Verifique o console.");
+    }
+}
+		async function carregarVtrBasesCards() {
+    const container = document.getElementById('vtr-bases-cards-container');
+    if (!container) return;
+
+    container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:50px;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Carregando Ativos...</div>';
+
+    try {
+        // 1. Busca todas as unidades estruturadas para saber onde procurar subcoleções
+        const unidadesSnap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
+        let html = '';
+
+        // Mapeamento de ícones por segmento (conforme debatido)
+        const iconesVtr = {
+            incendio: 'fa-fire-extinguisher',
+            ambulancia: 'fa-heart-pulse',
+            salvamento: 'fa-truck-pickup',
+            passeio: 'fa-car'
+        };
+
+        // 2. Itera sobre cada unidade para buscar viaturas e bases
+        for (const unitDoc of unidadesSnap.docs) {
+            const unitData = unitDoc.data();
+            const unitUid = unitDoc.id;
+
+            // Busca subcoleção de Viaturas
+            const vtrSnap = await db.collection('vtr_bases').doc(unitUid).collection('viaturas').get();
+            // Busca subcoleção de Bases
+            const baseSnap = await db.collection('vtr_bases').doc(unitUid).collection('bases').get();
+
+            // Renderiza Cards de Viaturas
+            vtrSnap.forEach(doc => {
+                const vtr = doc.data();
+                const icone = iconesVtr[vtr.segmento] || 'fa-truck';
+                const statusClass = `vtr-${vtr.status_operativo}`; // ativa, manutencao, reserva
+                
+                html += `
+                    <div class="unit-building-card">
+                        <div class="card-actions-container">
+                            <button class="btn-edit-unit-card" title="Editar Viatura" onclick="event.stopPropagation(); alert('Edição em breve')">
+                                <i class="fas fa-pencil-alt"></i>
+                            </button>
+                            <button class="btn-delete-unit-card" title="Excluir Viatura" onclick="event.stopPropagation(); deletarAtivo('${unitUid}', 'viaturas', '${doc.id}', '${vtr.prefixo}')">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                        <div style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
+                            <i class="fas ${icone}" style="font-size: 2em; color: #2c7399;"></i>
+                        </div>
+                        <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column;">
+                            <span style="display:block; font-weight:900; font-size:1.1em; color:#333; text-align: center;">${vtr.prefixo}</span>
+                            <small style="display:block; text-align:center; color:#888; margin-bottom:10px;">${vtr.placa} | ${vtr.modelo}</small>
+                            
+                            <div style="border-top: 1px solid #eee; padding-top:8px;">
+                                <small style="display:block; font-size:0.7em; color:#999; text-transform:uppercase; font-weight:bold;">Status & Unidade:</small>
+                                <span class="status-vtr-badge ${statusClass}">${vtr.status_operativo}</span>
+                                <span style="float:right; font-weight:bold; color:#2c7399; font-size:0.8em;">${unitData.sigla}</span>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+
+            // Renderiza Cards de Bases
+            baseSnap.forEach(doc => {
+                const base = doc.data();
+                html += `
+                    <div class="unit-building-card">
+                        <div class="card-actions-container">
+                            <button class="btn-delete-unit-card" title="Excluir Base" onclick="event.stopPropagation(); deletarAtivo('${unitUid}', 'bases', '${doc.id}', '${base.nome}')">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                        <div style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
+                            <i class="fas fa-fort-awesome" style="font-size: 2em; color: #800020;"></i>
+                        </div>
+                        <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column;">
+                            <span style="display:block; font-weight:900; font-size:1.1em; color:#333; text-align: center;">${base.nome}</span>
+                            <small style="display:block; text-align:center; color:#666; font-size:0.8em; margin-bottom:10px;">
+                                <i class="fas fa-map-marker-alt"></i> ${base.endereco}
+                            </small>
+                            <div style="border-top: 1px solid #eee; padding-top:8px;">
+                                <small style="display:block; font-size:0.7em; color:#999; text-transform:uppercase; font-weight:bold;">Unidade Responsável:</small>
+                                <span style="font-weight:bold; color:#800020; font-size:0.8em;">${unitData.sigla}</span>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        container.innerHTML = html || '<p style="grid-column: 1/-1; text-align:center; padding:30px;">Nenhum ativo cadastrado.</p>';
+
+    } catch (e) {
+        console.error("Erro ao carregar cards de ativos:", e);
+        container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro técnico ao carregar lista.</p>';
+    }
+}
+
+// Função para excluir (Viatura ou Base)
+async function deletarAtivo(unitUid, subColecao, ativoUid, nomeIdentificador) {
+    if (!confirm(`Deseja realmente remover "${nomeIdentificador}" do sistema?`)) return;
+
+    try {
+        await db.collection('vtr_bases').doc(unitUid).collection(subColecao).doc(ativoUid).delete();
+        alert("Removido com sucesso!");
+        carregarVtrBasesCards();
+    } catch (e) {
+        console.error("Erro ao excluir:", e);
+        alert("Erro ao excluir ativo.");
+    }
 }
     </script>
 </body>
