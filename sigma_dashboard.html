@@ -284,8 +284,14 @@
 .vtr-semaforo-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
 .semaforo-item { padding: 10px; border-radius: 8px; text-align: center; border: 1px solid #ddd; }
 .semaforo-label { display: block; font-size: 0.65em; font-weight: bold; color: #666; }
-.semaforo-status { font-weight: 800; font-size: 0.85em; display: block; margin-top: 4px; }
-
+.semaforo-status { line-height: 1.2 !important; font-weight: 800; font-size: 0.85em; display: block; margin-top: 4px; }
+.semaforo-status small {
+    font-size: 0.75em;
+    font-weight: normal;
+    display: block;
+    margin-top: 2px;
+    opacity: 0.9;
+}
 .status-ok { background: #e8f5e9; color: #2e7d32; border-color: #c8e6c9; }
 .status-alerta { background: #fffde7; color: #f9a825; border-color: #fff9c4; }
 .status-critico { background: #ffebee; color: #c62828; border-color: #ffcdd2; }
@@ -11438,58 +11444,75 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
         if (!doc.exists) return;
         const vtr = doc.data();
 
-        // 1. Preenche Dados Básicos (com travas de segurança para nulos)
+        // 1. Preenche Dados Básicos
         document.getElementById('modal-vtr-titulo').innerText = `VIATURA ${vtr.prefixo || 'S/P'}`;
         document.getElementById('det-vtr-prefixo').innerText = vtr.prefixo || '---';
         document.getElementById('det-vtr-placa').innerText = vtr.placa || '---';
         document.getElementById('det-vtr-modelo').innerText = vtr.modelo || '---';
         document.getElementById('det-vtr-km').innerText = (vtr.km_atual || 0).toLocaleString('pt-BR') + ' km';
 
-        // 2. Lógica do Semáforo: LICENCIAMENTO
-        const elLic = document.getElementById('status-licenciamento');
-        // O replace garante que a data seja lida corretamente em todos os navegadores
-        const dataLic = vtr.licenciamento ? new Date(vtr.licenciamento.replace(/-/g, '\/')) : new Date();
         const hoje = new Date();
-        hoje.setHours(0, 0, 0, 0); // Zera as horas para comparação justa por dias
-        const diffDias = Math.ceil((dataLic - hoje) / (1000 * 60 * 60 * 24));
+        hoje.setHours(0, 0, 0, 0);
+
+        // 2. Lógica do Semáforo: LICENCIAMENTO (Exibindo Data)
+        const elLic = document.getElementById('status-licenciamento');
+        const dataLicRaw = vtr.licenciamento ? vtr.licenciamento.replace(/-/g, '\/') : null;
+        const dataLic = dataLicRaw ? new Date(dataLicRaw) : null;
+        const dataLicFmt = dataLic ? dataLic.toLocaleDateString('pt-BR') : 'N/D';
+        
+        let licStatusCritico = false;
+        let diffDias = 999;
 
         elLic.className = 'semaforo-item'; 
-        if (!vtr.licenciamento) {
-            elLic.querySelector('.semaforo-status').innerText = 'N/D';
-        } else if (diffDias < 0) {
-            elLic.classList.add('status-critico');
-            elLic.querySelector('.semaforo-status').innerText = 'VENCIDO';
-        } else if (diffDias <= 30) {
-            elLic.classList.add('status-alerta');
-            elLic.querySelector('.semaforo-status').innerText = 'VENCE EM ' + diffDias + 'D';
+        if (!dataLic) {
+            elLic.querySelector('.semaforo-status').innerHTML = `N/D`;
         } else {
-            elLic.classList.add('status-ok');
-            elLic.querySelector('.semaforo-status').innerText = 'OK';
+            diffDias = Math.ceil((dataLic - hoje) / (1000 * 60 * 60 * 24));
+            if (diffDias < 0) {
+                elLic.classList.add('status-critico');
+                elLic.querySelector('.semaforo-status').innerHTML = `VENCIDO<br><small>${dataLicFmt}</small>`;
+                licStatusCritico = true;
+            } else if (diffDias <= 30) {
+                elLic.classList.add('status-alerta');
+                elLic.querySelector('.semaforo-status').innerHTML = `ATENÇÃO<br><small>Vence ${dataLicFmt}</small>`;
+            } else {
+                elLic.classList.add('status-ok');
+                elLic.querySelector('.semaforo-status').innerHTML = `OK<br><small>${dataLicFmt}</small>`;
+            }
         }
 
-        // 3. Lógica do Semáforo: ÓLEO
+        // 3. Lógica do Semáforo: ÓLEO (Exibindo KM e Data)
         const elOleo = document.getElementById('status-oleo');
         const kmPrevisto = vtr.manutencao?.oleo_km_prevista || 0;
         const kmFaltante = kmPrevisto - (vtr.km_atual || 0);
+        const dataOleoRaw = vtr.manutencao?.oleo_data ? vtr.manutencao.oleo_data.replace(/-/g, '\/') : null;
+        const dataOleo = dataOleoRaw ? new Date(dataOleoRaw) : null;
+        const dataOleoFmt = dataOleo ? dataOleo.toLocaleDateString('pt-BR') : 'N/D';
+        
+        let oleoStatusCritico = false;
 
         elOleo.className = 'semaforo-item';
         if (kmPrevisto === 0) {
             elOleo.querySelector('.semaforo-status').innerText = 'N/D';
-        } else if (kmFaltante <= 0) {
-            elOleo.classList.add('status-critico');
-            elOleo.querySelector('.semaforo-status').innerText = 'VENCIDO';
-        } else if (kmFaltante <= 500) {
-            elOleo.classList.add('status-alerta');
-            elOleo.querySelector('.semaforo-status').innerText = 'FALTAM ' + kmFaltante + 'KM';
         } else {
-            elOleo.classList.add('status-ok');
-            elOleo.querySelector('.semaforo-status').innerText = 'OK';
+            const dataOleoVencida = dataOleo && dataOleo < hoje;
+            if (kmFaltante <= 0 || dataOleoVencida) {
+                elOleo.classList.add('status-critico');
+                elOleo.querySelector('.semaforo-status').innerHTML = `VENCIDO<br><small>${kmPrevisto}km ou ${dataOleoFmt}</small>`;
+                oleoStatusCritico = true;
+            } else if (kmFaltante <= 500) {
+                elOleo.classList.add('status-alerta');
+                elOleo.querySelector('.semaforo-status').innerHTML = `TROCAR EM BREVE<br><small>${kmPrevisto}km</small>`;
+            } else {
+                elOleo.classList.add('status-ok');
+                elOleo.querySelector('.semaforo-status').innerHTML = `OK<br><small>${kmPrevisto}km</small>`;
+            }
         }
 
-        // 4. Lógica Prontidão Geral
+        // 4. Lógica Prontidão Geral (Verifica se houve qualquer vencimento crítico)
         const elGeral = document.getElementById('status-vtr-geral');
         elGeral.className = 'semaforo-item';
-        if (diffDias < 0 || kmFaltante <= 0) {
+        if (licStatusCritico || oleoStatusCritico) {
             elGeral.classList.add('status-critico');
             elGeral.querySelector('.semaforo-status').innerText = 'REVISAR';
         } else {
@@ -11497,9 +11520,8 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
             elGeral.querySelector('.semaforo-status').innerText = 'PRONTA';
         }
 
-        // 5. Exibe o modal (Forçando o Flex para centralizar conforme sua classe modal-overlay)
-        const modal = document.getElementById('modal-detalhes-vtr');
-        modal.style.display = 'flex';
+        // 5. Exibe o modal
+        document.getElementById('modal-detalhes-vtr').style.display = 'flex';
 
     } catch (e) {
         console.error("Erro ao carregar detalhes:", e);
