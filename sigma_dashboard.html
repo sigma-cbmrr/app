@@ -11704,13 +11704,17 @@ async function carregarCardsListasExistentes() {
         snap.forEach(doc => {
             const lista = doc.data();
             
-            // Calcula o total de itens (somando os itens de todos os setores do array list)
+            // Calcula o total de itens
             const qtdItens = lista.list ? lista.list.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0) : 0;
 
-            // 3. Montagem do card (Padrão Unidades/Postos)
+            // 3. Montagem do card (Com botão de Edição e Exclusão)
             html += `
                 <div class="unit-building-card" style="cursor:pointer; border-top: 6px solid #2c7399;" onclick="abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
                     <div class="card-actions-container">
+                        <button class="btn-edit-unit-card" title="Editar Cabeçalho" onclick="event.stopPropagation(); prepararEdicaoCabecalhoLista('${doc.id}')">
+                            <i class="fas fa-pencil-alt" style="color: #555 !important;"></i>
+                        </button>
+                        
                         <button class="btn-delete-unit-card" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
                             <i class="fas fa-trash-alt"></i>
                         </button>
@@ -11747,29 +11751,26 @@ async function carregarCardsListasExistentes() {
         container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro ao carregar listas.</p>';
     }
 }
-		async function gravarCabecalhoLista(abrirEditor) {
+		async function gravarCabecalhoLista(abrirEditor, idExistente = null) {
     const selectAtivo = document.getElementById('lista-ativo-uid');
     const selectPosto = document.getElementById('lista-posto-uid');
-    const selectUnidade = document.getElementById('lista-unidade-vinculo'); // 1. Captura o novo select
+    const selectUnidade = document.getElementById('lista-unidade-vinculo');
 
     const ativoUid = selectAtivo.value;
     const postoUid = selectPosto.value;
-    const unidadeUid = selectUnidade.value; // 2. Obtém o UID da Unidade selecionada
+    const unidadeUid = selectUnidade.value;
 
-    // 3. Validação atualizada: Unidade agora é obrigatória
     if (!ativoUid || !postoUid || !unidadeUid) {
         return alert("Por favor, selecione o Ativo, a Unidade Gestora e o Posto de Vínculo.");
     }
 
     const optionAtivo = selectAtivo.options[selectAtivo.selectedIndex];
     const nomeAtivo = optionAtivo.dataset.nome;
-    
-    // 4. Captura a Sigla da Unidade diretamente do texto do select de Unidades
     const unidadeSigla = selectUnidade.options[selectUnidade.selectedIndex].text;
     const nomePosto = selectPosto.options[selectPosto.selectedIndex].text;
 
-    // Geramos um ID único para esta lista específica
-    const listaUid = `LISTA_${ativoUid}_${postoUid}`;
+    // ✅ Define se usa o ID enviado pelo 'lápis' ou gera um novo (Criação)
+    const listaUid = idExistente || `LISTA_${ativoUid}_${postoUid}`;
 
     try {
         const batch = db.batch();
@@ -11779,16 +11780,23 @@ async function carregarCardsListasExistentes() {
             uid: listaUid,
             ativo_id: ativoUid,
             ativo_nome: nomeAtivo,
-            unidade_id: unidadeUid,    // UID da Unidade (definido pelo Admin ou travado p/ Gestor)
-            unidade_sigla: unidadeSigla, // Sigla da Unidade (ex: CCI)
+            unidade_id: unidadeUid,
+            unidade_sigla: unidadeSigla,
             posto_id: postoUid,
             posto_nome: nomePosto,
             ativo: true,
             tipo: 'conferencia_materiais',
-            list: [], 
-            criado_em: firebase.firestore.FieldValue.serverTimestamp(),
-            criado_por: currentUserData.nome_militar_completo
+            // ✅ Usa merge:true no batch para não apagar o array 'list' se já houver itens
+            atualizado_em: firebase.firestore.FieldValue.serverTimestamp(),
+            atualizado_por: currentUserData.nome_militar_completo
         };
+
+        // Se for uma lista nova, adicionamos os campos de criação
+        if (!idExistente) {
+            dadosLista.criado_em = firebase.firestore.FieldValue.serverTimestamp();
+            dadosLista.criado_por = currentUserData.nome_militar_completo;
+            dadosLista.list = []; 
+        }
 
         batch.set(listaRef, dadosLista, { merge: true });
 
@@ -11797,15 +11805,23 @@ async function carregarCardsListasExistentes() {
             [listaUid]: {
                 nome: nomeAtivo,
                 posto: nomePosto,
-                unidade: unidadeSigla, // Mantém compatibilidade com o Dashboard
+                unidade: unidadeSigla,
                 ativo: true
             }
         });
 
         await batch.commit();
 
-        alert(`Lista para ${nomeAtivo} vinculada à unidade ${unidadeSigla} no ${nomePosto} salva com sucesso!`);
+        alert(`Informações de ${nomeAtivo} salvas com sucesso!`);
         
+        // ✅ RESET DO FORMULÁRIO E BOTÃO
+        const btnSalvar = document.querySelector('#form-cadastro-lista .btn-modern-action');
+        if (btnSalvar) {
+            btnSalvar.innerHTML = '<i class="fas fa-list-ol"></i> Salvar e Editar Itens';
+            btnSalvar.style.backgroundColor = "#800000";
+            btnSalvar.onclick = () => gravarCabecalhoLista(true);
+        }
+
         controlarToggleFormLista(); 
         carregarCardsListasExistentes(); 
 
@@ -11816,6 +11832,47 @@ async function carregarCardsListasExistentes() {
     } catch (e) {
         console.error("Erro ao gravar lista:", e);
         alert("Erro técnico ao salvar cabeçalho da lista.");
+    }
+}
+		async function prepararEdicaoCabecalhoLista(listaUid) {
+    // 1. Abre o formulário se estiver fechado
+    const form = document.getElementById('form-cadastro-lista');
+    if (form.style.display === 'none' || form.classList.contains('collapsed')) {
+        controlarToggleFormLista();
+    }
+
+    try {
+        // 2. Busca os dados atuais da lista no Firebase
+        const doc = await db.collection('listas_conferencia').doc(listaUid).get();
+        if (!doc.exists) {
+            alert("Erro: Lista não encontrada.");
+            return;
+        }
+        const data = doc.data();
+
+        // 3. Preenche os selects com os IDs originais
+        document.getElementById('lista-ativo-uid').value = data.ativo_id || "";
+        document.getElementById('lista-unidade-vinculo').value = data.unidade_id || "";
+        document.getElementById('lista-posto-uid').value = data.posto_id || "";
+
+        // 4. Localiza o botão de ação principal do formulário
+        const btnSalvar = document.querySelector('#form-cadastro-lista .btn-modern-action');
+        
+        if (btnSalvar) {
+            // Muda o texto e a cor para indicar que é uma EDIÇÃO
+            btnSalvar.innerHTML = '<i class="fas fa-sync"></i> Atualizar Dados';
+            btnSalvar.style.backgroundColor = "#2c7399"; // Azul (indicativo de edição no seu sistema)
+            
+            // Reconfigura o clique para chamar a gravação passando o ID da lista
+            btnSalvar.onclick = () => gravarCabecalhoLista(false, listaUid);
+        }
+
+        // 5. Scroll suave para o topo para o usuário ver o formulário preenchido
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    } catch (e) {
+        console.error("Erro ao carregar dados para edição:", e);
+        alert("Erro ao carregar informações da lista.");
     }
 }
 		async function carregarCardsListasExistentes() {
