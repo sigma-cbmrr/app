@@ -11643,9 +11643,69 @@ async function carregarFiltrosParaNovoEditor() {
 // Função Placeholder para os Cards (Faremos a gravação no próximo passo)
 async function carregarCardsListasExistentes() {
     const container = document.getElementById('container-cards-listas');
-    container.innerHTML = '<p style="text-align:center; padding:20px; color:#999;">Buscando listas de conferência...</p>';
-    
-    // Por enquanto deixaremos vazio até criarmos a função de Gravar
+    if (!container) return;
+
+    // 1. Garante que o container use o grid do sistema
+    container.className = "cards-grid"; 
+    container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:50px;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Buscando inventários...</div>';
+
+    try {
+        // 2. Busca apenas listas ativas no banco
+        const snap = await db.collection('listas_conferencia')
+                             .where('ativo', '==', true)
+                             .get();
+
+        if (snap.empty) {
+            container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; padding:30px; color:#999;">Nenhuma lista de conferência criada ainda.</p>';
+            return;
+        }
+
+        let html = '';
+        snap.forEach(doc => {
+            const lista = doc.data();
+            
+            // Calcula o total de itens (somando os itens de todos os setores do array list)
+            const qtdItens = lista.list ? lista.list.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0) : 0;
+
+            // 3. Montagem do card (Padrão Unidades/Postos)
+            html += `
+                <div class="unit-building-card" style="cursor:pointer; border-top: 6px solid #2c7399;" onclick="abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
+                    <div class="card-actions-container">
+                        <button class="btn-delete-unit-card" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                    
+                    <div style="width: 100%; height: 70px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
+                        <i class="fa-solid fa-clipboard-list" style="font-size: 2.2em; color: #2c7399;"></i>
+                    </div>
+
+                    <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div style="text-align: center;">
+                            <span style="display:block; font-weight:900; font-size:1.2em; color:#333; margin-bottom: 5px;">${lista.ativo_nome}</span>
+                            <span class="status-badge" style="background:#e0f2fe; color:#0369a1; font-size:0.75em; padding: 4px 8px; border-radius: 4px;">
+                                ${qtdItens} ITENS NO INVENTÁRIO
+                            </span>
+                        </div>
+                        
+                        <div style="border-top: 1px solid #eee; padding-top:10px; margin-top: 15px;">
+                            <span style="font-weight:bold; color:#2c7399; text-transform:uppercase; font-size:0.7em; display:block;">Vínculo Operacional:</span>
+                            <div style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+                                <i class="fas fa-map-marker-alt" style="color:#555; font-size: 0.8em;"></i>
+                                <span style="color:#444; font-weight:600; font-size:0.8em;">${lista.posto_nome} | ${lista.unidade_sigla}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+
+    } catch (e) {
+        console.error("Erro ao carregar cards de listas:", e);
+        container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro ao carregar listas.</p>';
+    }
 }
 		async function gravarCabecalhoLista(abrirEditor) {
     const selectAtivo = document.getElementById('lista-ativo-uid');
