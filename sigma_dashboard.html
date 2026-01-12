@@ -10465,58 +10465,83 @@ async function executarAporteEstoque() {
 }
 		
 	async function abrirModalTransferencia(docId) {
-    // 🛑 PROTEÇÃO DE ELITE: Se o ID vier vazio, o código para aqui e avisa
+    // 1. PROTEÇÃO E LIMPEZA IMEDIATA (Reseta o modal antes de qualquer busca)
     if (!docId || docId === "" || docId === "undefined") {
-        console.error("ERRO ABORTADO: abrirModalTransferencia recebeu um ID Vazio.");
+        console.error("ERRO: abrirModalTransferencia recebeu um ID inválido.");
         return; 
     }
 
-    // 1. Limpa o modal de qualquer resquício de uso anterior
-    if (typeof resetarVisibilidadeModal === 'function') {
-        resetarVisibilidadeModal();
+    const modal = document.getElementById('modal-almox-transferencia');
+    const tituloNome = document.getElementById('almox-transf-item-nome');
+    const selectViatura = document.getElementById('almox-viatura-alvo');
+    const opTipo = document.getElementById('almox-operacao-tipo');
+
+    // Reset visual instantâneo para evitar "rastro" do item anterior
+    if (tituloNome) {
+        tituloNome.textContent = "Carregando...";
+        tituloNome.setAttribute('data-docid', docId);
     }
+    
+    // Garante que o tipo de operação volte ao padrão ao abrir
+    if (opTipo) opTipo.value = "ENVIO"; 
+    
+    // Esconde as divs de Multi/Setor antes de carregar o novo item
+    resetarVisibilidadeModal();
 
     try {
-        // 2. Busca os dados do material no Almoxarifado Central
+        // 2. BUSCA DE DADOS
         const doc = await db.collection('almoxarifado_central').doc(docId).get();
         if (!doc.exists) {
-            console.error("Item não encontrado no banco de dados:", docId);
+            alert("Erro: Item não localizado no estoque.");
             return;
         }
         const item = doc.data();
 
-        // 3. Preenche o cabeçalho do modal
-        const tituloNome = document.getElementById('almox-transf-item-nome');
-        if (tituloNome) {
-            tituloNome.textContent = item.nome;
-            tituloNome.setAttribute('data-docid', docId);
-            tituloNome.setAttribute('data-tipo', item.tipo); 
-        }
+        // 3. INJEÇÃO DE DADOS (Agora o data-tipo estará presente ANTES de qualquer função de UI rodar)
+        tituloNome.textContent = item.nome;
+        tituloNome.setAttribute('data-tipo', item.tipo); // 'single' ou 'multi'
 
-        // 4. Carrega as viaturas disponíveis
-        const unitListIds = await getUnitListIds();
-        const selectViatura = document.getElementById('almox-viatura-alvo');
-        
+        // 4. POPULAR DESTINOS (Lógica Admin vs Gestor)
+        const role = currentUserData.role;
         if (selectViatura) {
-            selectViatura.innerHTML = '<option value="" disabled selected>Selecione a viatura...</option>';
-            const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-            const rotas = rotasDoc.data() || {};
-
-            unitListIds.forEach(id => {
-                if (rotas[id]) {
+            selectViatura.innerHTML = '<option value="" disabled selected>Selecione o destino...</option>';
+            
+            if (role === 'admin') {
+                // Admin envia para UNIDADES
+                const snapU = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
+                snapU.forEach(uDoc => {
+                    const u = uDoc.data();
                     const opt = document.createElement('option');
-                    opt.value = id;
-                    opt.textContent = rotas[id].nome;
+                    opt.value = uDoc.id; // UID da Unidade
+                    opt.textContent = u.sigla;
                     selectViatura.appendChild(opt);
-                }
-            });
+                });
+            } else {
+                // Gestor envia para VIATURAS da sua unidade
+                const unitListIds = await getUnitListIds();
+                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+                const rotas = rotasDoc.data() || {};
+                unitListIds.forEach(id => {
+                    if (rotas[id]) {
+                        const opt = document.createElement('option');
+                        opt.value = id;
+                        opt.textContent = rotas[id].nome;
+                        selectViatura.appendChild(opt);
+                    }
+                });
+            }
         }
 
-        const modal = document.getElementById('modal-almox-transferencia');
-        if (modal) modal.style.display = 'flex';
+        // 5. CONFIGURAÇÃO FINAL DA INTERFACE
+        // Chama a configuração para decidir se mostra campos Multi ou Single baseado no item recém-carregado
+        configurarInterfaceMovimentacao();
+
+        // 6. EXIBIÇÃO
+        modal.style.display = 'flex';
 
     } catch (e) {
-        console.error("Erro ao abrir modal de transferência:", e);
+        console.error("Erro ao abrir transferência:", e);
+        alert("Erro técnico ao abrir o modal.");
     }
 }
 		
