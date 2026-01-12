@@ -4484,68 +4484,73 @@ window.addEventListener('message', function(event) {
 }
 		//---GESTÃO DE POSTOS--- 08.01.2025
 		async function abrirGestaoPosto(postoUid) {
-    const modal = document.getElementById('modal-gestao-posto');
-    const listaVtrsContainer = document.getElementById('lista-vtrs-vinculo');
+    const modal = document.getElementById('modal-gestao-vincos-posto');
+    const containerGestao = document.getElementById('lista-viaturas-gestao');
+    const containerLeitura = document.getElementById('lista-viaturas-leitura');
     
-    // 1. Busca dados do Posto para o título
-    const postoDoc = await db.collection('postos_estruturados').doc(postoUid).get();
-    const postoData = postoDoc.data();
-    document.getElementById('modal-posto-nome').innerText = postoData.nome;
-    document.getElementById('modal-posto-endereco').innerText = postoData.endereco || '';
-
-    listaVtrsContainer.innerHTML = '<p style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Carregando viaturas...</p>';
-    modal.style.display = 'block';
+    if (!modal || !containerGestao || !containerLeitura) return;
 
     try {
-        // 2. Busca todas as listas de conferência
-        const listasSnap = await db.collection('listas_conferencia').where('ativo', '==', true).get();
+        // 1. Busca os dados do Posto para o título
+        const postoDoc = await db.collection('postos_estruturados').doc(postoUid).get();
+        if (!postoDoc.exists) return;
+        const postoData = postoDoc.data();
+
+        // ✅ Uso dos IDs corretos do seu HTML para evitar o erro de 'null'
+        document.getElementById('modal-posto-titulo').innerText = postoData.nome;
+        document.getElementById('modal-posto-endereco').innerHTML = `<i class="fas fa-map-marker-alt"></i> ${postoData.endereco}`;
         
-        if (listasSnap.empty) {
-            listaVtrsContainer.innerHTML = '<p style="text-align:center; padding:20px; color:#999;">Nenhuma lista de conferência cadastrada no sistema.</p>';
-            return;
-        }
+        modal.style.display = 'flex'; // Usando flex para centralizar conforme seu CSS de modal
+        containerGestao.innerHTML = '<p style="font-size: 0.8em; color: #999;">Carregando ativos...</p>';
+        containerLeitura.innerHTML = '';
 
-        let html = '';
+        // 2. Busca TODAS as listas ativas
+        const listasSnapshot = await db.collection('listas_conferencia').where('ativo', '==', true).get();
+        
+        let htmlGestao = '';
+        let htmlLeitura = '';
 
-        listasSnap.forEach(doc => {
+        listasSnapshot.forEach(doc => {
             const lista = doc.data();
-            const listaId = doc.id;
-            
-            // ✅ CORREÇÃO 1: ADMIN PODE TUDO OU SE FOR A UNIDADE DO GESTOR
-            const temPermissao = (currentUserData.role === 'admin' || lista.unidade_id === currentUserData.unidade_id);
-            
-            // ✅ CORREÇÃO 2: BUSCA 'ativo_nome' EM VEZ DE PREFIXO (EVITA O UNDEFINED)
-            const nomeExibicao = lista.ativo_nome || "Ativo S/ Nome";
-            const unidadeSigla = lista.unidade_sigla || "---";
-
-            // Verifica se esta lista já está vinculada a ESTE posto específico
             const estaNestePosto = (lista.posto_id === postoUid);
+            
+            // ✅ LÓGICA DE ADMIN: Admin pode gerir TUDO. Gestor apenas a própria unidade.
+            const souAdmin = currentUserData.role === 'admin';
+            const ehMinhaUnidade = (lista.unidade_id === currentUserData.unidade_id);
+            const podeGerir = souAdmin || ehMinhaUnidade;
 
-            html += `
-                <div class="vtr-vinculo-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee;">
-                    <div>
-                        <strong style="color: #333;">${nomeExibicao}</strong>
-                        <span style="display: block; font-size: 0.75em; color: #666;">Unidade: ${unidadeSigla}</span>
+            // ✅ CORREÇÃO DO UNDEFINED: Busca 'ativo_nome' que é como salvamos no banco
+            const nomeExibicao = lista.ativo_nome || "Ativo sem nome";
+            const identificacaoExtra = lista.unidade_sigla ? ` | ${lista.unidade_sigla}` : "";
+
+            if (podeGerir) {
+                // Se pode gerir (Admin ou Dono), entra na lista com Switch
+                htmlGestao += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-bottom: 5px;">
+                        <span style="font-weight: 600; color: #333;">${nomeExibicao} <small style="color:#888; font-weight:normal;">${identificacaoExtra}</small></span>
+                        <label class="switch">
+                            <input type="checkbox" ${estaNestePosto ? 'checked' : ''} 
+                                   onchange="vincularListaAoPosto('${doc.id}', '${postoUid}', this.checked)">
+                            <span class="slider round"></span>
+                        </label>
                     </div>
-                    <div>
-                        ${temPermissao 
-                            ? `<label class="switch-sigma">
-                                    <input type="checkbox" ${estaNestePosto ? 'checked' : ''} 
-                                           onclick="alternarVinculoVtrPosto('${listaId}', '${postoUid}', this.checked)">
-                                    <span class="slider-sigma"></span>
-                               </label>`
-                            : `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Apenas Leitura</span>`
-                        }
+                `;
+            } else if (estaNestePosto) {
+                // Se NÃO pode gerir, mas a VTR de outro está no seu posto, entra em Leitura
+                htmlLeitura += `
+                    <div style="display: flex; align-items: center; gap: 10px; background: #f0f0f0; padding: 8px; border-radius: 6px; font-size: 0.85em; margin-bottom: 5px;">
+                        <i class="fas fa-lock" style="color: #ccc;"></i>
+                        <span style="color: #777;">${nomeExibicao} - ${lista.unidade_sigla}</span>
                     </div>
-                </div>
-            `;
+                `;
+            }
         });
 
-        listaVtrsContainer.innerHTML = html;
+        containerGestao.innerHTML = htmlGestao || '<p style="color:#999; font-size:0.8em;">Nenhum ativo disponível para gestão.</p>';
+        containerLeitura.innerHTML = htmlLeitura || '<p style="color:#ccc; font-size:0.8em;">Nenhuma viatura externa vinculada.</p>';
 
     } catch (e) {
-        console.error("Erro na gestão de posto:", e);
-        listaVtrsContainer.innerHTML = '<p style="color:red;">Erro ao carregar vínculos.</p>';
+        console.error("Erro ao gerir posto:", e);
     }
 }
 
