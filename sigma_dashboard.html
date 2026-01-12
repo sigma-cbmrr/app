@@ -314,7 +314,28 @@
     margin: 0 !important;
     box-sizing: border-box !important;
 }
-        @media (min-width: 768px) {
+		.timeline-event {
+    position: relative;
+    padding-left: 30px;
+    margin-bottom: 20px;
+    border-left: 2px solid #e2e8f0;
+}
+.timeline-event::before {
+    content: '';
+    position: absolute;
+    left: -7px;
+    top: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #92400e;
+}
+.event-date { font-size: 0.75em; color: #64748b; font-weight: bold; display: block; }
+.event-title { font-size: 0.9em; font-weight: 800; color: #1e293b; text-transform: uppercase; }
+.event-desc { font-size: 0.9em; color: #475569; margin-top: 4px; background: #f8fafc; padding: 8px; border-radius: 4px; border: 1px solid #f1f5f9; }
+.event-user { font-size: 0.75em; color: #2c7399; font-weight: bold; margin-top: 4px; display: block; }
+        
+		@media (min-width: 768px) {
             .sidebar {
 				left: 0 !important;
 			}
@@ -3372,6 +3393,26 @@ input:checked + .slider:before {
             <button class="btn-modern-action btn-sync" style="background-color: #166534;" onclick="executarAporteEstoque()">
                 <i class="fas fa-check"></i> Confirmar Entrada
             </button>
+        </div>
+    </div>
+</div>
+	<div id="modal-timeline-global" class="modal-overlay" style="display:none; z-index: 31005;">
+    <div class="modal-content" style="max-width: 550px; border-top: 5px solid #fef3c7; background: #fdfdfd;">
+        <button class="close-btn" onclick="document.getElementById('modal-timeline-global').style.display='none'"><i class="fas fa-times"></i></button>
+        
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+            <i class="fas fa-history" style="font-size: 2em; color: #92400e;"></i>
+            <div>
+                <h2 style="margin:0; color: #92400e;">Histórico de Vida</h2>
+                <small id="timeline-item-nome" style="color: #666; font-weight: bold; font-size: 1em;">Material: ---</small>
+            </div>
+        </div>
+
+        <div id="timeline-container" style="max-height: 450px; overflow-y: auto; padding: 10px; position: relative;">
+            </div>
+
+        <div style="margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px;">
+            <button class="btn-modern-action btn-secondary" onclick="document.getElementById('modal-timeline-global').style.display='none'">Fechar</button>
         </div>
     </div>
 </div>
@@ -10072,6 +10113,10 @@ async function salvarCadastroGlobalHierarquico() {
     const btn = document.querySelector('.btn-sync');
     btn.disabled = true; btn.textContent = "Processando DNA...";
 
+    // Captura dados do autor e data para o primeiro registro do histórico
+    const autorNome = currentUserData.nome_militar_completo;
+    const dataRegistro = new Date().toLocaleString('pt-BR');
+
     try {
         await db.runTransaction(async (transaction) => {
             // 1. GERENCIAR UID PAI (FAMÍLIA)
@@ -10093,7 +10138,6 @@ async function salvarCadastroGlobalHierarquico() {
             }
 
             // 2. GERENCIAR UID FILHO (MODELO TÉCNICO)
-            // O ID global será o UID Pai + a combinação de marca/modelo (Slugificada)
             const slugModelo = `${marca}_${modelo}`.toLowerCase().replace(/\s+/g, '_').replace(/[^\w]/g, '');
             const uidGlobal = `${uidPai}-${slugModelo}`;
             const nomeTecnicoCompleto = `${nomePai} ${marca} ${modelo}`;
@@ -10108,7 +10152,7 @@ async function salvarCadastroGlobalHierarquico() {
                 modelo: modelo,
                 categoria: categoria,
                 tipo_controle: tipoControle,
-                criado_por: currentUserData.nome_militar_completo,
+                criado_por: autorNome,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
@@ -10118,20 +10162,28 @@ async function salvarCadastroGlobalHierarquico() {
             });
 
             // 5. HABILITAR NO ALMOXARIFADO CENTRAL (ADMIN)
+            // Criamos o item já com o primeiro "carimbo" no histórico_movimentacoes
             const docIdAlmox = `ADMIN_${uidGlobal}`;
             transaction.set(db.collection('almoxarifado_central').doc(docIdAlmox), {
                 uid_global: uidGlobal,
                 nome: nomeTecnicoCompleto,
-                unidade: "ADMINISTRATIVO", // Estoque Central
+                unidade: "ADMINISTRATIVO",
                 total: 0,
                 disponivel: 0,
                 emCarga: 0,
                 emAlteracao: 0,
-                tipo: tipoControle
+                tipo: tipoControle,
+                // INSERÇÃO CIRÚRGICA: Primeiro registro de vida do item
+                historico_movimentacoes: [{
+                    data: dataRegistro,
+                    evento: "CADASTRO_DNA",
+                    detalhes: `DNA do material criado no Catálogo Global e habilitado para estoque.`,
+                    quem: autorNome
+                }]
             }, { merge: true });
         });
 
-        alert("✅ Cadastro Global realizado com sucesso!\nO item já está disponível no Almoxarifado Central.");
+        alert("✅ Cadastro Global realizado com sucesso!\nO item já está registrado e disponível para aporte.");
         fecharModalCadastroGlobal();
         carregarAlmoxarifadoUI();
 
@@ -10142,7 +10194,7 @@ async function salvarCadastroGlobalHierarquico() {
         btn.disabled = false;
         btn.innerHTML = `<i class="fas fa-save"></i> Gravar no Catálogo`;
     }
-}	
+}
 	/**
  * Monitora a quantidade no aporte para gerar campos de tombamento se o item for MULTI
  */
@@ -10334,86 +10386,72 @@ async function executarAporteEstoque() {
     const dataReg = new Date().toLocaleString('pt-BR');
 
     if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
-    if (ehMulti && !obs) return alert("Para itens com tombamento, a justificativa (ex: NF) é obrigatória para o histórico.");
+    if (!obs) return alert("A justificativa (ex: NF ou Origem) é obrigatória para o histórico.");
 
     const btn = document.querySelector('#modal-almox-aporte .btn-sync');
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
 
     try {
         const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
+        const autorNome = currentUserData.nome_militar_completo;
         
         await db.runTransaction(async (transaction) => {
             const snapAlmox = await transaction.get(almoxRef);
             if (!snapAlmox.exists) throw new Error("Item não localizado no almoxarifado.");
             
             const d = snapAlmox.data();
-            const uidGlobal = d.uid_global; // O ID do Catálogo (item_000001-marca_modelo)
-            
+            const uidGlobal = d.uid_global;
             let novosTombamentos = [];
 
-            // --- LÓGICA PARA ITENS MULTI (TOMBAMENTO) ---
+            // 1. TRATAMENTO PARA ITENS MULTI
             if (ehMulti) {
                 const linhas = document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb');
-                
                 linhas.forEach(linha => {
                     const t = linha.querySelector('.val-tomb').value.trim().toUpperCase();
                     const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
                     
                     if (t) {
-                        const infoTomb = {
-                            tomb: t,
-                            serie: s || "N/A",
-                            situacao: "DISPONÍVEL",
-                            viatura_id: null,
-                            data_entrada: dataReg
-                        };
-                        novosTombamentos.push(infoTomb);
+                        novosTombamentos.push({
+                            tomb: t, serie: s || "N/A", situacao: "DISPONÍVEL",
+                            viatura_id: null, data_entrada: dataReg
+                        });
 
-                        // ✅ CRIAR HISTÓRICO DE VIDA INDIVIDUAL (A Certidão de Nascimento)
-                        // Criamos um documento na coleção global de ativos onde o ID é o próprio TOMBAMENTO
+                        // Histórico Individual do Ativo (RG do item)
                         const historicoRef = db.collection('historico_ativos_individuais').doc(t);
                         transaction.set(historicoRef, {
-                            tombamento: t,
-                            uid_global: uidGlobal,
-                            nome_material: d.nome,
+                            tombamento: t, uid_global: uidGlobal, nome_material: d.nome,
                             situacao_atual: "DISPONÍVEL (ALMOX. CENTRAL)",
                             unidade_atual: currentUserData.unidade,
                             eventos: [{
-                                data: dataReg,
-                                evento: "NASCIMENTO_SISTEMA",
-                                quem: currentUserData.nome_militar_completo,
-                                detalhes: `Item incorporado ao patrimônio via Aporte Central. Obs: ${obs}`
+                                data: dataReg, evento: "NASCIMENTO_SISTEMA", quem: autorNome,
+                                detalhes: `Item incorporado via Aporte Central. Obs: ${obs}`
                             }]
                         }, { merge: true });
                     }
                 });
-
-                if (novosTombamentos.length !== qtd) throw new Error("Preencha todos os campos de tombamento gerados.");
+                if (novosTombamentos.length !== qtd) throw new Error("Preencha todos os campos de tombamento.");
             }
 
-            // --- LÓGICA PARA ITENS SINGLE (QUANTIDADE) ---
-            // O histórico de itens single fica dentro do próprio documento do almoxarifado
-            let historicoSingle = d.historico_movimentacoes || [];
-            if (!ehMulti) {
-                historicoSingle.push({
-                    data: dataReg,
-                    evento: "ENTRADA_ESTOQUE",
-                    quantidade: qtd,
-                    quem: currentUserData.nome_militar_completo,
-                    detalhes: `Aporte de ${qtd} unidades. Justificativa: ${obs}`
-                });
-            }
+            // 2. REGISTRO NO HISTÓRICO GLOBAL (O que aparece no botão do Relógio)
+            // Criamos o log de movimentação para o lote/quantidade
+            const novoLogAporte = {
+                data: dataReg,
+                evento: "ENTRADA_ESTOQUE",
+                detalhes: `Aporte de ${qtd}un (${ehMulti ? 'Identificados por Tombamento' : 'Quantidade'}). Justificativa: ${obs}`,
+                quem: autorNome
+            };
 
-            // --- ATUALIZAÇÃO DO SALDO NO ALMOXARIFADO ---
+            // 3. ATUALIZAÇÃO DO SALDO E HISTÓRICO NO ALMOXARIFADO
             transaction.update(almoxRef, {
                 total: (d.total || 0) + qtd,
                 disponivel: (d.disponivel || 0) + qtd,
                 tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : (d.tombamentos || []),
-                historico_movimentacoes: ehMulti ? (d.historico_movimentacoes || []) : historicoSingle
+                // Garante que o log de aporte entre no histórico_movimentacoes do documento central
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLogAporte)
             });
         });
 
-        alert("✅ Aporte realizado! O estoque e o histórico de vida foram atualizados.");
+        alert("✅ Aporte realizado e registrado no histórico!");
         document.getElementById('modal-almox-aporte').style.display = 'none';
         carregarAlmoxarifadoUI();
 
@@ -11723,6 +11761,62 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 function abrirModalEditorItens(uid, nome) {
     alert(`Interface de Edição para ${nome} em desenvolvimento. Aqui o gestor adicionará mangueiras, rádios, etc.`);
     // Próximo passo: Criar este modal.
+}
+		async function verHistoricoVidaGlobal(docIdAlmox) {
+    const container = document.getElementById('timeline-container');
+    const modal = document.getElementById('modal-timeline-global');
+    const labelNome = document.getElementById('timeline-item-nome');
+
+    if (!container || !modal) return;
+
+    modal.style.display = 'flex';
+    container.innerHTML = '<div style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Carregando registros...</div>';
+
+    try {
+        const snap = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
+        if (!snap.exists) throw new Error("Item não localizado.");
+        
+        const data = snap.data();
+        labelNome.textContent = `Material: ${data.nome}`;
+
+        let eventos = [];
+
+        // LÓGICA HÍBRIDA DE BUSCA
+        if (data.tipo === 'multi') {
+            // Para itens com tombamento, o histórico é a soma das vidas individuais de seus tombamentos
+            // ou o histórico de movimentações do lote
+            eventos = data.historico_movimentacoes || [];
+        } else {
+            // Para itens single, lemos o array de movimentações de estoque
+            eventos = data.historico_movimentacoes || [];
+        }
+
+        if (eventos.length === 0) {
+            container.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">Nenhum registro histórico encontrado para este material.</p>';
+            return;
+        }
+
+        // Ordena: Mais recentes primeiro
+        eventos.sort((a, b) => {
+            // Tenta converter datas string para objeto Date para comparação
+            const dateA = new Date(a.data.split('/').reverse().join('-'));
+            const dateB = new Date(b.data.split('/').reverse().join('-'));
+            return dateB - dateA;
+        });
+
+        container.innerHTML = eventos.map(ev => `
+            <div class="timeline-event">
+                <span class="event-date">${ev.data}</span>
+                <span class="event-title">${ev.evento.replace(/_/g, ' ')}</span>
+                <div class="event-desc">${ev.detalhes}</div>
+                <span class="event-user"><i class="fas fa-user-edit"></i> Resp: ${ev.quem}</span>
+            </div>
+        `).join('');
+
+    } catch (e) {
+        console.error(e);
+        container.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar histórico.</p>';
+    }
 }
 		
     </script>
