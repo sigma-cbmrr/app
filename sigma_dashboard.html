@@ -3330,7 +3330,51 @@ input:checked + .slider:before {
             </div>
         </div>
     </div>
-</div>	
+</div>
+	<div id="modal-almox-aporte" class="modal-overlay" style="display:none; z-index: 31001;">
+    <div class="modal-content" style="max-width: 500px; border-top: 5px solid #166534;">
+        <button class="close-btn" onclick="document.getElementById('modal-almox-aporte').style.display='none'"><i class="fas fa-times"></i></button>
+        
+        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;">
+            <i class="fas fa-plus-circle" style="font-size: 2em; color: #166534;"></i>
+            <div>
+                <h2 style="margin:0; color: #166534;">Aporte de Material</h2>
+                <small style="color: #666;">Registrar entrada física no Almoxarifado Central</small>
+            </div>
+        </div>
+
+        <div style="background: #f0fdf4; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbf7d0;">
+            <span style="font-size: 0.85em; color: #166534; font-weight: bold; text-transform: uppercase;">Material Selecionado:</span>
+            <div id="almox-aporte-item-nome" style="font-size: 1.2em; font-weight: 800; color: #14532d; margin-top: 5px;" data-docid="" data-tipo="">---</div>
+        </div>
+
+        <div class="form-group">
+            <label>Quantidade de Entrada</label>
+            <input type="number" id="almox-aporte-qtd" class="g-cat-input" min="1" value="1" 
+                   oninput="const itemNomeEl = document.getElementById('almox-aporte-item-nome'); if(itemNomeEl.getAttribute('data-tipo') === 'multi') gerarInputsTombamentoAporte(this.value)">
+        </div>
+
+        <div id="div-aporte-multi-exclusivo" style="display:none; margin-top: 15px; padding: 15px; background: #f8fafc; border-radius: 8px; border: 1px dashed #2c7399;">
+            <label style="font-weight: bold; color: #2c7399; font-size: 0.85em; display: block; margin-bottom: 10px;">
+                <i class="fas fa-barcode"></i> Identificação dos Itens (Tombamento / Série):
+            </label>
+            <div id="lista-inputs-tombamento-exclusivo" style="max-height: 250px; overflow-y: auto;">
+                </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 15px;">
+            <label>Justificativa / Documento de Origem (Obrigatório)</label>
+            <textarea id="almox-aporte-obs" class="g-cat-input" style="height: 80px;" placeholder="Ex: NF 455 - Compra Direta / Doação via Ofício 123..."></textarea>
+        </div>
+
+        <div class="modal-buttons" style="margin-top: 25px;">
+            <button class="btn-modern-action btn-secondary" onclick="document.getElementById('modal-almox-aporte').style.display='none'">Cancelar</button>
+            <button class="btn-modern-action btn-sync" style="background-color: #166534;" onclick="executarAporteEstoque()">
+                <i class="fas fa-check"></i> Confirmar Entrada
+            </button>
+        </div>
+    </div>
+</div>
 	
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
@@ -4339,40 +4383,7 @@ window.addEventListener('message', function(event) {
         alert("Erro ao abrir formulário de edição.");
     }
 }
-        async function salvarAlteracoesUnidade() {
-            const oldName = document.getElementById('edit-unit-original-name').value;
-            const newName = document.getElementById('edit-unit-name-input').value.trim().toUpperCase();
-            if(!newName) return alert("Nome inválido");
-            
-            try {
-                const unitsRef = db.collection('config_geral').doc('unidades');
-                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayRemove(oldName) });
-                await unitsRef.update({ lista: firebase.firestore.FieldValue.arrayUnion(newName) });
-                
-                const rotasRef = db.collection('config_geral').doc('rotas');
-                const rotasSnap = await rotasRef.get();
-                const rotasData = rotasSnap.data();
-                const checkboxes = document.querySelectorAll('#unit-lists-checklist input[type="checkbox"]');
-                
-                checkboxes.forEach(chk => {
-                    const id = chk.value;
-                    if (chk.checked) {
-                        rotasData[id].unidade = newName; 
-                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: newName });
-                    } else if (rotasData[id].unidade === oldName) {
-                        rotasData[id].unidade = null; 
-                        db.collection(COLECAO_LISTAS).doc(id).update({ unidade: null });
-                    }
-                });
-                
-                await rotasRef.set(rotasData);
-                alert("Atualizado!"); 
-                document.getElementById('modal-unit-manager').style.display = 'none'; 
-                carregarUnidadesVisuais();
-            } catch(e) { 
-                alert("Erro: " + e.message);
-            }
-        }
+        
 		async function deletarUnidadeSistema(uid, sigla) {
     // 1. Confirmação de Segurança
     const confirmacao = confirm(`⚠️ ATENÇÃO: Deseja realmente excluir a unidade ${sigla}?\n\nIsso removerá a unidade da lista ativa, mas manterá o histórico de dados para auditoria.`);
@@ -5822,158 +5833,6 @@ function reimprimirPDF(data) {
                 alert("Erro ao excluir: " + e.message);
             }
         }
-
-        async function carregarPostosEditor() {
-             const sel = document.getElementById('novo-local-posto');
-             if(!sel) return;
-             
-             try {
-                const doc = await db.collection('config_geral').doc('postos').get();
-                const lista = doc.exists ? doc.data().lista : [];
-                let h = ''; 
-                lista.forEach(p => h+=`<option value="${p}">${p}</option>`); 
-                sel.innerHTML = h;
-             } catch(e){}
-        }
-
-        async function criarNovoLocal() {
-            const posto = document.getElementById('novo-local-posto').value;
-            const nome = document.getElementById('novo-local-nome').value.trim().toUpperCase();
-            const unidade = document.getElementById('novo-local-unidade').value;
-            if(!posto || !nome || !unidade) return alert("Preencha Posto, Nome e Unidade.");
-            
-            // Constrói o ID único e o nome completo
-            const id = `${posto.toLowerCase()}_${nome.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
-            const localCompleto = `${posto} - ${nome}`; // Nome que aparecerá no Card/Relatório
-            
-            try {
-                // 1. Salva a lista (Viaturas)
-                await db.collection(COLECAO_LISTAS).doc(id).set({ nome_local: nome, posto: posto, list: [], unidade: unidade, updatedAt: firebase.firestore.Timestamp.now() });
-
-                // 2. Salva a rota
-                await db.collection('config_geral').doc('rotas').set({ [id]: { nome: nome, posto: posto, unidade: unidade, ativo: true } }, { merge: true });
-
-                // --- NOVO: Cria o registro inicial para o Dashboard ---
-                // Este registro garante que o Card de Pendências apareça imediatamente com status OK.
-                await db.collection(COLECAO_RESULTADOS).add({
-                    local: localCompleto,
-                    lista_id: id,
-                    conferente: "Sistema (Inicialização)",
-                    unidade: unidade,
-                    posto: posto,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                    // Dados para garantir que o card seja renderizado com 0 pendências
-                    itensRelatorio: [], 
-                    itensCaa: [],
-                    totalCaa: 0,
-                    totalItensConferidos: 0,
-                    statusAdmin: 'OK'
-                });
-                // ----------------------------------------------------
-
-                alert("Lista Criada e Card Inicializado!"); 
-                carregarListaLocaisAdmin();
-                // Chama loadCaaData() para atualizar o Dashboard com o novo Card
-                loadCaaData(); 
-                
-            } catch(e) { 
-                alert("Erro ao criar lista: " + e.message); 
-            }
-        }
-        
-        async function excluirLocalAdmin(listaId, listaNome) {
-    if (!confirm(`TEM CERTEZA? Excluir a lista: ${listaNome} (ID: ${listaId})?`)) {
-        return;
-    }
-
-    try {
-        // --- 1. REMOVER REGISTROS DE PENDÊNCIA (CARDS) ---
-        const resultadosSnap = await db.collection(COLECAO_RESULTADOS)
-            .where('lista_id', '==', listaId)
-            .get();
-
-        const batch = db.batch();
-        resultadosSnap.forEach(doc => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
-        // ----------------------------------------------------
-
-        // 2. Remova o item da coleção principal de listas (o conteúdo em si)
-        await db.collection(COLECAO_LISTAS).doc(listaId).delete();
-
-        // 3. Remova a referência da rota na configuração geral, inativando-a
-        const rotasRef = db.collection('config_geral').doc('rotas');
-        const rotasSnap = await rotasRef.get();
-        const rotasData = rotasSnap.data();
-
-        if (rotasData && rotasData[listaId]) {
-            // Marca como inativo em vez de deletar para manter o histórico de dados antigos
-            rotasData[listaId].ativo = false;
-            await rotasRef.set(rotasData); 
-        }
-
-        alert(`Lista "${listaNome}" excluída/inativada e Cards de Pendência removidos com sucesso!`);
-        
-        carregarListaLocaisAdmin();
-        loadCaaData(); // Atualiza o Dashboard
-    } catch (e) {
-        console.error("Erro ao excluir lista:", e);
-        alert("Erro ao excluir lista: " + e.message);
-    }
-}
-        
-        async function carregarListaLocaisAdmin() {
-    const ul = document.getElementById('lista-locais-container');
-    const doc = await db.collection('config_geral').doc('rotas').get();
-    const rotas = doc.data();
-    ul.innerHTML = '';
-    
-    // --- FILTRO DE SEGURANÇA PARA GESTOR ---
-    const isGestor = currentUserData.role === 'gestor';
-    const unidadeGestor = currentUserData.unidade;
-    // ----------------------------------------
-    
-    // Objeto para mapear o ID da lista para o nome do local
-    const listaNomes = {};
-
-    // Mapeia as rotas e carrega os nomes
-    Object.entries(rotas).forEach(([id, info]) => {
-        if(info.ativo === false) return;
-
-        // CONDIÇÃO DE FILTRAGEM: Se for gestor, só mostra se a unidade da rota for igual à unidade do gestor.
-        if (isGestor && info.unidade !== unidadeGestor) {
-            return;
-        }
-        
-        listaNomes[id] = info.nome;
-        
-        const li = document.createElement('li');
-        li.className = 'local-item';
-        
-        const safeName = info.nome.replace(/'/g, "\\'");
-        const safeId = id.replace(/'/g, "\\'");
-        // NOVO: Passando o nome da unidade para uso no abrirEditor
-        const safeUnit = info.unidade.replace(/'/g, "\\'") || 'Geral'; 
-        
-        // --- CHAMADA CORRIGIDA: INCLUINDO A UNIDADE NO ABRIR EDITOR ---
-        li.innerHTML = `
-            <div class="local-info">
-                <strong>${info.nome}</strong>
-                <span>${info.posto} | Unidade: ${info.unidade||'Geral'}</span>
-            </div>
-            <div style="display:flex; gap: 10px;">
-                <button class="btn-modern-action btn-edit" onclick="abrirEditor('${safeId}', '${safeName}', '${safeUnit}')">
-                    Editar
-                </button>
-                <button class="btn-modern-action btn-delete" onclick="excluirLocalAdmin('${safeId}', '${safeName}')">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </div>
-        `;
-        ul.appendChild(li);
-    });
-}
         
         function renderizarLista() { 
             const container = document.getElementById('lista-setores-container');
@@ -8573,12 +8432,6 @@ function renderCautelaRow(cautela) {
                 // Recarrega a lista para atualizar a visualização e garantir a consistência
                 renderizarLista();
                 
-                // 🛑 CRÍTICO: Limpa os resultados C/A antigos que podem estar linkados.
-                // A remoção dos carimbos remove a indisponibilidade, mas não o alerta C/A em si.
-                // Recomenda-se limpar manualmente os resultados da lista na coleção 'resultados_conferencias'
-                // para garantir que o Dashboard esteja 100% zerado, mas não podemos fazer isso automaticamente aqui
-                // sem o ID da lista.
-                
             } catch (e) {
                 console.error("Erro ao limpar carimbos:", e);
                 alert("Erro ao limpar carimbos: " + e.message);
@@ -8635,141 +8488,6 @@ async function findUidByName(nomeCompleto) {
     } catch (e) {
         console.error("Erro ao buscar UID por nome:", e);
         return null;
-    }
-}
-		
-      async function resetTotalItensLocal(listaId) {
-    if (!confirm(`ATENÇÃO: Isso apagará TODOS os históricos e cautelas registradas nos itens da lista [${listaId}]. Deseja continuar?`)) return;
-
-    const listaRef = db.collection('listas_conferencia').doc(listaId);
-
-    try {
-        await db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(listaRef);
-            if (!doc.exists) throw new Error("Lista não encontrada.");
-
-            let listaMestra = doc.data().list || [];
-
-            // Percorre setores e itens para resetar os campos
-            const listaLimpa = listaMestra.map(setor => ({
-                ...setor,
-                itens: setor.itens.map(item => {
-                    // 1. Limpa histórico de vida
-                    item.historico_vida = [];
-                    
-                    // 2. Limpa cautelas de itens single (Abatimento de estoque)
-                    if (item.tipo === 'single') {
-                        item.cautelas = [];
-                    }
-                    
-                    // 3. Limpa cautelas de itens multi (Tombamentos)
-                    if (item.tipo === 'multi' && item.tombamentos) {
-                        item.tombamentos = item.tombamentos.map(t => {
-                            // Remove o objeto 'cautela' de dentro do tombamento
-                            if (t.cautela) delete t.cautela;
-                            // Reseta o status de conferência se necessário
-                            t.status = 'pending';
-                            return t;
-                        });
-                        // Limpa array auxiliar se existir
-                        item.tombamentos_cautelados = [];
-                    }
-                    
-                    return item;
-                })
-            }));
-
-            // Atualiza o banco com a lista resetada
-            transaction.update(listaRef, { list: listaLimpa });
-        });
-
-        alert("✅ Limpeza concluída! A lista está como nova.");
-        location.reload();
-
-    } catch (e) {
-        console.error("Erro no reset:", e);
-        alert("Erro ao limpar: " + e.message);
-    }
-}
-		async function estornarEResetarCautela(cautelaId) {
-    if (!confirm("Deseja estornar esta cautela?")) return;
-
-    // Ajustado conforme sua correção: "listas_conferencia"
-    const nomeColecao = 'listas_conferencia';
-    const idDocumentoLista = 'alfa_abt17'; 
-
-    try {
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
-        const docCautela = await cautelaRef.get();
-        
-        if (!docCautela.exists) {
-            alert("❌ Cautela não encontrada em 'cautelas_abertas'.");
-            return;
-        }
-        
-        const dadosCautela = docCautela.data();
-        const listaRef = db.collection(nomeColecao).doc(idDocumentoLista);
-
-        await db.runTransaction(async (transaction) => {
-            const listaDoc = await transaction.get(listaRef);
-            
-            if (!listaDoc.exists) {
-                throw new Error(`Não encontrei o documento em ${nomeColecao}/${idDocumentoLista}`);
-            }
-            
-            let dadosMestra = listaDoc.data().list || [];
-
-            // VARREDURA TOTAL:
-            // Percorre toda a lista procurando por qualquer menção ao cautelaId,
-            // corrigindo inclusive os itens que foram gravados de forma incompleta.
-            dadosMestra.forEach(setor => {
-                if (setor.itens) {
-                    setor.itens.forEach(item => {
-                        
-                        // 1. Limpa itens MULTI (Tombamentos)
-                        if (item.tipo === 'multi' && item.tombamentos) {
-                            item.tombamentos.forEach(t => {
-                                // Se o ID bater OU se o status estiver 'pending' mas deveria estar livre
-                                if (t.cautela && (t.cautela.id === cautelaId || t.cautela.id_cautela === cautelaId)) {
-                                    delete t.cautela;
-                                    t.status = 'pending';
-                                    t.status_conferencia = 'OK';
-                                }
-                                // Caso especial: se o tombamento está marcado no array de itens da cautela 
-                                // mas o objeto cautela sumiu do banco (seu caso do 2º item)
-                                const constaSaiuNaCautela = dadosCautela.itens.find(ic => ic.tombamento === t.tomb);
-                                if (constaSaiuNaCautela) {
-                                    if (t.cautela) delete t.cautela;
-                                    t.status = 'pending';
-                                    t.status_conferencia = 'OK';
-                                }
-                            });
-                        }
-                        
-                        // 2. Limpa itens SINGLE
-                        if (item.tipo === 'single' && item.cautelas) {
-                            item.cautelas = item.cautelas.filter(c => c.id !== cautelaId && c.id_cautela !== cautelaId);
-                        }
-
-                        // 3. Limpa o Histórico de Vida do item
-                        if (item.historico_vida) {
-                            item.historico_vida = item.historico_vida.filter(h => h.id_doc !== cautelaId);
-                        }
-                    });
-                }
-            });
-
-            // 4. Grava a lista atualizada e deleta o documento da cautela
-            transaction.update(listaRef, { list: dadosMestra });
-            transaction.delete(cautelaRef);
-        });
-
-        alert("✅ Reset concluído com sucesso!");
-        location.reload();
-
-    } catch (error) {
-        console.error("Erro no estorno:", error);
-        alert("Erro: " + error.message);
     }
 }
 
@@ -10763,86 +10481,8 @@ async function executarAporteEstoque() {
         console.error("Erro ao abrir modal de transferência:", e);
     }
 }
-		async function abrirModalEnvio(docId, tomb = null) {
-    const modal = document.getElementById('modal-movimentacao-almox'); // Usaremos o ID do modal, mas mudaremos o conteúdo interno
-    const titulo = document.getElementById('modal-movimentacao-titulo');
-    const corpo = document.getElementById('modal-movimentacao-corpo');
-
-    titulo.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Material para Viatura`;
-    titulo.style.color = "#2c7399";
-
-    // Busca dados do item para saber se é Single ou Multi
-    const doc = await db.collection('almoxarifado_central').doc(docId).get();
-    const item = doc.data();
-
-    corpo.innerHTML = `
-        <div style="padding: 15px;">
-            <p>Item: <b>${item.nome}</b> ${tomb ? `| Tomb: <b>${tomb}</b>` : ''}</p>
-            
-            <label>Selecione o Destino:</label>
-            <select id="envio-destino-vtr" class="form-control" style="margin-bottom:15px;">
-                <option value="">Carregando viaturas...</option>
-            </select>
-
-            ${!tomb ? `
-                <label>Quantidade a Enviar (Máx: ${item.disponivel}):</label>
-                <input type="number" id="envio-qtd" class="form-control" min="1" max="${item.disponivel}" value="1">
-            ` : `<input type="hidden" id="envio-qtd" value="1">`}
-
-            <label style="margin-top:10px;">Observações/Motivo:</label>
-            <textarea id="envio-obs" class="form-control" rows="2" placeholder="Ex: Carga de material para serviço diário"></textarea>
-            
-            <div style="margin-top:20px; text-align:right;">
-                <button onclick="fecharModalMov()" class="btn-cancelar">Cancelar</button>
-                <button onclick="executarEnvio('${docId}', '${tomb || ''}')" class="btn-confirmar" style="background:#2c7399;">Confirmar Envio</button>
-            </div>
-        </div>
-    `;
-
-    // Popular o select de viaturas (reutilizando sua lógica de listas_conferencia)
-    popularSelectViaturas('envio-destino-vtr');
-    $(modal).modal('show');
-}
-		async function abrirModalRecolhimento(docId, tomb, listaIdOrigem) {
-    const modal = document.getElementById('modal-movimentacao-almox');
-    const titulo = document.getElementById('modal-movimentacao-titulo');
-    const corpo = document.getElementById('modal-movimentacao-corpo');
-
-    titulo.innerHTML = `<i class="fas fa-arrow-down"></i> Recolher para Almoxarifado`;
-    titulo.style.color = "#f57c00";
-
-    const doc = await db.collection('almoxarifado_central').doc(docId).get();
-    const item = doc.data();
-    
-    // Busca o nome da viatura de origem para exibir no modal
-    const vtrDoc = await db.collection('listas_conferencia').doc(listaIdOrigem).get();
-    const vtrNome = vtrDoc.exists ? vtrDoc.data().nome_local : "Viatura de Origem";
-
-    corpo.innerHTML = `
-        <div style="padding: 15px;">
-            <p>Origem: <b style="color:#f57c00;">${vtrNome}</b></p>
-            <p>Item: <b>${item.nome}</b> ${tomb ? `| Tomb: <b>${tomb}</b>` : ''}</p>
-
-            ${!tomb ? `
-                <label>Quantidade a Recolher:</label>
-                <input type="number" id="recolha-qtd" class="form-control" min="1" value="1">
-            ` : `<input type="hidden" id="recolha-qtd" value="1">`}
-
-            <label style="margin-top:10px;">Estado do Material:</label>
-            <select id="recolha-estado" class="form-control">
-                <option value="perfeito">Em perfeito estado (Disponível)</option>
-                <option value="danificado">Danificado (Gerar Pendência)</option>
-            </select>
-            
-            <div style="margin-top:20px; text-align:right;">
-                <button onclick="fecharModalMov()" class="btn-cancelar">Cancelar</button>
-                <button onclick="executarRecolhimento('${docId}', '${tomb || ''}', '${listaIdOrigem}')" class="btn-confirmar" style="background:#f57c00;">Confirmar Recolhimento</button>
-            </div>
-        </div>
-    `;
-
-    $(modal).modal('show');
-}
+		
+		
 		async function executarEnvio(docIdAlmox) {
     const viaturaId = document.getElementById('almox-viatura-alvo').value;
     const setorAlvo = document.getElementById('almox-setor-alvo').value;
