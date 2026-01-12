@@ -10223,22 +10223,41 @@ async function configurarInterfaceMovimentacao() {
     const docIdAlmox = infoItem.getAttribute('data-docid');
     const viaturaId = document.getElementById('almox-viatura-alvo').value;
     const tombFoco = localStorage.getItem('sigma_tomb_foco');
+    
+    // Captura o perfil para decidir o que mostrar
+    const role = currentUserData.role;
 
     resetarVisibilidadeModal();
 
     const docAlmox = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
     const dAlmox = docAlmox.data() || {};
 
+    // --- AJUSTE DE RÓTULOS E VISIBILIDADE POR PERFIL ---
+    const labelDestino = document.querySelector('#div-almox-viatura label');
+    const divSetor = document.getElementById('div-almox-setor');
+
+    if (role === 'admin') {
+        if (labelDestino) labelDestino.textContent = "Unidade de Destino";
+        if (divSetor) divSetor.style.display = 'none'; // Admin não escolhe setor
+    } else {
+        if (labelDestino) labelDestino.textContent = "Viatura / Local Alvo";
+        // O setor só aparece se for ENVIO (Gestor enviando para Vtr)
+        if (divSetor) divSetor.style.display = (tipo === 'ENVIO') ? 'block' : 'none';
+    }
+
     if (tipo === 'ENVIO') {
         document.getElementById('div-almox-viatura').style.display = 'block';
-        document.getElementById('div-almox-setor').style.display = 'block';
+        
+        // Lógica de Tombamentos
         if (ehMulti) {
             document.getElementById('almox-transf-qtd').closest('.form-group').style.display = 'none';
             document.getElementById('div-selecao-envio-multi').style.display = 'block';
+            
+            // Se for Admin, mostra os que não têm viatura (estão no central)
+            // Se for Gestor, mostra os que estão na unidade dele (seria dAlmox.tombamentos filtrados)
             const disponiveis = (dAlmox.tombamentos || []).filter(t => !t.viatura_id);
             document.getElementById('lista-checks-tombamento').innerHTML = gerarHtmlChecks(disponiveis, 'azul');
             
-            // SE FOI CLICADO EM UM TOMBAMENTO NA LUPA, MARCA ELE AUTOMATICAMENTE
             if(tombFoco) {
                 const chk = document.querySelector(`.check-envio-tomb[value="${tombFoco}"]`);
                 if(chk) { chk.checked = true; atualizarQtdEnvio(); }
@@ -10249,7 +10268,13 @@ async function configurarInterfaceMovimentacao() {
 
     if (tipo === 'RECOLHIMENTO' && viaturaId) {
         document.getElementById('div-almox-viatura').style.display = 'block';
+        
+        // No recolhimento, o setor nunca é exibido
+        if (divSetor) divSetor.style.display = 'none';
+
         const vtrSnap = await db.collection('listas_conferencia').doc(viaturaId).get();
+        if (!vtrSnap.exists) return;
+
         let itemNaVtr = null;
         vtrSnap.data().list.forEach(s => {
             const achado = s.itens.find(it => it.uid_global === dAlmox.uid_global || it.nome === infoItem.textContent);
