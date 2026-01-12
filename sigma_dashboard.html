@@ -9475,6 +9475,7 @@ async function verDetalhesItemAlmox(docId) {
     const tbodyRastreio = document.getElementById('almox-rastreio-body');
     const theadRastreio = document.getElementById('almox-rastreio-thead');
     const filterCard = document.getElementById('almox-filtros-container');
+    const breadcrumb = document.getElementById('almox-breadcrumb');
 
     if (!docId || !palcoPrincipal || !palcoRastreio) return;
 
@@ -9493,6 +9494,8 @@ async function verDetalhesItemAlmox(docId) {
         const uidGlobal = itemData.uid_global;
         const role = currentUserData.role;
 
+        if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
+
         theadRastreio.innerHTML = `
             <tr>
                 <th>${ehMulti ? 'Tombamento' : 'Identificação'}</th>
@@ -9502,9 +9505,11 @@ async function verDetalhesItemAlmox(docId) {
             </tr>`;
 
         let htmlFinal = '';
+        let cDisp = 0, cUso = 0, cCaut = 0, cPend = 0;
 
-        // 1. BUSCA NOS ALMOXARIFADOS (Estoques Disponíveis)
+        // 1. BUSCA NOS ALMOXARIFADOS (Estoques Sede e Setoriais)
         const snapAlmoxs = await db.collection('almoxarifado_central').where('uid_global', '==', uidGlobal).get();
+        
         snapAlmoxs.forEach(docAl => {
             const d = docAl.data();
             const unitIdDoc = docAl.id;
@@ -9512,30 +9517,36 @@ async function verDetalhesItemAlmox(docId) {
 
             if (ehMulti) {
                 (d.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
+                    const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
+                    if (temP) cPend++; else cDisp++;
+
                     htmlFinal += `
                         <tr style="background:#f0fdf4;">
                             <td><strong>${t.tomb}</strong></td>
                             <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
-                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
+                            <td style="text-align:center;"><span class="status-badge" style="background:${temP ? '#ffebee' : '#dcfce7'};color:${temP ? '#c62828' : '#166534'};">${temP ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
                             <td style="text-align:right;">
                                 <button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>
                             </td>
                         </tr>`;
                 });
-            } else if (d.disponivel > 0) {
-                htmlFinal += `
-                    <tr style="background:#f0fdf4;">
-                        <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
-                        <td style="text-align:center;">Saldo Sede: <b>${d.disponivel}</b></td>
-                        <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
-                        <td style="text-align:right;">
-                            <button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>
-                        </td>
-                    </tr>`;
+            } else {
+                cDisp += (Number(d.disponivel) || 0);
+                if (d.disponivel > 0) {
+                    htmlFinal += `
+                        <tr style="background:#f0fdf4;">
+                            <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
+                            <td style="text-align:center;">Saldo em estoque: <b>${d.disponivel} un.</b></td>
+                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
+                            <td style="text-align:right;">
+                                <button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>
+                            </td>
+                        </tr>`;
+                }
             }
         });
 
-        // 2. BUSCA NAS VIATURAS (Itens em Carga) - OLHO DE DEUS ATIVADO
+        // 2. BUSCA NAS VIATURAS (Itens em Carga)
         let queryListas = (role === 'admin') 
             ? db.collection('listas_conferencia').where('ativo', '==', true)
             : db.collection('listas_conferencia').where(firebase.firestore.FieldPath.documentId(), 'in', await getUnitListIds());
@@ -9544,10 +9555,7 @@ async function verDetalhesItemAlmox(docId) {
 
         snapListas.forEach(docVtr => {
             const vtrData = docVtr.data();
-            const listaId = docVtr.id;
             const siglaUnidadeVtr = vtrData.unidade_sigla || "---";
-
-            // Tenta encontrar o almoxarifado destino correspondente a esta viatura
             const idAlmoxVolta = `${siglaUnidadeVtr}_${uidGlobal}`;
 
             vtrData.list.forEach(setor => {
@@ -9556,38 +9564,55 @@ async function verDetalhesItemAlmox(docId) {
 
                 if (ehMulti) {
                     (itNaVtr.tombamentos || []).forEach(t => {
-                        const status = t.cautela ? 'CAUTELADO' : 'EM USO';
-                        const corStatus = t.cautela ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;';
+                        const temCautela = !!t.cautela;
+                        const temPendencia = t.pendencias_ids && t.pendencias_ids.length > 0;
+                        
+                        if (temPendencia) cPend++; else if (temCautela) cCaut++; else cUso++;
+
+                        const statusTxt = temPendencia ? 'PENDENTE' : (temCautela ? 'CAUTELADO' : 'EM USO');
+                        const corStatus = temPendencia ? 'background:#ffebee;color:#c62828;' : (temCautela ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;');
                         
                         htmlFinal += `
                             <tr>
                                 <td><strong>${t.tomb}</strong></td>
                                 <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaUnidadeVtr})</small></td>
-                                <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${status}</span></td>
+                                <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${statusTxt}</span></td>
                                 <td style="text-align:right;">
-                                    <button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${listaId}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;">
-                                        <i class="fas fa-arrow-down"></i>
-                                    </button>
+                                    <button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>
                                 </td>
                             </tr>`;
                     });
-                } else if (itNaVtr.quantidadeEsperada > 0) {
+                } else {
+                    cUso += Number(itNaVtr.quantidadeEsperada) || 0;
                     htmlFinal += `
                         <tr>
                             <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
                             <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaUnidadeVtr})</small></td>
                             <td style="text-align:center;"><b>${itNaVtr.quantidadeEsperada} un.</b></td>
                             <td style="text-align:right;">
-                                <button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${listaId}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;">
-                                    <i class="fas fa-arrow-down"></i>
-                                </button>
+                                <button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>
                             </td>
                         </tr>`;
                 }
             });
         });
 
-        tbodyRastreio.innerHTML = htmlFinal || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum item em carga ou disponível localizado.</td></tr>';
+        // 3. RENDERIZAÇÃO DO EXTRATO NO TOPO (RESTAURADO)
+        const totalGeral = cDisp + cUso + cCaut + cPend;
+        const extratoHtml = `
+            <div id="almox-resumo-topo" style="display: flex; gap: 10px; padding: 15px; background: #fff; border: 1px solid #eee; border-radius: 8px; justify-content: space-around; flex-wrap: wrap; margin-bottom:20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                <div style="text-align:center;"><small style="color:#2e7d32; font-weight:bold; display:block;">DISPONÍVEL</small><b style="font-size:1.4em; color:#2e7d32;">${cDisp}</b></div>
+                <div style="text-align:center;"><small style="color:#616161; font-weight:bold; display:block;">EM USO</small><b style="font-size:1.4em; color:#616161;">${cUso}</b></div>
+                <div style="text-align:center;"><small style="color:#e65100; font-weight:bold; display:block;">CAUTELADO</small><b style="font-size:1.4em; color:#e65100;">${cCaut}</b></div>
+                <div style="text-align:center;"><small style="color:#c62828; font-weight:bold; display:block;">PENDENTE</small><b style="font-size:1.4em; color:#c62828;">${cPend}</b></div>
+                <div style="text-align:center; border-left: 2px solid #ddd; padding-left:20px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL GERAL</small><b style="font-size:1.4em; color:#800020;">${totalGeral}</b></div>
+            </div>`;
+
+        const resumoAntigo = document.getElementById('almox-resumo-topo');
+        if(resumoAntigo) resumoAntigo.remove();
+        
+        palcoRastreio.querySelector('div').insertAdjacentHTML('afterend', extratoHtml);
+        tbodyRastreio.innerHTML = htmlFinal || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro físico localizado.</td></tr>';
 
     } catch (e) {
         console.error(e);
