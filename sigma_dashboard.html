@@ -5699,8 +5699,10 @@ function reimprimirPDF(data) {
         document.getElementById('perm-manage-users').checked = permissoes.canManageUnitUsers || false;
         document.getElementById('perm-manage-lists').checked = permissoes.canManageUnitLists || false;
 
-        roleSelect.onchange = function() {
-            permFields.style.display = (this.value === 'gestor' || this.value === 'admin') ? 'block' : 'none';
+        // ✅ CORREÇÃO AQUI: Chamando a função de controle de abas de permissão
+        roleSelect.onchange = (e) => {
+            const selectedRole = e.target.value;
+            permFields.style.display = (selectedRole === 'gestor' || selectedRole === 'admin') ? 'block' : 'none';
         };
 
         document.getElementById('modal-user-manager').style.display = 'flex';
@@ -10392,19 +10394,20 @@ async function salvarCadastroGlobalHierarquico() {
 	/**
  * Monitora a quantidade no aporte para gerar campos de tombamento se o item for MULTI
  */
-document.getElementById('almox-transf-qtd').addEventListener('input', function() {
+document.getElementById('almox-transf-qtd').addEventListener('input', (e) => {
     const operacao = document.getElementById('almox-operacao-tipo').value;
-    const ehMulti = document.getElementById('almox-transf-item-nome').getAttribute('data-tipo') === 'multi';
-    if (operacao === 'ENTRADA' && ehMulti) {
-        const qtd = parseInt(this.value) || 0;
-        const listaInputs = document.getElementById('lista-inputs-tombamento');
-        listaInputs.innerHTML = '';
-        for (let i = 1; i <= qtd; i++) {
-            listaInputs.innerHTML += `<div class="linha-aporte-tomb" style="display:grid; grid-template-columns:35px 1fr 1fr; gap:8px; margin-bottom:10px;">
-                <div style="background:#800020; color:white; text-align:center; padding:10px 0; border-radius:4px;">${i}</div>
-                <input type="text" class="g-cat-input input-tomb-valor" placeholder="Tombamento" required>
-                <input type="text" class="g-cat-input input-sn-valor" placeholder="Nº Série">
-            </div>`;
+    const itemNomeEl = document.getElementById('almox-transf-item-nome');
+    const ehMulti = itemNomeEl.getAttribute('data-tipo') === 'multi';
+
+    // ✅ Verifica se a operação exige entrada de tombamentos (Aporte/Entrada)
+    if ((operacao === 'ENTRADA' || operacao === 'ENVIO' || operacao === 'APORTE') && ehMulti) {
+        const qtd = parseInt(e.target.value) || 0;
+        
+        // ✅ CHAMA A FUNÇÃO CORRETA EM VEZ DE REESCREVER O HTML AQUI
+        if (typeof gerarInputsTombamentoAporte === "function") {
+            gerarInputsTombamentoAporte(qtd);
+        } else {
+            console.error("Erro: A função gerarInputsTombamentoAporte não foi encontrada.");
         }
     }
 });
@@ -10524,37 +10527,38 @@ function atualizarQtdEnvio() {
     }
 }
 		async function prepararAporte(docId) {
-    const doc = await db.collection('almoxarifado_central').doc(docId).get();
-    if (!doc.exists) return;
-    const item = doc.data();
+    try {
+        const doc = await db.collection('almoxarifado_central').doc(docId).get();
+        if (!doc.exists) return;
+        const item = doc.data();
 
-    const elNome = document.getElementById('almox-aporte-item-nome');
-    elNome.textContent = item.nome;
-    elNome.setAttribute('data-docid', docId);
-    elNome.setAttribute('data-tipo', item.tipo);
+        const elNome = document.getElementById('almox-aporte-item-nome');
+        elNome.textContent = item.nome;
+        elNome.setAttribute('data-docid', docId);
+        elNome.setAttribute('data-tipo', item.tipo);
 
-    // Reset campos
-    document.getElementById('almox-aporte-qtd').value = 1;
-    document.getElementById('almox-aporte-obs').value = '';
-    document.getElementById('lista-inputs-tombamento-exclusivo').innerHTML = '';
-    document.getElementById('div-aporte-multi-exclusivo').style.display = 'none';
+        // Reset campos do formulário
+        document.getElementById('almox-aporte-qtd').value = 1;
+        document.getElementById('almox-aporte-obs').value = '';
+        
+        const containerLista = document.getElementById('lista-inputs-tombamento-exclusivo');
+        const containerDiv = document.getElementById('div-aporte-multi-exclusivo');
+        
+        containerLista.innerHTML = '';
 
-    // Se for multi, já dispara o gerador de inputs para a qtd 1
-    if (item.tipo === 'multi') {
-        gerarInputsTombamentoAporte(1);
-        document.getElementById('div-aporte-multi-exclusivo').style.display = 'block';
+        // Se for multi, dispara a geração inicial de 1 campo
+        if (item.tipo === 'multi') {
+            gerarInputsTombamentoAporte(1);
+            containerDiv.style.display = 'block';
+        } else {
+            containerDiv.style.display = 'none';
+        }
+
+        document.getElementById('modal-almox-aporte').style.display = 'flex';
+    } catch (e) {
+        console.error("Erro ao preparar aporte:", e);
     }
-
-    document.getElementById('modal-almox-aporte').style.display = 'flex';
 }
-		document.getElementById('almox-aporte-qtd').addEventListener('input', function() {
-    const ehMulti = document.getElementById('almox-aporte-item-nome').getAttribute('data-tipo') === 'multi';
-    if (ehMulti) {
-        const qtd = parseInt(this.value) || 0;
-        gerarInputsTombamentoAporte(qtd);
-    }
-});
-
 function gerarInputsTombamentoAporte(qtd) {
     const lista = document.getElementById('lista-inputs-tombamento-exclusivo');
     lista.innerHTML = '';
