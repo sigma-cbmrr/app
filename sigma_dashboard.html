@@ -10577,39 +10577,96 @@ async function executarAporteEstoque() {
     const obs = document.getElementById('almox-aporte-obs').value.trim();
     const dataReg = new Date().toLocaleString('pt-BR');
 
-    if (!qtd || qtd < 1) return alert("Quantidade inválida.");
+    if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
+    if (ehMulti && !obs) return alert("Para itens com tombamento, a justificativa (ex: NF) é obrigatória para o histórico.");
+
+    const btn = document.querySelector('#modal-almox-aporte .btn-sync');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
 
     try {
-        const ref = db.collection('almoxarifado_central').doc(docIdAlmox);
+        const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
+        
         await db.runTransaction(async (transaction) => {
-            const snap = await transaction.get(ref);
-            const d = snap.data();
-
+            const snapAlmox = await transaction.get(almoxRef);
+            if (!snapAlmox.exists) throw new Error("Item não localizado no almoxarifado.");
+            
+            const d = snapAlmox.data();
+            const uidGlobal = d.uid_global; // O ID do Catálogo (item_000001-marca_modelo)
+            
             let novosTombamentos = [];
+
+            // --- LÓGICA PARA ITENS MULTI (TOMBAMENTO) ---
             if (ehMulti) {
-                document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb').forEach(linha => {
+                const linhas = document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb');
+                
+                linhas.forEach(linha => {
                     const t = linha.querySelector('.val-tomb').value.trim().toUpperCase();
                     const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
-                    if (t) novosTombamentos.push({
-                        tomb: t, serie: s || "N/A", situacao: "DISPONÍVEL", viatura_id: null,
-                        historico_vida: [{ data: dataReg, evento: "APORTE_ESTOQUE", detalhes: `Entrada via Aporte: ${obs}`, quem: conferente }]
-                    });
+                    
+                    if (t) {
+                        const infoTomb = {
+                            tomb: t,
+                            serie: s || "N/A",
+                            situacao: "DISPONÍVEL",
+                            viatura_id: null,
+                            data_entrada: dataReg
+                        };
+                        novosTombamentos.push(infoTomb);
+
+                        // ✅ CRIAR HISTÓRICO DE VIDA INDIVIDUAL (A Certidão de Nascimento)
+                        // Criamos um documento na coleção global de ativos onde o ID é o próprio TOMBAMENTO
+                        const historicoRef = db.collection('historico_ativos_individuais').doc(t);
+                        transaction.set(historicoRef, {
+                            tombamento: t,
+                            uid_global: uidGlobal,
+                            nome_material: d.nome,
+                            situacao_atual: "DISPONÍVEL (ALMOX. CENTRAL)",
+                            unidade_atual: currentUserData.unidade,
+                            eventos: [{
+                                data: dataReg,
+                                evento: "NASCIMENTO_SISTEMA",
+                                quem: currentUserData.nome_militar_completo,
+                                detalhes: `Item incorporado ao patrimônio via Aporte Central. Obs: ${obs}`
+                            }]
+                        }, { merge: true });
+                    }
                 });
-                if (novosTombamentos.length !== qtd) throw new Error("Preencha todos os tombamentos.");
+
+                if (novosTombamentos.length !== qtd) throw new Error("Preencha todos os campos de tombamento gerados.");
             }
 
-            transaction.update(ref, {
+            // --- LÓGICA PARA ITENS SINGLE (QUANTIDADE) ---
+            // O histórico de itens single fica dentro do próprio documento do almoxarifado
+            let historicoSingle = d.historico_movimentacoes || [];
+            if (!ehMulti) {
+                historicoSingle.push({
+                    data: dataReg,
+                    evento: "ENTRADA_ESTOQUE",
+                    quantidade: qtd,
+                    quem: currentUserData.nome_militar_completo,
+                    detalhes: `Aporte de ${qtd} unidades. Justificativa: ${obs}`
+                });
+            }
+
+            // --- ATUALIZAÇÃO DO SALDO NO ALMOXARIFADO ---
+            transaction.update(almoxRef, {
                 total: (d.total || 0) + qtd,
                 disponivel: (d.disponivel || 0) + qtd,
-                tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : (d.tombamentos || [])
+                tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : (d.tombamentos || []),
+                historico_movimentacoes: ehMulti ? (d.historico_movimentacoes || []) : historicoSingle
             });
         });
 
-        alert("✅ Estoque atualizado com sucesso!");
+        alert("✅ Aporte realizado! O estoque e o histórico de vida foram atualizados.");
         document.getElementById('modal-almox-aporte').style.display = 'none';
         carregarAlmoxarifadoUI();
+
     } catch (e) {
-        alert("❌ Erro: " + e.message);
+        console.error(e);
+        alert("❌ Erro no aporte: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> Confirmar Entrada';
     }
 }
 		
