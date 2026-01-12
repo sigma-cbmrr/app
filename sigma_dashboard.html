@@ -11882,16 +11882,15 @@ function abrirModalEditorItens(uid, nome) {
 }
 	async function executarEnvioUnidade() {
     const docElement = document.getElementById('almox-transf-item-nome');
-    const docIdOrigem = docElement.getAttribute('data-docid'); // ADMIN_item_...
+    const docIdOrigem = docElement.getAttribute('data-docid'); 
     const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
-    const uidGlobal = docIdOrigem.replace('ADMIN_', ''); // Remove o prefixo para ter o DNA puro
+    const uidGlobal = docIdOrigem.replace('ADMIN_', ''); 
     
-    const unidadeDestinoUid = document.getElementById('almox-viatura-alvo').value; // Agora carregamos UIDs de unidades aqui
+    const unidadeDestinoUid = document.getElementById('almox-viatura-alvo').value; 
     const obs = document.getElementById('almox-transf-obs').value.trim();
     const dataReg = new Date().toLocaleString('pt-BR');
     const autorNome = currentUserData.nome_militar_completo;
 
-    // Validações
     if (!unidadeDestinoUid) return alert("Selecione a Unidade de destino.");
     const selectUnidade = document.getElementById('almox-viatura-alvo');
     const nomeUnidadeDestino = selectUnidade.options[selectUnidade.selectedIndex].text;
@@ -11905,70 +11904,71 @@ function abrirModalEditorItens(uid, nome) {
 
     try {
         const refOrigem = db.collection('almoxarifado_central').doc(docIdOrigem);
-        const docIdDestino = `${nomeUnidadeDestino}_${uidGlobal}`; // Ex: CCI_item_000001-...
+        const docIdDestino = `${nomeUnidadeDestino}_${uidGlobal}`; 
         const refDestino = db.collection('almoxarifado_central').doc(docIdDestino);
 
         await db.runTransaction(async (transaction) => {
+            // --- PASSO 1: TODAS AS LEITURAS (READS) NO TOPO ---
             const snapOrigem = await transaction.get(refOrigem);
+            const snapDestino = await transaction.get(refDestino); // <--- MOVIDO PARA CÁ (ANTES DE QUALQUER ESCRITA)
+
             if (!snapOrigem.exists) throw new Error("Item de origem não localizado.");
             const dOrigem = snapOrigem.data();
 
             if (dOrigem.disponivel < qtd) throw new Error("Saldo insuficiente no Almoxarifado Central.");
 
-            // --- LÓGICA PARA ITENS MULTI (TOMBAMENTOS) ---
+            // --- PASSO 2: PREPARAÇÃO DE DADOS (CÁLCULOS EM MEMÓRIA) ---
             let tombamentosParaMover = [];
+            let novosTombamentosOrigem = dOrigem.tombamentos || [];
+            let selecionados = [];
+
             if (ehMulti) {
-                const selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
+                selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
                 if (selecionados.length !== qtd) throw new Error("A quantidade informada não bate com os tombamentos selecionados.");
 
-                // Filtra e remove da origem, prepara para o destino
-                const novosTombamentosOrigem = (dOrigem.tombamentos || []).filter(t => !selecionados.includes(t.tomb));
+                novosTombamentosOrigem = (dOrigem.tombamentos || []).filter(t => !selecionados.includes(t.tomb));
                 tombamentosParaMover = (dOrigem.tombamentos || []).filter(t => selecionados.includes(t.tomb));
+            }
 
-                // Atualiza o RG do item individual (Coleção histórica)
+            const logEnvio = {
+                data: dataReg, evento: "SAIDA_TRANSFERENCIA",
+                detalhes: `Enviado ${qtd}un para Unidade: ${nomeUnidadeDestino}. Motivo: ${obs}`,
+                quem: autorNome
+            };
+
+            const logRecebimento = {
+                data: dataReg, evento: "ENTRADA_TRANSFERENCIA",
+                detalhes: `Recebido ${qtd}un do Almox. Central. Motivo: ${obs}`,
+                quem: autorNome
+            };
+
+            // --- PASSO 3: TODAS AS ESCRITAS (WRITES) ---
+
+            // A. Histórico Individual
+            if (ehMulti) {
                 for (let t of selecionados) {
                     const histRef = db.collection('historico_ativos_individuais').doc(t);
                     transaction.set(histRef, {
                         situacao_atual: `DISPONÍVEL (ESTOQUE ${nomeUnidadeDestino})`,
                         unidade_atual: nomeUnidadeDestino,
                         eventos: firebase.firestore.FieldValue.arrayUnion({
-                            data: dataReg,
-                            evento: "TRANSFERENCIA_UNIDADE",
-                            quem: autorNome,
+                            data: dataReg, evento: "TRANSFERENCIA_UNIDADE", quem: autorNome,
                             detalhes: `Transferido do Almox. Central para ${nomeUnidadeDestino}. Justificativa: ${obs}`
                         })
                     }, { merge: true });
                 }
-
-                transaction.update(refOrigem, { tombamentos: novosTombamentosOrigem });
             }
 
-            // --- REGISTRO NO HISTÓRICO GLOBAL (TIMELINE) ---
-            const logEnvio = {
-                data: dataReg,
-                evento: "SAIDA_TRANSFERENCIA",
-                detalhes: `Enviado ${qtd}un para Unidade: ${nomeUnidadeDestino}. Motivo: ${obs}`,
-                quem: autorNome
-            };
-
-            const logRecebimento = {
-                data: dataReg,
-                evento: "ENTRADA_TRANSFERENCIA",
-                detalhes: `Recebido ${qtd}un do Almox. Central. Motivo: ${obs}`,
-                quem: autorNome
-            };
-
-            // --- ATUALIZA ORIGEM (ADMIN) ---
+            // B. Atualiza Origem
             transaction.update(refOrigem, {
                 total: (dOrigem.total || 0) - qtd,
                 disponivel: (dOrigem.disponivel || 0) - qtd,
+                tombamentos: ehMulti ? novosTombamentosOrigem : (dOrigem.tombamentos || []),
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logEnvio)
             });
 
-            // --- ATUALIZA/CRIA DESTINO (UNIDADE) ---
-            const snapDestino = await transaction.get(refDestino);
+            // C. Atualiza/Cria Destino
             if (!snapDestino.exists) {
-                // Cria o registro na unidade se ele nunca teve esse item
                 transaction.set(refDestino, {
                     uid_global: uidGlobal,
                     nome: dOrigem.nome,
@@ -11986,7 +11986,7 @@ function abrirModalEditorItens(uid, nome) {
                 transaction.update(refDestino, {
                     total: (dDest.total || 0) + qtd,
                     disponivel: (dDest.disponivel || 0) + qtd,
-                    tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...tombamentosParaMover) : [],
+                    tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...tombamentosParaMover) : (dDest.tombamentos || []),
                     historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logRecebimento)
                 });
             }
