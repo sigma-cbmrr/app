@@ -2606,6 +2606,12 @@ input:checked + .slider:before {
                     <option value="">Carregando ativos...</option>
                 </select>
             </div>
+			<div class="form-group">
+    		<label style="font-weight: bold; font-size: 0.85em;">Unidade Gestora:</label>
+    			<select id="lista-unidade-vinculo" class="filter-input">
+        			<option value="">Selecione a Unidade...</option>
+    			</select>
+			</div>
             <div class="form-group">
                 <label style="font-weight: bold; font-size: 0.85em;">Vincular ao Posto:</label>
                 <select id="lista-posto-uid" class="filter-input">
@@ -11556,48 +11562,76 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
     }
 }
 
-// Busca Ativos e Postos no Banco para preencher os Selects
-// Busca Ativos e Postos no Banco para preencher os Selects
+// Busca Ativos, Postos e Unidades no Banco para preencher os Selects
 async function carregarFiltrosParaNovoEditor() {
     const selectAtivo = document.getElementById('lista-ativo-uid');
     const selectPosto = document.getElementById('lista-posto-uid');
+    const selectUnidade = document.getElementById('lista-unidade-vinculo'); // Novo ID conforme alinhamos
     
-    if (!selectAtivo || !selectPosto) return;
+    if (!selectAtivo || !selectPosto || !selectUnidade) return;
 
     selectAtivo.innerHTML = '<option value="">Carregando ativos...</option>';
     selectPosto.innerHTML = '<option value="">Carregando postos...</option>';
+    selectUnidade.innerHTML = '<option value="">Carregando unidades...</option>';
 
     try {
-        // 1. Carregar Postos
+        const isGestor = currentUserData.role === 'gestor';
+
+        // 1. Carregar Unidades (Com lógica de trava para Gestor)
+        const snapUnidades = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
+        let htmlUnidades = '<option value="" disabled selected>Selecione a Unidade...</option>';
+        
+        snapUnidades.forEach(doc => {
+            const u = doc.data();
+            htmlUnidades += `<option value="${doc.id}">${u.sigla}</option>`;
+        });
+        selectUnidade.innerHTML = htmlUnidades;
+
+        // Trava cirúrgica para Gestor
+        if (isGestor) {
+            // Busca pelo nome/sigla que está no currentUserData.unidade
+            for (let opt of selectUnidade.options) {
+                if (opt.text === currentUserData.unidade) {
+                    selectUnidade.value = opt.value;
+                    break;
+                }
+            }
+            selectUnidade.disabled = true;
+            selectUnidade.style.backgroundColor = '#f4f4f9';
+        } else {
+            selectUnidade.disabled = false;
+            selectUnidade.style.backgroundColor = '';
+        }
+
+        // 2. Carregar Postos
         const snapPostos = await db.collection('postos_estruturados').where('ativo', '==', true).get();
-        let htmlPostos = '<option value="">Vincular ao Posto...</option>';
+        let htmlPostos = '<option value="" disabled selected>Vincular ao Posto...</option>';
         snapPostos.forEach(doc => {
             htmlPostos += `<option value="${doc.id}">${doc.data().nome}</option>`;
         });
         selectPosto.innerHTML = htmlPostos;
 
-        // 2. Carregar Viaturas e Bases (Varrendo as subcoleções)
-        const unidadesSnap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
-        let htmlAtivos = '<option value="">Selecione a VTR ou Base...</option>';
+        // 3. Carregar Viaturas e Bases (Filtro por unidade se for Gestor)
+        let htmlAtivos = '<option value="" disabled selected>Selecione a VTR ou Base...</option>';
 
-        for (const unitDoc of unidadesSnap.docs) {
+        for (const unitDoc of snapUnidades.docs) {
             const unitSigla = unitDoc.data().sigla;
             const unitId = unitDoc.id;
 
-            // Busca Viaturas desta unidade
-            const vtrs = await db.collection('vtr_bases').doc(unitId).collection('viaturas').get();
-            vtrs.forEach(vtrDoc => {
-                const v = vtrDoc.data();
-                // EXIBIÇÃO SIMPLIFICADA: Apenas o Prefixo
-                htmlAtivos += `<option value="${vtrDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${v.prefixo}">${v.prefixo}</option>`;
+            // Se for gestor, ignora as viaturas que não são da unidade dele
+            if (isGestor && unitSigla !== currentUserData.unidade) continue;
+
+            const [vtrs, bases] = await Promise.all([
+                db.collection('vtr_bases').doc(unitId).collection('viaturas').get(),
+                db.collection('vtr_bases').doc(unitId).collection('bases').get()
+            ]);
+
+            vtrs.forEach(vDoc => {
+                htmlAtivos += `<option value="${vDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${vDoc.data().prefixo}">${vDoc.data().prefixo}</option>`;
             });
 
-            // Busca Bases desta unidade
-            const bases = await db.collection('vtr_bases').doc(unitId).collection('bases').get();
-            bases.forEach(baseDoc => {
-                const b = baseDoc.data();
-                // EXIBIÇÃO SIMPLIFICADA: Apenas o Nome da Base
-                htmlAtivos += `<option value="${baseDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${b.nome}">${b.nome}</option>`;
+            bases.forEach(bDoc => {
+                htmlAtivos += `<option value="${bDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${bDoc.data().nome}">${bDoc.data().nome}</option>`;
             });
         }
         selectAtivo.innerHTML = htmlAtivos;
@@ -11606,7 +11640,6 @@ async function carregarFiltrosParaNovoEditor() {
         console.error("Erro ao carregar filtros do editor:", e);
     }
 }
-
 // Função Placeholder para os Cards (Faremos a gravação no próximo passo)
 async function carregarCardsListasExistentes() {
     const container = document.getElementById('container-cards-listas');
@@ -11617,19 +11650,22 @@ async function carregarCardsListasExistentes() {
 		async function gravarCabecalhoLista(abrirEditor) {
     const selectAtivo = document.getElementById('lista-ativo-uid');
     const selectPosto = document.getElementById('lista-posto-uid');
+    const selectUnidade = document.getElementById('lista-unidade-vinculo'); // 1. Captura o novo select
 
     const ativoUid = selectAtivo.value;
     const postoUid = selectPosto.value;
+    const unidadeUid = selectUnidade.value; // 2. Obtém o UID da Unidade selecionada
 
-    if (!ativoUid || !postoUid) {
-        return alert("Por favor, selecione tanto o Ativo quanto o Posto de Vínculo.");
+    // 3. Validação atualizada: Unidade agora é obrigatória
+    if (!ativoUid || !postoUid || !unidadeUid) {
+        return alert("Por favor, selecione o Ativo, a Unidade Gestora e o Posto de Vínculo.");
     }
 
-    // Captura os dados extras que guardamos nos atributos 'data-' do select
-    const optionSelecionada = selectAtivo.options[selectAtivo.selectedIndex];
-    const nomeAtivo = optionSelecionada.dataset.nome;
-    const unidadeUid = optionSelecionada.dataset.unidade;
-    const unidadeSigla = optionSelecionada.dataset.sigla;
+    const optionAtivo = selectAtivo.options[selectAtivo.selectedIndex];
+    const nomeAtivo = optionAtivo.dataset.nome;
+    
+    // 4. Captura a Sigla da Unidade diretamente do texto do select de Unidades
+    const unidadeSigla = selectUnidade.options[selectUnidade.selectedIndex].text;
     const nomePosto = selectPosto.options[selectPosto.selectedIndex].text;
 
     // Geramos um ID único para esta lista específica
@@ -11643,37 +11679,35 @@ async function carregarCardsListasExistentes() {
             uid: listaUid,
             ativo_id: ativoUid,
             ativo_nome: nomeAtivo,
-            unidade_id: unidadeUid,
-            unidade_sigla: unidadeSigla,
+            unidade_id: unidadeUid,    // UID da Unidade (definido pelo Admin ou travado p/ Gestor)
+            unidade_sigla: unidadeSigla, // Sigla da Unidade (ex: CCI)
             posto_id: postoUid,
             posto_nome: nomePosto,
             ativo: true,
             tipo: 'conferencia_materiais',
-            list: [], // Array onde entrarão os itens (mangueiras, etc)
+            list: [], 
             criado_em: firebase.firestore.FieldValue.serverTimestamp(),
             criado_por: currentUserData.nome_militar_completo
         };
 
         batch.set(listaRef, dadosLista, { merge: true });
 
-        // Opcional: Atualiza a rota se necessário para compatibilidade com o Dashboard antigo
-        // Aqui garantimos que o sistema reconheça este novo par Ativo-Posto
         const rotaRef = db.collection('config_geral').doc('rotas');
         batch.update(rotaRef, {
             [listaUid]: {
                 nome: nomeAtivo,
                 posto: nomePosto,
-                unidade: unidadeSigla,
+                unidade: unidadeSigla, // Mantém compatibilidade com o Dashboard
                 ativo: true
             }
         });
 
         await batch.commit();
 
-        alert(`Lista para ${nomeAtivo} vinculada ao ${nomePosto} salva com sucesso!`);
+        alert(`Lista para ${nomeAtivo} vinculada à unidade ${unidadeSigla} no ${nomePosto} salva com sucesso!`);
         
-        controlarToggleFormLista(); // Fecha o formulário
-        carregarCardsListasExistentes(); // Atualiza o grid de cards
+        controlarToggleFormLista(); 
+        carregarCardsListasExistentes(); 
 
         if (abrirEditor) {
             abrirModalEditorItens(listaUid, nomeAtivo);
