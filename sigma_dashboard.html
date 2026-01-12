@@ -9470,240 +9470,131 @@ function filtrarAlmoxarifado() {
 }
 		
 async function verDetalhesItemAlmox(docId) {
-
     const palcoPrincipal = document.getElementById('container-tabela-principal');
-
     const palcoRastreio = document.getElementById('almox-rastreio-wrapper');
-
     const tbodyRastreio = document.getElementById('almox-rastreio-body');
-
     const theadRastreio = document.getElementById('almox-rastreio-thead');
-
-    const breadcrumb = document.getElementById('almox-breadcrumb');
-
     const filterCard = document.getElementById('almox-filtros-container');
-
-
 
     if (!docId || !palcoPrincipal || !palcoRastreio) return;
 
-
-
     palcoPrincipal.style.display = 'none';
-
     if (filterCard) filterCard.style.display = 'none';
-
     palcoRastreio.style.display = 'block';
 
-
-
-    tbodyRastreio.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material em todas as unidades...</td></tr>';
-
-
+    tbodyRastreio.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material...</td></tr>';
 
     try {
-
         const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
-
         if (!almoxDoc.exists) throw new Error("Item não encontrado.");
-
         
-
         const itemData = almoxDoc.data();
-
         const ehMulti = itemData.tipo === 'multi';
-
         const uidGlobal = itemData.uid_global;
-
-
-
-        if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes Global > <b style="color:#800020;">${itemData.nome}</b>`;
-
-
+        const role = currentUserData.role;
 
         theadRastreio.innerHTML = `
-
             <tr>
-
-                <th>${ehMulti ? 'Tombamento' : 'Localização / Unidade'}</th>
-
-                <th style="text-align:center;">${ehMulti ? 'Localização / Unidade' : 'Quantidade'}</th>
-
+                <th>${ehMulti ? 'Tombamento' : 'Identificação'}</th>
+                <th style="text-align:center;">Localização Atual</th>
                 <th style="text-align:center;">Status</th>
-
                 <th style="text-align:right;">Ações</th>
-
             </tr>`;
-
-
 
         let htmlFinal = '';
 
-        const role = currentUserData.role;
+        // 1. BUSCA NOS ALMOXARIFADOS (Estoques Disponíveis)
+        const snapAlmoxs = await db.collection('almoxarifado_central').where('uid_global', '==', uidGlobal).get();
+        snapAlmoxs.forEach(docAl => {
+            const d = docAl.data();
+            const unitIdDoc = docAl.id;
+            if (d.total <= 0) return;
 
-
-
-        // --- LÓGICA DE BUSCA GLOBAL OU LOCAL ---
-
-        let queryListas;
-
-        if (role === 'admin') {
-
-            // Admin busca em TODAS as listas do estado
-
-            queryListas = db.collection('listas_conferencia').where('ativo', '==', true);
-
-        } else {
-
-            // Gestor continua limitado às listas da sua unidade
-
-            const unitListIds = await getUnitListIds();
-
-            if (unitListIds.length === 0) {
-
-                tbodyRastreio.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhuma viatura vinculada.</td></tr>';
-
-                return;
-
+            if (ehMulti) {
+                (d.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
+                    htmlFinal += `
+                        <tr style="background:#f0fdf4;">
+                            <td><strong>${t.tomb}</strong></td>
+                            <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
+                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
+                            <td style="text-align:right;">
+                                <button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>
+                            </td>
+                        </tr>`;
+                });
+            } else if (d.disponivel > 0) {
+                htmlFinal += `
+                    <tr style="background:#f0fdf4;">
+                        <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
+                        <td style="text-align:center;">Saldo Sede: <b>${d.disponivel}</b></td>
+                        <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
+                        <td style="text-align:right;">
+                            <button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>
+                        </td>
+                    </tr>`;
             }
+        });
 
-            queryListas = db.collection('listas_conferencia').where(firebase.firestore.FieldPath.documentId(), 'in', unitListIds);
-
-        }
-
-
+        // 2. BUSCA NAS VIATURAS (Itens em Carga) - OLHO DE DEUS ATIVADO
+        let queryListas = (role === 'admin') 
+            ? db.collection('listas_conferencia').where('ativo', '==', true)
+            : db.collection('listas_conferencia').where(firebase.firestore.FieldPath.documentId(), 'in', await getUnitListIds());
 
         const snapListas = await queryListas.get();
 
-
-
-        // 1. Varredura nas Listas de Conferência (Viaturas/Bases)
-
         snapListas.forEach(docVtr => {
-
             const vtrData = docVtr.data();
+            const listaId = docVtr.id;
+            const siglaUnidadeVtr = vtrData.unidade_sigla || "---";
 
-            const nomeLocal = vtrData.nome_local || vtrData.ativo_nome;
-
-            const siglaUnidade = vtrData.unidade_sigla || "";
-
-
+            // Tenta encontrar o almoxarifado destino correspondente a esta viatura
+            const idAlmoxVolta = `${siglaUnidadeVtr}_${uidGlobal}`;
 
             vtrData.list.forEach(setor => {
-
                 const itNaVtr = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
-
                 if (!itNaVtr) return;
 
-
-
                 if (ehMulti) {
-
                     (itNaVtr.tombamentos || []).forEach(t => {
-
-                        let statusHtml = t.cautela ? 
-
-                            '<span class="status-badge" style="background:#fff3e0;color:#e65100;">CAUTELADO</span>' : 
-
-                            '<span class="status-badge" style="background:#f5f5f5;color:#616161;">EM USO</span>';
-
+                        const status = t.cautela ? 'CAUTELADO' : 'EM USO';
+                        const corStatus = t.cautela ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;';
                         
-
                         htmlFinal += `
-
                             <tr>
-
                                 <td><strong>${t.tomb}</strong></td>
-
-                                <td><i class="fas fa-truck"></i> ${nomeLocal} <small>(${siglaUnidade})</small></td>
-
-                                <td style="text-align:center;">${statusHtml}</td>
-
-                                <td style="text-align:right;"><small style="color:#999;">Visualização Global</small></td>
-
+                                <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaUnidadeVtr})</small></td>
+                                <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${status}</span></td>
+                                <td style="text-align:right;">
+                                    <button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${listaId}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;">
+                                        <i class="fas fa-arrow-down"></i>
+                                    </button>
+                                </td>
                             </tr>`;
-
                     });
-
-                } else {
-
-                    const totalVtr = Number(itNaVtr.quantidadeEsperada) || 0;
-
+                } else if (itNaVtr.quantidadeEsperada > 0) {
                     htmlFinal += `
-
                         <tr>
-
-                            <td><i class="fas fa-truck"></i> ${nomeLocal} <small>(${siglaUnidade})</small></td>
-
-                            <td style="text-align:center;"><b>${totalVtr}</b></td>
-
-                            <td style="text-align:center;"><span class="status-badge" style="background:#e0f2fe;color:#0369a1;">EM CARGA</span></td>
-
-                            <td style="text-align:right;"><small style="color:#999;">Visualização Global</small></td>
-
+                            <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
+                            <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaUnidadeVtr})</small></td>
+                            <td style="text-align:center;"><b>${itNaVtr.quantidadeEsperada} un.</b></td>
+                            <td style="text-align:right;">
+                                <button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${listaId}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;">
+                                    <i class="fas fa-arrow-down"></i>
+                                </button>
+                            </td>
                         </tr>`;
-
                 }
-
             });
-
         });
 
-
-
-        // 2. Varredura em outros Almoxarifados (Para o Admin ver o saldo na CCI, 1º BBM, etc)
-
-        if (role === 'admin') {
-
-            const snapAlmoxs = await db.collection('almoxarifado_central')
-
-                                      .where('uid_global', '==', uidGlobal)
-
-                                      .get();
-
-            
-
-            snapAlmoxs.forEach(docAl => {
-
-                const d = docAl.data();
-
-                if (d.unidade === "ADMINISTRATIVO" || d.total <= 0) return; // Pula o central (já está na tela principal) e os vazios
-
-
-
-                htmlFinal += `
-
-                    <tr style="background:#f0fdf4;">
-
-                        <td>${ehMulti ? '---' : `<i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b>`}</td>
-
-                        <td style="text-align:center;">${ehMulti ? `<i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b>` : `<b>${d.disponivel}</b>`}</td>
-
-                        <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL NO SETOR</span></td>
-
-                        <td style="text-align:right;"><small style="color:#999;">Saldo em Almox.</small></td>
-
-                    </tr>`;
-
-            });
-
-        }
-
-
-
-        tbodyRastreio.innerHTML = htmlFinal || '<tr><td colspan="4" style="text-align:center; padding:20px;">Este item não foi localizado em nenhuma unidade operacional ou setor.</td></tr>';
-
-
+        tbodyRastreio.innerHTML = htmlFinal || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum item em carga ou disponível localizado.</td></tr>';
 
     } catch (e) {
-
         console.error(e);
-
-        tbodyRastreio.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Erro no rastreio global.</td></tr>';
-
+        tbodyRastreio.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Erro ao processar rastreio.</td></tr>';
     }
-
-}// Função de Filtragem Instantânea com Higienização Numérica
+}
+		// Função de Filtragem Instantânea com Higienização Numérica
 function filtrarRastreioMulti() {
     // 1. Pega o termo digitado e remove qualquer caractere que não seja número
     const termoOriginal = document.getElementById('filtro-tomb-input').value.toLowerCase();
