@@ -133,57 +133,57 @@
     		flex-wrap: wrap;
 		}
 
-/* 2. O "Selection Card" - Botão Elegante com Ícone */
-.selection-card {
-    background: #ffffff;
-    border: 2px solid #eee;
-    border-radius: 12px;
-    width: 180px;
-    height: 150px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-}
+		/* 2. O "Selection Card" - Botão Elegante com Ícone */
+		.selection-card {
+    		background: #ffffff;
+    		border: 2px solid #eee;
+    		border-radius: 12px;
+    		width: 180px;
+    		height: 150px;
+    		display: flex;
+    		flex-direction: column;
+    		align-items: center;
+    		justify-content: center;
+    		gap: 15px;
+    		cursor: pointer;
+    		transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    		box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+		}
 
-.selection-card i {
-    font-size: 3em;
-    color: #5d6d7e;
-    transition: all 0.3s ease;
-}
+		.selection-card i {
+    		font-size: 3em;
+    		color: #5d6d7e;
+    		transition: all 0.3s ease;
+		}
 
-.selection-card span {
-    font-weight: bold;
-    font-size: 0.85em;
-    color: #555;
-    text-align: center;
-}
+		.selection-card span {
+    		font-weight: bold;
+    		font-size: 0.85em;
+    		color: #555;
+    		text-align: center;
+		}
 
-/* 3. Efeitos de Interação (Hover e Selecionado) */
-.selection-card:hover {
-    transform: translateY(-5px);
-    border-color: #2c7399; /* Azul Gestão Sigma */
-    box-shadow: 0 8px 15px rgba(44, 115, 153, 0.2);
-}
+		/* 3. Efeitos de Interação (Hover e Selecionado) */
+		.selection-card:hover {
+    		transform: translateY(-5px);
+    		border-color: #2c7399; /* Azul Gestão Sigma */
+    		box-shadow: 0 8px 15px rgba(44, 115, 153, 0.2);
+		}
 
-.selection-card:hover i {
-    color: #2c7399;
-}
+		.selection-card:hover i {
+    		color: #2c7399;
+		}
 
-.selection-card.selected {
-    background-color: #f0f7fa;
-    border-color: #2c7399;
-    border-width: 3px;
-}
+		.selection-card.selected {
+    		background-color: #f0f7fa;
+    		border-color: #2c7399;
+    		border-width: 3px;
+		}
 
-.selection-card.selected i {
-    color: #2c7399;
-    transform: scale(1.1);
-}
+		.selection-card.selected i {
+    		color: #2c7399;
+    		transform: scale(1.1);
+		}
 
 /* 4. Badges de Status Operativo para os Cards */
 .status-vtr-badge {
@@ -9586,12 +9586,13 @@ async function abrirSeletorGlobalSubstituicao() {
         carregarAlmoxarifadoUI(); // Tenta recarregar a UI mesmo com erro
     }
 }
-	/**
- * Renderiza a interface da tabela de Almoxarifado.
- * Esta função resolve o erro "is not defined" no console.
+		
+/**
+ * RENDERIZAÇÃO DA TABELA DO ALMOXARIFADO
+ * Ajustada para permitir visão global ao ADMIN e restrita ao GESTOR.
  */
 async function carregarAlmoxarifadoUI() {
-    // 1. Controle de Visibilidade Absoluto: Restaura o container principal e esconde os detalhes
+    // 1. Controle de Visibilidade dos Painéis
     const containerPrincipal = document.getElementById('container-tabela-principal');
     const wrapperRastreio = document.getElementById('almox-rastreio-wrapper');
     const wrapperPendencias = document.getElementById('ca-table-wrapper');
@@ -9602,7 +9603,7 @@ async function carregarAlmoxarifadoUI() {
     if (wrapperPendencias) wrapperPendencias.style.display = 'none';
     if (filtroCard) filtroCard.style.display = 'flex';
 
-    // 2. Definição de elementos de UI
+    // 2. Elementos de Interface
     const table = document.getElementById('almox-table');
     const thead = table ? table.querySelector('thead') : null;
     const tbody = document.getElementById('almox-body');
@@ -9610,11 +9611,11 @@ async function carregarAlmoxarifadoUI() {
 
     if (!tbody) return;
 
-    // 3. Restaura o cabeçalho padrão e Breadcrumb
+    // 3. Reset do Cabeçalho e Breadcrumb
     if (thead) {
         thead.innerHTML = `
             <tr>
-                <th>Material</th>
+                <th>Material / Origem</th>
                 <th style="text-align: center;">Total Geral</th>
                 <th style="text-align: center;">Em Uso</th>
                 <th style="text-align: center;">Pendente</th>
@@ -9627,51 +9628,83 @@ async function carregarAlmoxarifadoUI() {
         breadcrumb.innerHTML = `Almoxarifado > Inventário Geral`;
     }
 
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Atualizando inventário...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Atualizando base de dados...</td></tr>';
 
     try {
-        // Busca os itens da unidade do usuário logado
-        const snap = await db.collection('almoxarifado_central')
-                             .where('unidade', '==', currentUserData.unidade)
-                             .get();
+        const role = currentUserData.role;
+        const unidadeUsuario = currentUserData.unidade;
+
+        let query;
+        // 4. LÓGICA DE FILTRO POR PERFIL
+        // Admin vê tudo (incluindo o que foi criado agora como 'ADMINISTRATIVO')
+        // Gestor vê apenas a unidade dele
+        if (role === 'admin') {
+            query = db.collection('almoxarifado_central');
+        } else {
+            query = db.collection('almoxarifado_central')
+                      .where('unidade', '==', unidadeUsuario);
+        }
+
+        const snap = await query.get();
         
         let html = '';
         if (snap.empty) {
-            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum item sincronizado nesta unidade.</td></tr>';
+            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum material encontrado para esta unidade.</td></tr>';
         } else {
             const docs = [];
             snap.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
+            
+            // Ordenação Alfabética
             docs.sort((a, b) => a.nome.localeCompare(b.nome));
 
             docs.forEach(d => {
-                const total = d.total || 0;
-                const disponivel = d.disponivel || 0;
-                const statusColor = disponivel === 0 ? '#d90f23' : disponivel < (total * 0.2) ? '#f57c00' : '#1b8a3e';
+                const total = Number(d.total) || 0;
+                const disponivel = Number(d.disponivel) || 0;
+                const emCarga = Number(d.emCarga) || 0;
+                const emAlteracao = Number(d.emAlteracao) || 0;
+
+                // Cores de Status baseadas na disponibilidade
+                let statusColor = '#1b8a3e'; // Verde (OK)
+                if (disponivel === 0) {
+                    statusColor = '#d90f23'; // Vermelho (Zerado)
+                } else if (disponivel < (total * 0.25)) {
+                    statusColor = '#f57c00'; // Laranja (Crítico)
+                }
+
+                // Identificador de Unidade (Apenas para o Admin)
+                const labelUnidade = role === 'admin' 
+                    ? `<br><span style="font-size:0.75em; color:#2c7399; font-weight:bold;"><i class="fas fa-map-marker-alt"></i> LOCAL: ${d.unidade}</span>` 
+                    : '';
 
                 html += `
                 <tr>
                     <td data-label="Material">
-                        <strong>${d.nome}</strong><br>
-                        <small style="color:#888;">${d.tipo === 'multi' ? 'TOMBAMENTO' : 'QUANTIDADE'}</small>
+                        <div style="line-height:1.2;">
+                            <strong>${d.nome}</strong>
+                            ${labelUnidade}
+                            <br><small style="color:#888; font-weight:500;">TIPO: ${d.tipo === 'multi' ? 'TOMBAMENTO' : 'QUANTIDADE'}</small>
+                        </div>
                     </td>
-                    <td style="text-align:center;" data-label="Total">${total}</td>
-                    <td style="text-align:center;" data-label="Em Carga">${d.emCarga || 0}</td>
-                    <td style="text-align:center;" data-label="Em Alteração">${d.emAlteracao || 0}</td>
-                    <td style="text-align:center; font-weight:bold; color:${statusColor}; background-color:#fcfcfc;" data-label="Disponível">
+                    <td style="text-align:center; font-weight:500;" data-label="Total">${total}</td>
+                    <td style="text-align:center; color:#555;" data-label="Em Carga">${emCarga}</td>
+                    <td style="text-align:center; color:#d90f23;" data-label="Pendente">${emAlteracao}</td>
+                    <td style="text-align:center; font-weight:800; color:${statusColor}; background-color:rgba(0,0,0,0.02);" data-label="Disponível">
                         ${disponivel}
                     </td>
                     <td style="text-align:center;" data-label="Ações">
-                        <div style="display:flex; gap:8px; justify-content:center;">
-                            <button class="btn-modern-action" title="Ver Rastreabilidade" onclick="verDetalhesItemAlmox('${d.id}')" 
-                                    style="background-color: rgba(44, 115, 153, 0.12) !important; color: #2c7399 !important; border: 1px solid rgba(44, 115, 153, 0.4) !important; padding: 8px 12px !important;">
-                                <i class="fas fa-search-plus"></i>
+                        <div style="display:flex; gap:6px; justify-content:center;">
+                            <button class="btn-modern-action" title="Rastrear Localização" onclick="verDetalhesItemAlmox('${d.id}')" 
+                                    style="background:#e0f2fe!important; color:#0369a1!important; border:1px solid #bae6fd!important; padding:7px 10px!important;">
+                                <i class="fas fa-search-location"></i>
                             </button>
-                            <button class="btn-modern-action" title="Adicionar Novo Estoque" onclick="prepararAporte('${d.id}')" 
-                                    style="background-color: rgba(27, 138, 62, 0.12) !important; color: #1b8a3e !important; border: 1px solid rgba(27, 138, 62, 0.4) !important; padding: 8px 12px !important;">
+                            
+                            <button class="btn-modern-action" title="Entrada de Estoque" onclick="prepararAporte('${d.id}')" 
+                                    style="background:#dcfce7!important; color:#166534!important; border:1px solid #bbf7d0!important; padding:7px 10px!important;">
                                 <i class="fas fa-plus"></i>
                             </button>
-                            <button class="btn-modern-action" title="Histórico de Vida" onclick="verHistoricoVida('${d.id}')" 
-                                    style="background-color: rgba(245, 124, 0, 0.12) !important; color: #f57c00 !important; border: 1px solid rgba(245, 124, 0, 0.4) !important; padding: 8px 12px !important;">
+                            
+                            <button class="btn-modern-action" title="Histórico de Vida do Item" onclick="verHistoricoVidaGlobal('${d.id}')" 
+                                    style="background:#fef3c7!important; color:#92400e!important; border:1px solid #fde68a!important; padding:7px 10px!important;">
                                 <i class="fas fa-history"></i>
                             </button>
                         </div>
@@ -9682,8 +9715,9 @@ async function carregarAlmoxarifadoUI() {
         tbody.innerHTML = html;
 
     } catch (e) {
-        console.error("Erro ao carregar UI do Almoxarifado:", e);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao carregar dados.</td></tr>';
+        console.error("Erro crítico ao renderizar Almoxarifado:", e);
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">
+            <i class="fas fa-exclamation-circle"></i> Erro ao carregar dados: ${e.message}</td></tr>`;
     }
 }
 /**
