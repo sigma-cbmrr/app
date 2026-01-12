@@ -2210,13 +2210,8 @@ input:checked + .slider:before {
         	<a onclick="switchView('postos')" id="link-postos" class="restricted-admin-only"><i class="fas fa-map-signs"></i> Postos</a>
 			<a onclick="switchView('vtr-bases')" id="link-vtr-bases" class="restricted-admin-only"><i class="fas fa-truck-monster"></i> Viaturas & Bases</a>
         	<a onclick="switchView('usuarios')" id="link-usuarios" class="restricted-admin-only"><i class="fas fa-users"></i> Usuários</a>
-        	<li onclick="navegarMenu('menu-editor-listas'); carregarListasFiltros(); carregarCardsListas();" 
-    			id="link-listas" 
-    			class="restricted-admin-only">
-    			<i class="fas fa-clipboard-list"></i>
-    			<span>Editor de Listas</span>
-</li>
-    </div>
+        	<a onclick="switchView('listas')" id="link-listas" class="restricted-admin-only"><i class="fas fa-clipboard-list"></i> Editor de Listas</a>
+    	</div>
 	
     <div class="content">
         
@@ -4998,9 +4993,8 @@ function reimprimirPDF(data) {
     }
     
     if (v === 'listas') {
-        carregarPostosServicoSelect('novo-local-posto'); 
-        carregarUnidadesSelect('novo-local-unidade'); 
-        carregarListaLocaisAdmin(); 
+        carregarFiltrosParaNovoEditor(); // Chama a função que popula Ativos e Postos
+        carregarCardsListasExistentes(); // Chama a função que mostrará as listas já criadas
     }
 
     if(v === 'global-history') {
@@ -11129,7 +11123,7 @@ function limparFormularioUnidade() {
         header.style.display = temCardVisivel ? "block" : "none";
     });
 }
-		/*[GESTÃO DE VIATURAS/BASE INÍCIO]*/
+		/*[GESTÃO DE VIATURAS/BASE*/
 
 		// 1. Controla a abertura do formulário retrátil
 function controlarToggleVtrBase() {
@@ -11540,6 +11534,248 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
         console.error("Erro ao carregar detalhes:", e);
         alert("Erro ao abrir detalhes da viatura.");
     }
+}
+		/*[GESTÃO DE VIATURAS/BASE*/
+
+		// Controla a abertura do formulário de Nova Lista
+function controlarToggleFormLista() {
+    const form = document.getElementById('form-cadastro-lista');
+    if (form.style.display === 'none') {
+        form.style.display = 'block';
+    } else {
+        form.style.display = 'none';
+    }
+}
+
+// Busca Ativos e Postos no Banco para preencher os Selects
+async function carregarFiltrosParaNovoEditor() {
+    const selectAtivo = document.getElementById('lista-ativo-uid');
+    const selectPosto = document.getElementById('lista-posto-uid');
+    
+    if (!selectAtivo || !selectPosto) return;
+
+    selectAtivo.innerHTML = '<option value="">Carregando ativos...</option>';
+    selectPosto.innerHTML = '<option value="">Carregando postos...</option>';
+
+    try {
+        // 1. Carregar Postos
+        const snapPostos = await db.collection('postos_estruturados').where('ativo', '==', true).get();
+        let htmlPostos = '<option value="">Vincular ao Posto...</option>';
+        snapPostos.forEach(doc => {
+            htmlPostos += `<option value="${doc.id}">${doc.data().nome}</option>`;
+        });
+        selectPosto.innerHTML = htmlPostos;
+
+        // 2. Carregar Viaturas e Bases (Varrendo as subcoleções)
+        const unidadesSnap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
+        let htmlAtivos = '<option value="">Selecione a VTR ou Base...</option>';
+
+        for (const unitDoc of unidadesSnap.docs) {
+            const unitSigla = unitDoc.data().sigla;
+            const unitId = unitDoc.id;
+
+            // Busca Viaturas desta unidade
+            const vtrs = await db.collection('vtr_bases').doc(unitId).collection('viaturas').get();
+            vtrs.forEach(vtrDoc => {
+                const v = vtrDoc.data();
+                htmlAtivos += `<option value="${vtrDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${v.prefixo}">${unitSigla} | ${v.prefixo} (${v.placa})</option>`;
+            });
+
+            // Busca Bases desta unidade
+            const bases = await db.collection('vtr_bases').doc(unitId).collection('bases').get();
+            bases.forEach(baseDoc => {
+                const b = baseDoc.data();
+                htmlAtivos += `<option value="${baseDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${b.nome}">${unitSigla} | BASE: ${b.nome}</option>`;
+            });
+        }
+        selectAtivo.innerHTML = htmlAtivos;
+
+    } catch (e) {
+        console.error("Erro ao carregar filtros do editor:", e);
+    }
+}
+
+// Função Placeholder para os Cards (Faremos a gravação no próximo passo)
+async function carregarCardsListasExistentes() {
+    const container = document.getElementById('container-cards-listas');
+    container.innerHTML = '<p style="text-align:center; padding:20px; color:#999;">Buscando listas de conferência...</p>';
+    
+    // Por enquanto deixaremos vazio até criarmos a função de Gravar
+}
+		async function gravarCabecalhoLista(abrirEditor) {
+    const selectAtivo = document.getElementById('lista-ativo-uid');
+    const selectPosto = document.getElementById('lista-posto-uid');
+
+    const ativoUid = selectAtivo.value;
+    const postoUid = selectPosto.value;
+
+    if (!ativoUid || !postoUid) {
+        return alert("Por favor, selecione tanto o Ativo quanto o Posto de Vínculo.");
+    }
+
+    // Captura os dados extras que guardamos nos atributos 'data-' do select
+    const optionSelecionada = selectAtivo.options[selectAtivo.selectedIndex];
+    const nomeAtivo = optionSelecionada.dataset.nome;
+    const unidadeUid = optionSelecionada.dataset.unidade;
+    const unidadeSigla = optionSelecionada.dataset.sigla;
+    const nomePosto = selectPosto.options[selectPosto.selectedIndex].text;
+
+    // Geramos um ID único para esta lista específica
+    const listaUid = `LISTA_${ativoUid}_${postoUid}`;
+
+    try {
+        const batch = db.batch();
+        const listaRef = db.collection('listas_conferencia').doc(listaUid);
+
+        const dadosLista = {
+            uid: listaUid,
+            ativo_id: ativoUid,
+            ativo_nome: nomeAtivo,
+            unidade_id: unidadeUid,
+            unidade_sigla: unidadeSigla,
+            posto_id: postoUid,
+            posto_nome: nomePosto,
+            ativo: true,
+            tipo: 'conferencia_materiais',
+            list: [], // Array onde entrarão os itens (mangueiras, etc)
+            criado_em: firebase.firestore.FieldValue.serverTimestamp(),
+            criado_por: currentUserData.nome_militar_completo
+        };
+
+        batch.set(listaRef, dadosLista, { merge: true });
+
+        // Opcional: Atualiza a rota se necessário para compatibilidade com o Dashboard antigo
+        // Aqui garantimos que o sistema reconheça este novo par Ativo-Posto
+        const rotaRef = db.collection('config_geral').doc('rotas');
+        batch.update(rotaRef, {
+            [listaUid]: {
+                nome: nomeAtivo,
+                posto: nomePosto,
+                unidade: unidadeSigla,
+                ativo: true
+            }
+        });
+
+        await batch.commit();
+
+        alert(`Lista para ${nomeAtivo} vinculada ao ${nomePosto} salva com sucesso!`);
+        
+        controlarToggleFormLista(); // Fecha o formulário
+        carregarCardsListasExistentes(); // Atualiza o grid de cards
+
+        if (abrirEditor) {
+            abrirModalEditorItens(listaUid, nomeAtivo);
+        }
+
+    } catch (e) {
+        console.error("Erro ao gravar lista:", e);
+        alert("Erro técnico ao salvar cabeçalho da lista.");
+    }
+}
+		async function carregarCardsListasExistentes() {
+    const container = document.getElementById('container-cards-listas');
+    if (!container) return;
+
+    container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Carregando inventários...</div>';
+
+    try {
+        const snap = await db.collection('listas_conferencia')
+                             .where('ativo', '==', true)
+                             .get();
+
+        if (snap.empty) {
+            container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; padding:30px; color:#999;">Nenhuma lista de conferência criada ainda.</p>';
+            return;
+        }
+
+        let html = '';
+        snap.forEach(doc => {
+            const lista = doc.data();
+            const qtdItens = lista.list ? lista.list.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0) : 0;
+
+            html += `
+                <div class="unit-building-card" style="cursor:pointer; border-top: 6px solid #2c7399;" onclick="abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
+                    <div class="card-actions-container">
+                        <button class="btn-delete-unit-card" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                    
+                    <div style="width: 100%; height: 70px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
+                        <i class="fa-solid fa-clipboard-list" style="font-size: 2.2em; color: #2c7399;"></i>
+                    </div>
+
+                    <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div style="text-align: center;">
+                            <span style="display:block; font-weight:900; font-size:1.2em; color:#333; margin-bottom: 5px;">${lista.ativo_nome}</span>
+                            <span class="status-badge" style="background:#e0f2fe; color:#0369a1; font-size:0.75em;">${qtdItens} ITENS NO INVENTÁRIO</span>
+                        </div>
+                        
+                        <div style="border-top: 1px solid #eee; padding-top:10px; margin-top: 15px;">
+                            <span style="font-weight:bold; color:#2c7399; text-transform:uppercase; font-size:0.7em; display:block;">Vínculo Operacional:</span>
+                            <div style="display:flex; align-items:center; gap:8px; margin-top:5px;">
+                                <i class="fas fa-map-marker-alt" style="color:#555; font-size: 0.8em;"></i>
+                                <span style="color:#444; font-weight:600; font-size:0.8em;">${lista.posto_nome} | ${lista.unidade_sigla}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+
+    } catch (e) {
+        console.error("Erro ao carregar cards de listas:", e);
+        container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro ao carregar listas.</p>';
+    }
+}
+
+/**
+ * Filtra os cards de listas em tempo real (Busca)
+ */
+function filtrarCardsListas() {
+    const termo = document.getElementById('filter-lista-busca').value.toUpperCase();
+    const cards = document.querySelectorAll('#container-cards-listas .unit-building-card');
+
+    cards.forEach(card => {
+        const texto = card.innerText.toUpperCase();
+        card.style.display = texto.includes(termo) ? "flex" : "none";
+    });
+}
+
+/**
+ * Exclui a lista de conferência e limpa a rota associada
+ */
+async function deletarListaInteira(listaUid, nomeAtivo) {
+    if (!confirm(`⚠️ ATENÇÃO: Isso apagará permanentemente o inventário de materiais do ${nomeAtivo}. Confirma?`)) return;
+
+    try {
+        const batch = db.batch();
+        
+        // 1. Remove a lista
+        batch.delete(db.collection('listas_conferencia').doc(listaUid));
+        
+        // 2. Remove da rota antiga (limpeza de legado)
+        const rotaRef = db.collection('config_geral').doc('rotas');
+        batch.update(rotaRef, {
+            [listaUid]: firebase.firestore.FieldValue.delete()
+        });
+
+        await batch.commit();
+        alert("Lista removida com sucesso.");
+        carregarCardsListasExistentes();
+
+    } catch (e) {
+        console.error("Erro ao deletar lista:", e);
+        alert("Erro ao excluir lista.");
+    }
+}
+		
+
+function abrirModalEditorItens(uid, nome) {
+    alert(`Interface de Edição para ${nome} em desenvolvimento. Aqui o gestor adicionará mangueiras, rádios, etc.`);
+    // Próximo passo: Criar este modal.
 }
 		
     </script>
