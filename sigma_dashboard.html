@@ -9500,99 +9500,116 @@ async function verDetalhesItemAlmox(docId) {
 
         theadRastreio.innerHTML = `
             <tr>
-                <th>${ehMulti ? 'Tombamento' : 'Identificação'}</th>
-                <th style="text-align:center;">Localização Atual</th>
+                <th>${ehMulti ? 'Tombamento / Unidade' : 'Identificação'}</th>
+                <th style="text-align:center;">Localização / Saldo</th>
                 <th style="text-align:center;">Status</th>
                 <th style="text-align:right;">Ações</th>
             </tr>`;
 
-        let htmlPrioridade = ''; // O que é do usuário
-        let htmlRestante = '';   // O que é de outras unidades
+        let htmlPrioridade = ''; 
+        let htmlRestante = '';   
         let cDisp = 0, cUso = 0, cCaut = 0, cPend = 0;
 
-        // 1. BUSCA NOS ALMOXARIFADOS (Estoques Sede e Setoriais)
         const snapAlmoxs = await db.collection('almoxarifado_central').where('uid_global', '==', uidGlobal).get();
         
+        // 1. PROCESSAMENTO DE ESTOQUES (ALMOXARIFADOS)
         snapAlmoxs.forEach(docAl => {
             const d = docAl.data();
             const unitIdDoc = docAl.id;
             if (d.total <= 0) return;
 
-            const ehDonoDoEstoque = (d.unidade_id === currentUserData.unidade_id) || (d.unidade === currentUserData.unidade);
-            const souAdminOuGeral = (role === 'admin' || role === 'gestor_geral');
-            const podeEnviar = (souAdminOuGeral && d.unidade === "ADMINISTRATIVO") || (ehDonoDoEstoque && !souAdminOuGeral);
+            const ehDono = (d.unidade_id === currentUserData.unidade_id) || (d.unidade === currentUserData.unidade);
+            const souAdminGeral = (role === 'admin' || role === 'gestor_geral');
+            const podeEnviar = (souAdminGeral && d.unidade === "ADMINISTRATIVO") || (ehDono && !souAdminGeral);
 
             let bufferHtml = '';
 
             if (ehMulti) {
-                (d.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
-                    const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
-                    if (temP) cPend++; else cDisp++;
+                const tombDisponiveis = (d.tombamentos || []).filter(t => !t.viatura_id);
+                
+                // SE FOR DONO OU ADMIN NA SEDE: DETALHAMENTO OPERACIONAL
+                if (ehDono || (souAdminGeral && d.unidade === "ADMINISTRATIVO")) {
+                    tombDisponiveis.forEach(t => {
+                        const temP = t.pendencias_ids?.length > 0;
+                        if (temP) cPend++; else cDisp++;
 
-                    const statusHtml = temP 
-                        ? '<span class="status-badge" style="background:#ffebee;color:#c62828;">PENDENTE</span>' 
-                        : '<span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span>';
+                        const btnAcao = podeEnviar 
+                            ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
+                            : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
-                    const btnAcao = podeEnviar 
-                        ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
-                        : `<small style="color:#999; font-style:italic;">Visualização</small>`;
+                        bufferHtml += `
+                            <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
+                                <td><strong>${t.tomb}</strong></td>
+                                <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
+                                <td style="text-align:center;"><span class="status-badge" style="background:${temP ? '#ffebee' : '#dcfce7'};color:${temP ? '#c62828' : '#166534'};">${temP ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
+                                <td style="text-align:right;">${btnAcao}</td>
+                            </tr>`;
+                    });
+                } else {
+                    // SE NÃO FOR DONO: RESUMO LOGÍSTICO (MODAL)
+                    const qtdOutros = tombDisponiveis.length;
+                    cDisp += qtdOutros;
+                    const listaTombStr = JSON.stringify(tombDisponiveis.map(t => t.tomb));
 
                     bufferHtml += `
-                        <tr style="background:${ehDonoDoEstoque ? '#f0fdf4' : '#fff'};">
-                            <td><strong>${t.tomb}</strong></td>
-                            <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
-                            <td style="text-align:center;">${statusHtml}</td>
-                            <td style="text-align:right;">${btnAcao}</td>
+                        <tr style="background:#f8fafc;">
+                            <td><i class="fas fa-warehouse" style="color:#94a3b8;"></i> Estoque Setorial</td>
+                            <td style="text-align:center;">Unidade: <b>${d.unidade}</b></td>
+                            <td style="text-align:center;"><span class="status-badge" style="background:#e2e8f0;color:#475569; font-weight:bold;">${qtdOutros} TOMBAMENTOS</span></td>
+                            <td style="text-align:right;">
+                                <button onclick='abrirModalConsultaTombamentos("${d.unidade}", ${listaTombStr})' class="btn-modern-action" style="background:#64748b!important; padding:5px 10px!important;"><i class="fas fa-eye"></i></button>
+                            </td>
                         </tr>`;
-                });
+                }
             } else {
-                cDisp += (Number(d.disponivel) || 0);
-                if (d.disponivel > 0) {
+                // ITEM SINGLE: SEMPRE RESUMIDO POR UNIDADE
+                const saldoDisp = Number(d.disponivel) || 0;
+                cDisp += saldoDisp;
+                if (saldoDisp > 0) {
                     const btnAcaoSingle = podeEnviar
                         ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
                         : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
                     bufferHtml += `
-                        <tr style="background:${ehDonoDoEstoque ? '#f0fdf4' : '#fff'};">
+                        <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
                             <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
-                            <td style="text-align:center;">Saldo: <b>${d.disponivel} un.</b></td>
+                            <td style="text-align:center;">Saldo: <b>${saldoDisp} un.</b></td>
                             <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
                             <td style="text-align:right;">${btnAcaoSingle}</td>
                         </tr>`;
                 }
             }
-
-            if (ehDonoDoEstoque) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
+            if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
         });
 
-        // 2. BUSCA NAS VIATURAS (Itens em Carga)
+        // 2. BUSCA NAS VIATURAS (ITENS EM CARGA)
         const snapListas = await db.collection('listas_conferencia').where('ativo', '==', true).get();
 
         snapListas.forEach(docVtr => {
             const vtrData = docVtr.data();
-            const siglaUnidadeVtr = vtrData.unidade_sigla || "---";
-            const idAlmoxVolta = `${siglaUnidadeVtr}_${uidGlobal}`;
+            const siglaVtr = vtrData.unidade_sigla || "---";
+            const idAlmoxVolta = `${vtrData.unidade_id || siglaVtr}_${uidGlobal}`;
             const ehMinhaVtr = (vtrData.unidade_id === currentUserData.unidade_id) || (vtrData.unidade_sigla === currentUserData.unidade);
 
             vtrData.list.forEach(setor => {
                 const itNaVtr = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
                 if (!itNaVtr) return;
 
-                let bufferHtmlVtr = '';
+                let bufferVtr = '';
 
                 if (ehMulti) {
                     (itNaVtr.tombamentos || []).forEach(t => {
-                        const temCautela = !!t.cautela;
+                        const temC = !!t.cautela;
                         const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
-                        if (temP) cPend++; else if (temCautela) cCaut++; else cUso++;
+                        if (temP) cPend++; else if (temC) cCaut++; else cUso++;
 
-                        const statusTxt = temP ? 'PENDENTE' : (temCautela ? 'CAUTELADO' : 'EM USO');
-                        const corStatus = temP ? 'background:#ffebee;color:#c62828;' : (temCautela ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;');
+                        const statusTxt = temP ? 'PENDENTE' : (temC ? 'CAUTELADO' : 'EM USO');
+                        const corStatus = temP ? 'background:#ffebee;color:#c62828;' : (temC ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;');
                         
-                        bufferHtmlVtr += `
+                        bufferVtr += `
                             <tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
                                 <td><strong>${t.tomb}</strong></td>
-                                <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaUnidadeVtr})</small></td>
+                                <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
                                 <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${statusTxt}</span></td>
                                 <td style="text-align:right;">
                                     ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}
@@ -9601,43 +9618,65 @@ async function verDetalhesItemAlmox(docId) {
                     });
                 } else {
                     cUso += Number(itNaVtr.quantidadeEsperada) || 0;
-                    bufferHtmlVtr += `
+                    bufferVtr += `
                         <tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
                             <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
-                            <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaUnidadeVtr})</small></td>
+                            <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
                             <td style="text-align:center;"><b>${itNaVtr.quantidadeEsperada} un.</b></td>
                             <td style="text-align:right;">
                                 ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}
                             </td>
                         </tr>`;
                 }
-
-                if (ehMinhaVtr) htmlPrioridade += bufferHtmlVtr; else htmlRestante += bufferHtmlVtr;
+                if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
             });
         });
 
         // 3. EXTRATO DE TOPO
-        const totalGeral = cDisp + cUso + cCaut + cPend;
+        const totalG = cDisp + cUso + cCaut + cPend;
         const extratoHtml = `
             <div id="almox-resumo-topo" style="display: flex; gap: 10px; padding: 15px; background: #fff; border: 1px solid #eee; border-radius: 8px; justify-content: space-around; flex-wrap: wrap; margin-bottom:20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                 <div style="text-align:center;"><small style="color:#2e7d32; font-weight:bold; display:block;">DISPONÍVEL</small><b style="font-size:1.4em; color:#2e7d32;">${cDisp}</b></div>
                 <div style="text-align:center;"><small style="color:#616161; font-weight:bold; display:block;">EM USO</small><b style="font-size:1.4em; color:#616161;">${cUso}</b></div>
                 <div style="text-align:center;"><small style="color:#e65100; font-weight:bold; display:block;">CAUTELADO</small><b style="font-size:1.4em; color:#e65100;">${cCaut}</b></div>
                 <div style="text-align:center;"><small style="color:#c62828; font-weight:bold; display:block;">PENDENTE</small><b style="font-size:1.4em; color:#c62828;">${cPend}</b></div>
-                <div style="text-align:center; border-left: 2px solid #ddd; padding-left:20px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL GERAL</small><b style="font-size:1.4em; color:#800020;">${totalGeral}</b></div>
+                <div style="text-align:center; border-left: 2px solid #ddd; padding-left:20px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL</small><b style="font-size:1.4em; color:#800020;">${totalG}</b></div>
             </div>`;
 
-        const resumoAntigo = document.getElementById('almox-resumo-topo');
-        if(resumoAntigo) resumoAntigo.remove();
+        const resOld = document.getElementById('almox-resumo-topo');
+        if(resOld) resOld.remove();
         palcoRastreio.querySelector('div').insertAdjacentHTML('afterend', extratoHtml);
         
-        // Renderiza primeiro o que é prioridade (da unidade), depois o restante.
         tbodyRastreio.innerHTML = (htmlPrioridade + htmlRestante) || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro localizado.</td></tr>';
 
     } catch (e) {
         console.error(e);
         tbodyRastreio.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Erro ao processar rastreio.</td></tr>';
     }
+}
+
+// FUNÇÃO DO MODAL DE CONSULTA (Para outras unidades)
+function abrirModalConsultaTombamentos(unidade, lista) {
+    const modalHtml = `
+        <div id="modal-consulta-tomb" class="modal-modern-overlay" style="display:flex;">
+            <div class="modal-modern-content" style="max-width:350px;">
+                <div class="modal-modern-header">
+                    <h3>Tombamentos: ${unidade}</h3>
+                    <button onclick="document.getElementById('modal-consulta-tomb').remove()" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-modern-body" style="max-height:300px; overflow-y:auto;">
+                    <ul style="list-style:none; padding:0; margin:0;">
+                        ${lista.map(t => `<li style="padding:10px; border-bottom:1px solid #eee; display:flex; align-items:center; gap:10px;">
+                            <i class="fas fa-tag" style="color:#2c7399;"></i> <span><b>${t}</b></span>
+                        </li>`).join('')}
+                    </ul>
+                </div>
+                <div class="modal-modern-footer">
+                    <button onclick="document.getElementById('modal-consulta-tomb').remove()" class="btn-modern-cancel">Fechar</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 		// Função de Filtragem Instantânea com Higienização Numérica
 function filtrarRastreioMulti() {
