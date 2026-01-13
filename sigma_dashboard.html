@@ -9370,16 +9370,15 @@ async function carregarAlmoxarifadoUI() {
 
     try {
         const role = currentUserData.role;
-        const unidadeUsuario = currentUserData.unidade;
 
         let query = db.collection('almoxarifado_central');
+        // 🛑 MUDANÇA CIRÚRGICA: Filtro agora utiliza o unidade_id (UID imutável)
         if (role !== 'admin') {
-            query = query.where('unidade', '==', unidadeUsuario);
+            query = query.where('unidade_id', '==', currentUserData.unidade_id);
         }
 
         const snap = await query.get();
         
-        // --- LÓGICA DE CONSOLIDAÇÃO (Remoção de Duplicidade) ---
         const inventarioAgrupado = {};
 
         snap.forEach(doc => {
@@ -9388,7 +9387,7 @@ async function carregarAlmoxarifadoUI() {
 
             if (!inventarioAgrupado[uid]) {
                 inventarioAgrupado[uid] = {
-                    id: doc.id, // Referência inicial para ações
+                    id: doc.id, 
                     nome: d.nome,
                     tipo: d.tipo,
                     total: 0,
@@ -9403,7 +9402,9 @@ async function carregarAlmoxarifadoUI() {
             inventarioAgrupado[uid].disponivel += (Number(d.disponivel) || 0);
             inventarioAgrupado[uid].emCarga += (Number(d.emCarga) || 0);
             inventarioAgrupado[uid].emAlteracao += (Number(d.emAlteracao) || 0);
-            if (!inventarioAgrupado[uid].locais.includes(d.unidade)) {
+            
+            // Armazena o nome legível da unidade para exibição no card do Admin
+            if (d.unidade && !inventarioAgrupado[uid].locais.includes(d.unidade)) {
                 inventarioAgrupado[uid].locais.push(d.unidade);
             }
         });
@@ -9419,6 +9420,7 @@ async function carregarAlmoxarifadoUI() {
                 const disponivel = d.disponivel;
                 let statusColor = (disponivel === 0) ? '#d90f23' : (disponivel < (total * 0.25)) ? '#f57c00' : '#1b8a3e';
 
+                // Exibe os locais onde o Admin possui saldo deste material
                 const labelLocais = role === 'admin' 
                     ? `<br><span style="font-size:0.75em; color:#2c7399; font-weight:bold;"><i class="fas fa-map-marker-alt"></i> LOCAIS: ${d.locais.join(', ')}</span>` 
                     : '';
