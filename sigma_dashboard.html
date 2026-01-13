@@ -12043,21 +12043,72 @@ function atualizarSelectSetores() {
         arquiteturaAtiva.map((s, idx) => `<option value="${idx}">${s.nome}</option>`).join('');
 }
 
-function abrirModalNovoSetor() {
-    const nome = prompt("Nome do novo setor (ex: CABINE, CARROCERIA ESQUERDA):");
-    if (!nome) return;
+// 1. Abre o modal e carrega a "inteligência" de nomes
+async function abrirModalNovoSetor() {
+    const modal = document.getElementById('modal-novo-setor-arquitetura');
+    const input = document.getElementById('input-nome-setor-modal');
+    const containerTags = document.getElementById('setores-tags-container');
+    
+    input.value = '';
+    modal.style.display = 'flex';
+    input.focus();
+
+    // Inteligência: Busca todos os nomes de setores já usados no sistema
+    try {
+        containerTags.innerHTML = '<small>Buscando padrões...</small>';
+        const snap = await db.collection('listas_conferencia').get();
+        const nomesSetores = new Set();
+        
+        // Nomes padrão de segurança
+        ['CABINE', 'CARROCERIA', 'TETO', 'MOTOR'].forEach(n => nomesSetores.add(n));
+
+        snap.forEach(doc => {
+            const lista = doc.data().list || [];
+            lista.forEach(s => nomesSetores.add(s.nome.toUpperCase()));
+        });
+
+        // Transforma o Set em Tags clicáveis (limitado a 10 sugestões mais comuns)
+        const listaFinal = Array.from(nomesSetores).sort();
+        containerTags.innerHTML = listaFinal.map(nome => `
+            <span class="tag-sugestao-setor" onclick="selecionarTagSetor('${nome}')">${nome}</span>
+        `).join('');
+
+    } catch (e) {
+        containerTags.innerHTML = '<small>Não foi possível carregar sugestões.</small>';
+    }
+}
+
+// 2. Auxiliar para preencher o input via clique na tag
+function selecionarTagSetor(nome) {
+    document.getElementById('input-nome-setor-modal').value = nome;
+    confirmarNovoSetor(); // Já confirma para agilizar
+}
+
+// 3. Valida e cria o setor no rascunho
+function confirmarNovoSetor() {
+    const nome = document.getElementById('input-nome-setor-modal').value.trim().toUpperCase();
+    
+    if (!nome) return alert("Digite um nome para o setor.");
+
+    // Trava de duplicidade: Evita dois setores com mesmo nome na mesma VTR
+    const existe = arquiteturaAtiva.some(s => s.nome === nome);
+    if (existe) return alert("Este setor já existe nesta viatura.");
 
     arquiteturaAtiva.push({
         id: "setor_" + Date.now(),
-        nome: nome.toUpperCase(),
+        nome: nome,
         itens: []
     });
 
     renderizarArquiteturaEditor();
     atualizarSelectSetores();
     marcarAlteracao();
+    fecharModalNovoSetor();
 }
 
+function fecharModalNovoSetor() {
+    document.getElementById('modal-novo-setor-arquitetura').style.display = 'none';
+}
 function removerSetorArquitetura(idx) {
     if (arquiteturaAtiva[idx].itens.length > 0) {
         if (!confirm("Este setor contém itens. Ao excluir o setor, os itens serão removidos da viatura. Confirmar?")) return;
