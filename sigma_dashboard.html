@@ -11863,20 +11863,20 @@ function abrirModalEditorItens(uid, nome) {
 
     try {
         const refOrigem = db.collection('almoxarifado_central').doc(docIdOrigem);
-        const docIdDestino = `${nomeUnidadeDestino}_${uidGlobal}`; 
+        
+        // 🛑 MUDANÇA CIRÚRGICA: O ID do documento agora usa o UID da Unidade para ser único e constante
+        const docIdDestino = `${unidadeDestinoUid}_${uidGlobal}`; 
         const refDestino = db.collection('almoxarifado_central').doc(docIdDestino);
 
         await db.runTransaction(async (transaction) => {
-            // --- PASSO 1: TODAS AS LEITURAS (READS) NO TOPO ---
             const snapOrigem = await transaction.get(refOrigem);
-            const snapDestino = await transaction.get(refDestino); // <--- MOVIDO PARA CÁ (ANTES DE QUALQUER ESCRITA)
+            const snapDestino = await transaction.get(refDestino); 
 
             if (!snapOrigem.exists) throw new Error("Item de origem não localizado.");
             const dOrigem = snapOrigem.data();
 
             if (dOrigem.disponivel < qtd) throw new Error("Saldo insuficiente no Almoxarifado Central.");
 
-            // --- PASSO 2: PREPARAÇÃO DE DADOS (CÁLCULOS EM MEMÓRIA) ---
             let tombamentosParaMover = [];
             let novosTombamentosOrigem = dOrigem.tombamentos || [];
             let selecionados = [];
@@ -11897,19 +11897,17 @@ function abrirModalEditorItens(uid, nome) {
 
             const logRecebimento = {
                 data: dataReg, evento: "ENTRADA_TRANSFERENCIA",
-                detalhes: `Recebido ${qtd}un do Almox. Central. Motivo: ${obs}`,
+                detalhes: `Recebido do Almox. Central via Admin. Motivo: ${obs}`,
                 quem: autorNome
             };
 
-            // --- PASSO 3: TODAS AS ESCRITAS (WRITES) ---
-
-            // A. Histórico Individual
             if (ehMulti) {
                 for (let t of selecionados) {
                     const histRef = db.collection('historico_ativos_individuais').doc(t);
                     transaction.set(histRef, {
                         situacao_atual: `DISPONÍVEL (ESTOQUE ${nomeUnidadeDestino})`,
                         unidade_atual: nomeUnidadeDestino,
+                        unidade_id: unidadeDestinoUid, // 🛑 Adicionado UID no histórico
                         eventos: firebase.firestore.FieldValue.arrayUnion({
                             data: dataReg, evento: "TRANSFERENCIA_UNIDADE", quem: autorNome,
                             detalhes: `Transferido do Almox. Central para ${nomeUnidadeDestino}. Justificativa: ${obs}`
@@ -11918,7 +11916,6 @@ function abrirModalEditorItens(uid, nome) {
                 }
             }
 
-            // B. Atualiza Origem
             transaction.update(refOrigem, {
                 total: (dOrigem.total || 0) - qtd,
                 disponivel: (dOrigem.disponivel || 0) - qtd,
@@ -11926,12 +11923,12 @@ function abrirModalEditorItens(uid, nome) {
                 historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logEnvio)
             });
 
-            // C. Atualiza/Cria Destino
             if (!snapDestino.exists) {
                 transaction.set(refDestino, {
                     uid_global: uidGlobal,
                     nome: dOrigem.nome,
                     unidade: nomeUnidadeDestino,
+                    unidade_id: unidadeDestinoUid, // 🛑 CAMPO CHAVE PARA FILTRO DO GESTOR
                     total: qtd,
                     disponivel: qtd,
                     emCarga: 0,
@@ -11945,6 +11942,7 @@ function abrirModalEditorItens(uid, nome) {
                 transaction.update(refDestino, {
                     total: (dDest.total || 0) + qtd,
                     disponivel: (dDest.disponivel || 0) + qtd,
+                    unidade_id: unidadeDestinoUid, // 🛑 Garante que o ID esteja presente
                     tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...tombamentosParaMover) : (dDest.tombamentos || []),
                     historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logRecebimento)
                 });
@@ -11962,7 +11960,7 @@ function abrirModalEditorItens(uid, nome) {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check"></i> Confirmar';
     }
-}	
+}
     </script>
 </body>
 </html>
