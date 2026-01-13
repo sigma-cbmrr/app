@@ -9514,49 +9514,47 @@ async function verDetalhesItemAlmox(docId) {
         const snapAlmoxs = await db.collection('almoxarifado_central').where('uid_global', '==', uidGlobal).get();
         
         snapAlmoxs.forEach(docAl => {
-            const d = docAl.data();
-            const unitIdDoc = docAl.id;
-            if (d.total <= 0) return;
+    const d = docAl.data();
+    const unitIdDoc = docAl.id;
+    if (d.total <= 0) return;
 
-            // Verifica se este estoque é o da Sede (ADMINISTRATIVO)
-            const ehEstoqueSede = d.unidade === "ADMINISTRATIVO";
-            const corFundo = ehEstoqueSede ? 'background:#f0f7fa;' : 'background:#f0fdf4;';
+    // Lógica de Permissão: Sou o dono deste estoque ou sou Admin?
+    const ehDonoDoEstoque = (d.unidade_id === currentUserData.unidade_id) || (d.unidade === currentUserData.unidade);
+    const souAdminOuGestorGeral = (currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral');
+    
+    // Ação: Admin/GestorGeral envia da SEDE. Gestor de Unidade envia do SEU estoque.
+    // Mas Admin NÃO pode enviar de um estoque que já é de outra unidade (respeitando sua regra).
+    const podeEnviar = (souAdminOuGestorGeral && d.unidade === "ADMINISTRATIVO") || (ehDonoDoEstoque && !souAdminOuGestorGeral);
 
-            if (ehMulti) {
-                (d.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
-                    const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
-                    if (temP) cPend++; else cDisp++;
+    if (ehMulti) {
+        (d.tombamentos || []).filter(t => !t.viatura_id).forEach(t => {
+            const btnAcao = podeEnviar 
+                ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important;"><i class="fas fa-paper-plane"></i></button>`
+                : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
-                    // SÓ EXIBE O BOTÃO SE O ITEM ESTIVER NA SEDE (ADMINISTRATIVO)
-                    const botaoAcao = ehEstoqueSede 
-                        ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
-                        : `<small style="color:#999; font-style:italic;">Estoque Setorial</small>`;
-
-                    htmlFinal += `
-                        <tr style="${corFundo}">
-                            <td><strong>${t.tomb}</strong></td>
-                            <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
-                            <td style="text-align:center;"><span class="status-badge" style="background:${temP ? '#ffebee' : '#dcfce7'};color:${temP ? '#c62828' : '#166534'};">${temP ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
-                            <td style="text-align:right;">${botaoAcao}</td>
-                        </tr>`;
-                });
-            } else {
-                cDisp += (Number(d.disponivel) || 0);
-                if (d.disponivel > 0) {
-                    const botaoAcaoSingle = ehEstoqueSede
-                        ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
-                        : `<small style="color:#999; font-style:italic;">Estoque Setorial</small>`;
-
-                    htmlFinal += `
-                        <tr style="${corFundo}">
-                            <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
-                            <td style="text-align:center;">Saldo em estoque: <b>${d.disponivel} un.</b></td>
-                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
-                            <td style="text-align:right;">${botaoAcaoSingle}</td>
-                        </tr>`;
-                }
-            }
+            htmlFinal += `
+                <tr style="background:${ehDonoDoEstoque ? '#f0fdf4' : '#fff'};">
+                    <td><strong>${t.tomb}</strong></td>
+                    <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
+                    <td style="text-align:center;"><span class="status-badge">${t.pendencias_ids?.length > 0 ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
+                    <td style="text-align:right;">${btnAcao}</td>
+                </tr>`;
         });
+    } else {
+        // Lógica similar para item Single...
+        const btnAcaoSingle = podeEnviar
+            ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important;"><i class="fas fa-paper-plane"></i></button>`
+            : `<small style="color:#999; font-style:italic;">Visualização</small>`;
+
+        htmlFinal += `
+            <tr style="background:${ehDonoDoEstoque ? '#f0fdf4' : '#fff'};">
+                <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
+                <td style="text-align:center;">Saldo: <b>${d.disponivel} un.</b></td>
+                <td style="text-align:center;"><span class="status-badge">DISPONÍVEL</span></td>
+                <td style="text-align:right;">${btnAcaoSingle}</td>
+            </tr>`;
+    }
+});
 
         // 2. BUSCA NAS VIATURAS (Itens em Carga)
         let queryListas = (role === 'admin') 
