@@ -2673,6 +2673,16 @@ input:checked + .slider:before {
             </div>
             <button onclick="adicionarItemRapido()" class="btn-add-fast">ADICIONAR</button>
         </div>
+		<div id="popover-qtd-editor" style="display:none; position: absolute; z-index: 1001; background: white; border: 1px solid #2c7399; padding: 15px; border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); width: 200px;">
+    <label style="font-size: 0.75em; font-weight: bold; color: #64748b; display: block; margin-bottom: 8px;">QUANTIDADE:</label>
+    <div style="display: flex; gap: 5px;">
+        <input type="number" id="input-qtd-popover" value="1" min="1" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <button onclick="confirmarQtdPopover()" style="background: #1b8a3e; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;">
+            <i class="fas fa-check"></i>
+        </button>
+    </div>
+    <small id="info-max-popover" style="font-size: 0.7em; color: #d32f2f; margin-top: 5px; display: block;"></small>
+</div>
     </div>
 
     <div class="editor-main-layout">
@@ -11954,26 +11964,39 @@ function marcarAlteracao() {
 // ================================================================
 function buscarItemParaAdicionar(termo) {
     const box = document.getElementById('sugestoes-estoque-editor');
-    if (termo.length < 2) {
-        box.style.display = 'none';
-        return;
-    }
+    if (termo.length < 2) { box.style.display = 'none'; return; }
 
     const t = termo.toLowerCase();
-    // Filtra no cache local do estoque (carregado ao abrir o editor)
-    const matches = estoqueGestorLocal.filter(i => 
-        i.nome.toLowerCase().includes(t) || 
-        (i.tombamento && i.tombamento.toLowerCase().includes(t))
-    ).slice(0, 8); // Limita a 8 sugestões para não poluir
+    const suggestions = [];
+
+    estoqueGestorLocal.forEach(item => {
+        if (item.tipo === 'multi') {
+            // Cria uma sugestão para cada tombamento disponível
+            (item.tombamentos || []).forEach(tomb => {
+                if (!tomb.viatura_id && (item.nome.toLowerCase().includes(t) || tomb.tomb.toLowerCase().includes(t))) {
+                    suggestions.push({ ...item, tombamentoExibicao: tomb.tomb, id_unico: `${item.id_almox}_${tomb.tomb}` });
+                }
+            });
+        } else {
+            // Item Single normal
+            if (item.nome.toLowerCase().includes(t)) {
+                suggestions.push({ ...item, id_unico: item.id_almox });
+            }
+        }
+    });
+
+    const matches = suggestions.slice(0, 10);
 
     if (matches.length === 0) {
-        box.innerHTML = '<div class="suggestion-item">Nenhum item disponível no seu estoque.</div>';
+        box.innerHTML = '<div class="suggestion-item">Nada disponível no estoque.</div>';
     } else {
         box.innerHTML = matches.map(i => `
-            <div class="suggestion-item" onclick="selecionarItemParaAdicionar('${i.id_almox}')">
-                <i class="fas fa-box"></i> 
-                <b>${i.nome}</b> 
-                <small>(Disp: ${i.disponivel}) ${i.tombamento ? ' - Tomb: '+i.tombamento : ''}</small>
+            <div class="suggestion-item" onclick="selecionarItemParaAdicionar('${encodeURIComponent(JSON.stringify(i))}', event)">
+                <i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'}" style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'};"></i> 
+                <div style="display:flex; flex-direction:column;">
+                    <b>${i.nome}</b>
+                    <small>${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'Saldo Disp: ' + i.disponivel}</small>
+                </div>
             </div>
         `).join('');
     }
@@ -11982,14 +12005,49 @@ function buscarItemParaAdicionar(termo) {
 
 let itemSelecionadoTemp = null;
 
-function selecionarItemParaAdicionar(idAlmox) {
-    const item = estoqueGestorLocal.find(i => i.id_almox === idAlmox);
-    if (!item) return;
-
+// 7. SELEÇÃO COM MICRO-MODAL
+function selecionarItemParaAdicionar(dataJson, event) {
+    const item = JSON.parse(decodeURIComponent(dataJson));
     itemSelecionadoTemp = item;
-    document.getElementById('input-busca-estoque').value = item.nome;
+    
+    const inputBusca = document.getElementById('input-busca-estoque');
+    inputBusca.value = item.nome + (item.tombamentoExibicao ? ` (${item.tombamentoExibicao})` : '');
     document.getElementById('sugestoes-estoque-editor').style.display = 'none';
+
+    if (item.tipo === 'single') {
+        // Abre Micro-Modal de Quantidade
+        const popover = document.getElementById('popover-qtd-editor');
+        const rect = inputBusca.getBoundingClientRect();
+        
+        popover.style.top = (rect.bottom + window.scrollY + 5) + 'px';
+        popover.style.left = rect.left + 'px';
+        popover.style.display = 'block';
+        
+        const inputQtd = document.getElementById('input-qtd-popover');
+        inputQtd.max = item.disponivel;
+        inputQtd.value = 1;
+        document.getElementById('info-max-popover').textContent = `Máximo: ${item.disponivel} un.`;
+        inputQtd.focus();
+        inputQtd.select();
+    } else {
+        // Se for Multi, já está pronto para adicionar (já escolheu o tombamento)
+        document.getElementById('popover-qtd-editor').style.display = 'none';
+    }
 }
+		function confirmarQtdPopover() {
+    const qtd = parseInt(document.getElementById('input-qtd-popover').value);
+    if (isNaN(qtd) || qtd <= 0) return;
+    
+    if (qtd > itemSelecionadoTemp.disponivel) {
+        alert("Quantidade indisponível no estoque.");
+        return;
+    }
+
+    itemSelecionadoTemp.quantidadeEscolhida = qtd;
+    document.getElementById('popover-qtd-editor').style.display = 'none';
+    adicionarItemRapido(); // Chama a inserção
+}
+		
 
 // ================================================================
 // 7. ADIÇÃO DO ITEM AO SETOR ESCOLHIDO
@@ -12009,17 +12067,16 @@ function adicionarItemRapido() {
     };
 
     if (itemSelecionadoTemp.tipo === 'single') {
-        const qtd = parseInt(prompt(`Quantidade de "${itemSelecionadoTemp.nome}" para adicionar?`, "1"));
-        if (isNaN(qtd) || qtd <= 0) return;
-        if (qtd > itemSelecionadoTemp.disponivel) return alert("Quantidade superior ao disponível no estoque!");
+        // Agora pega a quantidade do Popover em vez do prompt
+        const qtd = itemSelecionadoTemp.quantidadeEscolhida || 1;
         novoItem.quantidadeEsperada = qtd;
     } else {
-        // Se for MULTI (Tombado), cria o array de tombamentos
-        // Aqui pegamos o tombamento específico que foi selecionado
+        // Ajustado para capturar o tombamento desmembrado na busca inteligente
         novoItem.tombamentos = [{
-            tomb: itemSelecionadoTemp.tombamento,
+            tomb: itemSelecionadoTemp.tombamentoExibicao,
             situacao: "EM CARGA"
         }];
+        novoItem.quantidadeEsperada = 1;
     }
 
     // Adiciona ao estado local
