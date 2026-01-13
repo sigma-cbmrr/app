@@ -9512,7 +9512,6 @@ async function verDetalhesItemAlmox(docId) {
 
         const snapAlmoxs = await db.collection('almoxarifado_central').where('uid_global', '==', uidGlobal).get();
         
-        // 1. PROCESSAMENTO DE ESTOQUES (ALMOXARIFADOS)
         snapAlmoxs.forEach(docAl => {
             const d = docAl.data();
             const unitIdDoc = docAl.id;
@@ -9527,7 +9526,7 @@ async function verDetalhesItemAlmox(docId) {
             if (ehMulti) {
                 const tombDisponiveis = (d.tombamentos || []).filter(t => !t.viatura_id);
                 
-                // SE FOR DONO OU ADMIN NA SEDE: DETALHAMENTO OPERACIONAL
+                // SE FOR DONO OU ADMIN NA SEDE: DETALHAMENTO OPERACIONAL (Tombamento por Tombamento)
                 if (ehDono || (souAdminGeral && d.unidade === "ADMINISTRATIVO")) {
                     tombDisponiveis.forEach(t => {
                         const temP = t.pendencias_ids?.length > 0;
@@ -9540,16 +9539,16 @@ async function verDetalhesItemAlmox(docId) {
                         bufferHtml += `
                             <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
                                 <td><strong>${t.tomb}</strong></td>
-                                <td><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
+                                <td style="text-align:center;"><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
                                 <td style="text-align:center;"><span class="status-badge" style="background:${temP ? '#ffebee' : '#dcfce7'};color:${temP ? '#c62828' : '#166534'};">${temP ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
                                 <td style="text-align:right;">${btnAcao}</td>
                             </tr>`;
                     });
                 } else {
-                    // SE NÃO FOR DONO: RESUMO LOGÍSTICO (MODAL)
+                    // SE NÃO FOR DONO: RESUMO LOGÍSTICO (Agrupado por Unidade)
                     const qtdOutros = tombDisponiveis.length;
                     cDisp += qtdOutros;
-                    const listaTombStr = JSON.stringify(tombDisponiveis.map(t => t.tomb));
+                    const listaTombStr = JSON.stringify(tombDisponiveis.map(t => t.tomb)).replace(/"/g, '&quot;');
 
                     bufferHtml += `
                         <tr style="background:#f8fafc;">
@@ -9557,12 +9556,12 @@ async function verDetalhesItemAlmox(docId) {
                             <td style="text-align:center;">Unidade: <b>${d.unidade}</b></td>
                             <td style="text-align:center;"><span class="status-badge" style="background:#e2e8f0;color:#475569; font-weight:bold;">${qtdOutros} TOMBAMENTOS</span></td>
                             <td style="text-align:right;">
-                                <button onclick='abrirModalConsultaTombamentos("${d.unidade}", ${listaTombStr})' class="btn-modern-action" style="background:#64748b!important; padding:5px 10px!important;"><i class="fas fa-eye"></i></button>
+                                <button onclick="abrirModalConsultaTombamentos('${d.unidade}', '${listaTombStr}')" class="btn-modern-action" style="background:#64748b!important; padding:5px 10px!important;"><i class="fas fa-eye"></i></button>
                             </td>
                         </tr>`;
                 }
             } else {
-                // ITEM SINGLE: SEMPRE RESUMIDO POR UNIDADE
+                // ITEM SINGLE: SEMPRE RESUMIDO POR UNIDADE COM ALINHAMENTO CORRIGIDO
                 const saldoDisp = Number(d.disponivel) || 0;
                 cDisp += saldoDisp;
                 if (saldoDisp > 0) {
@@ -9572,9 +9571,9 @@ async function verDetalhesItemAlmox(docId) {
 
                     bufferHtml += `
                         <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
-                            <td><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
-                            <td style="text-align:center;">Saldo: <b>${saldoDisp} un.</b></td>
-                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">DISPONÍVEL</span></td>
+                            <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
+                            <td style="text-align:center;"><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
+                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">${saldoDisp} un. DISPONÍVEL</span></td>
                             <td style="text-align:right;">${btnAcaoSingle}</td>
                         </tr>`;
                 }
@@ -9609,7 +9608,7 @@ async function verDetalhesItemAlmox(docId) {
                         bufferVtr += `
                             <tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
                                 <td><strong>${t.tomb}</strong></td>
-                                <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
+                                <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
                                 <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${statusTxt}</span></td>
                                 <td style="text-align:right;">
                                     ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}
@@ -9621,8 +9620,8 @@ async function verDetalhesItemAlmox(docId) {
                     bufferVtr += `
                         <tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
                             <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
-                            <td><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
-                            <td style="text-align:center;"><b>${itNaVtr.quantidadeEsperada} un.</b></td>
+                            <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
+                            <td style="text-align:center;"><b>${itNaVtr.quantidadeEsperada} un. EM USO</b></td>
                             <td style="text-align:right;">
                                 ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}
                             </td>
@@ -9632,7 +9631,6 @@ async function verDetalhesItemAlmox(docId) {
             });
         });
 
-        // 3. EXTRATO DE TOPO
         const totalG = cDisp + cUso + cCaut + cPend;
         const extratoHtml = `
             <div id="almox-resumo-topo" style="display: flex; gap: 10px; padding: 15px; background: #fff; border: 1px solid #eee; border-radius: 8px; justify-content: space-around; flex-wrap: wrap; margin-bottom:20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
@@ -9655,8 +9653,9 @@ async function verDetalhesItemAlmox(docId) {
     }
 }
 
-// FUNÇÃO DO MODAL DE CONSULTA (Para outras unidades)
-function abrirModalConsultaTombamentos(unidade, lista) {
+// FUNÇÃO COMPLEMENTAR DO MODAL DE CONSULTA (Agrupamento Logístico)
+function abrirModalConsultaTombamentos(unidade, listaJson) {
+    const lista = JSON.parse(listaJson);
     const modalHtml = `
         <div id="modal-consulta-tomb" class="modal-modern-overlay" style="display:flex;">
             <div class="modal-modern-content" style="max-width:350px;">
