@@ -2738,7 +2738,7 @@ input:checked + .slider:before {
     		</div>
 
     		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #2c7399; padding-bottom: 10px;">
-        		<h2 style="margin: 0; color: #2c7399;"><i class="fas fa-clipboard-list"></i> INVENTÁRIOS CADASTRADOS</h2>
+        		<h2 style="margin: 0; color: #2c7399;"><i class="fas fa-clipboard-list"></i> LISTAS CADASTRADAS</h2>
         
         		<div style="position: relative;">
             		<i class="fas fa-search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #666; font-size: 0.8em;"></i>
@@ -11901,7 +11901,6 @@ function renderizarArquiteturaEditor() {
         setorDiv.className = 'setor-arquitetura-card';
         setorDiv.dataset.index = indexSetor;
 
-        // Cabeçalho do Setor
         let htmlHeader = `
             <div class="setor-arquitetura-header">
                 <span><i class="fas fa-grip-lines" style="margin-right:10px; opacity:0.5;"></i> ${setor.nome}</span>
@@ -11910,22 +11909,38 @@ function renderizarArquiteturaEditor() {
                 </button>
             </div>`;
 
-        // Corpo (Lista de Itens)
         let htmlItens = `<div class="setor-arquitetura-body" data-setor-index="${indexSetor}">`;
         
         (setor.itens || []).forEach((item, indexItem) => {
             const ehMulti = item.tipo === 'multi';
-            const identificador = ehMulti ? `${item.tombamentos.length} Tombamentos` : `${item.quantidadeEsperada} unidades`;
-            
+
             htmlItens += `
-                <div class="item-arquitetura-linha" data-item-index="${indexItem}">
-                    <div class="item-arquitetura-info">
-                        <b>${item.nome}</b>
-                        <span>${identificador} • ${item.tipo.toUpperCase()}</span>
+                <div class="item-arquitetura-linha" data-item-index="${indexItem}" style="flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px;">
+                    <div class="item-arquitetura-info" style="width: 100%;">
+                        <b style="color: #2c7399; font-size: 0.95em; text-transform: uppercase;">${item.nome}</b>
                     </div>
-                    <button onclick="marcarParaEstorno(${indexSetor}, ${indexItem})" class="btn-remove-item-vtr" title="Remover para estoque">
-                        <i class="fas fa-times"></i>
-                    </button>
+                    
+                    <div class="lista-tombamentos-container" style="width: 100%; padding-left: 5px;">
+                        ${ehMulti ? 
+                            (item.tombamentos || []).map((tData, tIndex) => `
+                                <div style="display: flex; justify-content: space-between; align-items: center; background: #f1f5f9; margin-bottom: 3px; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #800000;">
+                                    <span style="font-size: 0.85em; font-family: monospace;">Tomb.: <strong>${tData.tomb || 'S/N'}</strong></span>
+                                    <button onclick="removerTombamentoIndividual(${indexSetor}, ${indexItem}, ${tIndex})" 
+                                            style="background: none; border: none; color: #d90f23; cursor: pointer; padding: 2px 5px;" title="Remover Tombamento">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            `).join('') 
+                            : 
+                            `<div style="display: flex; justify-content: space-between; align-items: center; background: #f1f5f9; padding: 4px 8px; border-radius: 4px;">
+                                <span style="font-size: 0.85em;">Qtd: <strong>${item.quantidadeEsperada}</strong> unidades</span>
+                                <button onclick="marcarParaEstorno(${indexSetor}, ${indexItem})" 
+                                        style="background: none; border: none; color: #d90f23; cursor: pointer; padding: 2px 5px;">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>`
+                        }
+                    </div>
                 </div>`;
         });
 
@@ -11933,9 +11948,9 @@ function renderizarArquiteturaEditor() {
         setorDiv.innerHTML = htmlHeader + htmlItens;
         container.appendChild(setorDiv);
 
-        // --- ATIVA O ARRASTE DE ITENS (DENTRO E ENTRE SETORES) ---
+        // Sortable para itens (mantém o arrasto do bloco pai)
         new Sortable(setorDiv.querySelector('.setor-arquitetura-body'), {
-            group: 'itens_viatura', // Permite mover entre setores
+            group: 'itens_viatura', 
             animation: 150,
             ghostClass: 'sortable-ghost',
             onEnd: function (evt) {
@@ -11943,28 +11958,23 @@ function renderizarArquiteturaEditor() {
                 const toIdx = evt.to.dataset.setorIndex;
                 const oldItemIdx = evt.oldIndex;
                 const newItemIdx = evt.newIndex;
-
-                // Move o dado no array local
                 const itemMovido = arquiteturaAtiva[fromIdx].itens.splice(oldItemIdx, 1)[0];
                 arquiteturaAtiva[toIdx].itens.splice(newItemIdx, 0, itemMovido);
-
-                // Dispara a inteligência de mesclagem (se cair sobre item igual)
-                processarMesclagemAutomatica(toIdx);
+                marcarAlteracao();
             }
         });
     });
 
-    // --- ATIVA O ARRASTE DE SETORES (REORDENAÇÃO DO CAMINHÃO) ---
+    // Sortable para setores
     new Sortable(container, {
         animation: 150,
-        handle: '.setor-arquitetura-header', // Só arrasta pelo título
+        handle: '.setor-arquitetura-header',
         onEnd: function (evt) {
             const oldIdx = evt.oldIndex;
             const newIdx = evt.newIndex;
             const setorMovido = arquiteturaAtiva.splice(oldIdx, 1)[0];
             arquiteturaAtiva.splice(newIdx, 0, setorMovido);
-            
-            marcarAlteracao(); // Avisa que houve mudança
+            marcarAlteracao(); 
         }
     });
 }
