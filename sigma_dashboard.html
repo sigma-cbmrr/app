@@ -9037,7 +9037,7 @@ async function carregarAlmoxarifadoUI() {
         const role = currentUserData.role;
 
         let query = db.collection('almoxarifado_central');
-        // 🛑 MUDANÇA CIRÚRGICA: Filtro agora utiliza o unidade_id (UID imutável)
+        // Filtro por unidade_id (UID imutável) para não Admin
         if (role !== 'admin') {
             query = query.where('unidade_id', '==', currentUserData.unidade_id);
         }
@@ -9055,6 +9055,7 @@ async function carregarAlmoxarifadoUI() {
                     id: doc.id, 
                     nome: d.nome,
                     tipo: d.tipo,
+                    categoria: d.categoria || "OUTROS", // ⬅️ CAPTURA A CATEGORIA DO BANCO
                     total: 0,
                     disponivel: 0,
                     emCarga: 0,
@@ -9068,7 +9069,6 @@ async function carregarAlmoxarifadoUI() {
             inventarioAgrupado[uid].emCarga += (Number(d.emCarga) || 0);
             inventarioAgrupado[uid].emAlteracao += (Number(d.emAlteracao) || 0);
             
-            // Armazena o nome legível da unidade para exibição no card do Admin
             if (d.unidade && !inventarioAgrupado[uid].locais.includes(d.unidade)) {
                 inventarioAgrupado[uid].locais.push(d.unidade);
             }
@@ -9085,13 +9085,13 @@ async function carregarAlmoxarifadoUI() {
                 const disponivel = d.disponivel;
                 let statusColor = (disponivel === 0) ? '#d90f23' : (disponivel < (total * 0.25)) ? '#f57c00' : '#1b8a3e';
 
-                // Exibe os locais onde o Admin possui saldo deste material
                 const labelLocais = role === 'admin' 
                     ? `<br><span style="font-size:0.75em; color:#2c7399; font-weight:bold;"><i class="fas fa-map-marker-alt"></i> LOCAIS: ${d.locais.join(', ')}</span>` 
                     : '';
 
+                // 🛑 INSERÇÃO DO DATA-CATEGORIA PARA FILTRO INVISÍVEL
                 html += `
-                <tr>
+                <tr data-categoria="${d.categoria.toUpperCase()}">
                     <td data-label="Material">
                         <div style="line-height:1.2;">
                             <strong>${d.nome}</strong>
@@ -9120,22 +9120,38 @@ async function carregarAlmoxarifadoUI() {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao consolidar dados.</td></tr>';
     }
 }
+
 /**
- * Filtro de pesquisa em tempo real para o Almoxarifado.
+ * Filtro de pesquisa unificado (Texto + Categoria)
  */
 function filtrarAlmoxarifado() {
     const searchTerm = document.getElementById('almox-search').value.toUpperCase();
-    const categoryTerm = document.getElementById('almox-cat-filter').value;
+    const categoryTerm = document.getElementById('almox-cat-filter').value.toUpperCase();
     const rows = document.querySelectorAll('#almox-body tr');
 
     rows.forEach(row => {
+        // Ignora linhas de "Nenhum material encontrado" ou loadings
+        if (row.cells.length < 2) return;
+
         const textMaterial = row.cells[0]?.textContent.toUpperCase() || "";
-        // No futuro, se adicionarmos categoria aos itens, filtraremos aqui também
+        const itemCategory = row.getAttribute('data-categoria') || "";
+
+        // Lógica de Interseção:
+        // 1. O texto digitado deve estar no nome
         const matchesSearch = textMaterial.includes(searchTerm);
-        row.style.display = matchesSearch ? "" : "none";
+        
+        // 2. Se a categoria for vazia (Todas), matchesCategory é true. 
+        // Caso contrário, compara com o atributo da linha.
+        const matchesCategory = (categoryTerm === "" || itemCategory === categoryTerm);
+
+        // A linha só aparece se atender aos DOIS critérios ao mesmo tempo
+        if (matchesSearch && matchesCategory) {
+            row.style.display = "";
+        } else {
+            row.style.display = "none";
+        }
     });
-}
-		
+}		
 async function verDetalhesItemAlmox(docId) {
     const palcoPrincipal = document.getElementById('container-tabela-principal');
     const palcoRastreio = document.getElementById('almox-rastreio-wrapper');
