@@ -11978,6 +11978,26 @@ function renderizarArquiteturaEditor() {
         }
     });
 }
+		function removerTombamentoIndividual(indexSetor, indexItem, tIndex) {
+    const itemOrigem = arquiteturaAtiva[indexSetor].itens[indexItem];
+    const tombRemovido = itemOrigem.tombamentos.splice(tIndex, 1)[0];
+
+    // Registra para o estorno apenas o tombamento que saiu
+    itensParaEstorno.push({
+        uid_global: itemOrigem.uid_global,
+        tipo: 'multi',
+        tombamentos: [tombRemovido] // Apenas o removido vai para o estoque
+    });
+
+    // Se o item ficou vazio no setor, remove o nome do item da lista
+    if (itemOrigem.tombamentos.length === 0) {
+        arquiteturaAtiva[indexSetor].itens.splice(indexItem, 1);
+    }
+
+    marcarAlteracao();
+    renderizarArquiteturaEditor();
+    atualizarInterfaceEstorno();
+}
 
 // ================================================================
 // 5. INTELIGÊNCIA: MESCLAGEM AUTOMÁTICA
@@ -12339,23 +12359,29 @@ async function confirmarPublicacaoLista() {
         const batch = db.batch();
         const listaRef = db.collection('listas_conferencia').doc(idListaSendoEditada);
 
-        // A. ATUALIZA A LISTA MESTRA (Arquitetura)
+        // --- A. ATUALIZA A LISTA MESTRA (Arquitetura) ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        // B. PROCESSA ESTORNOS (Se houver)
+        // --- B. PROCESSA ESTORNOS (Individualizados) ---
         if (itensParaEstorno.length > 0) {
+            // Mapeamos os IDs únicos dos documentos que precisam de alteração para evitar múltiplos gets
+            const docsIdsNecessarios = [...new Set(itensParaEstorno.map(item => `${currentUserData.unidade_id}_${item.uid_global}`))];
+            
+            // Busca todos os documentos de uma vez para ganhar performance
+            const snapshots = await Promise.all(docsIdsNecessarios.map(id => db.collection('almoxarifado_central').doc(id).get()));
+            const estoqueAtual = {};
+            snapshots.forEach(snap => { if(snap.exists) estoqueAtual[snap.id] = snap.data(); });
+
             for (const item of itensParaEstorno) {
-                // Localiza o documento do item no almoxarifado da unidade
                 const docIdAlmox = `${currentUserData.unidade_id}_${item.uid_global}`;
-                const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
-                
-                const snapItem = await almoxRef.get();
-                if (snapItem.exists) {
-                    const dataAlmox = snapItem.data();
+                const dataAlmox = estoqueAtual[docIdAlmox];
+
+                if (dataAlmox) {
+                    const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
                     let updateAlmox = {};
 
                     if (item.tipo === 'single') {
@@ -12365,27 +12391,28 @@ async function confirmarPublicacaoLista() {
                             emCarga: Math.max(0, (dataAlmox.emCarga || 0) - qtd)
                         };
                     } else {
-                        // Para Multi: remove o "vinc_vtr" ou "situacao" dos tombamentos no estoque
-                        const idsRemovidos = item.tombamentos.map(t => t.tomb);
-                        const tombamentosEstoque = (dataAlmox.tombamentos || []).map(t => {
-                            if (idsRemovidos.includes(t.tomb)) {
+                        // Lógica Multi: Libera apenas os tombamentos que foram individualmente removidos
+                        const idsParaLiberar = item.tombamentos.map(t => t.tomb);
+                        
+                        const tombamentosAtualizados = (dataAlmox.tombamentos || []).map(t => {
+                            if (idsParaLiberar.includes(t.tomb)) {
                                 return { ...t, viatura_id: null, situacao: "DISPONÍVEL" };
                             }
                             return t;
                         });
                         
                         updateAlmox = {
-                            tombamentos: tombamentosEstoque,
-                            disponivel: (dataAlmox.disponivel || 0) + idsRemovidos.length,
-                            emCarga: Math.max(0, (dataAlmox.emCarga || 0) - idsRemovidos.length)
+                            tombamentos: tombamentosAtualizados,
+                            disponivel: (dataAlmox.disponivel || 0) + idsParaLiberar.length,
+                            emCarga: Math.max(0, (dataAlmox.emCarga || 0) - idsParaLiberar.length)
                         };
                     }
                     
-                    // Adiciona log de auditoria no histórico do material
+                    // Auditoria de estorno
                     updateAlmox.historico_movimentacoes = firebase.firestore.FieldValue.arrayUnion({
                         data: new Date().toLocaleString('pt-BR'),
                         evento: "ESTORNO_ARQUITETURA",
-                        detalhes: `Item removido da viatura ${idListaSendoEditada}. Justificativa: ${justificativa}`,
+                        detalhes: `Item(s) removido(s) da viatura ${idListaSendoEditada}. Justificativa: ${justificativa}`,
                         quem: currentUserData.nome_militar_completo
                     });
 
@@ -12397,21 +12424,21 @@ async function confirmarPublicacaoLista() {
         await batch.commit();
         alert("✅ Publicação realizada com sucesso!");
         
-        // Limpa estado de alteração
+        // Reset da Interface
         btn.classList.remove('modified');
         btn.style.backgroundColor = '#1b8a3e';
         btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Publicar Alterações';
         
-        // Reset da caixa de estorno
         itensParaEstorno = [];
         document.getElementById('justificativa-estorno-global').value = '';
-        atualizarInterfaceEstorno();
+        if (typeof atualizarInterfaceEstorno === 'function') atualizarInterfaceEstorno();
+        if (typeof renderizarArquiteturaEditor === 'function') renderizarArquiteturaEditor();
 
     } catch (e) {
-        console.error("Erro ao publicar:", e);
-        alert("Erro técnico ao salvar alterações.");
+        console.error("Erro crítico ao publicar:", e);
+        alert("Erro técnico ao salvar alterações. Verifique o console.");
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Publicar Alterações';
+        btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Tentar Novamente';
     }
 }
 		// Fecha as caixas de busca e popover ao clicar fora delas
