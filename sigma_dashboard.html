@@ -9122,36 +9122,60 @@ async function carregarAlmoxarifadoUI() {
 }
 
 /**
- * Filtro de pesquisa unificado (Texto + Categoria)
+ * Filtro de pesquisa unificado (Texto + Categoria) com feedback de lista vazia.
  */
 function filtrarAlmoxarifado() {
-    const searchTerm = document.getElementById('almox-search').value.toUpperCase();
-    const categoryTerm = document.getElementById('almox-cat-filter').value.toUpperCase();
-    const rows = document.querySelectorAll('#almox-body tr');
+    const searchTerm = document.getElementById('almox-search').value.toUpperCase().trim();
+    const categoryTerm = document.getElementById('almox-cat-filter').value.toUpperCase().trim();
+    const tbody = document.getElementById('almox-body');
+    const rows = tbody.querySelectorAll('tr:not(.no-results-row)'); // Ignora a própria linha de mensagem
+
+    let visibleCount = 0;
 
     rows.forEach(row => {
-        // Ignora linhas de "Nenhum material encontrado" ou loadings
-        if (row.cells.length < 2) return;
+        // Ignora linhas de cabeçalho ou loadings que não tenham o atributo de categoria
+        if (!row.hasAttribute('data-categoria')) return;
 
         const textMaterial = row.cells[0]?.textContent.toUpperCase() || "";
-        const itemCategory = row.getAttribute('data-categoria') || "";
+        const itemCategory = row.getAttribute('data-categoria').toUpperCase().trim();
 
         // Lógica de Interseção:
-        // 1. O texto digitado deve estar no nome
         const matchesSearch = textMaterial.includes(searchTerm);
-        
-        // 2. Se a categoria for vazia (Todas), matchesCategory é true. 
-        // Caso contrário, compara com o atributo da linha.
         const matchesCategory = (categoryTerm === "" || itemCategory === categoryTerm);
 
-        // A linha só aparece se atender aos DOIS critérios ao mesmo tempo
         if (matchesSearch && matchesCategory) {
             row.style.display = "";
+            visibleCount++;
         } else {
             row.style.display = "none";
         }
     });
-}		
+
+    // --- LÓGICA DE MENSAGEM PARA TABELA VAZIA ---
+    
+    // Remove mensagem anterior se existir
+    const existingMsg = tbody.querySelector('.no-results-row');
+    if (existingMsg) existingMsg.remove();
+
+    if (visibleCount === 0) {
+        const tr = document.createElement('tr');
+        tr.className = 'no-results-row';
+        tr.innerHTML = `
+            <td colspan="6" style="text-align:center; padding:40px; color:#64748b; background:#f8fafc;">
+                <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+                    <i class="fas fa-search" style="font-size:2em; color:#cbd5e1;"></i>
+                    <span>Nenhum material encontrado para a categoria <strong>"${document.getElementById('almox-cat-filter').value}"</strong> ou termo buscado.</span>
+                    <button onclick="document.getElementById('almox-search').value=''; document.getElementById('almox-cat-filter').value=''; filtrarAlmoxarifado();" 
+                            style="margin-top:10px; background:none; border:none; color:#2c7399; cursor:pointer; text-decoration:underline; font-size:0.9em;">
+                        Limpar todos os filtros
+                    </button>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    }
+}
+		
 async function verDetalhesItemAlmox(docId) {
     const palcoPrincipal = document.getElementById('container-tabela-principal');
     const palcoRastreio = document.getElementById('almox-rastreio-wrapper');
