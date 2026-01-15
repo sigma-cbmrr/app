@@ -12169,24 +12169,20 @@ let itemSelecionadoTemp = null;
 function selecionarItemParaAdicionar(item) {
     if (!item) return;
 
-    // O item já vem como objeto da função buscarItemParaAdicionar
     itemSelecionadoTemp = item;
     
     const inputBusca = document.getElementById('input-busca-estoque');
     const boxSugestoes = document.getElementById('sugestoes-estoque-editor');
     const popover = document.getElementById('popover-qtd-editor');
+    const selectSetor = document.getElementById('select-setor-destino'); // Referência do seletor
 
     // 1. Atualiza o input com o nome e, se houver, o tombamento
     inputBusca.value = item.nome + (item.tombamentoExibicao ? ` (${item.tombamentoExibicao})` : '');
     
-    // 2. Esconde a caixa de sugestões
     if (boxSugestoes) boxSugestoes.style.display = 'none';
 
-    // 3. Lógica de Quantidade (Single) vs Identidade (Multi)
     if (item.tipo === 'single') {
         const rect = inputBusca.getBoundingClientRect();
-        
-        // Posicionamento dinâmico do Popover
         popover.style.top = (rect.bottom + window.scrollY + 5) + 'px';
         popover.style.left = rect.left + 'px';
         popover.style.display = 'block';
@@ -12194,106 +12190,95 @@ function selecionarItemParaAdicionar(item) {
         const inputQtd = document.getElementById('input-qtd-popover');
         const infoMax = document.getElementById('info-max-popover');
 
-        // Configura limites do input de quantidade
         inputQtd.max = item.disponivel;
         inputQtd.value = 1;
-        
-        if (infoMax) {
-            infoMax.textContent = `Máximo: ${item.disponivel} un.`;
-        }
+        if (infoMax) infoMax.textContent = `Máximo: ${item.disponivel} un.`;
 
-        // Foca no campo de quantidade para agilizar a digitação
         setTimeout(() => {
             inputQtd.focus();
             inputQtd.select();
         }, 50);
 
     } else {
-        // Se for Multi, o tombamento já foi selecionado na busca, 
-        // então apenas garantimos que o popover de quantidade esteja fechado.
+        // --- AJUSTE PARA ITEM MULTI ---
         if (popover) popover.style.display = 'none';
-        
-        // Dica operacional: Como é Multi, o gestor já pode clicar em "Adicionar"
-        // ou você pode disparar o adicionarItemRapido() automaticamente aqui se desejar.
-        console.log("Item Multi pronto para adição:", item.tombamentoExibicao);
+
+        // Como não tem popover, já "carimbamos" o visual para pedir o destino
+        inputBusca.value = `[TOMB: ${item.tombamentoExibicao}] ${item.nome} - SELECIONE O DESTINO`;
+        inputBusca.style.backgroundColor = "#fff3e0"; // Alerta visual de pendência
+
+        if (selectSetor) {
+            selectSetor.focus();
+            selectSetor.style.boxShadow = "0 0 10px #d97706"; // Destaque no seletor
+        }
     }
 }
 		function confirmarQtdPopover() {
     const input = document.getElementById('input-qtd-popover');
     const qtd = parseInt(input.value);
     
-    // 1. Validação básica de entrada
     if (isNaN(qtd) || qtd <= 0) {
         alert("Informe uma quantidade válida.");
         return;
     }
     
-    // 2. Trava de segurança contra estouro de estoque
     if (qtd > itemSelecionadoTemp.disponivel) {
         alert(`Quantidade indisponível. Saldo atual: ${itemSelecionadoTemp.disponivel}`);
-        input.value = itemSelecionadoTemp.disponivel; // Ajusta automaticamente para o máximo
+        input.value = itemSelecionadoTemp.disponivel;
         input.focus();
         return;
     }
 
-    // 3. Atribui a quantidade ao objeto temporário
+    // 3. "CARIMBA" a quantidade no objeto temporário
     itemSelecionadoTemp.quantidadeEscolhida = qtd;
 
     // 4. Fecha o popover
     document.getElementById('popover-qtd-editor').style.display = 'none';
 
-    // 5. Chama a inserção no setor
-    adicionarItemRapido();
-
-    // 6. UX: Retorna o foco para o campo de busca para facilitar a próxima adição
+    // 5. UX: Feedback visual no input de busca indicando que o item aguarda destino
     const inputBusca = document.getElementById('input-busca-estoque');
+    const selectSetor = document.getElementById('select-setor-destino'); // Use o ID real do seu select
+
     if (inputBusca) {
-        inputBusca.value = '';
-        inputBusca.focus();
+        inputBusca.value = `[${qtd} un.] ${itemSelecionadoTemp.nome} - SELECIONE O DESTINO ABAIXO`;
+        inputBusca.style.backgroundColor = "#fff3e0"; // Cor de alerta/pendência (âmbar claro)
+    }
+
+    // 6. Foca no seletor de setor para o usuário concluir o processo
+    if (selectSetor) {
+        selectSetor.focus();
+        // Opcional: faz o select "piscar" ou abrir para chamar atenção
+        selectSetor.style.boxShadow = "0 0 10px #d97706";
     }
 }
+		
 		
 
 // ================================================================
 // 7. ADIÇÃO DO ITEM AO SETOR ESCOLHIDO
 // ================================================================
 function adicionarItemRapido() {
-    const setorIdx = document.getElementById('select-setor-destino').value;
+    const selectSetor = document.getElementById('select-setor-destino');
+    const setorIdx = selectSetor.value;
     const inputBusca = document.getElementById('input-busca-estoque');
 
-    if (!itemSelecionadoTemp) return alert("Selecione um item da lista de sugestões primeiro.");
+    if (!itemSelecionadoTemp) return alert("Selecione um item primeiro.");
     if (setorIdx === "") return alert("Escolha o setor de destino.");
 
-    // Prepara o objeto no formato da arquitetura (Lista Mestra)
-    const novoItem = {
-        uid_global: itemSelecionadoTemp.uid_global || itemSelecionadoTemp.id_almox,
-        nome: itemSelecionadoTemp.nome,
-        tipo: itemSelecionadoTemp.tipo, // 'single' ou 'multi'
-    };
+    // ... (mantenha sua lógica de criação do novoItem igual) ...
 
-    if (itemSelecionadoTemp.tipo === 'single') {
-        // Agora pega a quantidade do Popover em vez do prompt
-        const qtd = itemSelecionadoTemp.quantidadeEscolhida || 1;
-        novoItem.quantidadeEsperada = qtd;
-    } else {
-        // Ajustado para capturar o tombamento desmembrado na busca inteligente
-        novoItem.tombamentos = [{
-            tomb: itemSelecionadoTemp.tombamentoExibicao,
-            situacao: "EM CARGA"
-        }];
-        novoItem.quantidadeEsperada = 1;
-    }
-
-    // Adiciona ao estado local
     arquiteturaAtiva[setorIdx].itens.push(novoItem);
     
-    // Limpa campos
+    // --- AJUSTE CIRÚRGICO NA LIMPEZA ---
     itemSelecionadoTemp = null;
     inputBusca.value = '';
+    inputBusca.style.backgroundColor = "#fff"; // Volta a cor original
+    selectSetor.style.boxShadow = "none";      // Remove o brilho de destaque
+    selectSetor.value = "";                    // Reseta o select para a próxima adição
     
-    // Processa mesclagem caso o item já existisse no setor e atualiza tela
     processarMesclagemAutomatica(setorIdx);
     marcarAlteracao();
+    inputBusca.focus(); // Devolve o foco para a próxima busca
 }
 
 // ================================================================
@@ -12677,6 +12662,22 @@ function fecharBuscaELimpar() {
         inputBusca.blur(); // Remove o cursor do campo
     }
 }
+		// INSIRA ESTE BLOCO PARA DAR VIDA AO SELECT
+document.addEventListener('change', function(e) {
+    if (e.target && e.target.id === 'select-setor-destino') {
+        const setorIdx = e.target.value;
+
+        // Se existe um item "carimbado" aguardando destino e um setor válido foi escolhido
+        if (itemSelecionadoTemp && setorIdx !== "") {
+            
+            // Se for multi, já adiciona direto. 
+            // Se for single, verifica se a quantidade já foi escolhida no popover
+            if (itemSelecionadoTemp.tipo === 'multi' || (itemSelecionadoTemp.tipo === 'single' && itemSelecionadoTemp.quantidadeEscolhida > 0)) {
+                adicionarItemRapido(); 
+            }
+        }
+    }
+});
     </script>
 </body>
 </html>
