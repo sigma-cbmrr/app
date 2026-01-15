@@ -10082,8 +10082,14 @@ function carregarSetoresDestino(listaId) {
 }
 
 function atualizarQtdEnvio() {
+    // Conta quantos checkboxes de tombamento estão marcados
     const selecionados = document.querySelectorAll('.check-envio-tomb:checked').length;
-    document.getElementById('almox-transf-qtd').value = selecionados;
+    
+    // Atualiza o input de quantidade que a função de salvar utiliza
+    const inputQtd = document.getElementById('almox-transf-qtd');
+    if (inputQtd) {
+        inputQtd.value = selecionados;
+    }
 }
 		function resetarVisibilidadeModal() {
     // Reseta visibilidade dos blocos
@@ -11979,17 +11985,22 @@ function renderizarArquiteturaEditor() {
     });
 }
 		function removerTombamentoIndividual(indexSetor, indexItem, tIndex) {
-    const itemOrigem = arquiteturaAtiva[indexSetor].itens[indexItem];
+    const setorOrigem = arquiteturaAtiva[indexSetor];
+    const itemOrigem = setorOrigem.itens[indexItem];
+    
+    // Remove o tombamento do array original
     const tombRemovido = itemOrigem.tombamentos.splice(tIndex, 1)[0];
 
-    // Registra para o estorno apenas o tombamento que saiu
+    // --- CARIMBO DE ORIGEM: Fundamental para o Cancelar Estorno ---
     itensParaEstorno.push({
         uid_global: itemOrigem.uid_global,
+        nome: itemOrigem.nome, // Importante para exibir na lista de estorno
         tipo: 'multi',
-        tombamentos: [tombRemovido] // Apenas o removido vai para o estoque
+        tombamentos: [tombRemovido],
+        setorOrigem: setorOrigem.nome // Salva o nome do setor para possível retorno
     });
 
-    // Se o item ficou vazio no setor, remove o nome do item da lista
+    // Se o item ficou sem nenhum tombamento no setor, remove o objeto pai
     if (itemOrigem.tombamentos.length === 0) {
         arquiteturaAtiva[indexSetor].itens.splice(indexItem, 1);
     }
@@ -11998,7 +12009,7 @@ function renderizarArquiteturaEditor() {
     renderizarArquiteturaEditor();
     atualizarInterfaceEstorno();
 }
-
+		
 // ================================================================
 // 5. INTELIGÊNCIA: MESCLAGEM AUTOMÁTICA
 // ================================================================
@@ -12051,11 +12062,27 @@ function processarMesclagemAutomatica(setorIndex) {
 
 function marcarAlteracao() {
     const btn = document.querySelector('.btn-publish');
-    if (btn) {
-        btn.classList.add('modified');
-        btn.innerHTML = '<i class="fas fa-save"></i> Publicar Alterações *';
-        btn.style.backgroundColor = '#d97706'; // Laranja para alertar mudança
-    }
+    if (!btn) return;
+
+    // 1. Habilita o botão caso esteja desabilitado
+    btn.disabled = false;
+
+    // 2. Adiciona a classe de controle CSS
+    btn.classList.add('modified');
+
+    // 3. Feedback Visual Forte
+    // Usamos um fundo laranja/âmbar para indicar que existem dados "pendentes" de gravação
+    btn.style.backgroundColor = '#d97706'; 
+    btn.style.color = 'white';
+    btn.style.fontWeight = 'bold';
+
+    // 4. Texto Dinâmico
+    // O asterisco ajuda a indicar visualmente que o que está na tela não é o que está no banco
+    btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Publicar Alterações *';
+
+    // 5. Animação (Opcional, mas recomendado)
+    // Se você tiver uma animação de "pulse" no seu CSS, pode aplicar aqui
+    btn.style.animation = 'pulse-orange 2s infinite';
 }
 // ================================================================
 // 6. BUSCA INTELIGENTE NO ESTOQUE (AUTOCOMPLETE)
@@ -12072,12 +12099,10 @@ function buscarItemParaAdicionar(termo) {
     const t = termo.toLowerCase().trim();
     const suggestions = [];
 
-    // Percorre o estoque local da unidade (carregado ao abrir o editor)
     estoqueGestorLocal.forEach(item => {
         const nomeMatch = item.nome.toLowerCase().includes(t);
 
         if (item.tipo === 'multi') {
-            // Cria uma sugestão INDIVIDUAL para cada tombamento que não esteja em uso
             (item.tombamentos || []).forEach(tomb => {
                 const tombNum = String(tomb.tomb || "");
                 const tombMatch = tombNum.toLowerCase().includes(t);
@@ -12091,7 +12116,6 @@ function buscarItemParaAdicionar(termo) {
                 }
             });
         } else {
-            // Item Single (Consumo): Uma única sugestão com o saldo total disponível
             if (nomeMatch && (item.disponivel > 0)) {
                 suggestions.push({ 
                     ...item, 
@@ -12101,27 +12125,34 @@ function buscarItemParaAdicionar(termo) {
         }
     });
 
-    const matches = suggestions.slice(0, 10); // Limita a 10 para não poluir a tela
+    const matches = suggestions.slice(0, 10);
 
     if (matches.length === 0) {
-        box.innerHTML = '<div class="suggestion-item" style="padding:15px; color:#94a3b8; text-align:center;">Nada disponível no estoque para este termo.</div>';
+        box.innerHTML = '<div style="padding:15px; color:#94a3b8; text-align:center; font-size:0.9em;">Nada disponível.</div>';
     } else {
-        // Armazenamos temporariamente os matches em uma variável global/fechamento para o clique
         window.tempSuggestionsSearch = matches; 
 
         box.innerHTML = matches.map((i, index) => `
-            <div class="suggestion-item" onclick="selecionarSugestaoPorIndex(${index})" style="display: flex; align-items: center; padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #f1f5f9;">
-                <div style="width: 35px; display: flex; justify-content: center;">
+            <div class="suggestion-item" onclick="selecionarSugestaoPorIndex(${index})" 
+                 style="display: grid; grid-template-columns: 30px 1fr 30px; align-items: center; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; gap: 10px;">
+                
+                <div style="display: flex; justify-content: center; align-items: center;">
                     <i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'}" 
-                       style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1.1em;"></i>
+                       style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1em;"></i>
                 </div>
-                <div style="display:flex; flex-direction:column; flex: 1; margin-left: 10px;">
-                    <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase;">${i.nome}</b>
-                    <small style="color: #64748b; font-weight: 500;">
-                        ${i.tipo === 'multi' ? '<span style="color:#800020;">TOMB: ' + i.tombamentoExibicao + '</span>' : 'Disponível: ' + i.disponivel}
+
+                <div style="display: flex; flex-direction: column; overflow: hidden;">
+                    <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        ${i.nome}
+                    </b>
+                    <small style="color: #64748b; font-size: 0.75em;">
+                        ${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'SALDO: ' + i.disponivel}
                     </small>
                 </div>
-                <i class="fas fa-plus-circle" style="color: #cbd5e1; font-size: 0.9em;"></i>
+
+                <div style="display: flex; justify-content: center; align-items: center; color: #cbd5e1;">
+                    <i class="fas fa-chevron-right" style="font-size: 0.7em;"></i>
+                </div>
             </div>
         `).join('');
     }
@@ -12346,18 +12377,47 @@ function fecharModalNovoSetor() {
     document.getElementById('modal-novo-setor-arquitetura').style.display = 'none';
 }
 function removerSetorArquitetura(idx) {
-    if (arquiteturaAtiva[idx].itens.length > 0) {
-        if (!confirm("Este setor contém itens. Ao excluir o setor, os itens serão removidos da viatura. Confirmar?")) return;
+    const setor = arquiteturaAtiva[idx];
+    
+    if (setor.itens && setor.itens.length > 0) {
+        if (!confirm(`O setor "${setor.nome}" contém ${setor.itens.length} tipo(s) de item(ns). Ao excluí-lo, todos os itens retornarão para o estoque. Confirmar?`)) {
+            return;
+        }
+
+        // --- SEGURANÇA: MOVE TODOS OS ITENS COM CARIMBO DE ORIGEM ---
+        setor.itens.forEach(item => {
+            const baseItem = {
+                uid_global: item.uid_global,
+                nome: item.nome,
+                tipo: item.tipo,
+                setorOrigem: setor.nome // Permite desfazer mesmo se o setor sumir (vai para o 1º disponível)
+            };
+
+            if (item.tipo === 'multi') {
+                itensParaEstorno.push({
+                    ...baseItem,
+                    tombamentos: [...(item.tombamentos || [])]
+                });
+            } else {
+                itensParaEstorno.push({
+                    ...baseItem,
+                    quantidadeEsperada: item.quantidadeEsperada
+                });
+            }
+        });
     }
     
-    // Se houver itens, poderíamos mandá-los para a caixa de estorno, 
-    // mas por simplicidade nesta versão, eles são apenas removidos do rascunho.
+    // Remove o setor do rascunho
     arquiteturaAtiva.splice(idx, 1);
+    
+    // Atualiza a interface completa
     renderizarArquiteturaEditor();
-    atualizarSelectSetores();
+    if (typeof atualizarSelectSetores === 'function') atualizarSelectSetores();
+    if (typeof atualizarInterfaceEstorno === 'function') atualizarInterfaceEstorno();
+    
     marcarAlteracao();
 }
-	// ================================================================
+// ================================================================
 // 9. GESTÃO DA CAIXA DE SAÍDA (ESTORNOS)
 // ================================================================
 function marcarParaEstorno(setorIdx, itemIdx) {
@@ -12387,6 +12447,9 @@ function atualizarInterfaceEstorno() {
     const container = document.getElementById('lista-itens-estorno');
     const badge = document.getElementById('badge-estorno-count');
     
+    if (!container || !badge) return;
+
+    // O badge reflete o total de itens (objetos) na lista de estorno
     badge.textContent = itensParaEstorno.length;
 
     if (itensParaEstorno.length === 0) {
@@ -12394,20 +12457,32 @@ function atualizarInterfaceEstorno() {
         return;
     }
 
-    // Renderiza os itens com a animação CSS slideInRight definida anteriormente
-    container.innerHTML = itensParaEstorno.map((item, idx) => `
-        <div class="item-estorno-linha">
-            <div style="flex:1;">
-                <b style="font-size:0.85em; display:block; color:#334155;">${item.nome}</b>
-                <small style="color:#e65100; font-weight:700;">
-                    ${item.tipo === 'multi' ? item.tombamentos.length + ' Tomb.' : item.quantidadeEsperada + ' un.'}
-                </small>
+    // Renderiza os itens com foco nos detalhes do tombamento
+    container.innerHTML = itensParaEstorno.map((item, idx) => {
+        const ehMulti = item.tipo === 'multi';
+        
+        // Se for multi, listamos os números dos tombamentos envolvidos
+        let detalhe = "";
+        if (ehMulti && item.tombamentos) {
+            detalhe = item.tombamentos.map(t => t.tomb).join(', ');
+        } else {
+            detalhe = item.quantidadeEsperada + ' unidades';
+        }
+
+        return `
+            <div class="item-estorno-linha" style="display: flex; align-items: center; justify-content: space-between; padding: 10px; border-bottom: 1px solid #f1f5f9; background: #fffaf0; margin-bottom: 5px; border-radius: 6px;">
+                <div style="flex:1; padding-right: 10px;">
+                    <b style="font-size:0.85em; display:block; color:#334155; text-transform: uppercase;">${item.nome || 'Material'}</b>
+                    <small style="color:#e65100; font-weight:700; font-size: 0.75em; display: block; line-height: 1.2;">
+                        ${ehMulti ? '<i class="fas fa-tag"></i> TOMB: ' + detalhe : '<i class="fas fa-boxes"></i> QTD: ' + detalhe}
+                    </small>
+                </div>
+                <button onclick="cancelarEstorno(${idx})" class="btn-remove-item-vtr" title="Desfazer estorno" style="background: #f1f5f9!important; color: #64748b!important; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">
+                    <i class="fas fa-undo" style="font-size:0.8em;"></i>
+                </button>
             </div>
-            <button onclick="cancelarEstorno(${idx})" class="btn-remove-item-vtr" title="Desfazer">
-                <i class="fas fa-undo" style="font-size:0.9em;"></i>
-            </button>
-        </div>
-    `).reverse().join(''); // .reverse() para o mais recente aparecer no topo da lista do chat
+        `;
+    }).reverse().join(''); 
 }
 			function toggleEstornoDock() {
     const dock = document.getElementById('caixa-estorno-dock');
@@ -12423,18 +12498,41 @@ function atualizarInterfaceEstorno() {
 }
 
 function cancelarEstorno(idx) {
+    // 1. Remove da lista de estorno
     const item = itensParaEstorno.splice(idx, 1)[0];
-    // Tenta devolver para o setor de origem dele no rascunho
-    const setorDestino = arquiteturaAtiva.find(s => s.nome === item.setorOrigem) || arquiteturaAtiva[0];
+    if (!item) return;
+
+    // 2. Tenta localizar o setor original pelo nome
+    let setorDestino = arquiteturaAtiva.find(s => s.nome === item.setorOrigem);
     
+    // 3. Se o setor original não existe mais (ex: foi excluído), 
+    // tentamos o primeiro disponível ou avisamos o usuário.
+    if (!setorDestino && arquiteturaAtiva.length > 0) {
+        setorDestino = arquiteturaAtiva[0];
+        console.warn(`Setor original "${item.setorOrigem}" não encontrado. Movendo para ${setorDestino.nome}`);
+    }
+
     if (setorDestino) {
+        // Devolve o item/tombamento para a lista do setor
         setorDestino.itens.push(item);
+        
+        // 4. ESSENCIAL: Processa mesclagem para o item voltar a ser agrupado 
+        // sob o mesmo nome técnico se necessário.
         const sIdx = arquiteturaAtiva.indexOf(setorDestino);
         processarMesclagemAutomatica(sIdx);
+        
+        alert(`O item "${item.nome}" retornou para o setor "${setorDestino.nome}".`);
+    } else {
+        // Caso extremo: Não há setores na viatura
+        alert("Não foi possível devolver o item à viatura pois não existem setores criados.");
+        // Opcional: devolver o item para a lista de estorno para não perdê-lo
+        itensParaEstorno.splice(idx, 0, item);
     }
     
+    // 5. Sincroniza as telas
     atualizarInterfaceEstorno();
     renderizarArquiteturaEditor();
+    marcarAlteracao();
 }
 
 // ================================================================
