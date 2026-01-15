@@ -1614,9 +1614,12 @@ function renderizarConferencia() {
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
                         const dRel = {
-                            id: uid, nomeCompleto: nomeParaRelatorio, status: statusFinal,
+                            id: uid, 
+                            uid_global: entidade.uid_global || "", // ⬅️ ADICIONE ESTA LINHA (Crucial para o Histórico)
+                            nomeCompleto: nomeParaRelatorio, 
+                            status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                            pendencias_ids: pendenciasParaRelatorio, // Aqui vão as físicas + cautelas
+                            pendencias_ids: pendenciasParaRelatorio,
                             quantidade: quantidadeReal,
                             setor: setor.nome, 
                             obs: pendenciasParaRelatorio.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
@@ -1649,7 +1652,38 @@ function renderizarConferencia() {
             timestamp: timestampAgora, totalItensConferidos: itensRelatorio.length,
             totalCaa: totalCaa, itensCaa: itensCaa, itensRelatorio: itensRelatorio
         });
+        itensCaa.forEach(itemC/A => {
+            // 1. Identifica se é um item com tombamento (Multi) ou de estoque (Single)
+            // Se o ID contém um hifen (Ex: ID_BASE-TOMB), extraímos o tombamento para a chave do documento
+            const partesId = itemC/A.id.split('-');
+            const ehMulti = partesId.length > 1;
+            const tombamentoAlvo = ehMulti ? partesId[partesId.length - 1] : null;
 
+            // 2. Só gravamos no histórico individual se for um item Multi (Tombado)
+            // Itens Single (consumo) o histórico já é tratado no documento do Almoxarifado
+            if (ehMulti && tombamentoAlvo) {
+                const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
+        
+                // Criamos a mensagem baseada nas pendências relatadas agora
+                const resumoPendencias = itemC/A.pendencias_ids
+                    .filter(p => p.id.startsWith('TEMP-')) // Apenas as novas desta conferência
+                    .map(p => p.descricao)
+                    .join(' | ');
+
+                if (resumoPendencias) {
+                    batch.set(historicoRef, {
+                        eventos: firebase.firestore.FieldValue.arrayUnion({
+                            data: new Date().toLocaleString('pt-BR'),
+                            evento: "ALERTA_CONFERENCIA",
+                            quem: conferenteCompleto,
+                            detalhes: `⚠️ Alteração relatada na lista ${localNome}: ${resumoPendencias}`,
+                            lista_id: LISTA_ID
+                        })
+                    }, { merge: true });
+                }
+            }
+        });
+        
         await batch.commit();
         alert("✅ Conferência Finalizada com Sucesso!");
         limparRascunho();
