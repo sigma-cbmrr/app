@@ -1652,21 +1652,21 @@ function renderizarConferencia() {
             timestamp: timestampAgora, totalItensConferidos: itensRelatorio.length,
             totalCaa: totalCaa, itensCaa: itensCaa, itensRelatorio: itensRelatorio
         });
-        itensCaa.forEach(itemC/A => {
+        // --- 🔗 CONECTIVIDADE COM HISTÓRICO DE VIDA INDIVIDUAL ---
+        itensCaa.forEach(itemAlterado => {
             // 1. Identifica se é um item com tombamento (Multi) ou de estoque (Single)
             // Se o ID contém um hifen (Ex: ID_BASE-TOMB), extraímos o tombamento para a chave do documento
-            const partesId = itemC/A.id.split('-');
+            const partesId = itemAlterado.id.split('-');
             const ehMulti = partesId.length > 1;
             const tombamentoAlvo = ehMulti ? partesId[partesId.length - 1] : null;
 
             // 2. Só gravamos no histórico individual se for um item Multi (Tombado)
-            // Itens Single (consumo) o histórico já é tratado no documento do Almoxarifado
             if (ehMulti && tombamentoAlvo) {
                 const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
         
-                // Criamos a mensagem baseada nas pendências relatadas agora
-                const resumoPendencias = itemC/A.pendencias_ids
-                    .filter(p => p.id.startsWith('TEMP-')) // Apenas as novas desta conferência
+                // Filtramos apenas as pendências novas desta sessão (TEMP-)
+                const resumoPendencias = (itemAlterado.pendencias_ids || [])
+                    .filter(p => p.id && String(p.id).startsWith('TEMP-')) 
                     .map(p => p.descricao)
                     .join(' | ');
 
@@ -1676,8 +1676,9 @@ function renderizarConferencia() {
                             data: new Date().toLocaleString('pt-BR'),
                             evento: "ALERTA_CONFERENCIA",
                             quem: conferenteCompleto,
+                            // Usamos localNome que já contém o nome amigável (Ex: "ALFA - ABT-18")
                             detalhes: `⚠️ Alteração relatada na lista ${localNome}: ${resumoPendencias}`,
-                            lista_id: LISTA_ID
+                            lista_id: LISTA_ID // Mantemos o UID técnico para rastreabilidade de sistema
                         })
                     }, { merge: true });
                 }
