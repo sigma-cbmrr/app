@@ -12594,12 +12594,11 @@ function cancelarEstorno(idx) {
 // 10. PUBLICAÇÃO FINAL (GRAVAÇÃO NO FIREBASE)
 // ================================================================
 async function confirmarPublicacaoLista() {
-    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista de conferência e processará os estornos no estoque.")) return;
+    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque.")) return;
 
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
-    
     if (itensParaEstorno.length > 0 && !justificativa) {
-        alert("Para devolver itens ao estoque, você deve preencher a justificativa na Caixa de Saída.");
+        alert("Para devolver itens ao estoque, preencha a justificativa.");
         document.getElementById('justificativa-estorno-global').focus();
         return;
     }
@@ -12612,86 +12611,110 @@ async function confirmarPublicacaoLista() {
         const batch = db.batch();
         const listaRef = db.collection('listas_conferencia').doc(idListaSendoEditada);
 
-        // --- A. ATUALIZA A LISTA MESTRA (Arquitetura) ---
+        // --- 1. CAPTURA DE ESTADO ANTERIOR PARA COMPARAR ---
+        const snapLista = await listaRef.get();
+        const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
+        
+        // Mapeamos o que já estava na VTR para saber o que é "Novo"
+        const mapaAnterior = {};
+        listaAnterior.forEach(setor => {
+            setor.itens.forEach(it => { mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (it.quantidadeEsperada || 1); });
+        });
+
+        // --- 2. IDENTIFICA NOVAS INCLUSÕES (O que entrou agora) ---
+        const itensNovosNaVtr = [];
+        arquiteturaAtiva.forEach(setor => {
+            setor.itens.forEach(item => {
+                const qtdAnterior = mapaAnterior[item.uid_global] || 0;
+                const qtdAtual = item.quantidadeEsperada || 1;
+                
+                if (qtdAtual > qtdAnterior) {
+                    itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior });
+                }
+            });
+        });
+
+        // --- 3. PREPARA IDs PARA BUSCA ÚNICA (Estornos + Inclusões) ---
+        const idsNecessarios = [
+            ...itensParaEstorno.map(i => `${currentUserData.unidade_id}_${i.uid_global}`),
+            ...itensNovosNaVtr.map(i => `${currentUserData.unidade_id}_${i.uid_global}`)
+        ];
+        const uniqueIds = [...new Set(idsNecessarios)];
+        
+        const snapsAlmox = await Promise.all(uniqueIds.map(id => db.collection('almoxarifado_central').doc(id).get()));
+        const estoqueDoc = {};
+        snapsAlmox.forEach(s => { if(s.exists) estoqueDoc[s.id] = s.data(); });
+
+        // --- A. ATUALIZA A LISTA MESTRA ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        // --- B. PROCESSA ESTORNOS (Individualizados) ---
-        if (itensParaEstorno.length > 0) {
-            // Mapeamos os IDs únicos dos documentos que precisam de alteração para evitar múltiplos gets
-            const docsIdsNecessarios = [...new Set(itensParaEstorno.map(item => `${currentUserData.unidade_id}_${item.uid_global}`))];
-            
-            // Busca todos os documentos de uma vez para ganhar performance
-            const snapshots = await Promise.all(docsIdsNecessarios.map(id => db.collection('almoxarifado_central').doc(id).get()));
-            const estoqueAtual = {};
-            snapshots.forEach(snap => { if(snap.exists) estoqueAtual[snap.id] = snap.data(); });
+        // --- B. PROCESSA SAÍDAS DO ALMOXARIFADO (Novos itens na VTR) ---
+        itensNovosNaVtr.forEach(item => {
+            const docId = `${currentUserData.unidade_id}_${item.uid_global}`;
+            const dataA = estoqueDoc[docId];
+            if (dataA) {
+                let upd = {
+                    disponivel: (dataA.disponivel || 0) - item.qtdParaSubtrair,
+                    emCarga: (dataA.emCarga || 0) + item.qtdParaSubtrair
+                };
 
-            for (const item of itensParaEstorno) {
-                const docIdAlmox = `${currentUserData.unidade_id}_${item.uid_global}`;
-                const dataAlmox = estoqueAtual[docIdAlmox];
-
-                if (dataAlmox) {
-                    const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
-                    let updateAlmox = {};
-
-                    if (item.tipo === 'single') {
-                        const qtd = Number(item.quantidadeEsperada);
-                        updateAlmox = {
-                            disponivel: (dataAlmox.disponivel || 0) + qtd,
-                            emCarga: Math.max(0, (dataAlmox.emCarga || 0) - qtd)
-                        };
-                    } else {
-                        // Lógica Multi: Libera apenas os tombamentos que foram individualmente removidos
-                        const idsParaLiberar = item.tombamentos.map(t => t.tomb);
-                        
-                        const tombamentosAtualizados = (dataAlmox.tombamentos || []).map(t => {
-                            if (idsParaLiberar.includes(t.tomb)) {
-                                return { ...t, viatura_id: null, situacao: "DISPONÍVEL" };
-                            }
-                            return t;
-                        });
-                        
-                        updateAlmox = {
-                            tombamentos: tombamentosAtualizados,
-                            disponivel: (dataAlmox.disponivel || 0) + idsParaLiberar.length,
-                            emCarga: Math.max(0, (dataAlmox.emCarga || 0) - idsParaLiberar.length)
-                        };
-                    }
-                    
-                    // Auditoria de estorno
-                    updateAlmox.historico_movimentacoes = firebase.firestore.FieldValue.arrayUnion({
-                        data: new Date().toLocaleString('pt-BR'),
-                        evento: "ESTORNO_ARQUITETURA",
-                        detalhes: `Item(s) removido(s) da viatura ${idListaSendoEditada}. Justificativa: ${justificativa}`,
-                        quem: currentUserData.nome_militar_completo
-                    });
-
-                    batch.update(almoxRef, updateAlmox);
+                if (item.tipo === 'multi') {
+                    const idsTomb = item.tombamentos.map(t => t.tomb);
+                    upd.tombamentos = (dataA.tombamentos || []).map(t => 
+                        idsTomb.includes(t.tomb) ? { ...t, viatura_id: idListaSendoEditada, situacao: "EM_CARGA" } : t
+                    );
                 }
+
+                upd.historico_movimentacoes = firebase.firestore.FieldValue.arrayUnion({
+                    data: new Date().toLocaleString('pt-BR'),
+                    evento: "SAIDA_PARA_VTR",
+                    detalhes: `${item.qtdParaSubtrair}un enviados para ${idListaSendoEditada}`,
+                    quem: currentUserData.nome_militar_completo
+                });
+                batch.update(db.collection('almoxarifado_central').doc(docId), upd);
             }
-        }
+        });
+
+        // --- C. PROCESSA ESTORNOS (Itens que saíram da VTR) ---
+        itensParaEstorno.forEach(item => {
+            const docId = `${currentUserData.unidade_id}_${item.uid_global}`;
+            const dataA = estoqueDoc[docId];
+            if (dataA) {
+                const qtd = Number(item.quantidadeEsperada);
+                let upd = {
+                    disponivel: (dataA.disponivel || 0) + qtd,
+                    emCarga: Math.max(0, (dataA.emCarga || 0) - qtd)
+                };
+
+                if (item.tipo === 'multi') {
+                    const idsTomb = item.tombamentos.map(t => t.tomb);
+                    upd.tombamentos = (dataA.tombamentos || []).map(t => 
+                        idsTomb.includes(t.tomb) ? { ...t, viatura_id: null, situacao: "DISPONÍVEL" } : t
+                    );
+                }
+
+                upd.historico_movimentacoes = firebase.firestore.FieldValue.arrayUnion({
+                    data: new Date().toLocaleString('pt-BR'),
+                    evento: "ESTORNO_ARQUITETURA",
+                    detalhes: `Retorno de ${qtd}un da viatura ${idListaSendoEditada}. Justificativa: ${justificativa}`,
+                    quem: currentUserData.nome_militar_completo
+                });
+                batch.update(db.collection('almoxarifado_central').doc(docId), upd);
+            }
+        });
 
         await batch.commit();
-        alert("✅ Publicação realizada com sucesso!");
-        
-        // Reset da Interface
-        btn.classList.remove('modified');
-        btn.style.backgroundColor = '#1b8a3e';
-        btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Publicar Alterações';
-        
-        itensParaEstorno = [];
-        document.getElementById('justificativa-estorno-global').value = '';
-        if (typeof atualizarInterfaceEstorno === 'function') atualizarInterfaceEstorno();
-        if (typeof renderizarArquiteturaEditor === 'function') renderizarArquiteturaEditor();
+        alert("✅ Publicação e Ajuste de Estoque realizados!");
+        location.reload();
 
     } catch (e) {
-        console.error("Erro crítico ao publicar:", e);
-        alert("Erro técnico ao salvar alterações. Verifique o console.");
+        console.error("Erro crítico:", e);
+        alert("Erro ao salvar: " + e.message);
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Tentar Novamente';
     }
 }
 		// Fecha as caixas de busca e popover ao clicar fora delas
