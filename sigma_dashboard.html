@@ -9211,9 +9211,27 @@ async function verDetalhesItemAlmox(docId) {
 
         if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
 
+        // ✅ NOVO HEADER DE IDENTIDADE (UX IMPROVEMENT)
+        const btnHistGlobal = !ehMulti ? 
+            `<button class="btn-modern-action" title="Histórico Global do Lote" onclick="verHistoricoVidaGlobal('${docId}')" style="background:#fef3c7!important; color:#92400e!important; padding:8px 15px!important; border-radius:6px;"><i class="fas fa-history"></i> Ver Histórico do Lote</button>` : '';
+
+        const headerHtml = `
+            <div id="header-detalhe-item" style="display:flex; justify-content:space-between; align-items:center; background:#fff; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:15px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                <div>
+                    <small style="color:#888; text-transform:uppercase; font-weight:bold; letter-spacing:1px;">Material Selecionado</small>
+                    <h2 style="margin:5px 0 0 0; color:#2c7399; font-size:1.6em;">${itemData.nome}</h2>
+                </div>
+                ${btnHistGlobal}
+            </div>`;
+
+        const oldHeader = document.getElementById('header-detalhe-item');
+        if(oldHeader) oldHeader.remove();
+        palcoRastreio.prepend(new DOMParser().parseFromString(headerHtml, 'text/html').body.firstChild);
+
+        // ✅ AJUSTE NO THEAD (Remove identificação para Single)
         theadRastreio.innerHTML = `
             <tr>
-                <th>${ehMulti ? 'Tombamento / Unidade' : 'Identificação'}</th>
+                ${ehMulti ? '<th>Tombamento / Unidade</th>' : ''}
                 <th style="text-align:center;">Localização / Saldo</th>
                 <th style="text-align:center;">Status</th>
                 <th style="text-align:right;">Ações</th>
@@ -9238,20 +9256,15 @@ async function verDetalhesItemAlmox(docId) {
 
             if (ehMulti) {
                 const tombDisponiveis = (d.tombamentos || []).filter(t => !t.viatura_id);
-                
                 if (ehDono || (souAdminGeral && d.unidade === "ADMINISTRATIVO")) {
                     tombDisponiveis.forEach(t => {
                         const temP = t.pendencias_ids?.length > 0;
-                        if (ehDono || souAdminGeral) {
-                            if (temP) cPend++; else cDisp++;
-                        }
+                        if (ehDono || souAdminGeral) { if (temP) cPend++; else cDisp++; }
 
-                        // Botão de Envio (Original)
                         const btnAcao = podeEnviar 
                             ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
                             : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
-                        // Botão de Histórico Individual (RG)
                         const btnHistorico = `<button onclick="abrirRGIndividual('${t.tomb}')" class="btn-modern-action" title="Ver RG do Ativo" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
 
                         bufferHtml += `
@@ -9266,41 +9279,34 @@ async function verDetalhesItemAlmox(docId) {
                     const qtdOutros = tombDisponiveis.length;
                     if (souAdminGeral) cDisp += qtdOutros;
                     const listaTombStr = JSON.stringify(tombDisponiveis.map(t => t.tomb)).replace(/"/g, '&quot;');
-
-                    bufferHtml += `
-                        <tr style="background:#f8fafc;">
-                            <td><i class="fas fa-warehouse" style="color:#94a3b8;"></i> Estoque Setorial</td>
-                            <td style="text-align:center;">Unidade: <b>${d.unidade}</b></td>
-                            <td style="text-align:center;"><span class="status-badge" style="background:#e2e8f0;color:#475569; font-weight:bold;">${qtdOutros} TOMBAMENTOS</span></td>
-                            <td style="text-align:right;">
-                                <button onclick="abrirModalConsultaTombamentos('${d.unidade}', '${listaTombStr}')" class="btn-modern-action" style="background:#64748b!important; padding:5px 10px!important;"><i class="fas fa-eye"></i></button>
-                            </td>
-                        </tr>`;
+                    bufferHtml += `<tr style="background:#f8fafc;">
+                        <td><i class="fas fa-warehouse" style="color:#94a3b8;"></i> Estoque Setorial</td>
+                        <td style="text-align:center;">Unidade: <b>${d.unidade}</b></td>
+                        <td style="text-align:center;"><span class="status-badge" style="background:#e2e8f0;color:#475569; font-weight:bold;">${qtdOutros} TOMBAMENTOS</span></td>
+                        <td style="text-align:right;"><button onclick="abrirModalConsultaTombamentos('${d.unidade}', '${listaTombStr}')" class="btn-modern-action" style="background:#64748b!important; padding:5px 10px!important;"><i class="fas fa-eye"></i></button></td>
+                    </tr>`;
                 }
             } else {
+                // ✅ ITEM SINGLE: REMOVIDO COLUNA DE NOME DO ITEM (REDUNDANTE)
                 const saldoDisp = Number(d.disponivel) || 0;
                 if (ehDono || souAdminGeral) cDisp += saldoDisp;
-
                 if (saldoDisp > 0) {
                     const btnAcaoSingle = podeEnviar
                         ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
                         : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
-                    bufferHtml += `
-                        <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
-                            <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
-                            <td style="text-align:center;"><i class="fas fa-warehouse"></i> <b>${d.unidade}</b></td>
-                            <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">${saldoDisp} un. DISPONÍVEL</span></td>
-                            <td style="text-align:right;">${btnAcaoSingle}</td>
-                        </tr>`;
+                    bufferHtml += `<tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
+                        <td style="text-align:center;"><i class="fas fa-warehouse"></i> Almoxarifado: <b>${d.unidade}</b></td>
+                        <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">${saldoDisp} un. DISPONÍVEL</span></td>
+                        <td style="text-align:right;">${btnAcaoSingle}</td>
+                    </tr>`;
                 }
             }
             if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
         });
 
-        // 2. BUSCA NAS VIATURAS (ITENS EM CARGA)
+        // 2. BUSCA NAS VIATURAS
         const snapListas = await db.collection('listas_conferencia').where('ativo', '==', true).get();
-
         snapListas.forEach(docVtr => {
             const vtrData = docVtr.data();
             const siglaVtr = vtrData.unidade_sigla || "---";
@@ -9310,48 +9316,33 @@ async function verDetalhesItemAlmox(docId) {
             vtrData.list.forEach(setor => {
                 const itNaVtr = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
                 if (!itNaVtr) return;
-
                 let bufferVtr = '';
 
                 if (ehMulti) {
                     (itNaVtr.tombamentos || []).forEach(t => {
-                        const temC = !!t.cautela;
-                        const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
-                        
-                        if (ehMinhaVtr || souAdminGeral) {
-                            if (temP) cPend++; else if (temC) cCaut++; else cUso++;
-                        }
-
+                        const temC = !!t.cautela; const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
+                        if (ehMinhaVtr || souAdminGeral) { if (temP) cPend++; else if (temC) cCaut++; else cUso++; }
                         const statusTxt = temP ? 'PENDENTE' : (temC ? 'CAUTELADO' : 'EM USO');
                         const corStatus = temP ? 'background:#ffebee;color:#c62828;' : (temC ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;');
-                        
                         const btnRecolher = ehMinhaVtr || role === 'admin' 
-                            ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` 
-                            : `<small style="color:#999;">Carga Setorial</small>`;
-
+                            ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`;
                         const btnHistVtr = `<button onclick="abrirRGIndividual('${t.tomb}')" class="btn-modern-action" title="Ver RG do Ativo" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
-
-                        bufferVtr += `
-                            <tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
-                                <td><i class="fas fa-tag" style="color:#2c7399; margin-right:8px; font-size:0.9em;"></i><strong>${t.tomb}</strong></td>
-                                <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
-                                <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${statusTxt}</span></td>
-                                <td style="text-align:right;">${btnRecolher}${btnHistVtr}</td>
-                            </tr>`;
+                        bufferVtr += `<tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
+                            <td><i class="fas fa-tag" style="color:#2c7399; margin-right:8px; font-size:0.9em;"></i><strong>${t.tomb}</strong></td>
+                            <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
+                            <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${statusTxt}</span></td>
+                            <td style="text-align:right;">${btnRecolher}${btnHistVtr}</td>
+                        </tr>`;
                     });
                 } else {
+                    // ✅ ITEM SINGLE NAS VIATURAS: REMOVIDO COLUNA REDUNDANTE
                     const qtdVtr = Number(itNaVtr.quantidadeEsperada) || 0;
                     if (ehMinhaVtr || souAdminGeral) cUso += qtdVtr;
-
-                    bufferVtr += `
-                        <tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
-                            <td><i class="fas fa-boxes"></i> ${itemData.nome}</td>
-                            <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
-                            <td style="text-align:center;"><b>${qtdVtr} un. EM USO</b></td>
-                            <td style="text-align:right;">
-                                ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}
-                            </td>
-                        </tr>`;
+                    bufferVtr += `<tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
+                        <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
+                        <td style="text-align:center;"><b>${qtdVtr} un. EM USO</b></td>
+                        <td style="text-align:right;">${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}</td>
+                    </tr>`;
                 }
                 if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
             });
@@ -9360,17 +9351,17 @@ async function verDetalhesItemAlmox(docId) {
         // 3. EXTRATO DE TOPO
         const totalG = cDisp + cUso + cCaut + cPend;
         const extratoHtml = `
-            <div id="almox-resumo-topo" style="display: flex; gap: 10px; padding: 15px; background: #fff; border: 1px solid #eee; border-radius: 8px; justify-content: space-around; flex-wrap: wrap; margin-bottom:20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+            <div id="almox-resumo-topo" style="display:flex; gap:10px; padding:15px; background:#fff; border:1px solid #eee; border-radius:8px; justify-content:space-around; flex-wrap:wrap; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
                 <div style="text-align:center;"><small style="color:#2e7d32; font-weight:bold; display:block;">DISPONÍVEL</small><b style="font-size:1.4em; color:#2e7d32;">${cDisp}</b></div>
                 <div style="text-align:center;"><small style="color:#616161; font-weight:bold; display:block;">EM USO</small><b style="font-size:1.4em; color:#616161;">${cUso}</b></div>
                 <div style="text-align:center;"><small style="color:#e65100; font-weight:bold; display:block;">CAUTELADO</small><b style="font-size:1.4em; color:#e65100;">${cCaut}</b></div>
                 <div style="text-align:center;"><small style="color:#c62828; font-weight:bold; display:block;">PENDENTE</small><b style="font-size:1.4em; color:#c62828;">${cPend}</b></div>
-                <div style="text-align:center; border-left: 2px solid #ddd; padding-left:20px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL ${souAdminGeral ? 'GERAL' : 'LOCAL'}</small><b style="font-size:1.4em; color:#800020;">${totalG}</b></div>
+                <div style="text-align:center; border-left:2px solid #ddd; padding-left:20px;"><small style="color:#800020; font-weight:bold; display:block;">TOTAL ${souAdminGeral ? 'GERAL' : 'LOCAL'}</small><b style="font-size:1.4em; color:#800020;">${totalG}</b></div>
             </div>`;
 
         const resOld = document.getElementById('almox-resumo-topo');
         if(resOld) resOld.remove();
-        palcoRastreio.querySelector('div').insertAdjacentHTML('afterend', extratoHtml);
+        palcoRastreio.querySelector('#header-detalhe-item').insertAdjacentHTML('afterend', extratoHtml);
         
         tbodyRastreio.innerHTML = (htmlPrioridade + htmlRestante) || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro localizado.</td></tr>';
 
