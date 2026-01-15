@@ -12794,23 +12794,24 @@ async function confirmarPublicacaoLista() {
             });
 
             // ✅ MODIFICAÇÃO CIRÚRGICA: SINCRONIZAÇÃO COM O RG INDIVIDUAL (ITEM MULTI)
-            if (item.tipo === 'multi') {
-                const idsTombados = item.tombamentos.map(t => t.tomb);
-                
-                idsTombados.forEach(numTomb => {
-                    const historicoIndividualRef = db.collection('historico_ativos_individuais').doc(numTomb);
-                    
-                    batch.set(historicoIndividualRef, {
-                        eventos: firebase.firestore.FieldValue.arrayUnion({
-                            data: new Date().toLocaleString('pt-BR'),
-                            evento: acao.tipoOperacao === 'SAIDA' ? "MOVIMENTACAO_CARGA" : "MOVIMENTACAO_ESTORNO",
-                            detalhes: msgLog,
-                            quem: currentUserData.nome_militar_completo,
-                            local_referencia: nomeAmigavelVtr,
-                            lista_id: idListaSendoEditada
-                        })
-                    }, { merge: true });
-                });
+            idsTombados.forEach(numTomb => {
+    			const historicoIndividualRef = db.collection('historico_ativos_individuais').doc(numTomb);
+    
+    			// Criamos uma mensagem limpa, sem a redundância de "1un"
+    			const acaoLimpa = acao.tipoOperacao === 'SAIDA' ? "ENVIADO PARA" : "RETORNADO DE";
+    			const msgIndividual = `${acaoLimpa} ${nomeAmigavelVtr}${acao.tipoOperacao === 'ESTORNO' ? '. Motivo: ' + justificativa : ''}`;
+
+    			batch.set(historicoIndividualRef, {
+        			eventos: firebase.firestore.FieldValue.arrayUnion({
+            			data: new Date().toLocaleString('pt-BR'),
+            			evento: acao.tipoOperacao === 'SAIDA' ? "MOVIMENTACAO_CARGA" : "MOVIMENTACAO_ESTORNO",
+            			detalhes: msgIndividual, // ⬅️ Agora sai: "ENVIADO PARA ABT-18"
+            			quem: currentUserData.nome_militar_completo,
+            			local_referencia: nomeAmigavelVtr,
+            			lista_id: idListaSendoEditada
+        			})
+    			}, { merge: true });
+			});
             }
         });
 
