@@ -12042,44 +12042,79 @@ function marcarAlteracao() {
 // ================================================================
 function buscarItemParaAdicionar(termo) {
     const box = document.getElementById('sugestoes-estoque-editor');
-    if (termo.length < 2) { box.style.display = 'none'; return; }
+    if (!box) return;
+    
+    if (termo.length < 2) { 
+        box.style.display = 'none'; 
+        return; 
+    }
 
-    const t = termo.toLowerCase();
+    const t = termo.toLowerCase().trim();
     const suggestions = [];
 
+    // Percorre o estoque local da unidade (carregado ao abrir o editor)
     estoqueGestorLocal.forEach(item => {
+        const nomeMatch = item.nome.toLowerCase().includes(t);
+
         if (item.tipo === 'multi') {
-            // Cria uma sugestão para cada tombamento disponível
+            // Cria uma sugestão INDIVIDUAL para cada tombamento que não esteja em uso
             (item.tombamentos || []).forEach(tomb => {
-                if (!tomb.viatura_id && (item.nome.toLowerCase().includes(t) || tomb.tomb.toLowerCase().includes(t))) {
-                    suggestions.push({ ...item, tombamentoExibicao: tomb.tomb, id_unico: `${item.id_almox}_${tomb.tomb}` });
+                const tombNum = String(tomb.tomb || "");
+                const tombMatch = tombNum.toLowerCase().includes(t);
+
+                if (!tomb.viatura_id && (nomeMatch || tombMatch)) {
+                    suggestions.push({ 
+                        ...item, 
+                        tombamentoExibicao: tomb.tomb, 
+                        id_unico: `${item.id_almox}_${tomb.tomb}` 
+                    });
                 }
             });
         } else {
-            // Item Single normal
-            if (item.nome.toLowerCase().includes(t)) {
-                suggestions.push({ ...item, id_unico: item.id_almox });
+            // Item Single (Consumo): Uma única sugestão com o saldo total disponível
+            if (nomeMatch && (item.disponivel > 0)) {
+                suggestions.push({ 
+                    ...item, 
+                    id_unico: item.id_almox 
+                });
             }
         }
     });
 
-    const matches = suggestions.slice(0, 10);
+    const matches = suggestions.slice(0, 10); // Limita a 10 para não poluir a tela
 
     if (matches.length === 0) {
-    box.innerHTML = '<div class="suggestion-item">Nada disponível no estoque.</div>';
-	} else {
-    	box.innerHTML = matches.map(i => `
-        	<div class="suggestion-item" onclick="selecionarItemParaAdicionar('${encodeURIComponent(JSON.stringify(i))}', event)" style="display: flex; align-items: center; padding: 10px 15px;">
-            	<i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'} icon-sugestao-estoque" 
-   				style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; margin-right: 15px; width: 20px; text-align: center; position: static; display: inline-block;"></i>
-            	<div style="display:flex; flex-direction:column; pointer-events: none;">
-                	<b style="font-size: 0.9em; line-height: 1.2;">${i.nome}</b>
-                	<small style="color: #64748b;">${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'Saldo Disp: ' + i.disponivel}</small>
-            	</div>
-        	</div>
-    	`).join('');
-	}
-	box.style.display = 'block';
+        box.innerHTML = '<div class="suggestion-item" style="padding:15px; color:#94a3b8; text-align:center;">Nada disponível no estoque para este termo.</div>';
+    } else {
+        // Armazenamos temporariamente os matches em uma variável global/fechamento para o clique
+        window.tempSuggestionsSearch = matches; 
+
+        box.innerHTML = matches.map((i, index) => `
+            <div class="suggestion-item" onclick="selecionarSugestaoPorIndex(${index})" style="display: flex; align-items: center; padding: 10px 15px; cursor: pointer; border-bottom: 1px solid #f1f5f9;">
+                <div style="width: 35px; display: flex; justify-content: center;">
+                    <i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'}" 
+                       style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1.1em;"></i>
+                </div>
+                <div style="display:flex; flex-direction:column; flex: 1; margin-left: 10px;">
+                    <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase;">${i.nome}</b>
+                    <small style="color: #64748b; font-weight: 500;">
+                        ${i.tipo === 'multi' ? '<span style="color:#800020;">TOMB: ' + i.tombamentoExibicao + '</span>' : 'Disponível: ' + i.disponivel}
+                    </small>
+                </div>
+                <i class="fas fa-plus-circle" style="color: #cbd5e1; font-size: 0.9em;"></i>
+            </div>
+        `).join('');
+    }
+    box.style.display = 'block';
+}
+
+// Função de apoio para evitar passar JSON gigante no HTML
+function selecionarSugestaoPorIndex(index) {
+    const item = window.tempSuggestionsSearch[index];
+    if (item) {
+        // Esta função deve alimentar o itemSelecionadoTemp e fechar o box
+        selecionarItemParaAdicionar(item); 
+    }
 }
 
 let itemSelecionadoTemp = null;
