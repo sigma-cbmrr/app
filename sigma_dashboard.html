@@ -12009,23 +12009,43 @@ function processarMesclagemAutomatica(setorIndex) {
 
     itens.forEach(item => {
         const chave = item.uid_global;
+
         if (mapa.has(chave)) {
             const existente = mapa.get(chave);
+            
             if (item.tipo === 'single') {
-                existente.quantidadeEsperada += item.quantidadeEsperada;
+                // Mesclagem de Consumo: Soma as quantidades
+                existente.quantidadeEsperada = (Number(existente.quantidadeEsperada) || 0) + (Number(item.quantidadeEsperada) || 0);
             } else {
-                // Junta arrays de tombamentos e desduplica por precaução
-                const todosTombs = [...existente.tombamentos, ...item.tombamentos];
-                existente.tombamentos = Array.from(new Set(todosTombs.map(t => JSON.stringify(t)))).map(s => JSON.parse(s));
+                // Mesclagem de Patrimônio: Une os arrays de tombamentos
+                const tombamentosExistentes = existente.tombamentos || [];
+                const novosTombamentos = item.tombamentos || [];
+
+                // Desduplicação inteligente baseada no número do tombamento (tomb)
+                novosTombamentos.forEach(novoT => {
+                    const jaExiste = tombamentosExistentes.some(t => t.tomb === novoT.tomb);
+                    if (!jaExiste) {
+                        tombamentosExistentes.push(novoT);
+                    }
+                });
+                
+                existente.tombamentos = tombamentosExistentes;
+                // A quantidade esperada em itens multi deve ser sempre o total de tombamentos vinculados
+                existente.quantidadeEsperada = existente.tombamentos.length;
             }
         } else {
+            // Se for a primeira vez que o item aparece no setor, registra no mapa
+            // Fazemos um shallow copy para evitar mutações inesperadas em outros setores
             mapa.set(chave, item);
             novosItens.push(item);
         }
     });
 
+    // Atualiza o estado global com a lista limpa e mesclada
     arquiteturaAtiva[setorIndex].itens = novosItens;
-    renderizarArquiteturaEditor(); // Re-renderiza para mostrar a soma
+    
+    // Renderiza a interface (onde os tombamentos aparecerão um abaixo do outro conforme configuramos)
+    renderizarArquiteturaEditor();
     marcarAlteracao();
 }
 
@@ -12120,46 +12140,91 @@ function selecionarSugestaoPorIndex(index) {
 let itemSelecionadoTemp = null;
 
 // 7. SELEÇÃO COM MICRO-MODAL
-function selecionarItemParaAdicionar(dataJson, event) {
-    const item = JSON.parse(decodeURIComponent(dataJson));
+function selecionarItemParaAdicionar(item) {
+    if (!item) return;
+
+    // O item já vem como objeto da função buscarItemParaAdicionar
     itemSelecionadoTemp = item;
     
     const inputBusca = document.getElementById('input-busca-estoque');
-    inputBusca.value = item.nome + (item.tombamentoExibicao ? ` (${item.tombamentoExibicao})` : '');
-    document.getElementById('sugestoes-estoque-editor').style.display = 'none';
+    const boxSugestoes = document.getElementById('sugestoes-estoque-editor');
+    const popover = document.getElementById('popover-qtd-editor');
 
+    // 1. Atualiza o input com o nome e, se houver, o tombamento
+    inputBusca.value = item.nome + (item.tombamentoExibicao ? ` (${item.tombamentoExibicao})` : '');
+    
+    // 2. Esconde a caixa de sugestões
+    if (boxSugestoes) boxSugestoes.style.display = 'none';
+
+    // 3. Lógica de Quantidade (Single) vs Identidade (Multi)
     if (item.tipo === 'single') {
-        // Abre Micro-Modal de Quantidade
-        const popover = document.getElementById('popover-qtd-editor');
         const rect = inputBusca.getBoundingClientRect();
         
+        // Posicionamento dinâmico do Popover
         popover.style.top = (rect.bottom + window.scrollY + 5) + 'px';
         popover.style.left = rect.left + 'px';
         popover.style.display = 'block';
         
         const inputQtd = document.getElementById('input-qtd-popover');
+        const infoMax = document.getElementById('info-max-popover');
+
+        // Configura limites do input de quantidade
         inputQtd.max = item.disponivel;
         inputQtd.value = 1;
-        document.getElementById('info-max-popover').textContent = `Máximo: ${item.disponivel} un.`;
-        inputQtd.focus();
-        inputQtd.select();
+        
+        if (infoMax) {
+            infoMax.textContent = `Máximo: ${item.disponivel} un.`;
+        }
+
+        // Foca no campo de quantidade para agilizar a digitação
+        setTimeout(() => {
+            inputQtd.focus();
+            inputQtd.select();
+        }, 50);
+
     } else {
-        // Se for Multi, já está pronto para adicionar (já escolheu o tombamento)
-        document.getElementById('popover-qtd-editor').style.display = 'none';
+        // Se for Multi, o tombamento já foi selecionado na busca, 
+        // então apenas garantimos que o popover de quantidade esteja fechado.
+        if (popover) popover.style.display = 'none';
+        
+        // Dica operacional: Como é Multi, o gestor já pode clicar em "Adicionar"
+        // ou você pode disparar o adicionarItemRapido() automaticamente aqui se desejar.
+        console.log("Item Multi pronto para adição:", item.tombamentoExibicao);
     }
 }
 		function confirmarQtdPopover() {
-    const qtd = parseInt(document.getElementById('input-qtd-popover').value);
-    if (isNaN(qtd) || qtd <= 0) return;
+    const input = document.getElementById('input-qtd-popover');
+    const qtd = parseInt(input.value);
     
+    // 1. Validação básica de entrada
+    if (isNaN(qtd) || qtd <= 0) {
+        alert("Informe uma quantidade válida.");
+        return;
+    }
+    
+    // 2. Trava de segurança contra estouro de estoque
     if (qtd > itemSelecionadoTemp.disponivel) {
-        alert("Quantidade indisponível no estoque.");
+        alert(`Quantidade indisponível. Saldo atual: ${itemSelecionadoTemp.disponivel}`);
+        input.value = itemSelecionadoTemp.disponivel; // Ajusta automaticamente para o máximo
+        input.focus();
         return;
     }
 
+    // 3. Atribui a quantidade ao objeto temporário
     itemSelecionadoTemp.quantidadeEscolhida = qtd;
+
+    // 4. Fecha o popover
     document.getElementById('popover-qtd-editor').style.display = 'none';
-    adicionarItemRapido(); // Chama a inserção
+
+    // 5. Chama a inserção no setor
+    adicionarItemRapido();
+
+    // 6. UX: Retorna o foco para o campo de busca para facilitar a próxima adição
+    const inputBusca = document.getElementById('input-busca-estoque');
+    if (inputBusca) {
+        inputBusca.value = '';
+        inputBusca.focus();
+    }
 }
 		
 
