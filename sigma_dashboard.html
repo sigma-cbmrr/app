@@ -11871,23 +11871,37 @@ function fecharEditorArquitetura() {
 // ================================================================
 async function carregarEstoqueParaEditor(unidadeId) {
     try {
-        const snap = await db.collection('almoxarifado_central')
+        // RESET: Garante que o cache comece limpo
+        estoqueGestorLocal = [];
+
+        // BUSCA HÍBRIDA: Tenta buscar pelo unidade_id (UID)
+        // Se a busca falhar ou estiver vazia, buscaremos pela sigla (legado)
+        let snap = await db.collection('almoxarifado_central')
                              .where('unidade_id', '==', unidadeId)
                              .get();
+
+        // Se não achou nada pelo UID, tenta buscar pelo campo 'unidade' (Ex: "CCI")
+        if (snap.empty) {
+            console.log("Busca por UID vazia, tentando buscar por Sigla...");
+            snap = await db.collection('almoxarifado_central')
+                             .where('unidade', '==', unidadeId) 
+                             .get();
+        }
         
-        estoqueGestorLocal = [];
         snap.forEach(doc => {
             const d = doc.data();
-            if (d.disponivel > 0) {
-                estoqueGestorLocal.push({
-                    id_almox: doc.id,
-                    ...d
-                });
-            }
+            // REMOVI a trava de 'd.disponivel > 0'
+            // MOTIVO: Se você for remover um item da VTR (Estorno), o saldo no almox pode estar 0, 
+            // mas você precisa do ID do documento para devolver o item para lá.
+            estoqueGestorLocal.push({
+                id_almox: doc.id, // O ID REAL (Ex: CCI_item...)
+                ...d
+            });
         });
-        console.log(`Estoque carregado: ${estoqueGestorLocal.length} itens disponíveis.`);
+
+        console.log(`Estoque carregado no editor: ${estoqueGestorLocal.length} referências mapeadas.`);
     } catch (e) {
-        console.error("Erro ao carregar estoque para busca:", e);
+        console.error("Erro crítico ao carregar estoque para busca:", e);
     }
 }
 	// ================================================================
@@ -12342,11 +12356,6 @@ function cancelarRascunho() {
         selectSetor.style.border = "1px solid #cbd5e1"; // Remove destaques de foco
     }
 }
-
-/**
- * Garante que ao trocar o setor, o botão reaja imediatamente
- */
-document.getElementById('select-setor-destino').addEventListener('change', validarBotaoAdicionar);
 // ================================================================
 // 8. UTILITÁRIOS: ATUALIZAR SELECT E NOVO SETOR
 // ================================================================
@@ -12615,10 +12624,11 @@ async function confirmarPublicacaoLista() {
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
         
-        // Mapeamos o que já estava na VTR para saber o que é "Novo"
         const mapaAnterior = {};
         listaAnterior.forEach(setor => {
-            setor.itens.forEach(it => { mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (it.quantidadeEsperada || 1); });
+            setor.itens.forEach(it => { 
+                mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (it.quantidadeEsperada || 1); 
+            });
         });
 
         // --- 2. IDENTIFICA NOVAS INCLUSÕES (O que entrou agora) ---
@@ -12627,94 +12637,105 @@ async function confirmarPublicacaoLista() {
             setor.itens.forEach(item => {
                 const qtdAnterior = mapaAnterior[item.uid_global] || 0;
                 const qtdAtual = item.quantidadeEsperada || 1;
-                
                 if (qtdAtual > qtdAnterior) {
                     itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior });
                 }
             });
         });
 
-        // --- 3. PREPARA IDs PARA BUSCA ÚNICA (Estornos + Inclusões) ---
-        const idsNecessarios = [
-            ...itensParaEstorno.map(i => `${currentUserData.unidade_id}_${i.uid_global}`),
-            ...itensNovosNaVtr.map(i => `${currentUserData.unidade_id}_${i.uid_global}`)
-        ];
-        const uniqueIds = [...new Set(idsNecessarios)];
-        
-        const snapsAlmox = await Promise.all(uniqueIds.map(id => db.collection('almoxarifado_central').doc(id).get()));
-        const estoqueDoc = {};
-        snapsAlmox.forEach(s => { if(s.exists) estoqueDoc[s.id] = s.data(); });
+        // --- 3. MAPEAMENTO DE DOCUMENTOS REAIS (Uso do Cache id_almox) ---
+        // Aqui resolvemos o problema do ADMIN_ vs CCI_ vs UNID_
+        const mapearAcaoAlmox = (item, operacao) => {
+            // Busca no cache que populamos ao abrir o editor
+            const refEstoque = estoqueGestorLocal.find(e => e.uid_global === item.uid_global);
+            if (!refEstoque) {
+                console.warn(`Aviso: Item ${item.nome} não localizado no mapeamento de estoque local.`);
+                return null;
+            }
+            return {
+                docIdReal: refEstoque.id_almox, // Ex: "CCI_item_001"
+                dados: item,
+                tipoOperacao: operacao
+            };
+        };
+
+        const acoesParaProcessar = [
+            ...itensNovosNaVtr.map(i => mapearAcaoAlmox(i, 'SAIDA')),
+            ...itensParaEstorno.map(i => mapearAcaoAlmox(i, 'ESTORNO'))
+        ].filter(a => a !== null);
+
+        // --- 4. BUSCA DINÂMICA DE SALDOS ATUAIS ---
+        const uniqueDocIds = [...new Set(acoesParaProcessar.map(a => a.docIdReal))];
+        const snapsAlmox = await Promise.all(uniqueDocIds.map(id => db.collection('almoxarifado_central').doc(id).get()));
+        const estoqueDataMap = {};
+        snapsAlmox.forEach(s => { if(s.exists) estoqueDataMap[s.id] = s.data(); });
 
         // --- A. ATUALIZA A LISTA MESTRA ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
-            ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
+            ultima_edicao_arquitetura: firebase.firestore.Timestamp.now(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        // --- B. PROCESSA SAÍDAS DO ALMOXARIFADO (Novos itens na VTR) ---
-        itensNovosNaVtr.forEach(item => {
-            const docId = `${currentUserData.unidade_id}_${item.uid_global}`;
-            const dataA = estoqueDoc[docId];
-            if (dataA) {
-                let upd = {
-                    disponivel: (dataA.disponivel || 0) - item.qtdParaSubtrair,
-                    emCarga: (dataA.emCarga || 0) + item.qtdParaSubtrair
-                };
+        // --- B. PROCESSA TODAS AS MOVIMENTAÇÕES DE ESTOQUE ---
+        acoesParaProcessar.forEach(acao => {
+            const dataDoc = estoqueDataMap[acao.docIdReal];
+            const item = acao.dados;
+            if (!dataDoc) return;
+
+            let novoDisp = dataDoc.disponivel || 0;
+            let novoEmCarga = dataDoc.emCarga || 0;
+            let listaTombamentos = [...(dataDoc.tombamentos || [])];
+            let msgLog = "";
+
+            if (acao.tipoOperacao === 'SAIDA') {
+                const qtd = item.qtdParaSubtrair;
+                novoDisp -= qtd;
+                novoEmCarga += qtd;
+                msgLog = `SAÍDA: ${qtd}un enviadas para ${idListaSendoEditada}`;
 
                 if (item.tipo === 'multi') {
-                    const idsTomb = item.tombamentos.map(t => t.tomb);
-                    upd.tombamentos = (dataA.tombamentos || []).map(t => 
-                        idsTomb.includes(t.tomb) ? { ...t, viatura_id: idListaSendoEditada, situacao: "EM_CARGA" } : t
+                    const idsTombEnviados = item.tombamentos.map(t => t.tomb);
+                    listaTombamentos = listaTombamentos.map(t => 
+                        idsTombEnviados.includes(t.tomb) ? { ...t, viatura_id: idListaSendoEditada, situacao: "EM_CARGA" } : t
                     );
                 }
-
-                upd.historico_movimentacoes = firebase.firestore.FieldValue.arrayUnion({
-                    data: new Date().toLocaleString('pt-BR'),
-                    evento: "SAIDA_PARA_VTR",
-                    detalhes: `${item.qtdParaSubtrair}un enviados para ${idListaSendoEditada}`,
-                    quem: currentUserData.nome_militar_completo
-                });
-                batch.update(db.collection('almoxarifado_central').doc(docId), upd);
-            }
-        });
-
-        // --- C. PROCESSA ESTORNOS (Itens que saíram da VTR) ---
-        itensParaEstorno.forEach(item => {
-            const docId = `${currentUserData.unidade_id}_${item.uid_global}`;
-            const dataA = estoqueDoc[docId];
-            if (dataA) {
+            } else {
                 const qtd = Number(item.quantidadeEsperada);
-                let upd = {
-                    disponivel: (dataA.disponivel || 0) + qtd,
-                    emCarga: Math.max(0, (dataA.emCarga || 0) - qtd)
-                };
+                novoDisp += qtd;
+                novoEmCarga = Math.max(0, novoEmCarga - qtd);
+                msgLog = `ESTORNO: ${qtd}un retornaram de ${idListaSendoEditada}. Motivo: ${justificativa}`;
 
                 if (item.tipo === 'multi') {
-                    const idsTomb = item.tombamentos.map(t => t.tomb);
-                    upd.tombamentos = (dataA.tombamentos || []).map(t => 
-                        idsTomb.includes(t.tomb) ? { ...t, viatura_id: null, situacao: "DISPONÍVEL" } : t
+                    const idsTombRetorno = item.tombamentos.map(t => t.tomb);
+                    listaTombamentos = listaTombamentos.map(t => 
+                        idsTombRetorno.includes(t.tomb) ? { ...t, viatura_id: null, situacao: "DISPONÍVEL" } : t
                     );
                 }
-
-                upd.historico_movimentacoes = firebase.firestore.FieldValue.arrayUnion({
-                    data: new Date().toLocaleString('pt-BR'),
-                    evento: "ESTORNO_ARQUITETURA",
-                    detalhes: `Retorno de ${qtd}un da viatura ${idListaSendoEditada}. Justificativa: ${justificativa}`,
-                    quem: currentUserData.nome_militar_completo
-                });
-                batch.update(db.collection('almoxarifado_central').doc(docId), upd);
             }
+
+            batch.update(db.collection('almoxarifado_central').doc(acao.docIdReal), {
+                disponivel: novoDisp,
+                emCarga: novoEmCarga,
+                tombamentos: listaTombamentos,
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
+                    data: new Date().toLocaleString('pt-BR'),
+                    evento: acao.tipoOperacao === 'SAIDA' ? "SAIDA_PARA_VTR" : "ESTORNO_EDITOR",
+                    detalhes: msgLog,
+                    quem: currentUserData.nome_militar_completo
+                })
+            });
         });
 
         await batch.commit();
-        alert("✅ Publicação e Ajuste de Estoque realizados!");
+        alert("✅ Lista publicada e estoque sincronizado com sucesso!");
         location.reload();
 
     } catch (e) {
-        console.error("Erro crítico:", e);
+        console.error("Erro crítico na publicação:", e);
         alert("Erro ao salvar: " + e.message);
         btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Tentar Novamente';
     }
 }
 		// Fecha as caixas de busca e popover ao clicar fora delas
