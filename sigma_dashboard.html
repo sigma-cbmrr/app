@@ -12594,6 +12594,9 @@ function cancelarEstorno(idx) {
 async function confirmarPublicacaoLista() {
     if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque.")) return;
 
+    // CAPTURA O NOME AMIGÁVEL DA VIATURA/BASE DO TÍTULO DO EDITOR
+    const nomeAmigavelVtr = document.getElementById('edit-vtr-nome').textContent;
+
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
     if (itensParaEstorno.length > 0 && !justificativa) {
         alert("Para devolver itens ao estoque, preencha a justificativa.");
@@ -12620,7 +12623,7 @@ async function confirmarPublicacaoLista() {
             });
         });
 
-        // --- 2. IDENTIFICA NOVAS INCLUSÕES (O que entrou agora) ---
+        // --- 2. IDENTIFICA NOVAS INCLUSÕES ---
         const itensNovosNaVtr = [];
         arquiteturaAtiva.forEach(setor => {
             setor.itens.forEach(item => {
@@ -12632,20 +12635,14 @@ async function confirmarPublicacaoLista() {
             });
         });
 
-        // --- 3. MAPEAMENTO DE DOCUMENTOS REAIS (Uso do Cache id_almox) ---
-        // Aqui resolvemos o problema do ADMIN_ vs CCI_ vs UNID_
+        // --- 3. MAPEAMENTO DE DOCUMENTOS REAIS ---
         const mapearAcaoAlmox = (item, operacao) => {
-            // Busca no cache que populamos ao abrir o editor
             const refEstoque = estoqueGestorLocal.find(e => e.uid_global === item.uid_global);
             if (!refEstoque) {
-                console.warn(`Aviso: Item ${item.nome} não localizado no mapeamento de estoque local.`);
+                console.warn(`Aviso: Item ${item.nome} não localizado no mapeamento.`);
                 return null;
             }
-            return {
-                docIdReal: refEstoque.id_almox, // Ex: "CCI_item_001"
-                dados: item,
-                tipoOperacao: operacao
-            };
+            return { docIdReal: refEstoque.id_almox, dados: item, tipoOperacao: operacao };
         };
 
         const acoesParaProcessar = [
@@ -12681,7 +12678,8 @@ async function confirmarPublicacaoLista() {
                 const qtd = item.qtdParaSubtrair;
                 novoDisp -= qtd;
                 novoEmCarga += qtd;
-                msgLog = `SAÍDA: ${qtd}un enviadas para ${idListaSendoEditada}`;
+                // ✅ CORREÇÃO: Usa o nome amigável no histórico
+                msgLog = `SAÍDA: ${qtd}un enviadas para ${nomeAmigavelVtr}`;
 
                 if (item.tipo === 'multi') {
                     const idsTombEnviados = item.tombamentos.map(t => t.tomb);
@@ -12693,7 +12691,8 @@ async function confirmarPublicacaoLista() {
                 const qtd = Number(item.quantidadeEsperada);
                 novoDisp += qtd;
                 novoEmCarga = Math.max(0, novoEmCarga - qtd);
-                msgLog = `ESTORNO: ${qtd}un retornaram de ${idListaSendoEditada}. Motivo: ${justificativa}`;
+                // ✅ CORREÇÃO: Usa o nome amigável no histórico
+                msgLog = `ESTORNO: ${qtd}un retornaram de ${nomeAmigavelVtr}. Motivo: ${justificativa}`;
 
                 if (item.tipo === 'multi') {
                     const idsTombRetorno = item.tombamentos.map(t => t.tomb);
