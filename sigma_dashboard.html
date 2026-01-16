@@ -3461,6 +3461,8 @@ input:checked + .slider:before {
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore(); 
         const auth = firebase.auth();
+		const secondaryApp = firebase.initializeApp(firebaseConfig, 'Secondary');
+    	const secondaryAuth = secondaryApp.auth();
         
         function openNewConferenceModal() {
         document.getElementById('modal-nova-conferencia').style.display = 'flex';
@@ -5390,63 +5392,72 @@ function reimprimirPDF(data) {
         
        async function criarUsuario() {
     const email = document.getElementById('new-user-email').value.trim();
+    
+    // Solicitação de senha (Mínimo 6 caracteres conforme regra do Firebase)
+    const password = prompt("Defina uma senha de acesso para este militar (Mínimo 6 caracteres):");
+    if (!password || password.length < 6) {
+        return alert("Operação cancelada: A senha deve ter pelo menos 6 caracteres.");
+    }
+
     const guerra = document.getElementById('new-user-guerra').value.trim().toUpperCase();
     const posto = document.getElementById('new-user-posto').value;
-    const quadro = document.getElementById('new-user-quadro').value; // Novo Campo
-    const completo = document.getElementById('new-user-completo').value.trim().toUpperCase(); // Nome Civil Completo
+    const quadro = document.getElementById('new-user-quadro').value;
+    const completo = document.getElementById('new-user-completo').value.trim().toUpperCase();
     const role = document.getElementById('new-user-role').value;
     
-    // ✅ CAPTURA CIRÚRGICA: Separa o UID (value) da Sigla (text)
+    // Captura de Unidade (UID e Sigla)
     const selectUnit = document.getElementById('new-user-unit');
     const unitId = selectUnit.value; 
     const unitSigla = selectUnit.options[selectUnit.selectedIndex].text;
     
-    // NOVOS CAMPOS DE IDENTIFICAÇÃO E CONTATO (LIMPOS)
+    // Limpeza de campos numéricos
     const cpfRaw = document.getElementById('new-user-cpf').value.replace(/\D/g, '');
     const matriculaRaw = document.getElementById('new-user-matricula').value.replace(/\D/g, '');
     const telefoneRaw = document.getElementById('new-user-telefone').value.replace(/\D/g, '');
 
-    // Validação atualizada para checar unitId
     if (!email || !guerra || !posto || !quadro || !unitId || !completo || !cpfRaw || !telefoneRaw) {
-        return alert("Preencha todos os campos obrigatórios: Email, Nome Guerra, Posto/Quadro, Nome Completo, CPF, Telefone e Unidade.");
+        return alert("Erro: Preencha todos os campos obrigatórios.");
     }
     
-    // --- CÁLCULO DAS VARIÁVEIS AUXILIARES ---
     const nomeMilitarCompleto = `${posto} ${quadro} ${guerra}`;
     const whatsappUrl = `https://web.whatsapp.com/send?phone=55${telefoneRaw}`;
 
     try {
-        await db.collection('usuarios').add({ 
+        // 1. CRIA O LOGIN NO AUTH (Usando a instância secundária para não te deslogar)
+        const userCredential = await secondaryAuth.createUserWithEmailAndPassword(email, password);
+        const userUid = userCredential.user.uid;
+
+        // 2. DESLOGA O USUÁRIO NO APP SECUNDÁRIO IMEDIATAMENTE
+        await secondaryAuth.signOut();
+
+        // 3. CRIA O DOCUMENTO NO FIRESTORE (Usando o UID gerado)
+        await db.collection('usuarios').doc(userUid).set({ 
             email: email, 
             nome_guerra: guerra, 
             posto: posto,
             quadro: quadro,
             nome_completo: completo,
-            nome_militar_completo: nomeMilitarCompleto, // Nome de Exibição
-            telefone_contato: document.getElementById('new-user-telefone').value, // Salva o telefone FORMATADO
-            whatsapp_url: whatsappUrl, // Link WhatsApp atualizado
+            nome_militar_completo: nomeMilitarCompleto,
+            telefone_contato: document.getElementById('new-user-telefone').value,
+            whatsapp_url: whatsappUrl,
             cpf: cpfRaw,
             matricula: matriculaRaw,
-            
             role: role, 
-            unidade: unitSigla,   // ✅ Salva a Sigla (Ex: CCI)
-            unidade_id: unitId    // ✅ Salva o UID (ID do Documento ex: UNID-123...)
+            unidade: unitSigla,
+            unidade_id: unitId,
+            data_cadastro: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        alert("Usuário registrado! (Lembre-se de criar o login no Firebase Authentication)"); 
+        alert(`✅ Sucesso! Militar ${nomeMilitarCompleto} cadastrado e acesso liberado.`); 
         
-        // Limpar os campos após o cadastro
-        document.getElementById('new-user-email').value = '';
-        document.getElementById('new-user-guerra').value = '';
-        document.getElementById('new-user-completo').value = '';
-        document.getElementById('new-user-cpf').value = '';
-        document.getElementById('new-user-matricula').value = '';
-        document.getElementById('new-user-telefone').value = '';
-        document.getElementById('new-user-posto').value = ''; 
-        document.getElementById('new-user-quadro').value = ''; 
+        // Limpar os campos do formulário
+        ['new-user-email', 'new-user-guerra', 'new-user-completo', 'new-user-cpf', 'new-user-matricula', 'new-user-telefone'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
         
         listarUsuarios();
     } catch(e) { 
+        console.error("Erro no cadastro:", e);
         alert("Erro ao salvar usuário: " + e.message);
     }
 }
