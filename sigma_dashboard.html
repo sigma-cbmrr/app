@@ -2394,6 +2394,9 @@ input:checked + .slider:before {
         		<button id="btn-usuario-acao-principal" class="btn-modern-action btn-create" onclick="executarAcaoUsuario()" style="margin-top: 15px; width: 100%;">
             		Gravar Militar no Sistema
         		</button>
+				<button id="btn-usuario-excluir" class="btn-danger" onclick="excluirUsuario()" style="margin-top: 10px; width: 100%; display: none; background-color: #d90f23; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+    				<i class="fas fa-trash-alt"></i> Excluir Militar do Sistema
+				</button>
     		</div>
 
     		<div style="border-bottom: 2px solid #800020; margin-bottom: 20px; padding-bottom: 10px; margin-top: 30px;">
@@ -5344,28 +5347,25 @@ function reimprimirPDF(data) {
     const btnAcao = document.getElementById('btn-usuario-acao-principal');
     const tituloForm = document.getElementById('titulo-form-usuario');
     const campoSenha = document.getElementById('group-new-user-password');
+    const btnExcluir = document.getElementById('btn-usuario-excluir'); // ✅ Adicionado
     
-    // Alterna a classe que esconde/mostra o formulário
     container.classList.toggle('collapsed');
     const estaFechado = container.classList.contains('collapsed');
 
     if (estaFechado) {
-        // --- 1. VOLTA AO ESTADO ORIGINAL (CADASTRO) ---
         btnControl.innerHTML = '<i class="fas fa-user-plus"></i> Novo Militar';
-        btnControl.style.backgroundColor = ""; // Cor original (Bordô ou cinza padrão)
+        btnControl.style.backgroundColor = ""; 
         
-        // Limpa o UID de edição para o sistema saber que o próximo clique é um NOVO cadastro
         document.getElementById('edit-user-uid').value = '';
         
-        // Reseta textos e cores
         tituloForm.innerHTML = '<i class="fas fa-user-shield"></i> Cadastrar Novo Militar';
         btnAcao.innerHTML = 'Gravar Militar no Sistema';
-        btnAcao.className = "btn-modern-action btn-create"; // Classe de criação
-        
-        // Garante que o campo de senha volte a aparecer
-        campoSenha.style.display = 'block';
+        btnAcao.className = "btn-modern-action btn-create"; 
+        btnAcao.style.backgroundColor = ""; // ✅ Reseta a cor para o padrão (Bordô)
 
-        // Limpa todos os inputs e selects dentro do formulário
+        campoSenha.style.display = 'block';
+        if (btnExcluir) btnExcluir.style.display = 'none'; // ✅ Esconde o botão de excluir no fechamento
+
         const inputs = container.querySelectorAll('input, select');
         inputs.forEach(campo => {
             if (campo.id !== 'edit-user-uid') {
@@ -5373,30 +5373,23 @@ function reimprimirPDF(data) {
             }
         });
         
-        // Bloqueia o campo quadro (pois o posto foi resetado)
         document.getElementById('new-user-quadro').disabled = true;
 
     } else {
-        // --- 2. ESTADO ABERTO ---
         btnControl.innerHTML = '<i class="fas fa-times"></i> Cancelar';
-        btnControl.style.backgroundColor = "#5d6d7e"; // Cor cinza para indicar cancelamento
+        btnControl.style.backgroundColor = "#5d6d7e";
     }
 }	
         
        async function criarUsuario() {
-    // 1. Coleta e limpa o CPF primeiro (será a base do login)
     const cpfRaw = document.getElementById('new-user-cpf').value.replace(/\D/g, '');
-    
-    // 2. Coleta a senha do novo campo HTML
     const password = document.getElementById('new-user-password').value.trim();
     
     if (cpfRaw.length !== 11) return alert("Erro: Informe um CPF válido com 11 dígitos.");
     if (password.length < 6) return alert("Erro: A senha deve ter pelo menos 6 caracteres.");
 
-    // 💡 TRUQUE: Login técnico será CPF@sigma.com.br
     const emailLogin = `${cpfRaw}@sigma.com.br`;
     const emailContato = document.getElementById('new-user-email').value.trim();
-
     const guerra = document.getElementById('new-user-guerra').value.trim().toUpperCase();
     const posto = document.getElementById('new-user-posto').value;
     const quadro = document.getElementById('new-user-quadro').value;
@@ -5417,22 +5410,21 @@ function reimprimirPDF(data) {
     const nomeMilitarCompleto = `${posto} ${quadro} ${guerra}`;
     const whatsappUrl = `https://web.whatsapp.com/send?phone=55${telefoneRaw}`;
 
-    const btn = document.querySelector('#view-usuarios .btn-create');
+    // ✅ AJUSTE CIRÚRGICO: Seletor do botão usando o ID único da nova arquitetura
+    const btn = document.getElementById('btn-usuario-acao-principal');
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Criando conta...';
 
     try {
-        // 1. CRIA O LOGIN NO AUTH (Instância secundária para não te deslogar)
         const userCredential = await secondaryAuth.createUserWithEmailAndPassword(emailLogin, password);
         const userUid = userCredential.user.uid;
 
-        // 2. DESLOGA O NOVO USUÁRIO NO APP SECUNDÁRIO
         await secondaryAuth.signOut();
 
-        // 3. CRIA O DOCUMENTO NO FIRESTORE
         await db.collection('usuarios').doc(userUid).set({ 
-            email: emailLogin,           // Login via CPF
-            email_contato: emailContato, // Email real
+            uid: userUid,
+            email: emailLogin,
+            email_contato: emailContato,
             nome_guerra: guerra, 
             posto: posto,
             quadro: quadro,
@@ -5451,10 +5443,8 @@ function reimprimirPDF(data) {
         
         alert(`✅ Militar ${nomeMilitarCompleto} cadastrado!\n\nACESSO:\nCPF: ${cpfRaw}\nSenha: ${password}`); 
         
-        // Limpeza de campos
-        ['new-user-email', 'new-user-password', 'new-user-guerra', 'new-user-completo', 'new-user-cpf', 'new-user-matricula', 'new-user-telefone'].forEach(id => {
-            document.getElementById(id).value = '';
-        });
+        // ✅ AJUSTE CIRÚRGICO: Chama nossa função unificada para fechar e limpar o formulário
+        controlarToggleUsuario();
         
         listarUsuarios();
     } catch(e) { 
@@ -5462,32 +5452,55 @@ function reimprimirPDF(data) {
         alert("Erro ao cadastrar: " + e.message);
     } finally {
         btn.disabled = false;
-        btn.innerHTML = 'Salvar Usuário';
+        btn.innerHTML = 'Gravar Militar no Sistema';
+    }
+}
+		async function excluirUsuario() {
+    const uid = document.getElementById('edit-user-uid').value;
+    const nomeGuerra = document.getElementById('new-user-guerra').value;
+
+    if (!uid) return alert("Erro: Nenhum militar selecionado para exclusão.");
+
+    // Alerta de segurança padrão SIGMA
+    const confirmacao = confirm(`⚠️ ATENÇÃO!\n\nVocê está prestes a excluir o militar: ${nomeGuerra}.\n\nEsta ação removerá o perfil do Firestore. O login (Auth) deverá ser removido manualmente no Firebase Console.\n\nDeseja continuar?`);
+    
+    if (!confirmacao) return;
+
+    try {
+        await db.collection('usuarios').doc(uid).delete();
+        alert(`Militar ${nomeGuerra} removido com sucesso.`);
+        
+        // Fecha o formulário e limpa tudo
+        controlarToggleUsuario();
+        
+        // Atualiza a listagem
+        listarUsuarios();
+        
+    } catch (e) {
+        console.error("Erro ao excluir militar:", e);
+        alert("Erro técnico ao excluir: " + e.message);
     }
 }
 		async function prepararEdicaoUsuario(uid) {
     try {
-        // 1. Busca os dados atualizados no Firestore
         const doc = await db.collection('usuarios').doc(uid).get();
         if (!doc.exists) return alert("Militar não encontrado!");
         const u = doc.data();
 
-        // 2. Garante que o formulário abra
         const container = document.getElementById('form-cadastro-usuario');
         const btnControl = document.getElementById('btn-toggle-usuario');
+        
         if (container.classList.contains('collapsed')) {
             container.classList.remove('collapsed');
             btnControl.innerHTML = '<i class="fas fa-times"></i> Cancelar Edição';
             btnControl.style.backgroundColor = "#5d6d7e";
         }
 
-        // 3. Preenchimento Cirúrgico dos Campos
-        document.getElementById('edit-user-uid').value = uid; // Registra quem estamos editando
+        document.getElementById('edit-user-uid').value = uid;
         document.getElementById('new-user-completo').value = u.nome_completo || '';
         document.getElementById('new-user-guerra').value = u.nome_guerra || '';
         document.getElementById('new-user-posto').value = u.posto || '';
         
-        // Gatilho manual para reconstruir as opções do Quadro antes de selecionar o valor
         const selectPosto = document.getElementById('new-user-posto');
         const selectQuadro = document.getElementById('new-user-quadro');
         atualizarQuadroCad(selectPosto, selectQuadro);
@@ -5500,17 +5513,19 @@ function reimprimirPDF(data) {
         document.getElementById('new-user-role').value = u.role || 'operacional';
         document.getElementById('new-user-unit').value = u.unidade_id || '';
 
-        // 4. Ajuste Visual do Formulário para Modo Edição
         document.getElementById('titulo-form-usuario').innerHTML = '<i class="fas fa-user-edit"></i> Editar Dados do Militar';
         
         const btnAcao = document.getElementById('btn-usuario-acao-principal');
         btnAcao.innerHTML = '<i class="fas fa-save"></i> Salvar Alterações';
-        btnAcao.style.backgroundColor = "#2c7399"; // Azul para diferenciar de novo cadastro
+        btnAcao.className = "btn-modern-action btn-edit"; // Atualiza a classe se necessário
+        btnAcao.style.backgroundColor = "#2c7399";
 
-        // Esconde o campo de senha durante a edição
         document.getElementById('group-new-user-password').style.display = 'none';
 
-        // Scroll suave para o topo do formulário para facilitar a visualização em mobile
+        // ✅ INCLUSÃO CIRÚRGICA: Mostra o botão de excluir apenas na edição
+        const btnExcluir = document.getElementById('btn-usuario-excluir');
+        if (btnExcluir) btnExcluir.style.display = 'block';
+
         container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     } catch (e) {
