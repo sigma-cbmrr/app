@@ -3709,6 +3709,7 @@ input:checked + .slider:before {
 		let estoqueGestorLocal = []; // Cache do estoque da unidade para a busca rápida
 		let vtrSelecionadaNoModal = null;
 		let materialSelecionadoNoModal = null;
+		let dadosChecklistTemp = { vtr: null, km: 0, combustivel: '1/2' };
 		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -13222,54 +13223,81 @@ document.addEventListener('change', function(e) {
     badgeWrapper.innerHTML = `<div class="user-level-badge ${classeBadge}">${nomeRole}</div>`;
 }
 		async function prepararChecklistVtr() {
-    vtrSelecionadaNoModal = null;
+    dadosChecklistTemp.vtr = null; // Reseta seleção ao abrir
     const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${currentUserData.uid}`)) || [];
     
-    // Corrigido: Agora chama selecionarVtrVisual diretamente, buscando os dados necessários
-    let htmlRecentes = "";
-    for (const v of recentes) {
-        htmlRecentes += `
-            <span class="badge-vtr-recente" onclick="event.stopPropagation(); recuperarDadosVtrESelecionar('${v.id}')">
-                ${v.prefixo}
-            </span>`;
-    }
+    let htmlRecentes = recentes.map(v => `
+        <span class="badge-vtr-recente" onclick="recuperarDadosVtrESelecionar('${v.id}')">
+            ${v.prefixo}
+        </span>`).join('');
 
     Swal.fire({
-        // 1. Ícone de carro visto de frente (fa-car)
         title: '<i class="fas fa-clipboard-check"></i> Checklist de Viatura',
-		
-		backdrop: `rgba(0,0,0,0.6)`,
-		allowOutsideClick: false,
-		target: 'body',
-		
-        html: `
-            <div style="text-align: left; padding: 5px;">
-                <div id="area-busca-vtr">
-                    <label style="font-size: 0.85em; font-weight:bold; color:#800020;">LOCALIZAR PREFIXO OU PLACA:</label>
-                    <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Ex: ABT, ACA..." style="text-transform: uppercase; width: 100%; margin: 10px 0;">
-                    
-                    <div id="container-recentes" style="margin-top: 10px; ${recentes.length ? '' : 'display:none;'}">
-                        <small style="color: #999; display: block; margin-bottom: 5px;">Acesso Rápido:</small>
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">${htmlRecentes}</div>
-                    </div>
-
-                    <div id="resultados-busca-vtr" style="margin-top: 15px; max-height: 200px; overflow-y: auto; padding: 5px;"></div>
-                </div>
-
-                <div id="resumo-selecao-vtr" style="display:none;"></div>
-
-                <button id="btn-confirmar-vtr-modal" class="btn-iniciar-check-modal" style="display:none;" onclick="confirmarInicioChecklist()">
-                    INICIAR
-                </button>
-                
-                <button id="btn-trocar-vtr" style="display:none; background:none; border:none; color:#2c7399; cursor:pointer; width:100%; margin-top:10px; font-size:0.8em; text-decoration:underline;" onclick="resetarBuscaVtr()">
-                    Trocar viatura selecionada
-                </button>
-            </div>
-        `,
+        backdrop: `rgba(0,0,0,0.6)`,
+        target: 'body',
+        allowOutsideClick: false,
         showConfirmButton: false,
         showCancelButton: true,
-        cancelButtonText: 'Cancelar',
+        cancelButtonText: 'Sair',
+        html: `
+            <div id="checklist-stepper" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 40px; position: relative;">
+                <div style="position: absolute; top: 15px; left: 60px; right: 60px; height: 2px; background: #ddd; z-index: 1;"></div>
+                <div id="step-1-icon" style="z-index: 2; text-align: center;">
+                    <div class="step-dot" style="width: 30px; height: 30px; border-radius: 50%; background: #800020; color: white; line-height: 30px; margin: 0 auto; border: 3px solid #fff; box-shadow: 0 0 8px rgba(128,0,32,0.4);">1</div>
+                    <small style="color: #800020; font-weight: bold; display: block; margin-top: 5px;">Viatura</small>
+                </div>
+                <div id="step-2-icon" style="z-index: 2; text-align: center;">
+                    <div class="step-dot" style="width: 30px; height: 30px; border-radius: 50%; background: #ccc; color: white; line-height: 30px; margin: 0 auto; border: 3px solid #fff;">2</div>
+                    <small style="color: #999; font-weight: bold; display: block; margin-top: 5px;">Dados</small>
+                </div>
+            </div>
+
+            <div id="checklist-step-container" style="overflow: hidden; position: relative; min-height: 300px;">
+                
+                <div id="step-1-content" style="transition: all 0.4s ease; width: 100%;">
+                    <div id="area-busca-vtr" style="text-align: left;">
+                        <label style="font-size: 0.85em; font-weight:bold; color:#800020;">LOCALIZAR PREFIXO OU PLACA:</label>
+                        <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Digite..." style="text-transform: uppercase; width: 100%; margin: 10px 0;">
+                        <div id="container-recentes" style="margin-top: 10px; ${recentes.length ? '' : 'display:none;'}">
+                            <small style="color: #999; display: block; margin-bottom: 5px;">Acesso Rápido:</small>
+                            <div style="display: flex; gap: 8px; flex-wrap: wrap;">${htmlRecentes}</div>
+                        </div>
+                        <div id="resultados-busca-vtr" style="margin-top: 15px; max-height: 180px; overflow-y: auto;"></div>
+                    </div>
+
+                    <div id="resumo-selecao-vtr" style="display:none;"></div>
+
+                    <button id="btn-proximo-step" class="btn-iniciar-check-modal" style="display:none;" onclick="avancarParaEtapa2()">
+                        PRÓXIMO <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+
+                <div id="step-2-content" style="display:none; transition: all 0.4s ease; width: 100%; text-align: left;">
+                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="font-weight: bold; color: #800020; font-size: 0.85em;">QUILOMETRAGEM ATUAL (KM):</label>
+                            <input type="number" id="vtr-km-check" class="swal2-input" style="width: 100%; margin: 5px 0; font-weight: bold; text-align: center;">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-weight: bold; color: #800020; font-size: 0.85em;">NÍVEL DE COMBUSTÍVEL:</label>
+                            <select id="vtr-combustivel-check" class="swal2-select" style="width: 100%; margin: 5px 0; font-weight: bold;">
+                                <option value="reserva">⛽ ⚠️ RESERVA</option>
+                                <option value="1/4">⛽ ▃      1/4 (UM QUARTO)</option>
+                                <option value="1/2" selected>⛽ ▃▄     1/2 (MEIO TANQUE)</option>
+                                <option value="3/4">⛽ ▃▄▆    3/4 (TRÊS QUARTOS)</option>
+                                <option value="cheio">⛽ ▃▄▆█  FULL (TANQUE CHEIO)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn-iniciar-check-modal" style="margin-top: 20px;" onclick="finalizarPreCheckEIrProApp()">
+                        INICIAR INSPEÇÃO
+                    </button>
+                    <button style="background:none; border:none; color:#64748b; cursor:pointer; width:100%; margin-top:10px; font-size:0.8em; text-decoration:underline;" onclick="voltarParaEtapa1()">
+                        <i class="fas fa-arrow-left"></i> Voltar para seleção
+                    </button>
+                </div>
+            </div>
+        `,
         didOpen: () => {
             const inputBusca = document.getElementById('input-busca-vtr-global');
             inputBusca.focus();
@@ -13277,6 +13305,56 @@ document.addEventListener('change', function(e) {
         }
     });
 }
+		function avancarParaEtapa2() {
+    // 1. Efeito de slide: Passo 1 vai pra esquerda e Passo 2 entra
+    const step1 = document.getElementById('step-1-content');
+    const step2 = document.getElementById('step-2-content');
+    const kmInput = document.getElementById('vtr-km-check');
+
+    step1.style.transform = "translateX(-110%)";
+    setTimeout(() => {
+        step1.style.display = "none";
+        step2.style.display = "block";
+        step2.style.transform = "translateX(110%)";
+        // Trigger reflow
+        step2.offsetHeight;
+        step2.style.transform = "translateX(0)";
+        if(kmInput) kmInput.value = dadosChecklistTemp.vtr.km_atual || 0;
+    }, 200);
+
+    // 2. Atualiza a Linha do Tempo (Ponto 1 verde, Ponto 2 Bordô)
+    const dot1 = document.querySelector('#step-1-icon .step-dot');
+    const dot2 = document.querySelector('#step-2-icon .step-dot');
+    dot1.style.background = "#1b8a3e";
+    dot1.innerHTML = '<i class="fas fa-check" style="font-size:10px;"></i>';
+    dot2.style.background = "#800020";
+    dot2.style.boxShadow = "0 0 8px rgba(128,0,32,0.4)";
+    document.querySelector('#step-2-icon small').style.color = "#800020";
+}
+
+function voltarParaEtapa1() {
+    const step1 = document.getElementById('step-1-content');
+    const step2 = document.getElementById('step-2-content');
+
+    step2.style.transform = "translateX(110%)";
+    setTimeout(() => {
+        step2.style.display = "none";
+        step1.style.display = "block";
+        step1.style.transform = "translateX(-110%)";
+        step1.offsetHeight;
+        step1.style.transform = "translateX(0)";
+    }, 200);
+
+    // Reseta Stepper
+    const dot1 = document.querySelector('#step-1-icon .step-dot');
+    const dot2 = document.querySelector('#step-2-icon .step-dot');
+    dot1.style.background = "#800020";
+    dot1.innerHTML = '1';
+    dot2.style.background = "#ccc";
+    dot2.style.boxShadow = "none";
+    document.querySelector('#step-2-icon small').style.color = "#999";
+}
+		
 		async function recuperarDadosVtrESelecionar(vtrId) {
     try {
         const doc = await db.collection('viaturas').doc(vtrId).get();
@@ -13326,98 +13404,25 @@ document.addEventListener('change', function(e) {
     document.getElementById('btn-confirmar-vtr-modal').style.display = 'block';
     document.getElementById('btn-trocar-vtr').style.display = 'block';
 }
-		// 1. FUNÇÃO DE TRANSIÇÃO (ETAPA 1 -> ETAPA 2)
-function confirmarInicioChecklist() {
-    if (!vtrSelecionadaNoModal) return;
-    const { id, prefixo } = vtrSelecionadaNoModal;
-
-    // Salva nos recentes do localStorage
-    const key = `sigma_vtr_recentes_${currentUserData.uid}`;
-    let recentes = JSON.parse(localStorage.getItem(key)) || [];
-    recentes = recentes.filter(v => v.id !== id);
-    recentes.unshift({ id, prefixo });
-    localStorage.setItem(key, JSON.stringify(recentes.slice(0, 4)));
-
-    // Captura o KM atual da VTR selecionada para sugerir no input (se existir no objeto selecionado)
-    const kmSugerido = vtrSelecionadaNoModal.km_atual || 0;
-
-    // Abre a SEGUNDA TELA do modal (Dados Operacionais)
-    Swal.fire({
-        title: '<i class="fas fa-clipboard-check"></i> Dados Operacionais',
-        target: 'body',
-        backdrop: `rgba(0,0,0,0.6)`,
-        allowOutsideClick: false,
-        html: `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 20px; position: relative;">
-                <div style="position: absolute; top: 15px; left: 40px; right: 40px; height: 2px; background: #ddd; z-index: 1;"></div>
-                
-                <div style="z-index: 2; text-align: center;">
-                    <div style="width: 30px; height: 30px; border-radius: 50%; background: #1b8a3e; color: white; line-height: 30px; margin: 0 auto; border: 3px solid #fff; box-shadow: 0 0 5px rgba(0,0,0,0.2);"><i class="fas fa-check" style="font-size: 10px;"></i></div>
-                    <small style="color: #1b8a3e; font-weight: bold; display: block; margin-top: 5px;">Viatura</small>
-                </div>
-
-                <div style="z-index: 2; text-align: center;">
-                    <div style="width: 30px; height: 30px; border-radius: 50%; background: #800020; color: white; line-height: 30px; margin: 0 auto; border: 3px solid #fff; box-shadow: 0 0 8px rgba(128,0,32,0.4);">2</div>
-                    <small style="color: #800020; font-weight: bold; display: block; margin-top: 5px;">Operacional</small>
-                </div>
-            </div>
-
-            <div style="text-align: left; background: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
-                <div class="form-group" style="margin-bottom: 20px;">
-                    <label style="font-weight: bold; color: #800020; font-size: 0.85em;"><i class="fas fa-tachometer-alt"></i> QUILOMETRAGEM ATUAL (KM):</label>
-                    <input type="number" id="vtr-km-check" class="swal2-input" value="${kmSugerido}" style="width: 100%; margin: 8px 0; font-weight: bold; font-size: 1.2em; text-align: center;">
-                </div>
-
-                <div class="form-group">
-                    <label style="font-weight: bold; color: #800020; font-size: 0.85em;"><i class="fas fa-gas-pump"></i> NÍVEL DE COMBUSTÍVEL:</label>
-                    <select id="vtr-combustivel-check" class="swal2-select" style="width: 100%; margin: 8px 0; font-weight: bold;">
-                        <option value="reserva">⛽ RESERVA</option>
-                        <option value="1/4">1/4 (UM QUARTO)</option>
-                        <option value="1/2" selected>1/2 (MEIO TANQUE)</option>
-                        <option value="3/4">3/4 (TRÊS QUARTOS)</option>
-                        <option value="cheio">FULL (TANQUE CHEIO)</option>
-                    </select>
-                </div>
-            </div>
-
-            <button id="btn-abrir-conferencia-vtr" class="btn-iniciar-check-modal" style="margin-top: 25px;" onclick="finalizarPreCheckEIrProApp()">
-                INICIAR
-            </button>
-            
-            <button style="background:none; border:none; color:#64748b; cursor:pointer; width:100%; margin-top:15px; font-size:0.8em; text-decoration:underline;" onclick="prepararChecklistVtr()">
-                <i class="fas fa-chevron-left"></i> Voltar para seleção
-            </button>
-        `,
-        showConfirmButton: false
-    });
-}
+		
 		// 2. FUNÇÃO QUE VALIDA E LANÇA O APP DE CONFERÊNCIA
 function finalizarPreCheckEIrProApp() {
-    const kmDigitado = document.getElementById('vtr-km-check').value;
+    const km = document.getElementById('vtr-km-check').value;
     const combustivel = document.getElementById('vtr-combustivel-check').value;
-    
-    if (!kmDigitado || kmDigitado <= 0) {
-        return alert("Por favor, informe a quilometragem atual correta.");
-    }
 
-    const { id, prefixo } = vtrSelecionadaNoModal;
+    if (!km || km <= 0) return alert("Informe o KM atual.");
+
+    const { id, prefixo } = dadosChecklistTemp.vtr;
     const userUid = firebase.auth().currentUser.uid;
     const guerra = (currentUserData.nome_guerra || 'ND').toUpperCase();
 
-    // 🛑 CONSTRUÇÃO DA URL COM DADOS VOLÁTEIS 🛑
-    // Passamos km e combustivel via URL para o app salvar no resultado final
-    const url = `conferencia_app.html?vtrId=${id}&prefixo=${encodeURIComponent(prefixo)}&km=${kmDigitado}&combustivel=${combustivel}&modo=checklist_vtr&user_uid=${userUid}&nome_guerra=${guerra}`;
+    const url = `conferencia_app.html?vtrId=${id}&prefixo=${encodeURIComponent(prefixo)}&km=${km}&combustivel=${combustivel}&modo=checklist_vtr&user_uid=${userUid}&nome_guerra=${guerra}`;
 
     Swal.close();
-    
     const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
-    iframe.src = url;
+    document.getElementById('app-iframe').src = url;
     container.style.display = 'block';
-
-    console.log("Iniciando Checklist VTR com dados:", { kmDigitado, combustivel });
-}
-		
+}		
 		async function filtrarVtrsGlobais(termo) {
     const container = document.getElementById('resultados-busca-vtr');
     const busca = termo.replace(/[^A-Z0-9]/gi, '').toLowerCase();
