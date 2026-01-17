@@ -11312,103 +11312,106 @@ async function deletarAtivo(unitUid, subColecao, ativoUid, nomeIdentificador) {
 }
 
 async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
+    console.log("🔍 Acessando Prontuário Global da VTR:", ativoUid);
+    
     try {
-        const doc = await db.collection('vtr_bases').doc(unidadeUid).collection('viaturas').doc(ativoUid).get();
-        if (!doc.exists) return;
+        // 1. Busca os dados na coleção raiz 'viaturas'
+        const doc = await db.collection('viaturas').doc(ativoUid).get();
+        
+        if (!doc.exists) {
+            console.error("❌ Viatura não encontrada no caminho global.");
+            alert("Erro: Esta viatura não foi localizada na base de dados global.");
+            return;
+        }
+        
         const vtr = doc.data();
 
-        // 1. Preenche Dados Básicos
-        document.getElementById('modal-vtr-titulo').innerText = `VIATURA ${vtr.prefixo || 'S/P'}`;
-        document.getElementById('det-vtr-prefixo').innerText = vtr.prefixo || '---';
-        document.getElementById('det-vtr-placa').innerText = vtr.placa || '---';
-        document.getElementById('det-vtr-modelo').innerText = vtr.modelo || '---';
-        document.getElementById('det-vtr-km').innerText = (vtr.km_atual || 0).toLocaleString('pt-BR') + ' km';
+        // 2. Preenchimento Seguro de Dados Básicos
+        const preencher = (id, texto) => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = texto;
+        };
 
+        preencher('modal-vtr-titulo', `VIATURA ${vtr.prefixo || 'S/P'}`);
+        preencher('det-vtr-prefixo', vtr.prefixo || '---');
+        preencher('det-vtr-placa', vtr.placa || '---');
+        preencher('det-vtr-modelo', vtr.modelo || '---');
+        preencher('det-vtr-km', (vtr.km_atual || 0).toLocaleString('pt-BR') + ' km');
+
+        // 3. Exibição da Unidade e Responsável (Dono Provisório)
+        const detUsuario = document.getElementById('det-vtr-usuario');
+        if (detUsuario) {
+            // Se houver responsavel_atual_nome, exibe o militar. Senão, exibe a Unidade.
+            detUsuario.innerHTML = vtr.responsavel_atual_nome 
+                ? `<i class="fas fa-user-shield"></i> ${vtr.responsavel_atual_nome}` 
+                : `<i class="fas fa-map-marker-alt"></i> Pátio (${vtr.unidade_atual_nome || 'N/D'})`;
+        }
+
+        // 4. SEMÁFOROS TÉCNICOS
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
 
-        // 2. Lógica do Semáforo: LICENCIAMENTO (Focado em Exercício Fiscal)
+        // --- Licenciamento ---
         const elLic = document.getElementById('status-licenciamento');
-        const anoAtual = hoje.getFullYear(); 
-        
-        let anoExercicio = vtr.licenciamento ? vtr.licenciamento.toString().substring(0, 4) : null;
-        
-        elLic.className = 'semaforo-item'; 
-
-        if (!anoExercicio || anoExercicio === "") {
-            elLic.querySelector('.semaforo-status').innerHTML = `N/D`;
-        } else {
-            const anoExercicioNum = parseInt(anoExercicio);
-            if (anoExercicioNum < anoAtual) {
-                elLic.classList.add('status-critico');
-                elLic.querySelector('.semaforo-status').innerHTML = `VENCIDO<br><small>Exercício: ${anoExercicioNum}</small>`;
+        if (elLic) {
+            let anoExercicio = vtr.licenciamento ? vtr.licenciamento.toString().substring(0, 4) : null;
+            elLic.className = 'semaforo-item'; // Reset classes
+            
+            if (!anoExercicio) {
+                elLic.querySelector('.semaforo-status').innerHTML = `N/D`;
             } else {
-                elLic.classList.add('status-ok');
-                elLic.querySelector('.semaforo-status').innerHTML = `OK<br><small>Exercício: ${anoExercicioNum}</small>`;
+                const vencido = parseInt(anoExercicio) < hoje.getFullYear();
+                elLic.classList.add(vencido ? 'status-critico' : 'status-ok');
+                elLic.querySelector('.semaforo-status').innerHTML = `${vencido ? 'VENCIDO' : 'OK'}<br><small>Exercício: ${anoExercicio}</small>`;
             }
         }
 
-        // 3. Lógica do Semáforo: ÓLEO (KM ou Data - O que ocorrer primeiro)
+        // --- Troca de Óleo ---
         const elOleo = document.getElementById('status-oleo');
-        const kmPrevisto = vtr.manutencao?.oleo_km_prevista || 0;
-        const kmAtual = vtr.km_atual || 0;
-        const kmFaltante = kmPrevisto - kmAtual;
-        
-        const dataOleoRaw = vtr.manutencao?.oleo_data ? vtr.manutencao.oleo_data.replace(/-/g, '\/') : null;
-        const dataOleo = dataOleoRaw ? new Date(dataOleoRaw) : null;
-        const dataOleoFmt = dataOleo ? dataOleo.toLocaleDateString('pt-BR') : 'N/D';
-        
-        elOleo.className = 'semaforo-item';
+        if (elOleo) {
+            const kmPrevisto = vtr.manutencao?.oleo_km_prevista || 0;
+            const kmAtual = vtr.km_atual || 0;
+            elOleo.className = 'semaforo-item'; // Reset classes
 
-        if (kmPrevisto === 0 && !dataOleo) {
-            elOleo.querySelector('.semaforo-status').innerText = 'N/D';
-        } else {
-            const vencidoPorKm = kmPrevisto > 0 && kmFaltante <= 0;
-            const vencidoPorData = dataOleo && dataOleo < hoje;
-
-            if (vencidoPorKm || vencidoPorData) {
-                elOleo.classList.add('status-critico');
-                const motivo = vencidoPorKm ? 'KM EXCEDIDO' : 'DATA VENCIDA';
-                elOleo.querySelector('.semaforo-status').innerHTML = `VENCIDO<br><small>${motivo}<br>${kmPrevisto}km ou ${dataOleoFmt}</small>`;
-            } else if (kmFaltante <= 500) {
-                elOleo.classList.add('status-alerta');
-                elOleo.querySelector('.semaforo-status').innerHTML = `ALERTA<br><small>${kmPrevisto}km ou ${dataOleoFmt}</small>`;
+            if (kmPrevisto === 0) {
+                elOleo.querySelector('.semaforo-status').innerText = 'N/D';
             } else {
-                elOleo.classList.add('status-ok');
-                elOleo.querySelector('.semaforo-status').innerHTML = `OK<br><small>Troca: ${kmPrevisto}km ou ${dataOleoFmt}</small>`;
+                const vencido = kmAtual >= kmPrevisto;
+                elOleo.classList.add(vencido ? 'status-critico' : 'status-ok');
+                elOleo.querySelector('.semaforo-status').innerHTML = `${vencido ? 'VENCIDO' : 'OK'}<br><small>${kmPrevisto.toLocaleString()} km</small>`;
             }
         }
 
-       // 4. Lógica Prontidão Geral (Sincronizada com o Formulário de Cadastro)
+        // --- Situação Geral ---
         const elGeral = document.getElementById('status-vtr-geral');
-        const statusReal = vtr.status_operativo ? vtr.status_operativo.toLowerCase() : "";
-        
-        elGeral.className = 'semaforo-item';
-        
-        if (statusReal === 'ativo') {
-            elGeral.classList.add('status-ok'); // Verde
-            elGeral.querySelector('.semaforo-status').innerText = 'ATIVA';
+        if (elGeral) {
+            const statusReal = (vtr.status_operativo || "").toLowerCase();
+            elGeral.className = 'semaforo-item';
             
-        } else if (statusReal === 'reserva') {
-            elGeral.classList.add('status-ok'); // Também Verde, pois está pronta!
-            elGeral.querySelector('.semaforo-status').innerText = 'ATIVA (RESERVA)';
-            
-        } else if (statusReal === 'manutencao' || statusReal.includes('baixada')) {
-            elGeral.classList.add('status-alerta'); // Amarelo
-            elGeral.querySelector('.semaforo-status').innerText = 'EM MANUTENÇÃO';
-            
-        } else {
-            // Caso apareça algo inesperado no banco
-            elGeral.classList.add('status-critico'); 
-            elGeral.querySelector('.semaforo-status').innerText = 'NÃO INFORMADO';
+            if (vtr.em_manutencao === true) {
+                elGeral.classList.add('status-alerta');
+                elGeral.querySelector('.semaforo-status').innerText = 'MANUTENÇÃO';
+            } else if (statusReal === 'ativo' || statusReal === 'reserva') {
+                elGeral.classList.add('status-ok');
+                elGeral.querySelector('.semaforo-status').innerText = statusReal === 'reserva' ? 'ATIVA (RESERVA)' : 'ATIVA';
+            } else {
+                elGeral.classList.add('status-critico');
+                elGeral.querySelector('.semaforo-status').innerText = 'BAIXADA';
+            }
         }
 
-        // 5. Exibe o modal
-        document.getElementById('modal-detalhes-vtr').style.display = 'flex';
+        // 5. Comando de Abertura Visual
+        const modal = document.getElementById('modal-detalhes-vtr');
+        if (modal) {
+            modal.style.setProperty('display', 'flex', 'important');
+            console.log("✅ Prontuário aberto para visualização.");
+        } else {
+            console.error("❌ Erro Crítico: Elemento 'modal-detalhes-vtr' não existe no HTML.");
+        }
 
     } catch (e) {
-        console.error("Erro ao carregar detalhes:", e);
-        alert("Erro ao abrir detalhes da viatura.");
+        console.error("❌ Falha na execução do modal:", e);
+        alert("Erro ao carregar prontuário: " + e.message);
     }
 }
 		/*[GESTÃO DE VIATURAS/BASE*/
