@@ -3235,28 +3235,6 @@ input:checked + .slider:before {
         	</div>
     	</div>
 	</div>
-		
-    <div id="modal-nova-conferencia" class="modal-overlay">
-    	<div class="modal-content" style="max-width: 400px;">
-        	<button class="close-btn" onclick="document.getElementById('modal-nova-conferencia').style.display='none'"><i class="fas fa-times"></i></button>
-        	<div class="op-card action" style="border: none; box-shadow: none; padding: 0;">
-            	<h2 class="op-card-title"><i class="fas fa-clipboard-list"></i> Nova Conferência</h2>
-            	<div class="form-group">
-                	<label>1. Escolha o Setor / Posto</label>
-                	<select id="dash-select-setor" onchange="filtrarListasDashboard()">
-                    	<option value="" disabled selected>Carregando setores...</option>
-                	</select>
-            	</div>
-            	<div class="form-group">
-                	<label>2. Escolha a Viatura / Lista</label>
-                	<select id="dash-select-lista" disabled onchange="focarBotaoIniciar()">
-                		<option value="" disabled selected>Selecione um setor acima</option>
-            		</select>
-        		</div>
-        		<button id="btn-start-dash" class="btn-start" onclick="iniciarConferenciaDashboard()">INICIAR AGORA</button>
-        	</div>
-   	 	</div>
-    </div>
     
 	<div id="cautelaDetailsModal" class="modal-overlay">
     	<div class="modal-content" style="max-width: 700px;">
@@ -3650,9 +3628,63 @@ input:checked + .slider:before {
 		const secondaryApp = firebase.initializeApp(firebaseConfig, 'Secondary');
     	const secondaryAuth = secondaryApp.auth();
         
-        function openNewConferenceModal() {
-        document.getElementById('modal-nova-conferencia').style.display = 'flex';
-        }
+        async function openNewConferenceModal() {
+    materialSelecionadoNoModal = null; // Reseta
+    
+    // Busca os setores (Postos) disponíveis para montar o primeiro Select
+    const docRotas = await db.collection('config_geral').doc('rotas').get();
+    const rotas = docRotas.data() || {};
+    const setoresUnicos = [...new Set(Object.values(rotas).map(r => r.posto))].sort();
+
+    Swal.fire({
+        title: '<i class="fas fa-clipboard-check"></i> Conferência de Materiais',
+        backdrop: `rgba(0,0,0,0.6)`,
+        target: 'body',
+        allowOutsideClick: false,
+        html: `
+            <div style="text-align: left; padding: 5px;">
+                <div id="area-selecao-material">
+                    <div class="form-group">
+                        <label style="font-size: 0.85em; font-weight:bold; color:#800020;">1. SELECIONE O POSTO / SETOR:</label>
+                        <select id="swal-select-posto" class="swal2-select" style="width: 100%; margin: 10px 0;" onchange="filtrarListasParaMaterial(this.value)">
+                            <option value="" disabled selected>Escolha o posto...</option>
+                            ${setoresUnicos.map(s => `<option value="${s}">${s}</option>`).join('')}
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="group-select-lista" style="display:none; margin-top:15px;">
+                        <label style="font-size: 0.85em; font-weight:bold; color:#800020;">2. ESCOLHA A VIATURA / LISTA:</label>
+                        <select id="swal-select-lista" class="swal2-select" style="width: 100%; margin: 10px 0;" onchange="selecionarMaterialVisual()">
+                            <option value="" disabled selected>Selecione a lista...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="resumo-material-vtr" style="display:none;">
+                    <div class="vtr-selected-summary" style="border-color: #2c7399;">
+                        <i class="fas fa-boxes" style="color:#2c7399; font-size:1.5em; margin-bottom:10px;"></i>
+                        <p>Carga Selecionada</p>
+                        <h2 id="resumo-nome-lista" style="font-size:1.5em; color:#2c7399;">---</h2>
+                        <div id="resumo-detalhe-posto" style="margin-top:10px; color:#475569; font-size:0.85em; font-weight:bold; text-transform:uppercase;">
+                            POSTO: ---
+                        </div>
+                    </div>
+                </div>
+
+                <button id="btn-confirmar-material-modal" class="btn-iniciar-check-modal" style="display:none; background-color:#2c7399 !important;" onclick="confirmarInicioMaterial()">
+                    INICIAR CONFERÊNCIA
+                </button>
+                
+                <button id="btn-trocar-material" style="display:none; background:none; border:none; color:#2c7399; cursor:pointer; width:100%; margin-top:10px; font-size:0.8em; text-decoration:underline;" onclick="resetarSelecaoMaterial()">
+                    Trocar material selecionado
+                </button>
+            </div>
+        `,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Cancelar'
+    });
+}
         // Constantes Globais
         const COLECAO_RESULTADOS = 'resultados_conferencias';
         const COLECAO_LISTAS = 'listas_conferencia';
@@ -3676,6 +3708,7 @@ input:checked + .slider:before {
 		let itensParaEstorno = []; // Itens que foram marcados com "X"
 		let estoqueGestorLocal = []; // Cache do estoque da unidade para a busca rápida
 		let vtrSelecionadaNoModal = null;
+		let materialSelecionadoNoModal = null;
 		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -3777,7 +3810,6 @@ input:checked + .slider:before {
     const editorArq = document.getElementById('view-editor-arquitetura');
     if (editorArq) editorArq.style.display = 'none';
 
-    carregarListasParaNovaConferencia();
     closeMenuMobile();
 
     if (window.innerWidth <= 768) {
@@ -4282,80 +4314,78 @@ function renderAdminGestorCards(canViewDashboardCards) {
             } catch(e) {}
         }
 
-        function filtrarListasDashboard() {
-            const setor = document.getElementById('dash-select-setor').value;
-            const selLista = document.getElementById('dash-select-lista');
-            selLista.innerHTML = '<option value="" disabled selected>Selecione a Lista...</option>'; 
-            selLista.disabled = false;
-            
-            const fil = allLists.filter(l => l.setor === setor).sort((a,b)=>a.nome.localeCompare(b.nome));
-            fil.forEach(l => { 
-                const o = document.createElement('option'); 
-                o.value = l.id; 
-                o.textContent = l.nome; 
-                selLista.appendChild(o); 
-            });
-            selLista.focus();
-        }
+        async function filtrarListasParaMaterial(postoNome) {
+    const selectLista = document.getElementById('swal-select-lista');
+    const groupLista = document.getElementById('group-select-lista');
+    
+    // Busca nas rotas quais listas pertencem a esse posto
+    const docRotas = await db.collection('config_geral').doc('rotas').get();
+    const rotas = docRotas.data() || {};
+    
+    let options = '<option value="" disabled selected>Selecione a lista...</option>';
+    let encontrou = false;
 
-        function focarBotaoIniciar() { 
-            document.getElementById('btn-start-dash').focus();
+    Object.entries(rotas).forEach(([id, info]) => {
+        if (info.posto === postoNome && info.ativo !== false) {
+            options += `<option value="${id}">${info.nome}</option>`;
+            encontrou = true;
         }
+    });
 
+    if (encontrou) {
+        selectLista.innerHTML = options;
+        groupLista.style.display = 'block';
+    }
+}
+        
         // Localização: Linha ~1353
-function iniciarConferenciaDashboard() {
-    const listaId = document.getElementById('dash-select-lista').value;
-    const listaSelect = document.getElementById('dash-select-lista');
-    const nomeLista = listaSelect.options[listaSelect.selectedIndex].text;
+function selecionarMaterialVisual() {
+    const selectPosto = document.getElementById('swal-select-posto');
+    const selectLista = document.getElementById('swal-select-lista');
     
-    if(!listaId) return alert("Selecione uma lista.");
-    
-    // --- Variáveis Críticas (UID e Nome para Rascunho) ---
-    // 🛑 NOVO: UID do militar logado
-    const userUid = firebase.auth().currentUser.uid;
-    // Define o nome de guerra em MAIÚSCULAS para consistência na chave do rascunho.
-    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
-    
-    // Constrói a URL com o user padronizado (para leitura no app)
-    // 🛑 ATUALIZAÇÃO DA URL: INCLUI user_uid
-    const url = `conferencia_app.html?id=${listaId}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}&user_uid=${userUid}`;
-    
-    // Salva para resume
-    localStorage.setItem('sigma_active_conf', JSON.stringify({
-        id: listaId, 
-        nomeLista: nomeLista, 
-        user: userForDraft, // Nome de guerra (CHAVE ANTIGA)
-        user_uid: userUid, // 🛑 NOVO: CHAVE IMUTÁVEL
-        url: url
-    }));
-    
-    document.getElementById('modal-nova-conferencia').style.display = 'none';
-    
-    // --- LÓGICA DE ABERTURA DO IFRAME ---
-    const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
-    iframe.src = url; 
-    container.style.display = 'block';
+    const idLista = selectLista.value;
+    const nomeLista = selectLista.options[selectLista.selectedIndex].text;
+    const nomePosto = selectPosto.value;
+
+    materialSelecionadoNoModal = { id: idLista, nome: nomeLista, posto: nomePosto };
+
+    // Esconde a seleção e mostra o resumo
+    document.getElementById('area-selecao-material').style.display = 'none';
+    document.getElementById('resumo-nome-lista').textContent = nomeLista;
+    document.getElementById('resumo-detalhe-posto').textContent = `POSTO: ${nomePosto}`;
+    document.getElementById('resumo-material-vtr').style.display = 'block';
+
+    // Mostra botões de ação
+    document.getElementById('btn-confirmar-material-modal').style.display = 'block';
+    document.getElementById('btn-trocar-material').style.display = 'block';
 }
 
-window.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'SIGMA_FINISHED') {
-        // 🛑 Lógica para fechar o iframe e liberar recursos
-        document.getElementById('app-runner-container').style.display = 'none';
-        
-        // Garante que o iframe limpe a memória
-        const iframe = document.getElementById('app-iframe');
-        if (iframe) iframe.src = "about:blank"; 
-        
+function resetarSelecaoMaterial() {
+    materialSelecionadoNoModal = null;
+    document.getElementById('area-selecao-material').style.display = 'block';
+    document.getElementById('resumo-material-vtr').style.display = 'none';
+    document.getElementById('btn-confirmar-material-modal').style.display = 'none';
+    document.getElementById('btn-trocar-material').style.display = 'none';
+}
 
-        // 🛑 Chamadas de atualização do Dashboard (Agora Null-Safe)
-        if (typeof loadCaaData === 'function') loadCaaData();
-        if (typeof carregarConferenciasHoje === 'function') carregarConferenciasHoje();
-        if (typeof updateOperacionalCards === 'function') updateOperacionalCards();
+function confirmarInicioMaterial() {
+    if (!materialSelecionadoNoModal) return;
+    
+    const { id, nome, posto } = materialSelecionadoNoModal;
+    const userUid = firebase.auth().currentUser.uid;
+    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
 
-        alert("Conferência salva!");
-    }
-});        
+    // Monta a URL (Mesma lógica que você já tinha)
+    const url = `conferencia_app.html?id=${id}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}&user_uid=${userUid}`;
+
+    Swal.close();
+
+    // Abre o Iframe
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+    iframe.src = url;
+    container.style.display = 'block';
+}        
         // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
     // 🛑 CHAMA A FUNÇÃO UNIFICADA QUE JÁ ATUALIZA TODOS OS CARDS E A LISTA DE HOJE
