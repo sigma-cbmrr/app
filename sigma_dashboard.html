@@ -770,6 +770,74 @@
     transform: none !important; 
     display: inline-block !important;
 }
+		/* Estilo para as Pílulas de Viaturas Recentes */
+.badge-vtr-recente {
+    background: #f1f5f9;
+    color: #2c3e50;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid #e2e8f0;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.badge-vtr-recente:hover {
+    background: #800020;
+    color: white;
+    border-color: #800020;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(128, 0, 32, 0.2);
+}
+
+/* Card de Resultado da Busca Global */
+.result-vtr-card {
+    background: #fff;
+    border: 1px solid #eee;
+    padding: 12px 15px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-left: 4px solid #2c3e50;
+}
+
+.result-vtr-card:hover {
+    background: #f8fafc;
+    border-color: #2c7399;
+    transform: translateX(5px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.result-vtr-card b {
+    font-size: 1.1em;
+    color: #333;
+}
+
+.result-vtr-card i {
+    color: #2c7399;
+    margin-right: 8px;
+}
+
+/* Ajuste no Input do SweetAlert para seguir o padrão SIGMA */
+#input-busca-vtr-global {
+    border: 2px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    font-family: inherit !important;
+    font-size: 1em !important;
+    height: 45px !important;
+    margin: 10px 0 !important;
+    transition: border-color 0.3s !important;
+}
+
+#input-busca-vtr-global:focus {
+    border-color: #800020 !important;
+    box-shadow: 0 0 0 3px rgba(128, 0, 32, 0.1) !important;
+}
 		
 @media (min-width: 900px) {
     /* Força o grid do menu de cautelas a ter 4 colunas de tamanho igual */
@@ -10984,27 +11052,32 @@ function resetarFormVtrBase() {
     const modo = btn.dataset.modo || 'cadastro'; 
     const unidadeUid = document.getElementById('vtr-base-unidade').value;
 
-    if (!unidadeUid) {
-        alert("Por favor, selecione a Unidade Responsável.");
-        return;
-    }
+    if (!unidadeUid) return alert("Por favor, selecione a Unidade Responsável.");
 
-    const unitRef = db.collection('vtr_bases').doc(unidadeUid);
     const subColecao = (tipo === 'viatura') ? 'viaturas' : 'bases';
     
     try {
         let dados = {};
 
         if (tipo === 'viatura') {
+            const prefixo = document.getElementById('vtr-prefixo').value.toUpperCase();
+            const placa = document.getElementById('vtr-placa').value.toUpperCase();
+            
+            // 🛑 Lógica de Busca Inteligente: Remove tudo que não é letra ou número
+            const searchKey = (prefixo + placa).replace(/[^A-Z0-9]/gi, '').toLowerCase();
+
             dados = {
+                prefixo: prefixo,
+                placa: placa,
+                search_key: searchKey, // Campo para o buscador global
                 segmento: document.getElementById('vtr-segmento').value,
-                prefixo: document.getElementById('vtr-prefixo').value.toUpperCase(),
-                placa: document.getElementById('vtr-placa').value.toUpperCase(),
                 modelo: document.getElementById('vtr-modelo').value,
                 ano: document.getElementById('vtr-ano').value,
                 licenciamento: document.getElementById('vtr-licenciamento').value,
                 status_operativo: document.getElementById('vtr-status-operativo').value,
                 km_atual: parseFloat(document.getElementById('vtr-km-atual').value) || 0,
+                unidade_id: unidadeUid, // Vínculo com a unidade dona
+                em_manutencao: false, // Flag para bloqueio CEMAN
                 manutencao: {
                     oleo_data: document.getElementById('vtr-oleo-data').value,
                     oleo_km_prevista: parseFloat(document.getElementById('vtr-oleo-km').value) || 0
@@ -11012,39 +11085,35 @@ function resetarFormVtrBase() {
                 last_update: firebase.firestore.FieldValue.serverTimestamp()
             };
         } else {
+            // Lógica para Bases (Mantida na estrutura antiga ou migrada se desejar)
             dados = {
                 nome: document.getElementById('base-nome').value,
                 endereco: document.getElementById('base-endereco').value,
+                unidade_id: unidadeUid,
                 last_update: firebase.firestore.FieldValue.serverTimestamp()
             };
         }
 
+        // 🛑 NOVO MODELO: Viaturas agora vão para a coleção raiz 'viaturas'
+        const colecaoDestino = (tipo === 'viatura') ? db.collection('viaturas') : db.collection('vtr_bases').doc(unidadeUid).collection('bases');
+
         if (modo === 'edicao') {
             const ativoUid = btn.dataset.ativoUid;
-            await unitRef.collection(subColecao).doc(ativoUid).update(dados);
+            await colecaoDestino.doc(ativoUid).update(dados);
             alert("Ativo atualizado com sucesso!");
         } else {
             dados.timestamp = firebase.firestore.FieldValue.serverTimestamp();
-            await unitRef.collection(subColecao).add(dados);
-            alert("Ativo cadastrado com sucesso!");
+            await colecaoDestino.add(dados);
+            alert("Ativo cadastrado com sucesso no sistema global!");
         }
 
-        // === INCLUSÕES CIRÚRGICAS PARA LIMPEZA DE ESTADO ===
-        btn.innerHTML = '<i class="fas fa-save"></i> Gravar Ativo no Sistema';
-        btn.classList.remove('btn-update'); // Remove cor de edição se houver
-        delete btn.dataset.modo;
-        delete btn.dataset.ativoUid;
-        delete btn.dataset.unidadeUid;
-        // =================================================
-
-        // Finalização padrão
         resetarFormVtrBase();
         controlarToggleVtrBase(); 
         carregarVtrBasesCards();  
         
     } catch (error) {
         console.error("Erro ao processar ativo:", error);
-        alert("Erro técnico ao salvar. Verifique o console.");
+        alert("Erro técnico ao salvar.");
     }
 }
 		async function carregarVtrBasesCards() {
@@ -13004,12 +13073,91 @@ document.addEventListener('change', function(e) {
     const classeBadge = `badge-${role.replace('_', '-')}`;
     badgeWrapper.innerHTML = `<div class="user-level-badge ${classeBadge}">${nomeRole}</div>`;
 }
-		function prepararChecklistVtr() {
-    // Usando um alerta simples do navegador ou um modal se você já tiver SweetAlert
-    alert("Módulo CEMAN: Em breve você poderá realizar o checklist técnico da viatura e quilometragem por aqui.");
-    
-    // Log para testarmos se o clique está funcionando
-    console.log("Iniciando fluxo de busca de VTR para checklist...");
+		async function prepararChecklistVtr() {
+    // 1. Busca recentes do LocalStorage (específico deste dispositivo/militar)
+    const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${currentUserData.uid}`)) || [];
+    let htmlRecentes = recentes.map(v => `
+        <span class="badge-vtr-recente" onclick="selecionarVtrBusca('${v.id}', '${v.prefixo}')">
+            ${v.prefixo}
+        </span>`).join('');
+
+    const { value: vtrSelecionada } = await Swal.fire({
+        title: 'Checklist de Viatura',
+        html: `
+            <div style="text-align: left;">
+                <label style="font-size: 0.85em; font-weight:bold; color:#800020;">LOCALIZAR PREFIXO OU PLACA:</label>
+                <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Ex: ABT18, NAA1234..." style="text-transform: uppercase;">
+                
+                <div id="container-recentes" style="margin-top: 15px; ${recentes.length ? '' : 'display:none;'}">
+                    <small style="color: #999; display: block; margin-bottom: 5px;">Acesso Rápido:</small>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">${htmlRecentes}</div>
+                </div>
+
+                <div id="resultados-busca-vtr" style="margin-top: 20px; max-height: 200px; overflow-y: auto; border-radius: 8px;">
+                    </div>
+            </div>
+        `,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Fechar',
+        didOpen: () => {
+            const inputBusca = document.getElementById('input-busca-vtr-global');
+            inputBusca.focus();
+            inputBusca.addEventListener('input', (e) => filtrarVtrsGlobais(e.target.value));
+        }
+    });
+}
+		async function filtrarVtrsGlobais(termo) {
+    const container = document.getElementById('resultados-busca-vtr');
+    // Normaliza o termo digitado
+    const busca = termo.replace(/[^A-Z0-9]/gi, '').toLowerCase();
+
+    if (busca.length < 2) {
+        container.innerHTML = '';
+        return;
+    }
+
+    // Busca na coleção global 'viaturas'
+    // Nota: Em sistemas com muitas VTRs, o ideal é carregar uma vez no cache ao entrar na tela
+    const snap = await db.collection('viaturas')
+        .where('search_key', '>=', busca)
+        .where('search_key', '<=', busca + '\uf8ff')
+        .limit(5)
+        .get();
+
+    if (snap.empty) {
+        container.innerHTML = '<p style="font-size:0.8em; color:#999; text-align:center;">Nenhuma viatura encontrada.</p>';
+        return;
+    }
+
+    let html = '';
+    snap.forEach(doc => {
+        const v = doc.data();
+        html += `
+            <div class="result-vtr-card" onclick="selecionarVtrBusca('${doc.id}', '${v.prefixo}')">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span><i class="fas fa-truck-pickup"></i> <b>${v.prefixo}</b></span>
+                    <small style="color:#2c7399;">${v.placa}</small>
+                </div>
+                <small style="color:#999; font-size:0.7em;">${v.modelo}</small>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+function selecionarVtrBusca(id, prefixo) {
+    // 1. Salva nos recentes do usuário
+    const key = `sigma_vtr_recentes_${currentUserData.uid}`;
+    let recentes = JSON.parse(localStorage.getItem(key)) || [];
+    recentes = recentes.filter(v => v.id !== id); // Remove se já existe
+    recentes.unshift({ id, prefixo }); // Adiciona no topo
+    localStorage.setItem(key, JSON.stringify(recentes.slice(0, 4))); // Mantém os 4 últimos
+
+    // 2. Fecha o modal e inicia o fluxo (Ponto 3 da nossa conversa)
+    Swal.close();
+    alert(`Iniciando Checklist da VTR ${prefixo}...`);
+    // Aqui chamaremos o conferencia_app.html futuramente
 }
     </script>
 </body>
