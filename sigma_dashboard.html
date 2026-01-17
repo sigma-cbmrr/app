@@ -11439,7 +11439,7 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
 async function carregarFiltrosParaNovoEditor() {
     const selectAtivo = document.getElementById('lista-ativo-uid');
     const selectPosto = document.getElementById('lista-posto-uid');
-    const selectUnidade = document.getElementById('lista-unidade-vinculo'); // Novo ID conforme alinhamos
+    const selectUnidade = document.getElementById('lista-unidade-vinculo');
     
     if (!selectAtivo || !selectPosto || !selectUnidade) return;
 
@@ -11449,6 +11449,7 @@ async function carregarFiltrosParaNovoEditor() {
 
     try {
         const isGestor = currentUserData.role === 'gestor';
+        const minhaUnidadeId = currentUserData.unidade_id;
 
         // 1. Carregar Unidades (Com lógica de trava para Gestor)
         const snapUnidades = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
@@ -11460,20 +11461,10 @@ async function carregarFiltrosParaNovoEditor() {
         });
         selectUnidade.innerHTML = htmlUnidades;
 
-        // Trava cirúrgica para Gestor
         if (isGestor) {
-            // Busca pelo nome/sigla que está no currentUserData.unidade
-            for (let opt of selectUnidade.options) {
-                if (opt.text === currentUserData.unidade) {
-                    selectUnidade.value = opt.value;
-                    break;
-                }
-            }
+            selectUnidade.value = minhaUnidadeId;
             selectUnidade.disabled = true;
             selectUnidade.style.backgroundColor = '#f4f4f9';
-        } else {
-            selectUnidade.disabled = false;
-            selectUnidade.style.backgroundColor = '';
         }
 
         // 2. Carregar Postos
@@ -11484,29 +11475,42 @@ async function carregarFiltrosParaNovoEditor() {
         });
         selectPosto.innerHTML = htmlPostos;
 
-        // 3. Carregar Viaturas e Bases (Filtro por unidade se for Gestor)
+        // 🛑 3. CARREGAR VIATURAS (NOVA COLEÇÃO GLOBAL) E BASES 🛑
         let htmlAtivos = '<option value="" disabled selected>Selecione a VTR ou Base...</option>';
 
-        for (const unitDoc of snapUnidades.docs) {
-            const unitSigla = unitDoc.data().sigla;
-            const unitId = unitDoc.id;
-
-            // Se for gestor, ignora as viaturas que não são da unidade dele
-            if (isGestor && unitSigla !== currentUserData.unidade) continue;
-
-            const [vtrs, bases] = await Promise.all([
-                db.collection('vtr_bases').doc(unitId).collection('viaturas').get(),
-                db.collection('vtr_bases').doc(unitId).collection('bases').get()
-            ]);
-
-            vtrs.forEach(vDoc => {
-                htmlAtivos += `<option value="${vDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${vDoc.data().prefixo}">${vDoc.data().prefixo}</option>`;
+        // A. Busca Viaturas na Coleção Global
+        let vtrQuery = db.collection('viaturas');
+        if (isGestor) {
+            // Se for gestor, só vê viaturas que estão sob custódia da sua unidade
+            vtrQuery = vtrQuery.where('unidade_atual_id', '==', minhaUnidadeId);
+        }
+        
+        const vtrSnap = await vtrQuery.get();
+        if (!vtrSnap.empty) {
+            htmlAtivos += `<optgroup label="VIATURAS">`;
+            vtrSnap.forEach(vDoc => {
+                const v = vDoc.data();
+                htmlAtivos += `<option value="${vDoc.id}" data-unidade="${v.unidade_atual_id}" data-sigla="${v.unidade_atual_nome}" data-nome="${v.prefixo}">${v.prefixo}</option>`;
             });
+            htmlAtivos += `</optgroup>`;
+        }
 
-            bases.forEach(bDoc => {
-                htmlAtivos += `<option value="${bDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${bDoc.data().nome}">${bDoc.data().nome}</option>`;
+        // B. Busca Bases na estrutura antiga (Permanecem por Unidade)
+        htmlAtivos += `<optgroup label="BASES / DEPÓSITOS">`;
+        for (const unitDoc of snapUnidades.docs) {
+            const unitId = unitDoc.id;
+            const unitSigla = unitDoc.data().sigla;
+
+            if (isGestor && unitId !== minhaUnidadeId) continue;
+
+            const basesSnap = await db.collection('vtr_bases').doc(unitId).collection('bases').get();
+            basesSnap.forEach(bDoc => {
+                const b = bDoc.data();
+                htmlAtivos += `<option value="${bDoc.id}" data-unidade="${unitId}" data-sigla="${unitSigla}" data-nome="${b.nome}">${b.nome} (${unitSigla})</option>`;
             });
         }
+        htmlAtivos += `</optgroup>`;
+
         selectAtivo.innerHTML = htmlAtivos;
 
     } catch (e) {
