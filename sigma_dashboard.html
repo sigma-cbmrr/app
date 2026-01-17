@@ -13281,12 +13281,12 @@ document.addEventListener('change', function(e) {
                         <div class="form-group">
                             <label style="font-weight: bold; color: #800020; font-size: 0.85em;">NÍVEL DE COMBUSTÍVEL:</label>
                             <select id="vtr-combustivel-check" class="swal2-select" style="width: 100%; margin: 5px 0; font-weight: bold;">
-                                <option value="reserva">⛽ ⚠️ RESERVA</option>
-                                <option value="1/4">⛽ ▃      1/4 (UM QUARTO)</option>
-                                <option value="1/2" selected>⛽ ▃▄     1/2 (MEIO TANQUE)</option>
-                                <option value="3/4">⛽ ▃▄▆    3/4 (TRÊS QUARTOS)</option>
-                                <option value="cheio">⛽ ▃▄▆█  FULL (TANQUE CHEIO)</option>
-                            </select>
+    							<option value="reserva">⛽  ⚠️  RESERVA</option>
+    							<option value="1/4">⛽  ▂      1/4 (UM QUARTO)</option>
+    							<option value="1/2" selected>⛽  ▄      1/2 (MEIO TANQUE)</option>
+    							<option value="3/4">⛽  ▆      3/4 (TRÊS QUARTOS)</option>
+    							<option value="cheio">⛽  █      FULL (TANQUE CHEIO)</option>
+							</select>
                         </div>
                     </div>
                     <button class="btn-iniciar-check-modal" style="margin-top: 20px;" onclick="finalizarPreCheckEIrProApp()">
@@ -13306,29 +13306,43 @@ document.addEventListener('change', function(e) {
     });
 }
 		function avancarParaEtapa2() {
-    // 1. Efeito de slide: Passo 1 vai pra esquerda e Passo 2 entra
     const step1 = document.getElementById('step-1-content');
     const step2 = document.getElementById('step-2-content');
-    const kmInput = document.getElementById('vtr-km-check');
-
+    
+    // Transição de Slide
     step1.style.transform = "translateX(-110%)";
     setTimeout(() => {
         step1.style.display = "none";
         step2.style.display = "block";
         step2.style.transform = "translateX(110%)";
-        // Trigger reflow
         step2.offsetHeight;
         step2.style.transform = "translateX(0)";
-        if(kmInput) kmInput.value = dadosChecklistTemp.vtr.km_atual || 0;
+        
+        // 1. Sugere o KM e configura a Máscara
+        const kmInput = document.getElementById('vtr-km-check');
+        const kmAnterior = dadosChecklistTemp.vtr.km_atual || 0;
+        
+        if(kmInput) {
+            // Exibe o KM anterior formatado como sugestão inicial
+            kmInput.value = kmAnterior.toLocaleString('pt-BR');
+            
+            // Aplica a máscara enquanto digita
+            kmInput.addEventListener('input', function(e) {
+                // Remove tudo que não é número
+                let value = e.target.value.replace(/\D/g, '');
+                if (value === "") { e.target.value = ""; return; }
+                // Formata com pontos de milhar
+                e.target.value = parseInt(value).toLocaleString('pt-BR');
+            });
+        }
     }, 200);
 
-    // 2. Atualiza a Linha do Tempo (Ponto 1 verde, Ponto 2 Bordô)
+    // Atualiza Stepper (Cores)
     const dot1 = document.querySelector('#step-1-icon .step-dot');
     const dot2 = document.querySelector('#step-2-icon .step-dot');
     dot1.style.background = "#1b8a3e";
     dot1.innerHTML = '<i class="fas fa-check" style="font-size:10px;"></i>';
     dot2.style.background = "#800020";
-    dot2.style.boxShadow = "0 0 8px rgba(128,0,32,0.4)";
     document.querySelector('#step-2-icon small').style.color = "#800020";
 }
 
@@ -13421,22 +13435,34 @@ function voltarParaEtapa1() {
 		
 		// 2. FUNÇÃO QUE VALIDA E LANÇA O APP DE CONFERÊNCIA
 function finalizarPreCheckEIrProApp() {
-    const km = document.getElementById('vtr-km-check').value;
+    const kmInput = document.getElementById('vtr-km-check');
+    // Remove os pontos para converter de volta em número puro
+    const kmDigitado = parseInt(kmInput.value.replace(/\D/g, '')) || 0;
+    const kmAnterior = dadosChecklistTemp.vtr.km_atual || 0;
     const combustivel = document.getElementById('vtr-combustivel-check').value;
 
-    if (!km || km <= 0) return alert("Informe o KM atual.");
+    // 1. Validação: Não permite KM menor que o atual do banco
+    if (kmDigitado < kmAnterior) {
+        Swal.showValidationMessage(
+            `Erro: O KM não pode ser menor que o atual (${kmAnterior.toLocaleString('pt-BR')} km)`
+        );
+        kmInput.style.borderColor = "red";
+        return;
+    }
+
+    if (kmDigitado === 0) return alert("Informe a quilometragem atual.");
 
     const { id, prefixo } = dadosChecklistTemp.vtr;
     const userUid = firebase.auth().currentUser.uid;
     const guerra = (currentUserData.nome_guerra || 'ND').toUpperCase();
 
-    const url = `conferencia_app.html?vtrId=${id}&prefixo=${encodeURIComponent(prefixo)}&km=${km}&combustivel=${combustivel}&modo=checklist_vtr&user_uid=${userUid}&nome_guerra=${guerra}`;
+    const url = `conferencia_app.html?vtrId=${id}&prefixo=${encodeURIComponent(prefixo)}&km=${kmDigitado}&combustivel=${combustivel}&modo=checklist_vtr&user_uid=${userUid}&nome_guerra=${guerra}`;
 
     Swal.close();
     const container = document.getElementById('app-runner-container');
     document.getElementById('app-iframe').src = url;
     container.style.display = 'block';
-}		
+}	
 		async function filtrarVtrsGlobais(termo) {
     const container = document.getElementById('resultados-busca-vtr');
     const busca = termo.replace(/[^A-Z0-9]/gi, '').toLowerCase();
