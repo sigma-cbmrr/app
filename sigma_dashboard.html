@@ -11051,33 +11051,37 @@ function resetarFormVtrBase() {
     const tipo = btn.dataset.tipoAtivo;
     const modo = btn.dataset.modo || 'cadastro'; 
     const unidadeUid = document.getElementById('vtr-base-unidade').value;
+    
+    // ✅ CAPTURA O NOME AMIGÁVEL DA UNIDADE (Ex: CCI, 1º BBM)
+    const selectUnidade = document.getElementById('vtr-base-unidade');
+    const unidadeNome = selectUnidade.options[selectUnidade.selectedIndex].text;
 
     if (!unidadeUid) return alert("Por favor, selecione a Unidade Responsável.");
 
-    const subColecao = (tipo === 'viatura') ? 'viaturas' : 'bases';
-    
     try {
         let dados = {};
 
         if (tipo === 'viatura') {
             const prefixo = document.getElementById('vtr-prefixo').value.toUpperCase();
             const placa = document.getElementById('vtr-placa').value.toUpperCase();
-            
-            // 🛑 Lógica de Busca Inteligente: Remove tudo que não é letra ou número
             const searchKey = (prefixo + placa).replace(/[^A-Z0-9]/gi, '').toLowerCase();
 
             dados = {
                 prefixo: prefixo,
                 placa: placa,
-                search_key: searchKey, // Campo para o buscador global
+                search_key: searchKey,
                 segmento: document.getElementById('vtr-segmento').value,
                 modelo: document.getElementById('vtr-modelo').value,
                 ano: document.getElementById('vtr-ano').value,
                 licenciamento: document.getElementById('vtr-licenciamento').value,
                 status_operativo: document.getElementById('vtr-status-operativo').value,
                 km_atual: parseFloat(document.getElementById('vtr-km-atual').value) || 0,
-                unidade_id: unidadeUid, // Vínculo com a unidade dona
-                em_manutencao: false, // Flag para bloqueio CEMAN
+                
+                // ✅ MUDANÇA PARA NOMES VOLÁTEIS E AMIGÁVEIS
+                unidade_atual_id: unidadeUid, 
+                unidade_atual_nome: unidadeNome,
+                
+                em_manutencao: false, 
                 manutencao: {
                     oleo_data: document.getElementById('vtr-oleo-data').value,
                     oleo_km_prevista: parseFloat(document.getElementById('vtr-oleo-km').value) || 0
@@ -11085,16 +11089,15 @@ function resetarFormVtrBase() {
                 last_update: firebase.firestore.FieldValue.serverTimestamp()
             };
         } else {
-            // Lógica para Bases (Mantida na estrutura antiga ou migrada se desejar)
             dados = {
                 nome: document.getElementById('base-nome').value,
                 endereco: document.getElementById('base-endereco').value,
                 unidade_id: unidadeUid,
+                unidade_nome: unidadeNome, // Para consistência nas bases também
                 last_update: firebase.firestore.FieldValue.serverTimestamp()
             };
         }
 
-        // 🛑 NOVO MODELO: Viaturas agora vão para a coleção raiz 'viaturas'
         const colecaoDestino = (tipo === 'viatura') ? db.collection('viaturas') : db.collection('vtr_bases').doc(unidadeUid).collection('bases');
 
         if (modo === 'edicao') {
@@ -11126,8 +11129,10 @@ function resetarFormVtrBase() {
     const svgLixeira = '<path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/>';
 
     try {
-        const unidadesSnap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
         let html = '';
+
+        // 🛑 1. BUSCA GLOBAL DE VIATURAS (Coleção Raiz)
+        const vtrGlobalSnap = await db.collection('viaturas').orderBy('prefixo').get();
 
         const iconesVtr = {
             incendio: '<path d="M64 0C28.7 0 0 28.7 0 64V352c0 17.7 14.3 32 32 32H64c0 44.2 35.8 80 80 80s80-35.8 80-80H416c0 44.2 35.8 80 80 80s80-35.8 80-80h32c17.7 0 32-14.3 32-32V288c0-17.7-14.3-32-32-32H608V114.3c0-17-6.7-33.3-18.7-45.3L544 23.7c-12-12-28.3-18.7-45.3-18.7H64zM512 160V64h34.7l45.3 45.3V160H512zM144 352a48 48 0 1 1 0 96 48 48 0 1 1 0-96zm352 48a48 48 0 1 1 96 0 48 48 0 1 1 -96 0z"/>',
@@ -11136,42 +11141,43 @@ function resetarFormVtrBase() {
             passeio: '<path d="M135 192H441L428 139.5c-12-48.2-55.4-83.5-105.2-83.5H217.2c-49.8 0-93.2 35.3-105.2 83.5L99 192h36zM32 192c-17.7 0-32 14.3-32 32v96c0 17.7 14.3 32 32 32H48c0 44.2 35.8 80 80 80s80-35.8 80-80h160c0 44.2 35.8 80 80 80s80-35.8 80-80h16c17.7 0 32-14.3 32-32V224c0-17.7-14.3-32-32-32H32zM128 352a32 32 0 1 1 0 64 32 32 0 1 1 0-64zm352 32a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/>'
         };
 
+        vtrGlobalSnap.forEach(doc => {
+            const vtr = doc.data();
+            const desenhoPath = iconesVtr[vtr.segmento] || iconesVtr['passeio'];
+            const statusClass = `vtr-${vtr.status_operativo}`;
+            const unitId = vtr.unidade_atual_id || vtr.unidade_id;
+            const unitNome = vtr.unidade_atual_nome || "N/D";
+            
+            html += `
+                <div class="unit-building-card" style="cursor:pointer;" onclick="abrirModalDetalhesVtr('${unitId}', '${doc.id}')">
+                    <div class="card-actions-container">
+                        <button class="btn-edit-unit-card" title="Editar" onclick="event.stopPropagation(); prepararEdicaoAtivo('viatura', '${unitId}', '${doc.id}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="height:12px; fill:#555;">${svgLapiz}</svg>
+                        </button>
+                        <button class="btn-delete-unit-card" title="Excluir" onclick="event.stopPropagation(); deletarAtivoGlobal('${doc.id}', '${vtr.prefixo}')">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" style="height:12px; fill:#555;">${svgLixeira}</svg>
+                        </button>
+                    </div>
+                    <div style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" style="height:35px; fill:#2c7399;">${desenhoPath}</svg>
+                    </div>
+                    <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column;">
+                        <span style="display:block; font-weight:900; font-size:1.1em; color:#333; text-align: center;">${vtr.prefixo}</span>
+                        <small style="display:block; text-align:center; color:#888; margin-bottom:10px;">${vtr.placa} | ${vtr.modelo}</small>
+                        <div style="border-top: 1px solid #eee; padding-top:8px;">
+                            <span class="status-vtr-badge ${statusClass}">${vtr.status_operativo}</span>
+                            <span style="float:right; font-weight:bold; color:#2c7399; font-size:0.8em;">${unitNome}</span>
+                        </div>
+                    </div>
+                </div>`;
+        });
+
+        // 🛑 2. BUSCA DE BASES (Por Unidade)
+        const unidadesSnap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
         for (const unitDoc of unidadesSnap.docs) {
-            const unitData = unitDoc.data();
             const unitUid = unitDoc.id;
-
-            const vtrSnap = await db.collection('vtr_bases').doc(unitUid).collection('viaturas').get();
+            const sigla = unitDoc.data().sigla;
             const baseSnap = await db.collection('vtr_bases').doc(unitUid).collection('bases').get();
-
-            vtrSnap.forEach(doc => {
-                const vtr = doc.data();
-                const desenhoPath = iconesVtr[vtr.segmento] || iconesVtr['passeio'];
-                const statusClass = `vtr-${vtr.status_operativo}`;
-                
-                // INCLUSÃO: onclick para abrir modal e style cursor pointer
-                html += `
-                    <div class="unit-building-card" style="cursor:pointer;" onclick="abrirModalDetalhesVtr('${unitUid}', '${doc.id}')">
-                        <div class="card-actions-container">
-                            <button class="btn-edit-unit-card" title="Editar" onclick="event.stopPropagation(); prepararEdicaoAtivo('viatura', '${unitUid}', '${doc.id}')">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="height:12px; fill:#555;">${svgLapiz}</svg>
-                            </button>
-                            <button class="btn-delete-unit-card" title="Excluir" onclick="event.stopPropagation(); deletarAtivo('${unitUid}', 'viaturas', '${doc.id}', '${vtr.prefixo}')">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" style="height:12px; fill:#555;">${svgLixeira}</svg>
-                            </button>
-                        </div>
-                        <div style="width: 100%; height: 60px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" style="height:35px; fill:#2c7399;">${desenhoPath}</svg>
-                        </div>
-                        <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column;">
-                            <span style="display:block; font-weight:900; font-size:1.1em; color:#333; text-align: center;">${vtr.prefixo}</span>
-                            <small style="display:block; text-align:center; color:#888; margin-bottom:10px;">${vtr.placa} | ${vtr.modelo}</small>
-                            <div style="border-top: 1px solid #eee; padding-top:8px;">
-                                <span class="status-vtr-badge ${statusClass}">${vtr.status_operativo}</span>
-                                <span style="float:right; font-weight:bold; color:#2c7399; font-size:0.8em;">${unitData.sigla}</span>
-                            </div>
-                        </div>
-                    </div>`;
-            });
 
             baseSnap.forEach(doc => {
                 const base = doc.data();
@@ -11194,7 +11200,7 @@ function resetarFormVtrBase() {
                             <span style="display:block; font-weight:900; font-size:1.1em; color:#333; text-align: center;">${base.nome}</span>
                             <small style="display:block; text-align:center; color:#666; font-size:0.8em; margin-bottom:10px;">${base.endereco}</small>
                             <div style="border-top: 1px solid #eee; padding-top:8px;">
-                                <span style="font-weight:bold; color:#800020; font-size:0.8em;">${unitData.sigla}</span>
+                                <span style="font-weight:bold; color:#800020; font-size:0.8em;">${sigla}</span>
                             </div>
                         </div>
                     </div>`;
@@ -11206,6 +11212,18 @@ function resetarFormVtrBase() {
     } catch (e) {
         console.error("Erro ao carregar cards de ativos:", e);
         container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro técnico ao carregar lista.</p>';
+    }
+}
+
+// 🛑 Adicione esta função auxiliar para deletar da coleção GLOBAL
+async function deletarAtivoGlobal(ativoUid, nomeIdentificador) {
+    if (!confirm(`Deseja realmente remover a viatura "${nomeIdentificador}" do sistema global?`)) return;
+    try {
+        await db.collection('viaturas').doc(ativoUid).delete();
+        alert("Viatura removida com sucesso!");
+        carregarVtrBasesCards();
+    } catch (e) {
+        alert("Erro ao excluir viatura.");
     }
 }
 
