@@ -367,22 +367,35 @@
 
 /* Estado Selecionado do Card */
 .result-vtr-card.selected {
-    border-left: 6px solid #1b8a3e !important; /* Verde de seleção */
+    border-left: 6px solid #1b8a3e !important;
     background-color: #f0fdf4 !important;
-    transform: scale(1.02);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    border-color: #1b8a3e !important;
+    box-shadow: 0 4px 15px rgba(27, 138, 62, 0.15) !important;
+    transform: scale(1.01) translateX(5px);
 }
+	.my-swal-target {
+    position: relative !important;
+    z-index: 1000 !important;
+}	
 
 /* Botão de Iniciar dentro do Modal */
 .btn-iniciar-check-modal {
     background-color: #1b8a3e !important;
     color: white !important;
-    font-weight: bold !important;
+    border-radius: 8px !important;
+    padding: 15px !important;
+    font-weight: 800 !important;
+    letter-spacing: 1px;
     width: 100%;
     margin-top: 15px;
-    padding: 12px !important;
-    border-radius: 8px !important;
-    display: none; /* Inicia escondido */
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 6px rgba(27, 138, 62, 0.3);
+    transition: 0.3s;
+}
+		.btn-iniciar-check-modal:hover {
+    background-color: #14682f !important;
+    transform: translateY(-2px);
 }
 		@media (min-width: 768px) {
             .sidebar { left: 0 !important; }
@@ -13128,41 +13141,38 @@ document.addEventListener('change', function(e) {
     badgeWrapper.innerHTML = `<div class="user-level-badge ${classeBadge}">${nomeRole}</div>`;
 }
 		async function prepararChecklistVtr() {
-    vtrSelecionadaNoModal = null; // Reseta seleção
+    vtrSelecionadaNoModal = null;
     const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${currentUserData.uid}`)) || [];
     
     let htmlRecentes = recentes.map(v => `
-        <span class="badge-vtr-recente" onclick="selecionarVtrVisual('${v.id}', '${v.prefixo}')">
+        <span class="badge-vtr-recente" onclick="event.stopPropagation(); selecionarVtrVisual('${v.id}', '${v.prefixo}', this)">
             ${v.prefixo}
         </span>`).join('');
 
     Swal.fire({
         title: '<i class="fas fa-truck-pickup"></i> Checklist de Viatura',
+        target: document.querySelector('.content'), // 🛑 ALINHA COM O CONTENT E NÃO COM A PÁGINA
         html: `
-            <div style="text-align: left;">
+            <div style="text-align: left; padding: 5px;">
                 <label style="font-size: 0.85em; font-weight:bold; color:#800020;">LOCALIZAR PREFIXO OU PLACA:</label>
-                <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Ex: ABT18, NAA1234..." style="text-transform: uppercase; width: 100%; box-sizing: border-box;">
+                <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Digite prefixo ou placa..." style="text-transform: uppercase; width: 100%; margin: 10px 0;">
                 
-                <div id="container-recentes" style="margin-top: 15px; ${recentes.length ? '' : 'display:none;'}">
-                    <small style="color: #999; display: block; margin-bottom: 5px;">Acesso Rápido:</small>
+                <div id="container-recentes" style="margin-top: 10px; ${recentes.length ? '' : 'display:none;'}">
+                    <small style="color: #999; display: block; margin-bottom: 5px;">Recentes:</small>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">${htmlRecentes}</div>
                 </div>
 
-                <div id="resultados-busca-vtr">
+                <div id="resultados-busca-vtr" style="margin-top: 15px; max-height: 200px; overflow-y: auto; padding: 5px;">
                     </div>
 
-                <button id="btn-confirmar-vtr-modal" class="swal2-confirm swal2-styled btn-iniciar-check-modal" onclick="confirmarInicioChecklist()">
-                    INICIAR CHECKLIST AGORA
+                <button id="btn-confirmar-vtr-modal" class="btn-iniciar-check-modal" style="display:none;" onclick="confirmarInicioChecklist()">
+                    INICIAR CHECKLIST
                 </button>
             </div>
         `,
         showConfirmButton: false,
         showCancelButton: true,
-        cancelButtonText: 'Cancelar',
-        customClass: {
-            container: 'my-swal-container', // Permite alinhar com o content se necessário via CSS
-            popup: 'vtr-search-popup'
-        },
+        cancelButtonText: 'Voltar',
         didOpen: () => {
             const inputBusca = document.getElementById('input-busca-vtr-global');
             inputBusca.focus();
@@ -13170,25 +13180,27 @@ document.addEventListener('change', function(e) {
         }
     });
 }
-		function selecionarVtrVisual(id, prefixo) {
+		function selecionarVtrVisual(id, prefixo, elemento) {
     vtrSelecionadaNoModal = { id, prefixo };
 
-    // Remove seleção de todos e aplica no clicado
-    document.querySelectorAll('.result-vtr-card').forEach(c => c.classList.remove('selected'));
-    const cardClicado = event.currentTarget;
-    if(cardClicado && cardClicado.classList) cardClicado.classList.add('selected');
+    // 1. Remove destaque de qualquer outro card ou badge
+    document.querySelectorAll('.result-vtr-card, .badge-vtr-recente').forEach(el => el.classList.remove('selected'));
+    
+    // 2. Aplica destaque no elemento clicado
+    elemento.classList.add('selected');
 
-    // Mostra o botão de iniciar
+    // 3. Mostra e atualiza o botão de ação
     const btn = document.getElementById('btn-confirmar-vtr-modal');
     btn.style.display = 'block';
-    btn.innerHTML = `INICIAR CHECKLIST: ${prefixo}`;
+    btn.innerHTML = `<i class="fas fa-play"></i> INICIAR CHECKLIST: ${prefixo}`;
     
-    // Scroll suave até o botão
-    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Feedback visual de clique
+    elemento.style.transition = "0.1s";
+    elemento.style.transform = "scale(0.98)";
+    setTimeout(() => elemento.style.transform = "", 100);
 }
 		function confirmarInicioChecklist() {
     if (!vtrSelecionadaNoModal) return;
-
     const { id, prefixo } = vtrSelecionadaNoModal;
 
     // Salva nos recentes
@@ -13200,13 +13212,13 @@ document.addEventListener('change', function(e) {
 
     Swal.close();
     
-    // Aqui abriremos o App de Conferência
-    console.log(`🚀 Redirecionando para checklist da VTR ID: ${id}`);
-    alert(`Iniciando Prontuário da Viatura ${prefixo}...`);
+    // PRÓXIMO PASSO: Chamar o App de Conferência
+    console.log("Iniciando fluxo técnico para:", prefixo);
+    // window.location.href = `conferencia_app.html?vtrId=${id}&modo=checklist`;
 }
+		
 		async function filtrarVtrsGlobais(termo) {
     const container = document.getElementById('resultados-busca-vtr');
-    // Normaliza o termo digitado
     const busca = termo.replace(/[^A-Z0-9]/gi, '').toLowerCase();
 
     if (busca.length < 2) {
@@ -13214,8 +13226,6 @@ document.addEventListener('change', function(e) {
         return;
     }
 
-    // Busca na coleção global 'viaturas'
-    // Nota: Em sistemas com muitas VTRs, o ideal é carregar uma vez no cache ao entrar na tela
     const snap = await db.collection('viaturas')
         .where('search_key', '>=', busca)
         .where('search_key', '<=', busca + '\uf8ff')
@@ -13223,20 +13233,21 @@ document.addEventListener('change', function(e) {
         .get();
 
     if (snap.empty) {
-        container.innerHTML = '<p style="font-size:0.8em; color:#999; text-align:center;">Nenhuma viatura encontrada.</p>';
+        container.innerHTML = '<p style="font-size:0.8em; color:#999; text-align:center;">Viatura não cadastrada.</p>';
         return;
     }
 
     let html = '';
     snap.forEach(doc => {
         const v = doc.data();
+        // 🛑 MUDANÇA: Agora chama selecionarVtrVisual passando o elemento (this)
         html += `
-            <div class="result-vtr-card" onclick="selecionarVtrBusca('${doc.id}', '${v.prefixo}')">
+            <div class="result-vtr-card" onclick="selecionarVtrVisual('${doc.id}', '${v.prefixo}', this)">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span><i class="fas fa-truck-pickup"></i> <b>${v.prefixo}</b></span>
-                    <small style="color:#2c7399;">${v.placa}</small>
+                    <small style="color:#2c7399; font-weight:bold;">${v.placa}</small>
                 </div>
-                <small style="color:#999; font-size:0.7em;">${v.modelo}</small>
+                <small style="color:#999; font-size:0.75em;">${v.modelo} (${v.unidade_atual_nome || 'S/U'})</small>
             </div>
         `;
     });
