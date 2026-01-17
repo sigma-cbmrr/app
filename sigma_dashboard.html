@@ -423,11 +423,24 @@
     font-weight: 600;
     text-transform: uppercase;
 }
+	.vtr-selected-summary .last-check-info {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed #cbd5e1;
+    font-size: 0.75em;
+    color: #64748b;
+    line-height: 1.4;
+}
 
+.vtr-selected-summary .last-check-info i {
+    color: #1b8a3e;
+    margin-right: 4px;
+}
 @keyframes slideDown {
     from { opacity: 0; transform: translateY(-10px); }
     to { opacity: 1; transform: translateY(0); }
 }
+		
 		@media (min-width: 768px) {
             .sidebar { left: 0 !important; }
             .header-title-desktop { display: block; font-size: 1.2em; } 
@@ -2440,7 +2453,7 @@ input:checked + .slider:before {
                     	<i class="fas fa-clipboard-list"></i> Conferência de Materiais
                 	</button>
 					<button id="btn-open-vtr-modal" class="btn-modern-action" style="background-color: #2c3e50; flex: 1; min-width: 160px;" onclick="prepararChecklistVtr()">
-            			<i class="fas fa-truck-pickup"></i> Checklist Viatura
+            			<i class="fas fa-car"></i> Checklist Viatura
         			</button>
 				</div>
             </div>
@@ -13175,19 +13188,24 @@ document.addEventListener('change', function(e) {
     vtrSelecionadaNoModal = null;
     const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${currentUserData.uid}`)) || [];
     
-    let htmlRecentes = recentes.map(v => `
-        <span class="badge-vtr-recente" onclick="buscarVtrEspecifica('${v.id}')">
-            ${v.prefixo}
-        </span>`).join('');
+    // Corrigido: Agora chama selecionarVtrVisual diretamente, buscando os dados necessários
+    let htmlRecentes = "";
+    for (const v of recentes) {
+        htmlRecentes += `
+            <span class="badge-vtr-recente" onclick="event.stopPropagation(); recuperarDadosVtrESelecionar('${v.id}')">
+                ${v.prefixo}
+            </span>`;
+    }
 
     Swal.fire({
-        title: '<i class="fas fa-truck-pickup"></i> Checklist de Viatura',
+        // 1. Ícone de carro visto de frente (fa-car)
+        title: '<i class="fas fa-clipboard-check"></i> Checklist de Viatura',
         target: document.querySelector('.content'),
         html: `
             <div style="text-align: left; padding: 5px;">
                 <div id="area-busca-vtr">
                     <label style="font-size: 0.85em; font-weight:bold; color:#800020;">LOCALIZAR PREFIXO OU PLACA:</label>
-                    <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Digite prefixo ou placa..." style="text-transform: uppercase; width: 100%; margin: 10px 0;">
+                    <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Ex: ABT, ACA..." style="text-transform: uppercase; width: 100%; margin: 10px 0;">
                     
                     <div id="container-recentes" style="margin-top: 10px; ${recentes.length ? '' : 'display:none;'}">
                         <small style="color: #999; display: block; margin-bottom: 5px;">Acesso Rápido:</small>
@@ -13197,8 +13215,7 @@ document.addEventListener('change', function(e) {
                     <div id="resultados-busca-vtr" style="margin-top: 15px; max-height: 200px; overflow-y: auto; padding: 5px;"></div>
                 </div>
 
-                <div id="resumo-selecao-vtr" style="display:none;">
-                    </div>
+                <div id="resumo-selecao-vtr" style="display:none;"></div>
 
                 <button id="btn-confirmar-vtr-modal" class="btn-iniciar-check-modal" style="display:none;" onclick="confirmarInicioChecklist()">
                     INICIAR
@@ -13219,6 +13236,15 @@ document.addEventListener('change', function(e) {
         }
     });
 }
+		async function recuperarDadosVtrESelecionar(vtrId) {
+    try {
+        const doc = await db.collection('viaturas').doc(vtrId).get();
+        if (doc.exists) {
+            const v = doc.data();
+            selecionarVtrVisual(doc.id, v.prefixo, v.placa, v.unidade_atual_nome, v.ultima_conferencia);
+        }
+    } catch (e) { console.error("Erro ao recuperar recente:", e); }
+}
 		function resetarBuscaVtr() {
     vtrSelecionadaNoModal = null;
     document.getElementById('area-busca-vtr').style.display = 'block';
@@ -13227,30 +13253,35 @@ document.addEventListener('change', function(e) {
     document.getElementById('btn-trocar-vtr').style.display = 'none';
     setTimeout(() => document.getElementById('input-busca-vtr-global').focus(), 100);
 }
-		function selecionarVtrVisual(id, prefixo, placa, unidade) {
+		
+		function selecionarVtrVisual(id, prefixo, placa, unidade, ultimaConf) {
     vtrSelecionadaNoModal = { id, prefixo };
 
-    // 1. Esconde a busca e os recentes
     document.getElementById('area-busca-vtr').style.display = 'none';
-    
-    // 2. Limpa o valor do input (para caso o usuário queira trocar)
-    document.getElementById('input-busca-vtr-global').value = '';
-
-    // 3. Monta e mostra o Card de Resumo
     const containerResumo = document.getElementById('resumo-selecao-vtr');
+
+    // 2. Lógica da última checagem
+    let infoUltima = "Nenhuma checagem registrada";
+    if (ultimaConf && ultimaConf.data) {
+        const dataFmt = new Date(ultimaConf.data).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+        infoUltima = `Último check: ${dataFmt}<br>Por: ${ultimaConf.usuario_nome || 'Sistema'}`;
+    }
+
     containerResumo.innerHTML = `
         <div class="vtr-selected-summary">
-            <i class="fas fa-truck-pickup" style="color:#1b8a3e; font-size:1.5em; margin-bottom:10px;"></i>
+            <i class="fas fa-check-circle" style="color:#1b8a3e; font-size:1.2em; margin-bottom:10px;"></i>
             <p>Viatura Selecionada</p>
             <h2>${prefixo}</h2>
-            <div style="margin-top:10px; color:#475569; font-size:0.85em;">
-                <b>PLACA:</b> ${placa} | <b>UNIDADE:</b> ${unidade || 'N/D'}
+            <div style="margin-top:5px; color:#475569; font-size:0.85em; font-weight:bold;">
+                ${placa} | ${unidade || 'PÁTIO'}
+            </div>
+            <div class="last-check-info">
+                <i class="fas fa-history"></i> ${infoUltima}
             </div>
         </div>
     `;
+    
     containerResumo.style.display = 'block';
-
-    // 4. Mostra o botão Iniciar (Limpo) e o link de troca
     document.getElementById('btn-confirmar-vtr-modal').style.display = 'block';
     document.getElementById('btn-trocar-vtr').style.display = 'block';
 }
@@ -13295,9 +13326,11 @@ document.addEventListener('change', function(e) {
     let html = '';
     snap.forEach(doc => {
         const v = doc.data();
-        // Passamos ID, Prefixo, Placa e Unidade para a função de destaque
+        // Escapando strings para evitar erros no onclick
+        const vData = JSON.stringify(v.ultima_conferencia || {}).replace(/"/g, '&quot;');
+        
         html += `
-            <div class="result-vtr-card" onclick="selecionarVtrVisual('${doc.id}', '${v.prefixo}', '${v.placa}', '${v.unidade_atual_nome}')">
+            <div class="result-vtr-card" onclick="selecionarVtrVisual('${doc.id}', '${v.prefixo}', '${v.placa}', '${v.unidade_atual_nome}', ${vData})">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <span><i class="fas fa-truck-pickup"></i> <b>${v.prefixo}</b></span>
                     <small style="color:#2c7399; font-weight:bold;">${v.placa}</small>
@@ -13307,7 +13340,7 @@ document.addEventListener('change', function(e) {
     });
     container.innerHTML = html;
 }
-function selecionarVtrBusca(id, prefixo) {
+		function selecionarVtrBusca(id, prefixo) {
     // 1. Salva nos recentes do usuário
     const key = `sigma_vtr_recentes_${currentUserData.uid}`;
     let recentes = JSON.parse(localStorage.getItem(key)) || [];
