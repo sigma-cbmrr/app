@@ -13326,22 +13326,96 @@ document.addEventListener('change', function(e) {
     document.getElementById('btn-confirmar-vtr-modal').style.display = 'block';
     document.getElementById('btn-trocar-vtr').style.display = 'block';
 }
-		function confirmarInicioChecklist() {
+		// 1. FUNÇÃO DE TRANSIÇÃO (ETAPA 1 -> ETAPA 2)
+function confirmarInicioChecklist() {
     if (!vtrSelecionadaNoModal) return;
     const { id, prefixo } = vtrSelecionadaNoModal;
 
-    // Salva nos recentes
+    // Salva nos recentes do localStorage
     const key = `sigma_vtr_recentes_${currentUserData.uid}`;
     let recentes = JSON.parse(localStorage.getItem(key)) || [];
     recentes = recentes.filter(v => v.id !== id);
     recentes.unshift({ id, prefixo });
     localStorage.setItem(key, JSON.stringify(recentes.slice(0, 4)));
 
+    // Captura o KM atual da VTR selecionada para sugerir no input (se existir no objeto selecionado)
+    const kmSugerido = vtrSelecionadaNoModal.km_atual || 0;
+
+    // Abre a SEGUNDA TELA do modal (Dados Operacionais)
+    Swal.fire({
+        title: '<i class="fas fa-clipboard-check"></i> Dados Operacionais',
+        target: 'body',
+        backdrop: `rgba(0,0,0,0.6)`,
+        allowOutsideClick: false,
+        html: `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 20px; position: relative;">
+                <div style="position: absolute; top: 15px; left: 40px; right: 40px; height: 2px; background: #ddd; z-index: 1;"></div>
+                
+                <div style="z-index: 2; text-align: center;">
+                    <div style="width: 30px; height: 30px; border-radius: 50%; background: #1b8a3e; color: white; line-height: 30px; margin: 0 auto; border: 3px solid #fff; box-shadow: 0 0 5px rgba(0,0,0,0.2);"><i class="fas fa-check" style="font-size: 10px;"></i></div>
+                    <small style="color: #1b8a3e; font-weight: bold; display: block; margin-top: 5px;">Viatura</small>
+                </div>
+
+                <div style="z-index: 2; text-align: center;">
+                    <div style="width: 30px; height: 30px; border-radius: 50%; background: #800020; color: white; line-height: 30px; margin: 0 auto; border: 3px solid #fff; box-shadow: 0 0 8px rgba(128,0,32,0.4);">2</div>
+                    <small style="color: #800020; font-weight: bold; display: block; margin-top: 5px;">Operacional</small>
+                </div>
+            </div>
+
+            <div style="text-align: left; background: #f8fafc; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0;">
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="font-weight: bold; color: #800020; font-size: 0.85em;"><i class="fas fa-tachometer-alt"></i> QUILOMETRAGEM ATUAL (KM):</label>
+                    <input type="number" id="vtr-km-check" class="swal2-input" value="${kmSugerido}" style="width: 100%; margin: 8px 0; font-weight: bold; font-size: 1.2em; text-align: center;">
+                </div>
+
+                <div class="form-group">
+                    <label style="font-weight: bold; color: #800020; font-size: 0.85em;"><i class="fas fa-gas-pump"></i> NÍVEL DE COMBUSTÍVEL:</label>
+                    <select id="vtr-combustivel-check" class="swal2-select" style="width: 100%; margin: 8px 0; font-weight: bold;">
+                        <option value="reserva">⛽ RESERVA</option>
+                        <option value="1/4">1/4 (UM QUARTO)</option>
+                        <option value="1/2" selected>1/2 (MEIO TANQUE)</option>
+                        <option value="3/4">3/4 (TRÊS QUARTOS)</option>
+                        <option value="cheio">FULL (TANQUE CHEIO)</option>
+                    </select>
+                </div>
+            </div>
+
+            <button id="btn-abrir-conferencia-vtr" class="btn-iniciar-check-modal" style="margin-top: 25px;" onclick="finalizarPreCheckEIrProApp()">
+                INICIAR
+            </button>
+            
+            <button style="background:none; border:none; color:#64748b; cursor:pointer; width:100%; margin-top:15px; font-size:0.8em; text-decoration:underline;" onclick="prepararChecklistVtr()">
+                <i class="fas fa-chevron-left"></i> Voltar para seleção
+            </button>
+        `,
+        showConfirmButton: false
+    });
+}
+		// 2. FUNÇÃO QUE VALIDA E LANÇA O APP DE CONFERÊNCIA
+function finalizarPreCheckEIrProApp() {
+    const kmDigitado = document.getElementById('vtr-km-check').value;
+    const combustivel = document.getElementById('vtr-combustivel-check').value;
+    
+    if (!kmDigitado || kmDigitado <= 0) {
+        return alert("Por favor, informe a quilometragem atual correta.");
+    }
+
+    const { id, prefixo } = vtrSelecionadaNoModal;
+    const userUid = firebase.auth().currentUser.uid;
+    const guerra = (currentUserData.nome_guerra || 'ND').toUpperCase();
+
+    // 🛑 CONSTRUÇÃO DA URL COM DADOS VOLÁTEIS 🛑
+    // Passamos km e combustivel via URL para o app salvar no resultado final
+    const url = `conferencia_app.html?vtrId=${id}&prefixo=${encodeURIComponent(prefixo)}&km=${kmDigitado}&combustivel=${combustivel}&modo=checklist_vtr&user_uid=${userUid}&nome_guerra=${guerra}`;
+
     Swal.close();
     
-    // PRÓXIMO PASSO: Chamar o App de Conferência
-    console.log("Iniciando fluxo técnico para:", prefixo);
-    // window.location.href = `conferencia_app.html?vtrId=${id}&modo=checklist`;
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+    iframe.src = url;
+    container.style.display = 'block';
+
+    console.log("Iniciando Checklist VTR com dados:", { kmDigitado, combustivel });
 }
 		
 		async function filtrarVtrsGlobais(termo) {
@@ -13381,6 +13455,7 @@ document.addEventListener('change', function(e) {
     });
     container.innerHTML = html;
 }
+		
 		function selecionarVtrBusca(id, prefixo) {
     // 1. Salva nos recentes do usuário
     const key = `sigma_vtr_recentes_${currentUserData.uid}`;
