@@ -106,20 +106,6 @@
         .btn-dial-mobile {
             display: none !important;
         }
-        .profile-badge { 
-            background-color: #800020; /* Cor sólida SIGMA (vermelho escuro) */
-            color: white; /* Mantém o texto branco no fundo vermelho escuro */
-            padding: 4px 10px; 
-            border-radius: 15px; 
-            font-size: 0.8em; 
-            margin-left: 0; /* Remove a margem horizontal desnecessária na sidebar */
-            border: 1px solid rgba(255,255,255,0.5); /* Borda mais visível */
-        }
-        #sidebar-user-info .profile-badge {
-            /* Garante que o badge tenha margem superior para espaçamento */
-            margin-top: 5px; 
-            margin-left: 0;
-        }
 		/* ================================================================
    		BLOCO NOVO: VIATURAS & BASES (IDENTIDADE VISUAL SIGMA)
    		================================================================ */
@@ -337,6 +323,39 @@
 		.tag-sugestao-setor:hover { background: #800020; color: white; border-color: #800020; transform: translateY(-2px); }
 		#modal-novo-setor-arquitetura .modal-content { animation: scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }       
 		
+		/* Badge de Nível Translúcido - Estilo Moderno */
+.user-level-badge {
+    display: inline-block;
+    padding: 3px 12px;
+    border-radius: 50px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    margin-top: 8px;
+    background: rgba(128, 0, 32, 0.08); /* Fundo muito suave na cor base */
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border: 1px solid rgba(128, 0, 32, 0.2);
+    transition: all 0.3s ease;
+}
+
+/* Cores específicas conforme o papel (role) */
+.badge-admin { 
+    color: #d90f23 !important; 
+    background: rgba(217, 15, 35, 0.1) !important;
+    border-color: rgba(217, 15, 35, 0.3) !important;
+}
+.badge-gestor { 
+    color: #2c7399 !important; 
+    background: rgba(44, 115, 153, 0.1) !important;
+    border-color: rgba(44, 115, 153, 0.3) !important;
+}
+.badge-operacional { 
+    color: #1b8a3e !important; 
+    background: rgba(27, 138, 62, 0.1) !important;
+    border-color: rgba(27, 138, 62, 0.3) !important;
+}
 		@media (min-width: 768px) {
             .sidebar { left: 0 !important; }
             .header-title-desktop { display: block; font-size: 1.2em; } 
@@ -2235,12 +2254,15 @@ input:checked + .slider:before {
     
     <div class="sidebar" id="main-sidebar">
         <div class="sidebar-header">
-            <img src="logo_sigma.png" alt="Logo SIGMA" onerror="this.onerror=null; this.src='https://placehold.co/50x50/ffffff/800020/fff?text=S'">
-            <div id="sidebar-user-info">
-            	<span id="user-name"></span>
-            	<span id="user-role-display" class="profile-badge">Carregando...</span>
-        	</div>
-        </div>
+    		<div id="unit-logo-container" style="margin-bottom: 10px; display: flex; justify-content: center;">
+        		<img src="logo_sigma.png" id="sidebar-logo" alt="Logo SIGMA" style="width: 60px; height: auto;">
+    		</div>
+
+    		<div id="sidebar-user-info">
+        		<span id="user-name" style="font-size: 0.95em; color: #333;"></span>
+        		<div id="badge-wrapper"></div>
+    		</div>
+		</div>
         <div class="menu-label">Operacional</div>
         	<a onclick="switchView('dashboard')" id="link-dashboard" class="active"><i class="fas fa-chart-line"></i> Dashboard & Serviço</a>
         	<a onclick="switchView('my-history')" id="link-my-history"><i class="fas fa-history"></i> Minhas Conferências</a>
@@ -3509,22 +3531,20 @@ input:checked + .slider:before {
         });
 
         function setupUIBasedOnRole() {
-    const role = currentUserData.role || 'operacional';
-    const unit = currentUserData.unidade || 'N/D';
-    const p = currentUserData.permissoes || {};
+			if (typeof atualizarIdentidadeSidebar === 'function') {
+        		atualizarIdentidadeSidebar();
+    		}
+    		const role = currentUserData.role || 'operacional';
+    		const unit = currentUserData.unidade || 'N/D';
+    		const p = currentUserData.permissoes || {};
 
-    const roleDisplay = document.getElementById('user-role-display');
-    if (roleDisplay) {
-        roleDisplay.textContent = `${role.toUpperCase()} - ${unit}`;
-    }
+    		atualizarSaudacao(currentUserData);
 
-    atualizarSaudacao(currentUserData);
-
-    const isAdmin = (role === 'admin');
-    const isGestorGeral = (role === 'gestor_geral');
-    const isGestorOuAdmin = (role === 'gestor' || role === 'admin' || role === 'gestor_geral');
+    		const isAdmin = (role === 'admin');
+    		const isGestorGeral = (role === 'gestor_geral');
+    		const isGestorOuAdmin = (role === 'gestor' || role === 'admin' || role === 'gestor_geral');
     
-    const canManageUnits = isAdmin; 
+    		const canManageUnits = isAdmin; 
 
     const canViewDashboardCards = isAdmin || isGestorGeral || (role === 'gestor' && p.canViewDashboardCards);
     const canViewUnitHistory = isAdmin || isGestorGeral || (role === 'gestor' && p.canViewUnitHistory);
@@ -12948,6 +12968,39 @@ document.addEventListener('change', function(e) {
         }
     }
 });
+		async function atualizarIdentidadeSidebar() {
+    if (!currentUserData) return;
+
+    const logoContainer = document.getElementById('unit-logo-container');
+    const badgeWrapper = document.getElementById('badge-wrapper');
+    const siglaUnidade = currentUserData.unidade || "SIGMA";
+    const role = currentUserData.role || "operacional";
+
+    // 1. LÓGICA DO BRASÃO (Independência do Sistema)
+    // Se no futuro houver logo_url no Firestore, o código já está pronto:
+    if (currentUserData.unidade_logo_url) {
+        logoContainer.innerHTML = `<img src="${currentUserData.unidade_logo_url}" style="width: 55px; height: 55px; object-fit: contain;">`;
+    } else {
+        // Fallback: Iniciais da Unidade com estilo militar elegante
+        logoContainer.innerHTML = `
+            <div style="width: 55px; height: 55px; background: #800020; color: white; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2em; box-shadow: 0 4px 8px rgba(0,0,0,0.15); border: 2px solid rgba(255,255,255,0.2);">
+                ${siglaUnidade.substring(0, 3).toUpperCase()}
+            </div>`;
+    }
+
+    // 2. LÓGICA DO BADGE TRANSLÚCIDO
+    const roleMap = {
+        'admin': 'Administrador Geral',
+        'gestor': 'Gestor de Unidade',
+        'gestor_geral': 'Gestor Geral',
+        'operacional': 'Operacional'
+    };
+
+    const nomeRole = roleMap[role] || role.toUpperCase();
+    const classeBadge = `badge-${role.replace('_', '-')}`;
+
+    badgeWrapper.innerHTML = `<div class="user-level-badge ${classeBadge}">${nomeRole}</div>`;
+}
     </script>
 </body>
 </html>
