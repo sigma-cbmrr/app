@@ -357,6 +357,33 @@
     background: rgba(27, 138, 62, 0.1) !important;
     border-color: rgba(27, 138, 62, 0.3) !important;
 }
+		/* Container de resultados com espaço para o efeito de hover */
+#resultados-busca-vtr {
+    margin-top: 20px;
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 5px; /* Espaço para o card não bater na borda */
+}
+
+/* Estado Selecionado do Card */
+.result-vtr-card.selected {
+    border-left: 6px solid #1b8a3e !important; /* Verde de seleção */
+    background-color: #f0fdf4 !important;
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* Botão de Iniciar dentro do Modal */
+.btn-iniciar-check-modal {
+    background-color: #1b8a3e !important;
+    color: white !important;
+    font-weight: bold !important;
+    width: 100%;
+    margin-top: 15px;
+    padding: 12px !important;
+    border-radius: 8px !important;
+    display: none; /* Inicia escondido */
+}
 		@media (min-width: 768px) {
             .sidebar { left: 0 !important; }
             .header-title-desktop { display: block; font-size: 1.2em; } 
@@ -3584,7 +3611,8 @@ input:checked + .slider:before {
 		let idListaSendoEditada = null;
 		let itensParaEstorno = []; // Itens que foram marcados com "X"
 		let estoqueGestorLocal = []; // Cache do estoque da unidade para a busca rápida
-
+		let vtrSelecionadaNoModal = null;
+		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
             if (user) {
@@ -13100,38 +13128,81 @@ document.addEventListener('change', function(e) {
     badgeWrapper.innerHTML = `<div class="user-level-badge ${classeBadge}">${nomeRole}</div>`;
 }
 		async function prepararChecklistVtr() {
-    // 1. Busca recentes do LocalStorage (específico deste dispositivo/militar)
+    vtrSelecionadaNoModal = null; // Reseta seleção
     const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${currentUserData.uid}`)) || [];
+    
     let htmlRecentes = recentes.map(v => `
-        <span class="badge-vtr-recente" onclick="selecionarVtrBusca('${v.id}', '${v.prefixo}')">
+        <span class="badge-vtr-recente" onclick="selecionarVtrVisual('${v.id}', '${v.prefixo}')">
             ${v.prefixo}
         </span>`).join('');
 
-    const { value: vtrSelecionada } = await Swal.fire({
-        title: 'Checklist de Viatura',
+    Swal.fire({
+        title: '<i class="fas fa-truck-pickup"></i> Checklist de Viatura',
         html: `
             <div style="text-align: left;">
                 <label style="font-size: 0.85em; font-weight:bold; color:#800020;">LOCALIZAR PREFIXO OU PLACA:</label>
-                <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Ex: ABT18, NAA1234..." style="text-transform: uppercase;">
+                <input type="text" id="input-busca-vtr-global" class="swal2-input" placeholder="Ex: ABT18, NAA1234..." style="text-transform: uppercase; width: 100%; box-sizing: border-box;">
                 
                 <div id="container-recentes" style="margin-top: 15px; ${recentes.length ? '' : 'display:none;'}">
                     <small style="color: #999; display: block; margin-bottom: 5px;">Acesso Rápido:</small>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">${htmlRecentes}</div>
                 </div>
 
-                <div id="resultados-busca-vtr" style="margin-top: 20px; max-height: 200px; overflow-y: auto; border-radius: 8px;">
+                <div id="resultados-busca-vtr">
                     </div>
+
+                <button id="btn-confirmar-vtr-modal" class="swal2-confirm swal2-styled btn-iniciar-check-modal" onclick="confirmarInicioChecklist()">
+                    INICIAR CHECKLIST AGORA
+                </button>
             </div>
         `,
         showConfirmButton: false,
         showCancelButton: true,
-        cancelButtonText: 'Fechar',
+        cancelButtonText: 'Cancelar',
+        customClass: {
+            container: 'my-swal-container', // Permite alinhar com o content se necessário via CSS
+            popup: 'vtr-search-popup'
+        },
         didOpen: () => {
             const inputBusca = document.getElementById('input-busca-vtr-global');
             inputBusca.focus();
             inputBusca.addEventListener('input', (e) => filtrarVtrsGlobais(e.target.value));
         }
     });
+}
+		function selecionarVtrVisual(id, prefixo) {
+    vtrSelecionadaNoModal = { id, prefixo };
+
+    // Remove seleção de todos e aplica no clicado
+    document.querySelectorAll('.result-vtr-card').forEach(c => c.classList.remove('selected'));
+    const cardClicado = event.currentTarget;
+    if(cardClicado && cardClicado.classList) cardClicado.classList.add('selected');
+
+    // Mostra o botão de iniciar
+    const btn = document.getElementById('btn-confirmar-vtr-modal');
+    btn.style.display = 'block';
+    btn.innerHTML = `INICIAR CHECKLIST: ${prefixo}`;
+    
+    // Scroll suave até o botão
+    btn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+		function confirmarInicioChecklist() {
+    if (!vtrSelecionadaNoModal) return;
+
+    const { id, prefixo } = vtrSelecionadaNoModal;
+
+    // Salva nos recentes
+    const key = `sigma_vtr_recentes_${currentUserData.uid}`;
+    let recentes = JSON.parse(localStorage.getItem(key)) || [];
+    recentes = recentes.filter(v => v.id !== id);
+    recentes.unshift({ id, prefixo });
+    localStorage.setItem(key, JSON.stringify(recentes.slice(0, 4)));
+
+    Swal.close();
+    
+    // Aqui abriremos o App de Conferência
+    console.log(`🚀 Redirecionando para checklist da VTR ID: ${id}`);
+    alert(`Iniciando Prontuário da Viatura ${prefixo}...`);
 }
 		async function filtrarVtrsGlobais(termo) {
     const container = document.getElementById('resultados-busca-vtr');
