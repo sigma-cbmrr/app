@@ -11989,8 +11989,7 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 		
 
 async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
-    // 1. BLINDAGEM DE INSTÂNCIA (Acesso direto ao motor do Firebase)
-    // Isso garante que usemos a mesma conexão que o console do navegador usou com sucesso
+    // 1. BLINDAGEM DE INSTÂNCIA
     const firestore = firebase.firestore(); 
 
     // 2. NORMALIZAÇÃO RADICAL DE ID
@@ -11998,12 +11997,15 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     idReal = idReal.trim();
     idListaSendoEditada = idReal;
     
-    // 3. DEFINIÇÃO ABSOLUTA DE ROTA (DNA do ID manda na lógica)
+    // 3. DEFINIÇÃO ABSOLUTA DE ROTA
+    // Usamos 'window.' para garantir que o estado persista globalmente entre funções
     if (idReal.startsWith('CHECKLIST_VTR_')) {
         window.colecaoAtivaNoEditor = 'listas_checklist';
-        isModoVistoria = true;
+        window.isModoVistoria = true; 
+        isModoVistoria = true; // Mantém a variável local se ela for usada no escopo global do seu script
     } else {
         window.colecaoAtivaNoEditor = colecaoAlvo || 'listas_conferencia';
+        window.isModoVistoria = false;
         isModoVistoria = false;
     }
 
@@ -12018,34 +12020,34 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         </div>`;
 
     try {
-        // 5. BUSCA PERSISTENTE COM RE-LEITURA AUTOMÁTICA
+        // 5. BUSCA PERSISTENTE
         let doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         
         if (!doc.exists) {
-            console.warn(`⏳ [${idReal}] não localizado. Tentando re-sincronizar canal de rede em 1s...`);
+            console.warn(`⏳ [${idReal}] não localizado. Tentando re-sincronizar...`);
             await new Promise(r => setTimeout(r, 1000));
             doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         }
 
         if (!doc.exists) {
-            console.error("❌ ERRO FINAL: Documento ausente no Firestore após retentativa.");
-            throw new Error(`Lista não encontrada. O ID ${idReal} não existe na coleção ${window.colecaoAtivaNoEditor}.`);
+            throw new Error(`Lista não encontrada em ${window.colecaoAtivaNoEditor}.`);
         }
 
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 6. Configuração de Rótulos de Interface
-        const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome || 'N/D'}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        // 6. Configuração de Rótulos de Interface (com fallback de segurança)
+        const nomeParaExibir = dados.ativo_nome || dados.nome || nome;
+        const labelUnidade = window.isModoVistoria ? `Viatura: ${nomeParaExibir}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
         const inputBusca = document.getElementById('input-busca-estoque');
         if (inputBusca) {
-            inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
+            inputBusca.placeholder = window.isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 7. Carga de Estoque (Apenas para Conferência de Materiais)
-        if (!isModoVistoria && dados.unidade_id) {
+        // 7. Carga de Estoque
+        if (!window.isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
             estoqueGestorLocal = []; 
@@ -12059,8 +12061,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         console.error("❌ FALHA CRÍTICA NO EDITOR:", e);
         alert("Erro ao carregar: " + e.message);
         
-        // Se falhar, devolve o usuário para o menu de origem correto para não travar o sistema
-        if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
+        if (window.isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
 		async function verHistoricoVidaGlobal(docIdAlmox) {
@@ -13056,49 +13057,54 @@ function cancelarEstorno(idx) {
 async function confirmarPublicacaoLista() {
     if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque (se houver itens de materiais).")) return;
 
+    // ✅ GARANTIA DE INSTÂNCIA: Usa o motor raiz para evitar falha de conexão
+    const firestore = firebase.firestore();
     const nomeAmigavelVtr = document.getElementById('edit-vtr-nome').textContent;
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
     
-    if (itensParaEstorno.length > 0 && !justificativa) {
-        alert("Para devolver itens ao estoque, preencha a justificativa.");
+    // Filtra itens de estorno que NÃO são de vistoria livre (apenas materiais reais)
+    const estornosReais = itensParaEstorno.filter(i => i.uid_global !== "ITEM_VISTORIA_LIVRE");
+
+    if (estornosReais.length > 0 && !justificativa) {
+        alert("Para devolver materiais ao estoque, preencha a justificativa.");
         document.getElementById('justificativa-estorno-global').focus();
         return;
     }
 
     const btn = document.querySelector('.btn-publish');
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Gravando...';
+    btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Publicando no Servidor...';
 
     try {
-        const batch = db.batch();
-        // ✅ CORREÇÃO CIRÚRGICA 1: Usa a coleção dinâmica (listas_conferencia ou listas_checklist)
-        const listaRef = db.collection(colecaoAtivaNoEditor).doc(idListaSendoEditada);
+        const batch = firestore.batch();
+        // Usa a coleção global definida no momento da abertura
+        const listaRef = firestore.collection(window.colecaoAtivaNoEditor).doc(idListaSendoEditada);
 
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
         
         const mapaAnterior = {};
         listaAnterior.forEach(setor => {
-            setor.itens.forEach(it => { 
-                mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (it.quantidadeEsperada || 1); 
+            (setor.itens || []).forEach(it => { 
+                mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 1); 
             });
         });
 
-        // --- IDENTIFICA NOVAS INCLUSÕES ---
+        // 1. IDENTIFICA NOVAS INCLUSÕES DE MATERIAIS REAIS
         const itensNovosNaVtr = [];
         arquiteturaAtiva.forEach(setor => {
-            setor.itens.forEach(item => {
+            (setor.itens || []).forEach(item => {
                 const qtdAnterior = mapaAnterior[item.uid_global] || 0;
-                const qtdAtual = item.quantidadeEsperada || 1;
+                const qtdAtual = Number(item.quantidadeEsperada) || 1;
                 
-                // ✅ CORREÇÃO CIRÚRGICA 2: Ignora itens de Vistoria na movimentação de estoque
+                // Só processa movimentação se for material real (não vistoria livre)
                 if (qtdAtual > qtdAnterior && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
                     itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior });
                 }
             });
         });
 
-        // --- MAPEAMENTO DE DOCUMENTOS REAIS (Filtra apenas materiais reais) ---
+        // 2. MAPEAMENTO DE DOCUMENTOS DO ALMOXARIFADO
         const mapearAcaoAlmox = (item, operacao) => {
             if (item.uid_global === "ITEM_VISTORIA_LIVRE") return null;
             const refEstoque = estoqueGestorLocal.find(e => e.uid_global === item.uid_global);
@@ -13108,37 +13114,37 @@ async function confirmarPublicacaoLista() {
 
         const acoesParaProcessar = [
             ...itensNovosNaVtr.map(i => mapearAcaoAlmox(i, 'SAIDA')),
-            ...itensParaEstorno.map(i => mapearAcaoAlmox(i, 'ESTORNO'))
+            ...estornosReais.map(i => mapearAcaoAlmox(i, 'ESTORNO'))
         ].filter(a => a !== null);
 
-        // --- BUSCA DINÂMICA DE SALDOS ---
+        // 3. BUSCA DE SALDOS ATUAIS
         const uniqueDocIds = [...new Set(acoesParaProcessar.map(a => a.docIdReal))];
-        const snapsAlmox = await Promise.all(uniqueDocIds.map(id => db.collection('almoxarifado_central').doc(id).get()));
+        const snapsAlmox = await Promise.all(uniqueDocIds.map(id => firestore.collection('almoxarifado_central').doc(id).get()));
         const estoqueDataMap = {};
         snapsAlmox.forEach(s => { if(s.exists) estoqueDataMap[s.id] = s.data(); });
 
-        // --- A. ATUALIZA A LISTA MESTRA (Na coleção correta) ---
+        // --- A. ATUALIZA A ESTRUTURA DA LISTA (Conferência ou Vistoria) ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
-            ultima_edicao_arquitetura: firebase.firestore.Timestamp.now(),
+            ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        // --- B. PROCESSA MOVIMENTAÇÕES DE MATERIAIS ---
+        // --- B. PROCESSA LOGÍSTICA DE ESTOQUE ---
         acoesParaProcessar.forEach(acao => {
             const dataDoc = estoqueDataMap[acao.docIdReal];
             const item = acao.dados;
             if (!dataDoc) return;
 
-            let novoDisp = dataDoc.disponivel || 0;
-            let novoEmCarga = dataDoc.emCarga || 0;
+            let novoDisp = Number(dataDoc.disponivel) || 0;
+            let novoEmCarga = Number(dataDoc.emCarga) || 0;
             let listaTombamentos = [...(dataDoc.tombamentos || [])];
             let msgLog = "";
 
             if (acao.tipoOperacao === 'SAIDA') {
-                const qtd = item.qtdParaSubtrair;
+                const qtd = Number(item.qtdParaSubtrair);
                 novoDisp -= qtd; novoEmCarga += qtd;
-                msgLog = `SAÍDA: ${qtd}un enviadas para ${nomeAmigavelVtr}`;
+                msgLog = `SAÍDA AUTOMÁTICA (EDITOR): ${qtd}un para ${nomeAmigavelVtr}`;
 
                 if (item.tipo === 'multi') {
                     const idsTombEnviados = item.tombamentos.map(t => t.tomb);
@@ -13149,7 +13155,7 @@ async function confirmarPublicacaoLista() {
             } else {
                 const qtd = Number(item.quantidadeEsperada);
                 novoDisp += qtd; novoEmCarga = Math.max(0, novoEmCarga - qtd);
-                msgLog = `ESTORNO: ${qtd}un retornaram de ${nomeAmigavelVtr}. Motivo: ${justificativa}`;
+                msgLog = `ESTORNO (EDITOR): ${qtd}un de ${nomeAmigavelVtr}. Motivo: ${justificativa}`;
 
                 if (item.tipo === 'multi') {
                     const idsTombRetorno = item.tombamentos.map(t => t.tomb);
@@ -13159,7 +13165,8 @@ async function confirmarPublicacaoLista() {
                 }
             }
 
-            batch.update(db.collection('almoxarifado_central').doc(acao.docIdReal), {
+            // Atualiza o documento no almoxarifado central
+            batch.update(firestore.collection('almoxarifado_central').doc(acao.docIdReal), {
                 disponivel: novoDisp,
                 emCarga: novoEmCarga,
                 tombamentos: listaTombamentos,
@@ -13171,19 +13178,16 @@ async function confirmarPublicacaoLista() {
                 })
             });
 
-            // SINCRONIZAÇÃO COM RG INDIVIDUAL
+            // Sincroniza RGs Individuais (Apenas Patrimônio/Multi)
             if (item.tipo === 'multi') {
                 item.tombamentos.forEach(t => {
-                    const historicoIndividualRef = db.collection('historico_ativos_individuais').doc(String(t.tomb));
-                    const acaoLimpa = acao.tipoOperacao === 'SAIDA' ? "ENVIADO PARA" : "RETORNADO DE";
-                    
-                    batch.set(historicoIndividualRef, {
+                    const histRef = firestore.collection('historico_ativos_individuais').doc(String(t.tomb));
+                    batch.set(histRef, {
                         eventos: firebase.firestore.FieldValue.arrayUnion({
                             data: new Date().toLocaleString('pt-BR'),
                             evento: acao.tipoOperacao === 'SAIDA' ? "MOVIMENTACAO_CARGA" : "MOVIMENTACAO_ESTORNO",
-                            detalhes: `${acaoLimpa} ${nomeAmigavelVtr}${acao.tipoOperacao === 'ESTORNO' ? '. Motivo: ' + justificativa : ''}`,
+                            detalhes: `${acao.tipoOperacao === 'SAIDA' ? 'Enviado para' : 'Retornado de'} ${nomeAmigavelVtr}. Obs: ${justificativa || 'Via Editor'}`,
                             quem: currentUserData.nome_militar_completo,
-                            local_referencia: nomeAmigavelVtr,
                             lista_id: idListaSendoEditada
                         })
                     }, { merge: true });
@@ -13191,16 +13195,25 @@ async function confirmarPublicacaoLista() {
             }
         });
 
+        // EXECUÇÃO ATÔMICA
         await batch.commit();
-        alert("✅ Lista publicada com sucesso!");
         
-        // Em vez de recarregar tudo, podemos apenas voltar para a visão anterior
-        isModoVistoria ? switchView('vtr-bases') : switchView('listas');
+        // UI: Feedback e Redirecionamento
+        await Swal.fire({
+            icon: 'success',
+            title: 'Publicado!',
+            text: 'As alterações foram salvas e o estoque atualizado.',
+            timer: 2000,
+            showConfirmButton: false
+        });
+
+        // Volta para a visão correta
+        window.isModoVistoria ? switchView('vtr-bases') : switchView('listas');
         location.reload(); 
 
     } catch (e) {
-        console.error("Erro crítico na publicação:", e);
-        alert("Erro ao salvar: " + e.message);
+        console.error("Erro na publicação:", e);
+        alert("Falha ao salvar: " + e.message);
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Tentar Novamente';
     }
