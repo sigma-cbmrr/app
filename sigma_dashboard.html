@@ -3718,7 +3718,7 @@ input:checked + .slider:before {
 		let materialSelecionadoNoModal = null;
 		let dadosChecklistTemp = { vtr: null, km: 0, combustivel: '1/2' };
 		let isModoVistoria = false;
-		let colecaoAtivaNoEditor = 'listas_conferencia';
+		window.colecaoAtivaNoEditor = 'listas_conferencia';
 		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -11989,55 +11989,51 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 		
 
 async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
-    // 1. NORMALIZAÇÃO DE ID (Blindagem contra [object Object] ou espaços)
-    // Se o UID vier por erro de evento, extraímos apenas a string.
+    // 1. GARANTIA DE INSTÂNCIA (Acesso ao db global do navegador)
+    const firestore = window.db || db; 
+
+    // 2. NORMALIZAÇÃO DE ID
     let idReal = (typeof uid === 'object' && uid !== null) ? uid.id || uid.uid : String(uid);
     idReal = idReal.trim();
-    
     idListaSendoEditada = idReal;
     
-    // ✅ REGRA DE OURO: O ID dita a coleção
+    // 3. DEFINIÇÃO ABSOLUTA DA COLEÇÃO (DNA do ID manda na lógica)
     if (idReal.startsWith('CHECKLIST_VTR_')) {
-        colecaoAtivaNoEditor = 'listas_checklist';
+        window.colecaoAtivaNoEditor = 'listas_checklist';
         isModoVistoria = true;
     } else {
-        colecaoAtivaNoEditor = colecaoAlvo || 'listas_conferencia';
+        window.colecaoAtivaNoEditor = colecaoAlvo || 'listas_conferencia';
         isModoVistoria = false;
     }
 
-    console.log(`🚀 EDITOR - Tentativa de Abertura:
-        - ID Original: ${uid}
-        - ID Processado: ${idReal}
-        - Coleção: ${colecaoAtivaNoEditor}`);
+    console.log(`📡 [EDITOR] Solicitando: ${window.colecaoAtivaNoEditor}/${idReal}`);
 
-    // 2. Interface (Transição Visual)
-    switchView('editor-arquitetura'); // Garante que a tela mude corretamente
+    // 4. Interface (Transição Visual)
+    switchView('editor-arquitetura');
     document.getElementById('edit-vtr-nome').textContent = nome;
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Acessando base de dados...
+            <i class="fas fa-sync fa-spin fa-2x"></i><br>Conectando ao Firestore (${window.colecaoAtivaNoEditor})...
         </div>`;
 
     try {
-        // 3. BUSCA PERSISTENTE (Retry para Consistência Eventual)
-        let doc = await db.collection(colecaoAtivaNoEditor).doc(idReal).get();
+        // 5. BUSCA PERSISTENTE COM RE-LEITURA
+        let doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         
-        // Se falhar a primeira vez, esperamos 1 segundo e tentamos de novo 
-        // (O Google as vezes demora para propagar o documento em coleções recém-criadas)
         if (!doc.exists) {
-            console.warn(`⚠️ [${idReal}] não achado em [${colecaoAtivaNoEditor}]. Tentando re-leitura...`);
+            console.warn(`⚠️ Não localizado na 1ª tentativa. Re-sincronizando canal de rede...`);
             await new Promise(r => setTimeout(r, 1000));
-            doc = await db.collection(colecaoAtivaNoEditor).doc(idReal).get();
+            doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         }
 
         if (!doc.exists) {
-            throw new Error(`O documento ${idReal} não pôde ser lido na coleção ${colecaoAtivaNoEditor}.`);
+            throw new Error(`Lista não encontrada. O ID ${idReal} não existe na coleção ${window.colecaoAtivaNoEditor}.`);
         }
 
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 4. Configuração de Rótulos e Busca
+        // 6. Configuração de Interface
         const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome || 'N/D'}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
@@ -12046,7 +12042,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 5. Gestão de Estoque
+        // 7. Carga de Estoque (Apenas para Conferência de Materiais)
         if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
@@ -12055,13 +12051,13 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
 
         renderizarArquiteturaEditor();
         atualizarSelectSetores();
-        console.log("✅ Editor carregado com sucesso.");
+        console.log("✅ Dados carregados.");
 
     } catch (e) {
-        console.error("❌ FALHA NO EDITOR:", e);
-        alert("Erro ao abrir editor: " + e.message);
+        console.error("❌ FALHA NO ACESSO AO FIRESTORE:", e);
+        alert("Erro de Sincronia: " + e.message);
         
-        // Se falhar e for vistoria, volta para viaturas. Se for material, para listas.
+        // Retorno inteligente para evitar prender o usuário na tela de erro
         if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
@@ -13649,22 +13645,25 @@ function finalizarPreCheckEIrProApp() {
 }
 		async function gerenciarChecklistVtr(vtrId, prefixo) {
     const checklistId = `CHECKLIST_VTR_${vtrId}`;
-    const colecaoAlvo = 'listas_checklist'; // Definido no topo para consistência
+    const colecaoAlvo = 'listas_checklist';
+    
+    // ✅ GARANTIA DE INSTÂNCIA: Usa a mesma conexão global do console
+    const firestore = window.db || db; 
+    
     console.log("Iniciando gestão para:", checklistId);
     
     try {
-        const vtrDoc = await db.collection('viaturas').doc(vtrId).get();
-        if (!vtrDoc.exists) return alert("Erro: Viatura não localizada.");
+        const vtrDoc = await firestore.collection('viaturas').doc(vtrId).get();
+        if (!vtrDoc.exists) return alert("Erro: Viatura não localizada no cadastro global.");
         const vtrData = vtrDoc.data();
 
-        const docRef = db.collection(colecaoAlvo).doc(checklistId);
+        const docRef = firestore.collection(colecaoAlvo).doc(checklistId);
         const snapChecklist = await docRef.get();
 
-        // ✅ SE NÃO EXISTIR, CRIA
         if (!snapChecklist.exists) {
             console.log("Criando novo checklist na coleção:", colecaoAlvo);
             
-            const templateDoc = await db.collection('config_checklists').doc('vtr_padrao').get();
+            const templateDoc = await firestore.collection('config_checklists').doc('vtr_padrao').get();
             if (!templateDoc.exists) throw new Error("Template 'vtr_padrao' não encontrado.");
             const template = templateDoc.data();
 
@@ -13703,22 +13702,24 @@ function finalizarPreCheckEIrProApp() {
                 criado_em: firebase.firestore.FieldValue.serverTimestamp(),
                 criado_por: currentUserData.nome_militar_completo
             });
-            console.log("✅ Documento gravado com sucesso.");
+            console.log("✅ Checklist gravado no Firebase.");
         }
 
-        // ✅ TRANSIÇÃO DE TELA
+        // ✅ CONFIGURAÇÃO DE ESTADO GLOBAL
+        window.isModoVistoria = true; 
+        window.colecaoAtivaNoEditor = colecaoAlvo;
+
         fecharModalVtr();
         switchView('editor-arquitetura'); 
 
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // ✅ TIMEOUT DE PROPAGAÇÃO (Ouvindo a colecaoAlvo correta)
+        // ✅ TIMEOUT COM AWAIT PARA GARANTIR CONSISTÊNCIA
         setTimeout(async () => {
-            console.log("🚀 Abrindo editor para:", checklistId);
-            // Passamos colecaoAlvo explicitamente para não haver dúvida
+            console.log("🚀 Disparando abertura do editor...");
             await abrirModalEditorItens(checklistId, prefixo, colecaoAlvo);
-        }, 400);
+        }, 500);
 
     } catch (error) {
         console.error("Erro crítico no gerenciarChecklistVtr:", error);
