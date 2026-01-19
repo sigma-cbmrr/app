@@ -11980,11 +11980,13 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 }
 		
 
-async function abrirModalEditorItens(uid, nome) {
+async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferencia') {
     // 1. Definições Iniciais
     idListaSendoEditada = uid;
+    // 🟢 IMPORTANTE: Guardamos a coleção atual para o botão "Salvar/Publicar" saber onde gravar depois
+    colecaoAtivaNoEditor = colecaoAlvo; 
     
-    // 2. UI: Transição de Telas (Esconde o Menu de Cards e mostra o Editor)
+    // 2. UI: Transição de Telas
     const menuCards = document.getElementById('menu-editor-listas');
     const palcoEditor = document.getElementById('view-editor-arquitetura');
     
@@ -11995,41 +11997,40 @@ async function abrirModalEditorItens(uid, nome) {
     document.getElementById('edit-vtr-nome').textContent = nome;
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Carregando engenharia da viatura...
+            <i class="fas fa-sync fa-spin fa-2x"></i><br>Carregando dados...
         </div>`;
 
     try {
-        // 4. Busca os dados reais da Lista Mestra no Firestore
-        const doc = await db.collection('listas_conferencia').doc(uid).get();
-        if (!doc.exists) throw new Error("Lista não localizada no banco de dados.");
+        // 🟢 ALTERADO: Busca na coleção passada por parâmetro (conferencia ou checklist)
+        const doc = await db.collection(colecaoAlvo).doc(uid).get();
+        if (!doc.exists) throw new Error("Documento não localizado.");
         
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 🛑 IDENTIFICAÇÃO DE MODO: Checklist ou Materiais
-        isModoVistoria = (dados.tipo === 'checklist_viatura');
+        // 🛑 MODO INTELIGENTE: Se vier da coleção de checklist, ativa modo vistoria automaticamente
+        isModoVistoria = (colecaoAlvo === 'listas_checklist' || dados.tipo === 'checklist_viatura');
         
-        document.getElementById('edit-vtr-unidade').textContent = `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        document.getElementById('edit-vtr-unidade').textContent = `Origem: ${dados.unidade_sigla || 'N/D'}`;
         
-        // Muda o placeholder para dar o feedback visual
         const inputBusca = document.getElementById('input-busca-estoque');
         if (inputBusca) {
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 5. Carrega o estoque disponível do Gestor para a barra de busca rápida
-        // Usamos o unidade_id salvo na lista para garantir o filtro correto
-        if (dados.unidade_id) {
+        // 5. Carrega estoque apenas se NÃO for modo vistoria (economiza processamento)
+        if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
+        } else {
+            estoqueGestorLocal = []; // Limpa estoque anterior se for checklist
         }
 
-        // 6. Renderiza a interface e prepara os seletores
         renderizarArquiteturaEditor();
         atualizarSelectSetores();
 
     } catch (e) {
         console.error("Erro ao abrir editor:", e);
-        alert("Falha ao carregar o editor: " + e.message);
+        alert("Falha ao carregar: " + e.message);
         fecharEditorArquitetura();
     }
 }
@@ -13611,34 +13612,30 @@ function finalizarPreCheckEIrProApp() {
     // Aqui chamaremos o conferencia_app.html futuramente
 }
 		async function gerenciarChecklistVtr(vtrId, prefixo) {
-    // 1. Definição do ID único da lista para esta VTR
     const checklistId = `CHECKLIST_VTR_${vtrId}`;
     
     try {
-        // Busca os dados ATUAIS da viatura para pegar a unidade correta
         const vtrDoc = await db.collection('viaturas').doc(vtrId).get();
         if (!vtrDoc.exists) return alert("Erro: Viatura não localizada.");
         const vtrData = vtrDoc.data();
 
-        const docRef = db.collection('listas_conferencia').doc(checklistId);
+        // 🟢 ALTERADO: Agora busca na coleção específica de checklists
+        const docRef = db.collection('listas_checklist').doc(checklistId);
         const doc = await docRef.get();
 
         if (!doc.exists) {
-            console.log("Criando checklist para:", prefixo);
+            console.log("Criando novo checklist isolado para:", prefixo);
             
             const templateDoc = await db.collection('config_checklists').doc('vtr_padrao').get();
             if (!templateDoc.exists) return alert("Erro: Template padrão não encontrado.");
             const template = templateDoc.data();
 
-            // Formatação seguindo o padrão da sua listas_conferencia
             const novaListaFormatada = template.setores.map(setor => ({
                 id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
                 nome: setor.nome,
                 itens: setor.itens.map(it => {
                     const nomeItem = typeof it === 'object' ? it.nome : it;
                     const tipoItem = typeof it === 'object' ? it.tipo : 'single';
-                    
-                    // Geramos um UID que identifica que este item é de vistoria técnica
                     const idSeguro = nomeItem.replace(/\s+/g, '_').toUpperCase();
 
                     return {
@@ -13646,9 +13643,9 @@ function finalizarPreCheckEIrProApp() {
                         nome: nomeItem.toUpperCase(),
                         tipo: tipoItem,
                         quantidadeEsperada: 1,
-                        uid_global: "ITEM_VISTORIA_LIVRE", // Mantém o padrão de rastreio
-                        referencia_template: idSeguro,    // Guarda a referência do que ele é
-                        categoria: "VISTORIA"             // Etiqueta de categoria
+                        uid_global: "ITEM_VISTORIA_LIVRE",
+                        referencia_template: idSeguro,
+                        categoria: "VISTORIA"
                     };
                 })
             }));
@@ -13657,32 +13654,25 @@ function finalizarPreCheckEIrProApp() {
                 uid: checklistId,
                 ativo_id: vtrId,
                 ativo_nome: prefixo,
-                // Pega os dados confirmados da VTR
                 unidade_id: vtrData.unidade_atual_id, 
                 unidade_sigla: vtrData.unidade_atual_nome,
                 posto_nome: "PÁTIO / MANUTENÇÃO",
                 ativo: true,
-                tipo: 'checklist_viatura',
+                tipo: 'checklist_viatura', // Mantemos o tipo para dupla checagem
                 list: novaListaFormatada,
                 criado_em: firebase.firestore.FieldValue.serverTimestamp(),
                 criado_por: currentUserData.nome_militar_completo
             });
         }
 
-        // --- SOLUÇÃO PARA O ERRO 2: LIMPEZA DE TELA ---
-        // Fecha o modal de detalhes
         fecharModalVtr();
-        
-        // Aciona a lógica centralizada de troca de tela para o editor
-        // Isso esconde automaticamente os cards de ativos e do dashboard
         switchView('editor-arquitetura'); 
 
-        // Ajusta o padding do container para o editor ocupar a tela toda
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // Carrega os itens no editor que agora está isolado na tela
-        abrirModalEditorItens(checklistId, prefixo);
+        // 🟢 ALTERADO: Passamos a coleção como parâmetro para o editor saber onde buscar
+        abrirModalEditorItens(checklistId, prefixo, 'listas_checklist');
 
     } catch (error) {
         console.error("Erro:", error);
