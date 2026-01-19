@@ -12004,28 +12004,35 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
         </div>`;
 
     try {
-        // 🟢 ALTERADO: Busca na coleção passada por parâmetro (conferencia ou checklist)
+        // 🟢 BUSCA O DOCUMENTO
         const doc = await db.collection(colecaoAlvo).doc(uid).get();
-        if (!doc.exists) throw new Error("Documento não localizado.");
+        
+        // ✅ TRATAMENTO DE ERRO MELHORADO:
+        if (!doc.exists) {
+            console.warn(`Tentativa de leitura falhou para ID: ${uid} na coleção: ${colecaoAlvo}`);
+            throw new Error(`Lista não localizada. Verifique se o ID ${uid} existe na coleção ${colecaoAlvo}.`);
+        }
         
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 🛑 MODO INTELIGENTE: Se vier da coleção de checklist, ativa modo vistoria automaticamente
+        // 🛑 MODO INTELIGENTE: Se vier da coleção de checklist ou tiver o tipo correto
         isModoVistoria = (colecaoAlvo === 'listas_checklist' || dados.tipo === 'checklist_viatura');
         
-        document.getElementById('edit-vtr-unidade').textContent = `Origem: ${dados.unidade_sigla || 'N/D'}`;
+        // Atualiza a Unidade/Origem na tela
+        const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
         const inputBusca = document.getElementById('input-busca-estoque');
         if (inputBusca) {
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 5. Carrega estoque apenas se NÃO for modo vistoria (economiza processamento)
+        // 5. Carrega estoque apenas se NÃO for modo vistoria
         if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
-            estoqueGestorLocal = []; // Limpa estoque anterior se for checklist
+            estoqueGestorLocal = []; 
         }
 
         renderizarArquiteturaEditor();
@@ -13679,8 +13686,12 @@ function finalizarPreCheckEIrProApp() {
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // Chamada imediata com AWAIT (o await segura o processo até carregar)
-        await abrirModalEditorItens(checklistId, prefixo, colecaoAlvo);
+        // ✅ CORREÇÃO CIRÚRGICA: Pequeno delay de 400ms para propagação do Firestore
+        // Isso evita o erro de "Lista não encontrada" em coleções recém-criadas.
+        setTimeout(async () => {
+            console.log("Chamando abertura do editor para:", checklistId);
+            await abrirModalEditorItens(checklistId, prefixo, colecaoAlvo);
+        }, 400);
 
     } catch (error) {
         console.error("Erro crítico no gerenciarChecklistVtr:", error);
