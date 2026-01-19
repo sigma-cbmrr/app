@@ -11989,15 +11989,16 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 		
 
 async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
-    // 1. GARANTIA DE INSTÂNCIA (Acesso ao db global do navegador)
-    const firestore = window.db || db; 
+    // 1. BLINDAGEM DE INSTÂNCIA (Acesso direto ao motor do Firebase)
+    // Isso garante que usemos a mesma conexão que o console do navegador usou com sucesso
+    const firestore = firebase.firestore(); 
 
-    // 2. NORMALIZAÇÃO DE ID
-    let idReal = (typeof uid === 'object' && uid !== null) ? uid.id || uid.uid : String(uid);
+    // 2. NORMALIZAÇÃO RADICAL DE ID
+    let idReal = (typeof uid === 'object' && uid !== null) ? (uid.id || uid.uid || uid.checklistId) : String(uid);
     idReal = idReal.trim();
     idListaSendoEditada = idReal;
     
-    // 3. DEFINIÇÃO ABSOLUTA DA COLEÇÃO (DNA do ID manda na lógica)
+    // 3. DEFINIÇÃO ABSOLUTA DE ROTA (DNA do ID manda na lógica)
     if (idReal.startsWith('CHECKLIST_VTR_')) {
         window.colecaoAtivaNoEditor = 'listas_checklist';
         isModoVistoria = true;
@@ -12006,34 +12007,35 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         isModoVistoria = false;
     }
 
-    console.log(`📡 [EDITOR] Solicitando: ${window.colecaoAtivaNoEditor}/${idReal}`);
+    console.log(`📡 [FORÇA BRUTA] Solicitando: ${window.colecaoAtivaNoEditor}/${idReal}`);
 
     // 4. Interface (Transição Visual)
     switchView('editor-arquitetura');
     document.getElementById('edit-vtr-nome').textContent = nome;
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Conectando ao Firestore (${window.colecaoAtivaNoEditor})...
+            <i class="fas fa-sync fa-spin fa-2x"></i><br>Sincronizando com o Banco de Dados (${window.colecaoAtivaNoEditor})...
         </div>`;
 
     try {
-        // 5. BUSCA PERSISTENTE COM RE-LEITURA
+        // 5. BUSCA PERSISTENTE COM RE-LEITURA AUTOMÁTICA
         let doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         
         if (!doc.exists) {
-            console.warn(`⚠️ Não localizado na 1ª tentativa. Re-sincronizando canal de rede...`);
+            console.warn(`⏳ [${idReal}] não localizado. Tentando re-sincronizar canal de rede em 1s...`);
             await new Promise(r => setTimeout(r, 1000));
             doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         }
 
         if (!doc.exists) {
+            console.error("❌ ERRO FINAL: Documento ausente no Firestore após retentativa.");
             throw new Error(`Lista não encontrada. O ID ${idReal} não existe na coleção ${window.colecaoAtivaNoEditor}.`);
         }
 
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 6. Configuração de Interface
+        // 6. Configuração de Rótulos de Interface
         const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome || 'N/D'}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
@@ -12051,13 +12053,13 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
 
         renderizarArquiteturaEditor();
         atualizarSelectSetores();
-        console.log("✅ Dados carregados.");
+        console.log("✅ Editor carregado com sucesso.");
 
     } catch (e) {
-        console.error("❌ FALHA NO ACESSO AO FIRESTORE:", e);
-        alert("Erro de Sincronia: " + e.message);
+        console.error("❌ FALHA CRÍTICA NO EDITOR:", e);
+        alert("Erro ao carregar: " + e.message);
         
-        // Retorno inteligente para evitar prender o usuário na tela de erro
+        // Se falhar, devolve o usuário para o menu de origem correto para não travar o sistema
         if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
