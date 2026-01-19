@@ -845,164 +845,101 @@ function renderizarConferencia() {
 
  async function carregarDadosRemotos() {
     const ID_ALVO = isCautela ? CAUTELA_ID : LISTA_ID;
-    const COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS
+    
+    // ✅ DETECÇÃO DE MODO: Essencial para definir a coleção e o visual
     window.isModoChecklist = String(ID_ALVO).startsWith('CHECKLIST_VTR_');
     
-     // --- CAPTURA E EXIBIÇÃO IMEDIATA DO CONFERENTE ---
+    // ✅ TRIANGULAÇÃO DE COLEÇÃO: Direciona para o banco correto
+    let COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
+    if (window.isModoChecklist) {
+        COLECAO_ALVO = 'listas_checklist';
+    }
+
+    // --- CAPTURA E EXIBIÇÃO IMEDIATA DO CONFERENTE ---
     const urlParamsLocal = new URLSearchParams(window.location.search);
 
     userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
-
     userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
-
     userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
-
     userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
 
-
-
     const elHeader = document.getElementById('militar-info');
-
     if (elHeader) {
-
         elHeader.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
-
     }
 
-
-
     if (!ID_ALVO) return;
-
         
-
     const loadingMsg = document.getElementById('loading-message');
-
     if (loadingMsg) loadingMsg.innerHTML = "Conectando ao SIGMA...";
 
-
-
     try {
-
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
-
-        if (!doc.exists) throw new Error("Documento não encontrado.");
-
+        if (!doc.exists) throw new Error("Documento não encontrado em " + COLECAO_ALVO);
         
-
         const data = doc.data();
-
         const isDevolucaoFinal = urlParamsLocal.get('modo') === 'devolucao_final';
-
         
-
         if (isCautela) {
-
             dadosConferencia = adaptarCautelaParaRender(data);
-
         } else {
-
             const listaBruta = data.list || [];
-
             dadosConferencia = listaBruta.map(setor => ({
-
                 ...setor,
-
                 itens: (setor.itens || []).map(item => {
-
                     const tombamentoInvalido = item.tombamentos && item.tombamentos.some(t => t.tomb === item.nome || t.tomb === "S/T");
-
                     if (tombamentoInvalido || item.tipo === 'single') {
-
                         item.tipo = 'single';
-
                         item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
-
                     }
-
                     item._ocultarCarimbo = isDevolucaoFinal;
-
                     return item;
-
                 })
-
             }));
-
         }
-
-
 
         window.dadosConferencia = dadosConferencia;
-
         
-
-        // 🛑 AJUSTE CIRÚRGICO: Limpeza de rótulos redundantes no cabeçalho
+        // 🛑 AJUSTE DE CABEÇALHO E IDENTIDADE VISUAL
+        const tituloPrincipal = document.getElementById('titulo-conferencia');
+        if (tituloPrincipal && window.isModoChecklist) {
+            tituloPrincipal.innerText = "Vistoria de Viatura";
+            tituloPrincipal.style.color = "#2c3e50"; // Azul Petróleo
+        }
 
         infoLocal = { 
-
-            nome: isCautela ? `${CAUTELA_ID}` : (data.nome_local || "Lista"),
-
-            posto: isCautela ? "" : (data.posto || "Geral")
-
+            nome: isCautela ? `${CAUTELA_ID}` : (data.nome_local || data.ativo_nome || "Lista"),
+            posto: isCautela ? "" : (data.posto || (window.isModoChecklist ? "VTR" : "Geral"))
         };
-
         
-
         const infoElement = document.getElementById('local-posto-info');
-
         if (infoElement) {
-
-            // Remove o hífen se for cautela (posto vazio)
-
             const separador = infoLocal.posto ? " - " : "";
-
-            infoElement.innerHTML = `<span style="color:blue;font-weight:bold">${infoLocal.posto}${separador}${infoLocal.nome}</span>`;
-
+            const corDinamica = window.isModoChecklist ? "#2c3e50" : "blue";
+            infoElement.innerHTML = `<span style="color:${corDinamica};font-weight:bold">${infoLocal.posto}${separador}${infoLocal.nome}</span>`;
         }
-
-
 
         const btnFinalizar = document.getElementById('btn-finalizar');
-
         if (btnFinalizar) {
-
             if (isDevolucaoFinal) {
-
                 btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
-
             } else if (isCautela) {
-
                 btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
-
             } else {
-
                 btnFinalizar.onclick = () => finalizarConferencia();
-
             }
-
         }
-
-
 
         renderizarConferencia(); 
 
-
-
         if (typeof updateOverallStatus === "function") updateOverallStatus();
-
         if (loadingMsg) loadingMsg.style.display = 'none'; 
-
         document.getElementById('main-content').style.display = 'block';
 
-
-
     } catch (e) { 
-
         console.error(e);
-
         if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>${e.message}</span>`;
-
     }
-
 }
     
     function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
