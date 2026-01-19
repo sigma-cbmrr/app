@@ -3713,6 +3713,7 @@ input:checked + .slider:before {
 		let materialSelecionadoNoModal = null;
 		let dadosChecklistTemp = { vtr: null, km: 0, combustivel: '1/2' };
 		let isModoVistoria = false;
+		let colecaoAtivaNoEditor = 'listas_conferencia';
 		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -13052,12 +13053,11 @@ function cancelarEstorno(idx) {
 // 10. PUBLICAÇÃO FINAL (GRAVAÇÃO NO FIREBASE)
 // ================================================================
 async function confirmarPublicacaoLista() {
-    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque.")) return;
+    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque (se houver itens de materiais).")) return;
 
-    // CAPTURA O NOME AMIGÁVEL DA VIATURA/BASE DO TÍTULO DO EDITOR
     const nomeAmigavelVtr = document.getElementById('edit-vtr-nome').textContent;
-
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
+    
     if (itensParaEstorno.length > 0 && !justificativa) {
         alert("Para devolver itens ao estoque, preencha a justificativa.");
         document.getElementById('justificativa-estorno-global').focus();
@@ -13070,9 +13070,9 @@ async function confirmarPublicacaoLista() {
 
     try {
         const batch = db.batch();
-        const listaRef = db.collection('listas_conferencia').doc(idListaSendoEditada);
+        // ✅ CORREÇÃO CIRÚRGICA 1: Usa a coleção dinâmica (listas_conferencia ou listas_checklist)
+        const listaRef = db.collection(colecaoAtivaNoEditor).doc(idListaSendoEditada);
 
-        // --- 1. CAPTURA DE ESTADO ANTERIOR PARA COMPARAR ---
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
         
@@ -13083,25 +13083,25 @@ async function confirmarPublicacaoLista() {
             });
         });
 
-        // --- 2. IDENTIFICA NOVAS INCLUSÕES ---
+        // --- IDENTIFICA NOVAS INCLUSÕES ---
         const itensNovosNaVtr = [];
         arquiteturaAtiva.forEach(setor => {
             setor.itens.forEach(item => {
                 const qtdAnterior = mapaAnterior[item.uid_global] || 0;
                 const qtdAtual = item.quantidadeEsperada || 1;
-                if (qtdAtual > qtdAnterior) {
+                
+                // ✅ CORREÇÃO CIRÚRGICA 2: Ignora itens de Vistoria na movimentação de estoque
+                if (qtdAtual > qtdAnterior && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
                     itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior });
                 }
             });
         });
 
-        // --- 3. MAPEAMENTO DE DOCUMENTOS REAIS ---
+        // --- MAPEAMENTO DE DOCUMENTOS REAIS (Filtra apenas materiais reais) ---
         const mapearAcaoAlmox = (item, operacao) => {
+            if (item.uid_global === "ITEM_VISTORIA_LIVRE") return null;
             const refEstoque = estoqueGestorLocal.find(e => e.uid_global === item.uid_global);
-            if (!refEstoque) {
-                console.warn(`Aviso: Item ${item.nome} não localizado no mapeamento.`);
-                return null;
-            }
+            if (!refEstoque) return null;
             return { docIdReal: refEstoque.id_almox, dados: item, tipoOperacao: operacao };
         };
 
@@ -13110,20 +13110,20 @@ async function confirmarPublicacaoLista() {
             ...itensParaEstorno.map(i => mapearAcaoAlmox(i, 'ESTORNO'))
         ].filter(a => a !== null);
 
-        // --- 4. BUSCA DINÂMICA DE SALDOS ATUAIS ---
+        // --- BUSCA DINÂMICA DE SALDOS ---
         const uniqueDocIds = [...new Set(acoesParaProcessar.map(a => a.docIdReal))];
         const snapsAlmox = await Promise.all(uniqueDocIds.map(id => db.collection('almoxarifado_central').doc(id).get()));
         const estoqueDataMap = {};
         snapsAlmox.forEach(s => { if(s.exists) estoqueDataMap[s.id] = s.data(); });
 
-        // --- A. ATUALIZA A LISTA MESTRA ---
+        // --- A. ATUALIZA A LISTA MESTRA (Na coleção correta) ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.Timestamp.now(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        // --- B. PROCESSA TODAS AS MOVIMENTAÇÕES DE ESTOQUE ---
+        // --- B. PROCESSA MOVIMENTAÇÕES DE MATERIAIS ---
         acoesParaProcessar.forEach(acao => {
             const dataDoc = estoqueDataMap[acao.docIdReal];
             const item = acao.dados;
@@ -13136,8 +13136,7 @@ async function confirmarPublicacaoLista() {
 
             if (acao.tipoOperacao === 'SAIDA') {
                 const qtd = item.qtdParaSubtrair;
-                novoDisp -= qtd;
-                novoEmCarga += qtd;
+                novoDisp -= qtd; novoEmCarga += qtd;
                 msgLog = `SAÍDA: ${qtd}un enviadas para ${nomeAmigavelVtr}`;
 
                 if (item.tipo === 'multi') {
@@ -13148,8 +13147,7 @@ async function confirmarPublicacaoLista() {
                 }
             } else {
                 const qtd = Number(item.quantidadeEsperada);
-                novoDisp += qtd;
-                novoEmCarga = Math.max(0, novoEmCarga - qtd);
+                novoDisp += qtd; novoEmCarga = Math.max(0, novoEmCarga - qtd);
                 msgLog = `ESTORNO: ${qtd}un retornaram de ${nomeAmigavelVtr}. Motivo: ${justificativa}`;
 
                 if (item.tipo === 'multi') {
@@ -13160,7 +13158,6 @@ async function confirmarPublicacaoLista() {
                 }
             }
 
-            // Atualiza o documento principal no Almoxarifado
             batch.update(db.collection('almoxarifado_central').doc(acao.docIdReal), {
                 disponivel: novoDisp,
                 emCarga: novoEmCarga,
@@ -13173,35 +13170,32 @@ async function confirmarPublicacaoLista() {
                 })
             });
 
-            // ✅ MODIFICAÇÃO CIRÚRGICA: SINCRONIZAÇÃO COM O RG INDIVIDUAL (ITEM MULTI)
+            // SINCRONIZAÇÃO COM RG INDIVIDUAL
             if (item.tipo === 'multi') {
-                const idsTombados = item.tombamentos.map(t => t.tomb);
-                
-                // ✅ AJUSTE PARA O CARIMBO NO RG INDIVIDUAL (DENTRO DO LOOP idsTombados)
-				idsTombados.forEach(numTomb => {
-   					const historicoIndividualRef = db.collection('historico_ativos_individuais').doc(numTomb);
-    
-    				// Criamos uma mensagem limpa, sem a redundância de "1un"
-    				const acaoLimpa = acao.tipoOperacao === 'SAIDA' ? "ENVIADO PARA" : "RETORNADO DE";
-    				const msgIndividual = `${acaoLimpa} ${nomeAmigavelVtr}${acao.tipoOperacao === 'ESTORNO' ? '. Motivo: ' + justificativa : ''}`;
-
-    				batch.set(historicoIndividualRef, {
-        				eventos: firebase.firestore.FieldValue.arrayUnion({
-            				data: new Date().toLocaleString('pt-BR'),
-            				evento: acao.tipoOperacao === 'SAIDA' ? "MOVIMENTACAO_CARGA" : "MOVIMENTACAO_ESTORNO",
-            				detalhes: msgIndividual, // ⬅️ Agora sai: "ENVIADO PARA ABT-18"
-            				quem: currentUserData.nome_militar_completo,
-            				local_referencia: nomeAmigavelVtr,
-            				lista_id: idListaSendoEditada
-        				})
-    				}, { merge: true });
-				});
+                item.tombamentos.forEach(t => {
+                    const historicoIndividualRef = db.collection('historico_ativos_individuais').doc(String(t.tomb));
+                    const acaoLimpa = acao.tipoOperacao === 'SAIDA' ? "ENVIADO PARA" : "RETORNADO DE";
+                    
+                    batch.set(historicoIndividualRef, {
+                        eventos: firebase.firestore.FieldValue.arrayUnion({
+                            data: new Date().toLocaleString('pt-BR'),
+                            evento: acao.tipoOperacao === 'SAIDA' ? "MOVIMENTACAO_CARGA" : "MOVIMENTACAO_ESTORNO",
+                            detalhes: `${acaoLimpa} ${nomeAmigavelVtr}${acao.tipoOperacao === 'ESTORNO' ? '. Motivo: ' + justificativa : ''}`,
+                            quem: currentUserData.nome_militar_completo,
+                            local_referencia: nomeAmigavelVtr,
+                            lista_id: idListaSendoEditada
+                        })
+                    }, { merge: true });
+                });
             }
         });
 
         await batch.commit();
-        alert("✅ Lista publicada e estoque/RGs sincronizados!");
-        location.reload();
+        alert("✅ Lista publicada com sucesso!");
+        
+        // Em vez de recarregar tudo, podemos apenas voltar para a visão anterior
+        isModoVistoria ? switchView('vtr-bases') : switchView('listas');
+        location.reload(); 
 
     } catch (e) {
         console.error("Erro crítico na publicação:", e);
