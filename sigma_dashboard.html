@@ -11988,64 +11988,57 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 }
 		
 
-async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferencia') {
-    // 1. Definições Iniciais
-    idListaSendoEditada = uid;
+async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
+    // 1. NORMALIZAÇÃO DE ID (Blindagem contra [object Object] ou espaços)
+    // Se o UID vier por erro de evento, extraímos apenas a string.
+    let idReal = (typeof uid === 'object' && uid !== null) ? uid.id || uid.uid : String(uid);
+    idReal = idReal.trim();
     
-    // ✅ AUTO-AJUSTE DE COLEÇÃO (DNA do Ativo)
-    if (uid && uid.startsWith('CHECKLIST_VTR_')) {
-        colecaoAlvo = 'listas_checklist';
+    idListaSendoEditada = idReal;
+    
+    // ✅ REGRA DE OURO: O ID dita a coleção
+    if (idReal.startsWith('CHECKLIST_VTR_')) {
+        colecaoAtivaNoEditor = 'listas_checklist';
+        isModoVistoria = true;
+    } else {
+        colecaoAtivaNoEditor = colecaoAlvo || 'listas_conferencia';
+        isModoVistoria = false;
     }
-    
-    colecaoAtivaNoEditor = colecaoAlvo; 
-    console.log(`🔎 Iniciando abertura: [${uid}] na coleção: [${colecaoAlvo}]`);
 
-    // 2. UI: Transição de Telas
-    const menuCards = document.getElementById('menu-editor-listas');
-    const palcoEditor = document.getElementById('view-editor-arquitetura');
-    
-    if (menuCards) menuCards.style.display = 'none';
-    if (palcoEditor) palcoEditor.style.display = 'block';
-    
-    // 3. UI: Reset e Loading
+    console.log(`🚀 EDITOR - Tentativa de Abertura:
+        - ID Original: ${uid}
+        - ID Processado: ${idReal}
+        - Coleção: ${colecaoAtivaNoEditor}`);
+
+    // 2. Interface (Transição Visual)
+    switchView('editor-arquitetura'); // Garante que a tela mude corretamente
     document.getElementById('edit-vtr-nome').textContent = nome;
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Sincronizando com o servidor...
+            <i class="fas fa-sync fa-spin fa-2x"></i><br>Acessando base de dados...
         </div>`;
 
     try {
-        let doc = null;
-        let tentativas = 0;
-        const maxTentativas = 3;
-
-        // ✅ LÓGICA DE INSISTÊNCIA (CONTRA ERRO 400/WEBCHANNEL)
-        // O sistema tentará ler o documento até 3 vezes antes de desistir.
-        while (tentativas < maxTentativas) {
-            console.log(`📡 Tentativa de leitura ${tentativas + 1}/${maxTentativas}...`);
-            doc = await db.collection(colecaoAlvo).doc(uid).get();
-            
-            if (doc.exists) break; // Sucesso! Sai do loop.
-
-            tentativas++;
-            if (tentativas < maxTentativas) {
-                console.warn("⚠️ Lista não detectada ainda. Aguardando 1 segundo para nova tentativa...");
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-        }
-
-        if (!doc || !doc.exists) {
-            throw new Error(`O documento não foi localizado na coleção ${colecaoAlvo} após ${maxTentativas} tentativas.`);
-        }
+        // 3. BUSCA PERSISTENTE (Retry para Consistência Eventual)
+        let doc = await db.collection(colecaoAtivaNoEditor).doc(idReal).get();
         
+        // Se falhar a primeira vez, esperamos 1 segundo e tentamos de novo 
+        // (O Google as vezes demora para propagar o documento em coleções recém-criadas)
+        if (!doc.exists) {
+            console.warn(`⚠️ [${idReal}] não achado em [${colecaoAtivaNoEditor}]. Tentando re-leitura...`);
+            await new Promise(r => setTimeout(r, 1000));
+            doc = await db.collection(colecaoAtivaNoEditor).doc(idReal).get();
+        }
+
+        if (!doc.exists) {
+            throw new Error(`O documento ${idReal} não pôde ser lido na coleção ${colecaoAtivaNoEditor}.`);
+        }
+
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 🛑 MODO INTELIGENTE: Vistoria vs Conferência
-        isModoVistoria = (colecaoAlvo === 'listas_checklist' || dados.tipo === 'checklist_viatura');
-        
-        // Ajusta rótulos dinamicamente
-        const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        // 4. Configuração de Rótulos e Busca
+        const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome || 'N/D'}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
         const inputBusca = document.getElementById('input-busca-estoque');
@@ -12053,7 +12046,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 5. Gestão de Estoque Local
+        // 5. Gestão de Estoque
         if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
@@ -12065,9 +12058,11 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
         console.log("✅ Editor carregado com sucesso.");
 
     } catch (e) {
-        console.error("❌ Erro crítico no Editor:", e);
-        alert("Falha ao abrir editor: " + e.message);
-        fecharEditorArquitetura();
+        console.error("❌ FALHA NO EDITOR:", e);
+        alert("Erro ao abrir editor: " + e.message);
+        
+        // Se falhar e for vistoria, volta para viaturas. Se for material, para listas.
+        if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
 		async function verHistoricoVidaGlobal(docIdAlmox) {
