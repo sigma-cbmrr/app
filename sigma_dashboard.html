@@ -12004,14 +12004,16 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
         </div>`;
 
     try {
-        // 🟢 BUSCA O DOCUMENTO
-        const doc = await db.collection(colecaoAlvo).doc(uid).get();
+        let doc = await db.collection(colecaoAlvo).doc(uid).get();
         
-        // ✅ TRATAMENTO DE ERRO MELHORADO:
+        // 🔄 TENTATIVA DE RE-LEITURA SE FALHAR (Consistência Eventual)
         if (!doc.exists) {
-            console.warn(`Tentativa de leitura falhou para ID: ${uid} na coleção: ${colecaoAlvo}`);
-            throw new Error(`Lista não localizada. Verifique se o ID ${uid} existe na coleção ${colecaoAlvo}.`);
+            console.log("Aguardando propagação do banco...");
+            await new Promise(resolve => setTimeout(resolve, 800)); // Espera 800ms
+            doc = await db.collection(colecaoAlvo).doc(uid).get();
         }
+
+        if (!doc.exists) throw new Error("Lista não encontrada.");
         
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
@@ -12266,23 +12268,35 @@ async function abrirModalEditorItens(uid, nome) {
 // 2. FECHAR O EDITOR (BOTÃO VOLTAR)
 // ================================================================
 function fecharEditorArquitetura() {
-    // Se houver mudanças não publicadas, avisa o usuário
+    // 1. Verificação de segurança para mudanças não salvas
     const btnPub = document.querySelector('.btn-publish');
     if (btnPub && btnPub.classList.contains('modified')) {
         if (!confirm("Você possui alterações não publicadas. Deseja realmente sair e descartar as mudanças?")) return;
     }
     
-    // Limpa o estado
+    // 2. Limpa o estado global do editor
     idListaSendoEditada = null;
     arquiteturaAtiva = [];
     itensParaEstorno = [];
     
-    // UI: Volta para o menu de inventários
+    // 3. UI: Esconde o palco do editor
     document.getElementById('view-editor-arquitetura').style.display = 'none';
-    document.getElementById('menu-editor-listas').style.display = 'block';
     
-    // Recarrega os cards das listas para atualizar possíveis mudanças de contagem
-    carregarCardsListasExistentes();
+    // 4. ✅ LÓGICA DE RETORNO INTELIGENTE
+    if (isModoVistoria) {
+        // Se for checklist, volta para o menu de Viaturas & Bases
+        switchView('vtr-bases');
+    } else {
+        // Se for material, volta para a Gestão de Listas (comportamento original)
+        document.getElementById('menu-editor-listas').style.display = 'block';
+        const linkListas = document.getElementById('link-listas');
+        if (linkListas) linkListas.classList.add('active');
+        carregarCardsListasExistentes();
+    }
+
+    // 5. Restaura o padding padrão da tela que o editor remove
+    const contentPrincipal = document.querySelector('.content');
+    if (contentPrincipal) contentPrincipal.style.padding = '20px';
 }
 
 // ================================================================
