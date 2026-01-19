@@ -11997,26 +11997,46 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     idReal = idReal.trim();
     idListaSendoEditada = idReal;
     
-    // 3. DEFINIÇÃO ABSOLUTA DE ROTA
-    // Usamos 'window.' para garantir que o estado persista globalmente entre funções
+    // 3. DEFINIÇÃO ABSOLUTA DE ROTA E IDENTIDADE VISUAL
     if (idReal.startsWith('CHECKLIST_VTR_')) {
         window.colecaoAtivaNoEditor = 'listas_checklist';
         window.isModoVistoria = true; 
-        isModoVistoria = true; // Mantém a variável local se ela for usada no escopo global do seu script
+        isModoVistoria = true;
     } else {
         window.colecaoAtivaNoEditor = colecaoAlvo || 'listas_conferencia';
         window.isModoVistoria = false;
         isModoVistoria = false;
     }
 
-    console.log(`📡 [FORÇA BRUTA] Solicitando: ${window.colecaoAtivaNoEditor}/${idReal}`);
+    // --- CONFIGURAÇÃO UX HÍBRIDA ---
+    const modoCor = isModoVistoria ? '#2c3e50' : '#800020';
+    const modoTexto = isModoVistoria ? 'EDITOR DE CHECKLIST' : 'EDITOR DE LISTA';
+    const modoIcone = isModoVistoria ? 'fa-truck-monster' : 'fa-clipboard-list';
 
-    // 4. Interface (Transição Visual)
+    // 4. Interface (Transição e Estilização Dinâmica)
     switchView('editor-arquitetura');
-    document.getElementById('edit-vtr-nome').textContent = nome;
+    
+    // Aplica cor temática ao topo fixo
+    const headerSticky = document.querySelector('.editor-header-sticky');
+    if (headerSticky) headerSticky.style.borderTop = `6px solid ${modoCor}`;
+
+    // Injeta Título, Subtítulo e Ícone contextualizados
+    const titleContainer = document.querySelector('.editor-title-container');
+    if (titleContainer) {
+        titleContainer.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <i class="fas ${modoIcone}" style="color: ${modoCor}; font-size: 1.4em;"></i>
+                <div style="line-height: 1.1;">
+                    <span style="display: block; font-size: 0.65em; font-weight: 800; color: ${modoCor}; letter-spacing: 1px;">${modoTexto}</span>
+                    <h2 id="edit-vtr-nome" style="margin: 0; font-size: 1.2em; color: #1e293b;">${nome}</h2>
+                </div>
+            </div>`;
+    }
+
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Sincronizando com o Banco de Dados (${window.colecaoAtivaNoEditor})...
+            <i class="fas fa-sync fa-spin fa-2x" style="color: ${modoCor}"></i><br>
+            Sincronizando ${isModoVistoria ? 'Vistoria' : 'Materiais'}...
         </div>`;
 
     try {
@@ -12029,39 +12049,41 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
             doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         }
 
-        if (!doc.exists) {
-            throw new Error(`Lista não encontrada em ${window.colecaoAtivaNoEditor}.`);
-        }
+        if (!doc.exists) throw new Error(`Lista não encontrada em ${window.colecaoAtivaNoEditor}.`);
 
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 6. Configuração de Rótulos de Interface (com fallback de segurança)
+        // 6. Configuração de Rótulos de Interface
         const nomeParaExibir = dados.ativo_nome || dados.nome || nome;
-        const labelUnidade = window.isModoVistoria ? `Viatura: ${nomeParaExibir}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        const labelUnidade = isModoVistoria ? `Viatura: ${nomeParaExibir}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
         const inputBusca = document.getElementById('input-busca-estoque');
         if (inputBusca) {
-            inputBusca.placeholder = window.isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
+            inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
         // 7. Carga de Estoque
-        if (!window.isModoVistoria && dados.unidade_id) {
+        if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
             estoqueGestorLocal = []; 
         }
 
-        renderizarArquiteturaEditor();
+        renderizarArquiteturaEditor(); // Esta função usará o isModoVistoria para pintar os setores
         atualizarSelectSetores();
-        console.log("✅ Editor carregado com sucesso.");
+        
+        // Ajusta cor do botão de publicação inicial
+        const btnPub = document.querySelector('.btn-publish');
+        if (btnPub && !btnPub.classList.contains('modified')) {
+            btnPub.style.backgroundColor = isModoVistoria ? '#2c7399' : '#1b8a3e';
+        }
 
     } catch (e) {
         console.error("❌ FALHA CRÍTICA NO EDITOR:", e);
         alert("Erro ao carregar: " + e.message);
-        
-        if (window.isModoVistoria) switchView('vtr-bases'); else switchView('listas');
+        if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
 		async function verHistoricoVidaGlobal(docIdAlmox) {
@@ -12325,6 +12347,9 @@ function renderizarArquiteturaEditor() {
 
     container.innerHTML = '';
 
+    // Define a cor temática baseada no modo (Checklist VTR ou Lista Materiais)
+    const corTemaSetor = window.isModoVistoria ? '#2c3e50' : '#800020';
+
     if (arquiteturaAtiva.length === 0) {
         container.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:40px; color:#64748b;">
             <i class="fas fa-folder-open fa-3x" style="display:block; margin-bottom:15px; opacity:0.3;"></i>
@@ -12338,8 +12363,9 @@ function renderizarArquiteturaEditor() {
         setorDiv.className = 'setor-arquitetura-card';
         setorDiv.dataset.index = indexSetor;
 
+        // ✅ Aplica a cor dinâmica no background do cabeçalho do setor
         let htmlHeader = `
-            <div class="setor-arquitetura-header">
+            <div class="setor-arquitetura-header" style="background-color: ${corTemaSetor} !important;">
                 <span><i class="fas fa-grip-lines" style="margin-right:10px; opacity:0.5;"></i> ${setor.nome}</span>
                 <button onclick="removerSetorArquitetura(${indexSetor})" class="btn-remove-item-vtr" style="color:white;">
                     <i class="fas fa-trash-alt"></i>
@@ -12369,7 +12395,7 @@ function renderizarArquiteturaEditor() {
                             (item.tombamentos || []).map((tData, tIndex) => `
                                 <div style="display: flex; align-items: center; background: #f8fafc; padding: 2px 2px 2px 8px; border-radius: 4px; border: 1px solid #e2e8f0; gap: 6px;">
                                     <span style="font-size: 11px; font-family: 'Inter', sans-serif; font-weight: 700; color: #475569; letter-spacing: -0.2px;">
-                                        <i class="fas fa-tag" style="font-size: 9px; color: #800000; margin-right: 3px;"></i>${tData.tomb || 'S/N'}
+                                        <i class="fas fa-tag" style="font-size: 9px; color: ${corTemaSetor}; margin-right: 3px;"></i>${tData.tomb || 'S/N'}
                                     </span>
                                     <button onclick="removerTombamentoIndividual(${indexSetor}, ${indexItem}, ${tIndex})" 
                                             style="background: #fee2e2; border: none; color: #b91c1c; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 9px;">
@@ -12379,9 +12405,9 @@ function renderizarArquiteturaEditor() {
                             `).join('') 
                             : 
                             `<div style="font-size: 10px; font-weight: 800; color: #b45309; background: #fff7ed; padding: 2px 8px; border-radius: 4px; border: 1px solid #ffedd5; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 4px;">
-    							<i class="fas fa-boxes" style="font-size: 9px; opacity: 0.7;"></i>
-   								QTD: ${item.quantidadeEsperada}
- 							</div>`
+                                <i class="fas fa-boxes" style="font-size: 9px; opacity: 0.7;"></i>
+                                QTD: ${item.quantidadeEsperada}
+                            </div>`
                         }
                     </div>
                 </div>`;
