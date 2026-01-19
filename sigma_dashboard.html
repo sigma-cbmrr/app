@@ -11539,11 +11539,13 @@ async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
         // ============================================================
         const btnChecklist = document.getElementById('btn-checklist-vtr');
         if (btnChecklist) {
-            // Limpa o prefixo para evitar quebra de aspas
+            // Limpa o prefixo para evitar erros de aspas
             const prefixoSeguro = (vtr.prefixo || "VTR").replace(/'/g, "\\'");
             
-            // Injeta o clique passando os valores reais recuperados do banco
             btnChecklist.onclick = () => {
+                // Chamamos a função de gerenciamento passando os dados
+                // O segredo está aqui: a gerenciarChecklistVtr agora sabe 
+                // que deve usar 'listas_checklist'
                 gerenciarChecklistVtr(ativoUid, prefixoSeguro);
             };
         }
@@ -13624,24 +13626,29 @@ function finalizarPreCheckEIrProApp() {
             const template = templateDoc.data();
 
             const novaListaFormatada = template.setores.map(setor => ({
-                id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
-                nome: setor.nome,
-                itens: setor.itens.map(it => {
-                    const nomeItem = typeof it === 'object' ? it.nome : it;
-                    const tipoItem = typeof it === 'object' ? it.tipo : 'single';
-                    const idSeguro = nomeItem.replace(/\s+/g, '_').toUpperCase();
+    			id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
+    			nome: setor.nome,
+    			itens: setor.itens.map(it => {
+        			// Detecta se o item é um objeto (como o de fotos) ou apenas uma string (como "Limpeza")
+        			const isObjeto = (typeof it === 'object' && it !== null);
+        			const nomeFinal = isObjeto ? it.nome : it;
+        			const tipoFinal = isObjeto ? (it.tipo || 'single') : 'single';
+        
+        			const idSeguro = nomeFinal.replace(/\s+/g, '_').toUpperCase();
 
-                    return {
-                        id: "item_" + Math.random().toString(36).substr(2, 9),
-                        nome: nomeItem.toUpperCase(),
-                        tipo: tipoItem,
-                        quantidadeEsperada: 1,
-                        uid_global: "ITEM_VISTORIA_LIVRE",
-                        referencia_template: idSeguro,
-                        categoria: "VISTORIA"
-                    };
-                })
-            }));
+        			return {
+            			id: "item_" + Math.random().toString(36).substr(2, 9),
+            			nome: nomeFinal.toUpperCase(),
+            			tipo: tipoFinal,
+            			quantidadeEsperada: 1,
+            			uid_global: "ITEM_VISTORIA_LIVRE",
+            			referencia_template: idSeguro,
+            			categoria: "VISTORIA",
+            			// Preserva propriedades extras (como 'max' para fotos) se existirem
+            			...(isObjeto ? it : {}) 
+        			};
+    			})
+			}));
 
             // ✅ CORREÇÃO: Usamos o AWAIT para garantir que a gravação termine antes de prosseguir
             await docRef.set({
