@@ -844,47 +844,50 @@ function renderizarConferencia() {
 }
 
 async function carregarDadosRemotos() {
-    // --- CAPTURA DE PARÂMETROS DA URL ---
+    // 1. CAPTURA IMEDIATA DOS PARÂMETROS
     const urlParamsLocal = new URLSearchParams(window.location.search);
     
-    // ✅ AJUSTE CIRÚRGICO: Captura o ID diretamente da URL para evitar que venha vazio (null)
-    const ID_ALVO = urlParamsLocal.get('id') || (isCautela ? CAUTELA_ID : LISTA_ID);
+    // 2. NORMALIZAÇÃO DO ID (Resolve o erro do prefixo faltando)
+    let rawID = urlParamsLocal.get('id') || (isCautela ? CAUTELA_ID : LISTA_ID);
     
-    // ✅ DETECÇÃO DE MODO REFORÇADA: Verifica o parâmetro 'modo' da URL ou o Prefixo do ID
+    // ✅ CORREÇÃO CIRÚRGICA: Se o modo for checklist mas o ID não tiver o prefixo, nós adicionamos
     const modoUrl = urlParamsLocal.get('modo');
+    if (modoUrl === 'checklist_vtr' && rawID && !rawID.startsWith('CHECKLIST_VTR_')) {
+        rawID = 'CHECKLIST_VTR_' + rawID;
+    }
+    const ID_ALVO = rawID;
+
+    // 3. DETECÇÃO DE MODO
     window.isModoChecklist = (modoUrl === 'checklist_vtr') || String(ID_ALVO).startsWith('CHECKLIST_VTR_');
     
-    // ✅ TRIANGULAÇÃO DE COLEÇÃO: Direciona para o banco correto
+    // 4. TRIANGULAÇÃO DE COLEÇÃO
     let COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
     if (window.isModoChecklist) {
         COLECAO_ALVO = 'listas_checklist';
     }
 
-    // --- CAPTURA E EXIBIÇÃO IMEDIATA DO CONFERENTE ---
+    // --- CAPTURA E EXIBIÇÃO DO CONFERENTE ---
     userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
     userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
     userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
     userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
 
     const elHeader = document.getElementById('militar-info');
-    
     if (elHeader) {
         elHeader.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
     }
 
-    // 🛡️ Validação de segurança para não processar sem ID
-    if (!ID_ALVO || ID_ALVO === "null") {
-        console.error("ID_ALVO não encontrado nos parâmetros da URL.");
-        return;
-    }
+    if (!ID_ALVO || ID_ALVO === "null") return;
         
     const loadingMsg = document.getElementById('loading-message');
-    // Adicionei apenas o nome da coleção no log para você conferir no console
     if (loadingMsg) loadingMsg.innerHTML = `Conectando ao SIGMA (${COLECAO_ALVO})...`;
 
     try {
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
-        if (!doc.exists) throw new Error("Documento não encontrado em " + COLECAO_ALVO);
+        
+        if (!doc.exists) {
+            throw new Error(`Lista não encontrada: ${ID_ALVO} na coleção ${COLECAO_ALVO}`);
+        }
         
         const data = doc.data();
         const isDevolucaoFinal = urlParamsLocal.get('modo') === 'devolucao_final';
@@ -917,8 +920,8 @@ async function carregarDadosRemotos() {
         }
 
         infoLocal = { 
-            nome: isCautela ? `${CAUTELA_ID}` : (data.nome_local || data.ativo_nome || "Lista"),
-            posto: isCautela ? "" : (data.posto || (window.isModoChecklist ? "VTR" : "Geral"))
+            nome: isCautela ? `${CAUTELA_ID}` : (data.ativo_nome || data.nome_local || "Lista"),
+            posto: isCautela ? "" : (data.posto_nome || data.posto || (window.isModoChecklist ? "VTR" : "Geral"))
         };
         
         const infoElement = document.getElementById('local-posto-info');
