@@ -13613,7 +13613,6 @@ function finalizarPreCheckEIrProApp() {
         if (!vtrDoc.exists) return alert("Erro: Viatura não localizada.");
         const vtrData = vtrDoc.data();
 
-        // 🟢 ALTERADO: Agora busca na coleção específica de checklists
         const docRef = db.collection('listas_checklist').doc(checklistId);
         const doc = await docRef.get();
 
@@ -13644,19 +13643,22 @@ function finalizarPreCheckEIrProApp() {
                 })
             }));
 
+            // ✅ CORREÇÃO: Usamos o AWAIT para garantir que a gravação termine antes de prosseguir
             await docRef.set({
                 uid: checklistId,
                 ativo_id: vtrId,
                 ativo_nome: prefixo,
-                unidade_id: vtrData.unidade_atual_id, 
-                unidade_sigla: vtrData.unidade_atual_nome,
+                unidade_id: vtrData.unidade_atual_id || "", 
+                unidade_sigla: vtrData.unidade_atual_nome || "N/D",
                 posto_nome: "PÁTIO / MANUTENÇÃO",
                 ativo: true,
-                tipo: 'checklist_viatura', // Mantemos o tipo para dupla checagem
+                tipo: 'checklist_viatura',
                 list: novaListaFormatada,
                 criado_em: firebase.firestore.FieldValue.serverTimestamp(),
                 criado_por: currentUserData.nome_militar_completo
             });
+            
+            console.log("✅ Documento gravado com sucesso.");
         }
 
         fecharModalVtr();
@@ -13665,12 +13667,15 @@ function finalizarPreCheckEIrProApp() {
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // 🟢 ALTERADO: Passamos a coleção como parâmetro para o editor saber onde buscar
-        abrirModalEditorItens(checklistId, prefixo, 'listas_checklist');
+        // ✅ CORREÇÃO: Adicionamos um pequeno delay de 300ms apenas na criação 
+        // para evitar erro de leitura imediata (consistência eventual do Firestore)
+        setTimeout(async () => {
+            await abrirModalEditorItens(checklistId, prefixo, 'listas_checklist');
+        }, 300);
 
     } catch (error) {
-        console.error("Erro:", error);
-        alert("Erro ao acessar o checklist.");
+        console.error("Erro no fluxo de checklist:", error);
+        alert("Erro ao acessar o checklist: " + error.message);
     }
 }
     </script>
