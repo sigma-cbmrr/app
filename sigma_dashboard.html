@@ -3514,7 +3514,9 @@ input:checked + .slider:before {
             		</div>
 
             		<div class="vtr-acoes-container">
-                		<button class="btn-modern-action" onclick="gerenciarChecklistVtr('${ativoUid}', '${vtr.prefixo}')" style="background:#2c7399; color:white;">
+                		<button class="btn-modern-action" 
+    						onclick="gerenciarChecklistVtr('${ativoUid}', '${vtr.prefixo.replace(/'/g, "\\'")}')" 
+    						style="background:#2c7399; color:white;">
     						<i class="fa-solid fa-list-check"></i> Checklist
 						</button>
                 		<button class="btn-modern-action" onclick="alert('Relatório de Defeitos em breve!')" style="background:#800020; color:white;">
@@ -13536,29 +13538,30 @@ function finalizarPreCheckEIrProApp() {
     // Aqui chamaremos o conferencia_app.html futuramente
 }
 		async function gerenciarChecklistVtr(vtrId, prefixo) {
+    // 1. Definição do ID único da lista para esta VTR
     const checklistId = `CHECKLIST_VTR_${vtrId}`;
     
     try {
-        // 1. Verifica se o checklist da viatura já existe
+        // Busca os dados ATUAIS da viatura para pegar a unidade correta
+        const vtrDoc = await db.collection('viaturas').doc(vtrId).get();
+        if (!vtrDoc.exists) return alert("Erro: Viatura não localizada.");
+        const vtrData = vtrDoc.data();
+
         const docRef = db.collection('listas_conferencia').doc(checklistId);
         const doc = await docRef.get();
 
         if (!doc.exists) {
-            console.log("Iniciando criação de checklist personalizado para:", prefixo);
+            console.log("Criando checklist para:", prefixo);
             
-            // 2. Busca o Template Padrão que criamos no passo anterior
             const templateDoc = await db.collection('config_checklists').doc('vtr_padrao').get();
-            if (!templateDoc.exists) {
-                return alert("Erro: Template padrão não encontrado. Rode o script de alimentação novamente.");
-            }
+            if (!templateDoc.exists) return alert("Erro: Template padrão não encontrado.");
             const template = templateDoc.data();
 
-            // 3. Converte a estrutura do template para o formato da 'listas_conferencia'
+            // Formatação seguindo o padrão da sua listas_conferencia
             const novaListaFormatada = template.setores.map(setor => ({
-                id: "setor_" + Math.random().toString(36).substr(2, 9),
+                id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
                 nome: setor.nome,
                 itens: setor.itens.map(it => {
-                    // Se for objeto (especial), usa os dados. Se for string, cria padrão single.
                     const nome = typeof it === 'object' ? it.nome : it;
                     const tipo = typeof it === 'object' ? it.tipo : 'single';
                     return {
@@ -13571,32 +13574,38 @@ function finalizarPreCheckEIrProApp() {
                 })
             }));
 
-            // 4. Salva a nova lista vinculada a esta VTR
             await docRef.set({
                 uid: checklistId,
                 ativo_id: vtrId,
                 ativo_nome: prefixo,
-                unidade_id: currentUserData.unidade_id || "GERAL",
-                unidade_sigla: currentUserData.unidade || "CBMRR",
-                posto_nome: "OFICINA/PATIO", // Local padrão inicial
+                // Pega os dados confirmados da VTR
+                unidade_id: vtrData.unidade_atual_id, 
+                unidade_sigla: vtrData.unidade_atual_nome,
+                posto_nome: "PÁTIO / MANUTENÇÃO",
                 ativo: true,
                 tipo: 'checklist_viatura',
                 list: novaListaFormatada,
                 criado_em: firebase.firestore.FieldValue.serverTimestamp(),
                 criado_por: currentUserData.nome_militar_completo
             });
-            
-            console.log("✅ Checklist criado com sucesso para " + prefixo);
         }
 
-        // 5. Abre o Editor de Listas (Sua função atual do Dashboard)
-        // Isso permite que o gestor já edite os itens se quiser
+        // --- SOLUÇÃO PARA O ERRO 2: LIMPEZA DE TELA ---
+        // Fecha o modal de detalhes
         fecharModalVtr();
+        
+        // Oculta os cards do dashboard para o editor abrir limpo
+        const containerCards = document.getElementById('admin-gestor-cards-container');
+        const containerOp = document.getElementById('operacional-cards-container');
+        if (containerCards) containerCards.style.display = 'none';
+        if (containerOp) containerOp.style.display = 'none';
+
+        // Abre o editor
         abrirModalEditorItens(checklistId, prefixo);
 
     } catch (error) {
-        console.error("Erro ao gerenciar checklist:", error);
-        alert("Erro técnico ao acessar o checklist da viatura.");
+        console.error("Erro:", error);
+        alert("Erro ao acessar o checklist.");
     }
 }
     </script>
