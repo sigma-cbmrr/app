@@ -143,7 +143,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
 
 <script>
-    const firebaseConfig = { 
+const firebaseConfig = { 
         apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", 
         authDomain: "sigma-cbmrr.firebaseapp.com", 
         projectId: "sigma-cbmrr", 
@@ -158,29 +158,39 @@
 
     // --- INICIALIZAÇÃO DE VARIÁVEIS E PARÂMETROS DA URL ---
     const urlParams = new URLSearchParams(window.location.search);
-    const LISTA_ID = urlParams.get('id');
+    
+    // ✅ CORREÇÃO: Captura o ID e verifica se precisa do prefixo CHECKLIST_VTR_
+    let rawID = urlParams.get('id');
+    const modoUrl = urlParams.get('modo');
+    if (modoUrl === 'checklist_vtr' && rawID && !rawID.startsWith('CHECKLIST_VTR_')) {
+        rawID = 'CHECKLIST_VTR_' + rawID;
+    }
+
+    const LISTA_ID = rawID;
     const CAUTELA_ID = urlParams.get('cautelaId');
-    const COLECAO_LISTAS = 'listas_conferencia';
     const COLECAO_CAUTELAS = 'cautelas_abertas';
     
-    // Captura o modo e destinatário de forma direta
-    let MODO_OPERACAO = urlParams.get('modo') || 'recebimento'; 
+    // ✅ DEFINIÇÃO DINÂMICA DA COLEÇÃO DE LISTAS
+    window.isModoChecklist = (modoUrl === 'checklist_vtr') || (LISTA_ID && LISTA_ID.startsWith('CHECKLIST_VTR_'));
+    const COLECAO_LISTAS = window.isModoChecklist ? 'listas_checklist' : 'listas_conferencia';
+    
+    let MODO_OPERACAO = modoUrl || 'recebimento'; 
     let DESTINATARIO_DEVOLUCAO = urlParams.get('destinatarioDevolucao'); 
 
-    // Objeto de Usuário preenchido na hora (Resolve o problema do "Carregando...")
- let userInfo = { 
-    postoGraduacao: "ND", 
-    quadro: "ND", 
-    nomeGuerra: "ND",
-    uid: "ND"
-};
+    // ✅ CORREÇÃO: Captura Posto/Graduação e Quadro direto da URL para evitar o "ND"
+    let userInfo = { 
+        postoGraduacao: urlParams.get('posto_grad') || "ND", 
+        quadro: urlParams.get('quadro_mil') || "ND", 
+        nomeGuerra: urlParams.get('nome_guerra') || "ND",
+        uid: urlParams.get('user_uid') || "ND"
+    };
 
     let dadosConferencia = [];
     let isCautela = !!CAUTELA_ID;
     let infoLocal = { nome: '', posto: '' }; 
     window.itemStatus = {};
 
-    function getUrlParameter(n) { 
+function getUrlParameter(n) { 
         return (new URLSearchParams(window.location.search)).get(n) || ''; 
     }
 
@@ -191,93 +201,97 @@
     }
 
     function updateHeaderInfo() {
-    const el = document.getElementById('militar-info');
-    if (!el) return;
+        const el = document.getElementById('militar-info');
+        if (!el) return;
 
-    // Tenta pegar da variável global, se estiver vazia, tenta ler da URL na hora
-    const p = (userInfo.nomeGuerra !== "ND") ? userInfo : {
-        postoGraduacao: getUrlParameter('posto_grad') || "ND",
-        quadro: getUrlParameter('quadro_mil') || "ND",
-        nomeGuerra: getUrlParameter('nome_guerra') || "ND"
-    };
+        // Tenta pegar da variável global, se estiver vazia, tenta ler da URL na hora
+        const p = (userInfo.nomeGuerra !== "ND") ? userInfo : {
+            postoGraduacao: getUrlParameter('posto_grad') || "ND",
+            quadro: getUrlParameter('quadro_mil') || "ND",
+            nomeGuerra: getUrlParameter('nome_guerra') || "ND"
+        };
 
-    el.innerHTML = `<strong>Conferente:</strong> ${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`;
-}
-
-    function updateOverallStatus() {
-    // 1. Identifica todos os materiais (itens pais) na tela
-    const itensPai = document.querySelectorAll('.item-conferencia');
-    const totalGeral = itensPai.length;
-    let concluidosGeral = 0;
-
-    // 2. Conta quantos materiais estão com o check [✓] ou Alerta [C/A]
-    itensPai.forEach(item => {
-        if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
-            concluidosGeral++;
-        }
-    });
-
-    // 3. Atualização do Botão Finalizar
-    const btn = document.getElementById('btn-finalizar');
-    if (btn) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const modo = urlParams.get('modo') || (typeof MODO_OPERACAO !== 'undefined' ? MODO_OPERACAO : 'recebimento');
-        
-        let buttonPrefix = 'FINALIZAR CONFERÊNCIA';
-        if (modo === 'devolucao_final') buttonPrefix = 'FINALIZAR RECEBIMENTO DE DEVOLUÇÃO';
-        else if (!!urlParams.get('cautelaId')) buttonPrefix = 'FINALIZAR RECEBIMENTO';
-
-        btn.textContent = `${buttonPrefix} (${concluidosGeral}/${totalGeral} ITENS)`;
-        
-        const todosConcluidos = totalGeral > 0 && concluidosGeral === totalGeral;
-        btn.disabled = !todosConcluidos;
-        
-        if (btn.disabled) {
-            btn.style.backgroundColor = '#a0a0a0';
-            btn.style.opacity = '0.7';
-            btn.style.cursor = 'not-allowed';
-            btn.style.boxShadow = 'none';
-        } else {
-            btn.style.backgroundColor = '#1b8a3e';
-            btn.style.opacity = '1';
-            btn.style.cursor = 'pointer';
-            btn.style.boxShadow = '0 4px 8px rgba(27, 138, 62, 0.4)';
-        }
+        el.innerHTML = `<strong>Conferente:</strong> ${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString()}`;
     }
 
-    // 4. Atualiza os badges de progresso dos Setores (0/X)
-    document.querySelectorAll('.setor').forEach(s => {
-        const itensNoSetor = s.querySelectorAll('.item-conferencia');
-        const totalNoSetor = itensNoSetor.length;
-        const concluidosNoSetor = Array.from(itensNoSetor).filter(item => 
-            item.classList.contains('status-ok') || item.classList.contains('status-alert')
-        ).length;
-        const numAlteracoes = s.querySelectorAll('.item-conferencia.status-alert').length;
-        
-        const statusDiv = s.querySelector('.setor-status');
-        if (statusDiv) {
-            statusDiv.style.borderRadius = "20px";
-            statusDiv.style.fontWeight = "bold";
-            statusDiv.style.display = "inline-block";
-            statusDiv.style.minWidth = "45px";
-            statusDiv.style.color = "#ffffff"; // ⬅️ CORRIGIDO: Sempre branco
+    function updateOverallStatus() {
+        // 1. Identifica todos os materiais (itens pais) na tela
+        const itensPai = document.querySelectorAll('.item-conferencia');
+        const totalGeral = itensPai.length;
+        let concluidosGeral = 0;
 
-            if (totalNoSetor > 0 && concluidosNoSetor === totalNoSetor) {
-                if (numAlteracoes > 0) {
-                    statusDiv.innerText = `${numAlteracoes} C/A`;
-                    statusDiv.style.backgroundColor = "#d90f23";
-                } else {
-                    statusDiv.innerText = "S/A";
-                    statusDiv.style.backgroundColor = "#1b8a3e";
-                }
-            } else {
-                statusDiv.innerText = `${concluidosNoSetor}/${totalNoSetor}`;
-                statusDiv.style.backgroundColor = "#666"; // ⬅️ CORRIGIDO: Fundo escuro para contraste
+        // 2. Conta quantos materiais estão com o check [✓] ou Alerta [C/A]
+        itensPai.forEach(item => {
+            if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
+                concluidosGeral++;
             }
-            statusDiv.dataset.completed = concluidosNoSetor;
+        });
+
+        // 3. Atualização do Botão Finalizar
+        const btn = document.getElementById('btn-finalizar');
+        if (btn) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const modo = urlParams.get('modo') || (typeof MODO_OPERACAO !== 'undefined' ? MODO_OPERACAO : 'recebimento');
+            
+            // ✅ CORREÇÃO: Define o prefixo do botão baseado no modo Checklist
+            let buttonPrefix = window.isModoChecklist ? 'FINALIZAR VISTORIA' : 'FINALIZAR CONFERÊNCIA';
+            
+            if (modo === 'devolucao_final') buttonPrefix = 'FINALIZAR RECEBIMENTO DE DEVOLUÇÃO';
+            else if (!!urlParams.get('cautelaId')) buttonPrefix = 'FINALIZAR RECEBIMENTO';
+
+            btn.textContent = `${buttonPrefix} (${concluidosGeral}/${totalGeral} ITENS)`;
+            
+            const todosConcluidos = totalGeral > 0 && concluidosGeral === totalGeral;
+            btn.disabled = !todosConcluidos;
+            
+            if (btn.disabled) {
+                btn.style.backgroundColor = '#a0a0a0';
+                btn.style.opacity = '0.7';
+                btn.style.cursor = 'not-allowed';
+                btn.style.boxShadow = 'none';
+            } else {
+                // ✅ CORREÇÃO: Aplica Azul Petróleo no botão se for checklist, senão Verde original
+                btn.style.backgroundColor = window.isModoChecklist ? '#2c3e50' : '#1b8a3e';
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                const shadowColor = window.isModoChecklist ? 'rgba(44, 62, 80, 0.4)' : 'rgba(27, 138, 62, 0.4)';
+                btn.style.boxShadow = `0 4px 8px ${shadowColor}`;
+            }
         }
-    });
-}
+
+        // 4. Atualiza os badges de progresso dos Setores (0/X)
+        document.querySelectorAll('.setor').forEach(s => {
+            const itensNoSetor = s.querySelectorAll('.item-conferencia');
+            const totalNoSetor = itensNoSetor.length;
+            const concluidosNoSetor = Array.from(itensNoSetor).filter(item => 
+                item.classList.contains('status-ok') || item.classList.contains('status-alert')
+            ).length;
+            const numAlteracoes = s.querySelectorAll('.item-conferencia.status-alert').length;
+            
+            const statusDiv = s.querySelector('.setor-status');
+            if (statusDiv) {
+                statusDiv.style.borderRadius = "20px";
+                statusDiv.style.fontWeight = "bold";
+                statusDiv.style.display = "inline-block";
+                statusDiv.style.minWidth = "45px";
+                statusDiv.style.color = "#ffffff";
+
+                if (totalNoSetor > 0 && concluidosNoSetor === totalNoSetor) {
+                    if (numAlteracoes > 0) {
+                        statusDiv.innerText = `${numAlteracoes} C/A`;
+                        statusDiv.style.backgroundColor = "#d90f23";
+                    } else {
+                        statusDiv.innerText = "S/A";
+                        statusDiv.style.backgroundColor = "#1b8a3e";
+                    }
+                } else {
+                    statusDiv.innerText = `${concluidosNoSetor}/${totalNoSetor}`;
+                    statusDiv.style.backgroundColor = "#666"; 
+                }
+                statusDiv.dataset.completed = concluidosNoSetor;
+            }
+        });
+    }
 
 function updateSetorStatus(setorEl) { 
     if (!setorEl) return;
@@ -844,29 +858,32 @@ function renderizarConferencia() {
 }
 
 async function carregarDadosRemotos() {
-    // 1. CAPTURA IMEDIATA DOS PARÂMETROS
+    // 1. CAPTURA IMEDIATA E PRIORITÁRIA DOS PARÂMETROS DA URL
     const urlParamsLocal = new URLSearchParams(window.location.search);
     
-    // 2. NORMALIZAÇÃO DO ID (Resolve o erro do prefixo faltando)
-    let rawID = urlParamsLocal.get('id') || (isCautela ? CAUTELA_ID : LISTA_ID);
-    
-    // ✅ CORREÇÃO CIRÚRGICA: Se o modo for checklist mas o ID não tiver o prefixo, nós adicionamos
+    const idUrl = urlParamsLocal.get('id');
+    const cautelaIdUrl = urlParamsLocal.get('cautelaId');
     const modoUrl = urlParamsLocal.get('modo');
-    if (modoUrl === 'checklist_vtr' && rawID && !rawID.startsWith('CHECKLIST_VTR_')) {
-        rawID = 'CHECKLIST_VTR_' + rawID;
-    }
-    const ID_ALVO = rawID;
 
-    // 3. DETECÇÃO DE MODO
-    window.isModoChecklist = (modoUrl === 'checklist_vtr') || String(ID_ALVO).startsWith('CHECKLIST_VTR_');
+    // 2. NORMALIZAÇÃO DO ID E COLEÇÃO (Resolve o erro de "Documento não encontrado")
+    let ID_ALVO = cautelaIdUrl || idUrl;
+    const isCautelaLocal = !!cautelaIdUrl;
+
+    // Se o modo enviado pelo Dashboard for checklist, garantimos o prefixo no ID
+    if (modoUrl === 'checklist_vtr' && ID_ALVO && !ID_ALVO.startsWith('CHECKLIST_VTR_')) {
+        ID_ALVO = 'CHECKLIST_VTR_' + ID_ALVO;
+    }
+
+    // Define globalmente se estamos em modo Checklist para as outras funções
+    window.isModoChecklist = (modoUrl === 'checklist_vtr') || (ID_ALVO && ID_ALVO.startsWith('CHECKLIST_VTR_'));
     
-    // 4. TRIANGULAÇÃO DE COLEÇÃO
-    let COLECAO_ALVO = isCautela ? COLECAO_CAUTELAS : COLECAO_LISTAS;
+    // Define a coleção correta baseada no modo identificado
+    let COLECAO_ALVO = isCautelaLocal ? 'cautelas_abertas' : 'listas_conferencia';
     if (window.isModoChecklist) {
         COLECAO_ALVO = 'listas_checklist';
     }
 
-    // --- CAPTURA E EXIBIÇÃO DO CONFERENTE ---
+    // 3. CAPTURA E EXIBIÇÃO DO CONFERENTE (Posto, Quadro e Nome)
     userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
     userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
     userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
@@ -877,22 +894,24 @@ async function carregarDadosRemotos() {
         elHeader.innerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
     }
 
+    // Trava de segurança para IDs nulos
     if (!ID_ALVO || ID_ALVO === "null") return;
         
     const loadingMsg = document.getElementById('loading-message');
     if (loadingMsg) loadingMsg.innerHTML = `Conectando ao SIGMA (${COLECAO_ALVO})...`;
 
     try {
+        // 4. BUSCA NO FIRESTORE NA COLEÇÃO CORRETA
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
         
         if (!doc.exists) {
-            throw new Error(`Lista não encontrada: ${ID_ALVO} na coleção ${COLECAO_ALVO}`);
+            throw new Error(`Documento não encontrado: ${ID_ALVO} na coleção ${COLECAO_ALVO}`);
         }
         
         const data = doc.data();
         const isDevolucaoFinal = urlParamsLocal.get('modo') === 'devolucao_final';
         
-        if (isCautela) {
+        if (isCautelaLocal) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
             const listaBruta = data.list || [];
@@ -912,7 +931,7 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
         
-        // 🛑 AJUSTE DE CABEÇALHO E IDENTIDADE VISUAL
+        // 5. AJUSTE DE CABEÇALHO E IDENTIDADE VISUAL
         const tituloPrincipal = document.getElementById('titulo-conferencia');
         if (tituloPrincipal && window.isModoChecklist) {
             tituloPrincipal.innerText = "Vistoria de Viatura";
@@ -920,8 +939,8 @@ async function carregarDadosRemotos() {
         }
 
         infoLocal = { 
-            nome: isCautela ? `${CAUTELA_ID}` : (data.ativo_nome || data.nome_local || "Lista"),
-            posto: isCautela ? "" : (data.posto_nome || data.posto || (window.isModoChecklist ? "VTR" : "Geral"))
+            nome: isCautelaLocal ? `${cautelaIdUrl}` : (data.ativo_nome || data.nome_local || "Lista"),
+            posto: isCautelaLocal ? "" : (data.posto_nome || data.posto || (window.isModoChecklist ? "VTR" : "Geral"))
         };
         
         const infoElement = document.getElementById('local-posto-info');
@@ -935,13 +954,14 @@ async function carregarDadosRemotos() {
         if (btnFinalizar) {
             if (isDevolucaoFinal) {
                 btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
-            } else if (isCautela) {
+            } else if (isCautelaLocal) {
                 btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
             } else {
                 btnFinalizar.onclick = () => finalizarConferencia();
             }
         }
 
+        // 6. RENDERIZAÇÃO FINAL
         renderizarConferencia(); 
 
         if (typeof updateOverallStatus === "function") updateOverallStatus();
