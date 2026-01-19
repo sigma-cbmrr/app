@@ -12970,56 +12970,67 @@ function removerSetorArquitetura(idx) {
 // 9. GESTÃO DA CAIXA DE SAÍDA (ESTORNOS)
 // ================================================================
 function marcarParaEstorno(setorIdx, itemIdx) {
-    // Remove do rascunho visual
+    const itemAlvo = arquiteturaAtiva[setorIdx].itens[itemIdx];
+
+    // LÓGICA CIRÚRGICA: Se for modo Vistoria (Checklist), remove direto sem ir para a caixa de saída
+    if (window.isModoVistoria) {
+        if (confirm(`Deseja remover "${itemAlvo.nome}" desta vistoria?`)) {
+            arquiteturaAtiva[setorIdx].itens.splice(itemIdx, 1);
+            renderizarArquiteturaEditor();
+            marcarAlteracao();
+        }
+        return; // Encerra aqui para Vistoria
+    }
+
+    // LÓGICA ORIGINAL: Para Materiais, move para a caixa de saída (estorno)
     const itemRemovido = arquiteturaAtiva[setorIdx].itens.splice(itemIdx, 1)[0];
     
-    // Adiciona à lista de pendentes
     itensParaEstorno.push({
         ...itemRemovido,
         setorOrigem: arquiteturaAtiva[setorIdx].nome
     });
 
-    // Efeito de Feedback no Badge
     const badge = document.getElementById('badge-estorno-count');
-    badge.classList.add('badge-pulse');
-    setTimeout(() => badge.classList.remove('badge-pulse'), 300);
+    if (badge) {
+        badge.classList.add('badge-pulse');
+        setTimeout(() => badge.classList.remove('badge-pulse'), 300);
+    }
 
     atualizarInterfaceEstorno();
     renderizarArquiteturaEditor();
     marcarAlteracao();
-    
-    // Opcional: Notificação sonora discreta ou apenas visual
     console.log(`Item ${itemRemovido.nome} movido para caixa de saída.`);
 }
-
+		
 function atualizarInterfaceEstorno() {
+    const dock = document.getElementById('caixa-estorno-dock');
+    if (!dock) return;
+
+    // Se estivermos em modo vistoria, a caixa de saída nunca deve aparecer
+    if (window.isModoVistoria) {
+        dock.style.display = 'none';
+        return;
+    }
+
     const container = document.getElementById('lista-itens-estorno');
     const badge = document.getElementById('badge-estorno-count');
-    const dock = document.getElementById('caixa-estorno-dock'); // Pegamos o dock principal
     
-    if (!container || !badge || !dock) return;
+    if (!container || !badge) return;
 
-    // --- ADIÇÃO CIRÚRGICA: CONTROLE DE VISIBILIDADE DO DOCK ---
     if (itensParaEstorno.length === 0) {
-        dock.style.display = 'none'; // Esconde a telinha de chat se estiver vazia
+        dock.style.display = 'none';
         container.innerHTML = '<p class="empty-estorno" style="text-align:center; padding:20px; color:#94a3b8; font-size:0.8em;">Nenhum item para devolução.</p>';
         badge.textContent = "0";
         return;
     } else {
-        dock.style.display = 'block'; // Mostra a telinha se houver itens
+        dock.style.setProperty('display', 'block', 'important');
     }
-    // ---------------------------------------------------------
 
     badge.textContent = itensParaEstorno.length;
 
     container.innerHTML = itensParaEstorno.map((item, idx) => {
         const ehMulti = item.tipo === 'multi';
-        let detalhe = "";
-        if (ehMulti && item.tombamentos) {
-            detalhe = item.tombamentos.map(t => t.tomb).join(', ');
-        } else {
-            detalhe = item.quantidadeEsperada + ' unidades';
-        }
+        let detalhe = ehMulti && item.tombamentos ? item.tombamentos.map(t => t.tomb).join(', ') : item.quantidadeEsperada + ' unidades';
 
         return `
             <div class="item-estorno-linha" style="display: flex; align-items: center; justify-content: space-between; padding: 10px; border-bottom: 1px solid #f1f5f9; background: #fffaf0; margin-bottom: 5px; border-radius: 6px;">
@@ -13029,59 +13040,61 @@ function atualizarInterfaceEstorno() {
                         ${ehMulti ? '<i class="fas fa-tag"></i> TOMB: ' + detalhe : '<i class="fas fa-boxes"></i> QTD: ' + detalhe}
                     </small>
                 </div>
-                <button onclick="cancelarEstorno(${idx})" class="btn-remove-item-vtr" title="Desfazer estorno" style="background: #f1f5f9!important; color: #64748b!important; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">
+                <button onclick="cancelarEstorno(${idx})" class="btn-remove-item-vtr" style="background: #f1f5f9!important; color: #64748b!important; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 50%;">
                     <i class="fas fa-undo" style="font-size:0.8em;"></i>
                 </button>
-            </div>
-        `;
+            </div>`;
     }).reverse().join(''); 
 }
 			function toggleEstornoDock() {
-    const dock = document.getElementById('rascunho-item-novo');
+    const dock = document.getElementById('caixa-estorno-dock');
+    if (!dock) {
+        console.error("❌ Erro: Elemento 'caixa-estorno-dock' não encontrado no HTML.");
+        return; 
+    }
+
     const icon = dock.querySelector('.toggle-icon');
     
+    // Inverte a classe de expansão
     dock.classList.toggle('expanded');
     
-    if (dock.classList.contains('expanded')) {
-        icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
-    } else {
-        icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+    // Sincroniza o ícone (seta para cima/baixo)
+    if (icon) {
+        if (dock.classList.contains('expanded')) {
+            icon.classList.replace('fa-chevron-up', 'fa-chevron-down');
+        } else {
+            icon.classList.replace('fa-chevron-down', 'fa-chevron-up');
+        }
     }
 }
 
 function cancelarEstorno(idx) {
-    // 1. Remove da lista de estorno
+    // 1. Remove da lista de estorno (Caixa de Saída)
     const item = itensParaEstorno.splice(idx, 1)[0];
     if (!item) return;
 
-    // 2. Tenta localizar o setor original pelo nome
-    let setorDestino = arquiteturaAtiva.find(s => s.nome === item.setorOrigem);
-    
-    // 3. Se o setor original não existe mais (ex: foi excluído), 
-    // tentamos o primeiro disponível ou avisamos o usuário.
-    if (!setorDestino && arquiteturaAtiva.length > 0) {
-        setorDestino = arquiteturaAtiva[0];
-        console.warn(`Setor original "${item.setorOrigem}" não encontrado. Movendo para ${setorDestino.nome}`);
-    }
+    // 2. Localiza o setor de destino
+    // Tenta pelo nome original ou cai no primeiro setor disponível
+    let setorDestino = arquiteturaAtiva.find(s => s.nome === item.setorOrigem) || arquiteturaAtiva[0];
 
     if (setorDestino) {
-        // Devolve o item/tombamento para a lista do setor
+        // 3. Devolve o item para a memória da arquitetura
+        if (!setorDestino.itens) setorDestino.itens = [];
         setorDestino.itens.push(item);
         
-        // 4. ESSENCIAL: Processa mesclagem para o item voltar a ser agrupado 
-        // sob o mesmo nome técnico se necessário.
+        // 4. ESSENCIAL: Mesclagem automática
+        // Evita que o item apareça duplicado se já existir um do mesmo tipo no setor
         const sIdx = arquiteturaAtiva.indexOf(setorDestino);
         processarMesclagemAutomatica(sIdx);
         
-        alert(`O item "${item.nome}" retornou para o setor "${setorDestino.nome}".`);
+        console.log(`✅ Item "${item.nome}" restaurado no setor "${setorDestino.nome}".`);
     } else {
-        // Caso extremo: Não há setores na viatura
-        alert("Não foi possível devolver o item à viatura pois não existem setores criados.");
-        // Opcional: devolver o item para a lista de estorno para não perdê-lo
-        itensParaEstorno.splice(idx, 0, item);
+        alert("Não há setores disponíveis para restaurar o item.");
+        itensParaEstorno.splice(idx, 0, item); // Devolve para a caixa de saída em caso de erro
+        return;
     }
     
-    // 5. Sincroniza as telas
+    // 5. Sincronização Total da UI
     atualizarInterfaceEstorno();
     renderizarArquiteturaEditor();
     marcarAlteracao();
