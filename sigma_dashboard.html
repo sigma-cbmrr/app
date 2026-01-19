@@ -3625,13 +3625,18 @@ input:checked + .slider:before {
     <script>
         const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore(); 
+        const db = firebase.firestore();
+		firebase.firestore().clearPersistence().catch((err) => {
+    		if (err.code == 'failed-precondition') {
+        		console.warn("Múltiplas abas abertas, persistência não pôde ser limpa.");
+    		}
+		});
         const auth = firebase.auth();
 		const secondaryApp = firebase.initializeApp(firebaseConfig, 'Secondary');
     	const secondaryAuth = secondaryApp.auth();
         
         async function openNewConferenceModal() {
-    materialSelecionadoNoModal = null; // Reseta
+    	materialSelecionadoNoModal = null; // Reseta
     
     // Busca os setores (Postos) disponíveis para montar o primeiro Select
     const docRotas = await db.collection('config_geral').doc('rotas').get();
@@ -11987,15 +11992,13 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
     // 1. Definições Iniciais
     idListaSendoEditada = uid;
     
-    // ✅ CORREÇÃO CIRÚRGICA 1: Auto-ajuste de Coleção
-    // Se o UID começar com 'CHECKLIST_VTR_', forçamos a coleção 'listas_checklist'
-    // Isso evita que o parâmetro padrão ou nulo direcione para a coleção errada.
+    // ✅ AUTO-AJUSTE DE COLEÇÃO (DNA do Ativo)
     if (uid && uid.startsWith('CHECKLIST_VTR_')) {
         colecaoAlvo = 'listas_checklist';
     }
     
     colecaoAtivaNoEditor = colecaoAlvo; 
-    console.log(`🔎 Tentando abrir: [${uid}] na coleção: [${colecaoAlvo}]`);
+    console.log(`🔎 Iniciando abertura: [${uid}] na coleção: [${colecaoAlvo}]`);
 
     // 2. UI: Transição de Telas
     const menuCards = document.getElementById('menu-editor-listas');
@@ -12008,31 +12011,41 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
     document.getElementById('edit-vtr-nome').textContent = nome;
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Consultando base de dados...
+            <i class="fas fa-sync fa-spin fa-2x"></i><br>Sincronizando com o servidor...
         </div>`;
 
     try {
-        // 4. Busca o documento com lógica de retry para consistência eventual
-        let doc = await db.collection(colecaoAlvo).doc(uid).get();
-        
-        if (!doc.exists) {
-            console.log("⏱️ Aguardando propagação do banco...");
-            await new Promise(resolve => setTimeout(resolve, 800)); // Delay para indexação do Google
+        let doc = null;
+        let tentativas = 0;
+        const maxTentativas = 3;
+
+        // ✅ LÓGICA DE INSISTÊNCIA (CONTRA ERRO 400/WEBCHANNEL)
+        // O sistema tentará ler o documento até 3 vezes antes de desistir.
+        while (tentativas < maxTentativas) {
+            console.log(`📡 Tentativa de leitura ${tentativas + 1}/${maxTentativas}...`);
             doc = await db.collection(colecaoAlvo).doc(uid).get();
+            
+            if (doc.exists) break; // Sucesso! Sai do loop.
+
+            tentativas++;
+            if (tentativas < maxTentativas) {
+                console.warn("⚠️ Lista não detectada ainda. Aguardando 1 segundo para nova tentativa...");
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
         }
 
-        if (!doc.exists) {
-            throw new Error(`O documento ${uid} não foi localizado na coleção ${colecaoAlvo}.`);
+        if (!doc || !doc.exists) {
+            throw new Error(`O documento não foi localizado na coleção ${colecaoAlvo} após ${maxTentativas} tentativas.`);
         }
         
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 🛑 MODO INTELIGENTE: Identifica se é Checklist (Viatura) ou Conferência (Material)
+        // 🛑 MODO INTELIGENTE: Vistoria vs Conferência
         isModoVistoria = (colecaoAlvo === 'listas_checklist' || dados.tipo === 'checklist_viatura');
         
         // Ajusta rótulos dinamicamente
-        const labelUnidade = isModoVistoria ? `Origem: ${dados.unidade_sigla || 'PÁTIO'}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
         const inputBusca = document.getElementById('input-busca-estoque');
@@ -12040,15 +12053,16 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 5. Gestão de Estoque Local (Apenas para materiais reais)
+        // 5. Gestão de Estoque Local
         if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
-            estoqueGestorLocal = []; // Limpa cache para itens de vistoria técnica
+            estoqueGestorLocal = []; 
         }
 
         renderizarArquiteturaEditor();
         atualizarSelectSetores();
+        console.log("✅ Editor carregado com sucesso.");
 
     } catch (e) {
         console.error("❌ Erro crítico no Editor:", e);
