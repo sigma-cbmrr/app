@@ -13609,80 +13609,82 @@ function finalizarPreCheckEIrProApp() {
 }
 		async function gerenciarChecklistVtr(vtrId, prefixo) {
     const checklistId = `CHECKLIST_VTR_${vtrId}`;
+    console.log("Iniciando gestão para:", checklistId);
     
     try {
         const vtrDoc = await db.collection('viaturas').doc(vtrId).get();
         if (!vtrDoc.exists) return alert("Erro: Viatura não localizada.");
         const vtrData = vtrDoc.data();
 
-        const docRef = db.collection('listas_checklist').doc(checklistId);
+        // Referência direta e explícita à nova coleção
+        const colecaoAlvo = 'listas_checklist';
+        const docRef = db.collection(colecaoAlvo).doc(checklistId);
         const doc = await docRef.get();
 
         if (!doc.exists) {
-            console.log("Criando novo checklist isolado para:", prefixo);
+            console.log("Criando novo checklist na coleção:", colecaoAlvo);
             
             const templateDoc = await db.collection('config_checklists').doc('vtr_padrao').get();
-            if (!templateDoc.exists) return alert("Erro: Template padrão não encontrado.");
+            if (!templateDoc.exists) throw new Error("Template 'vtr_padrao' não encontrado no Firestore.");
             const template = templateDoc.data();
 
             const novaListaFormatada = template.setores.map(setor => ({
-    			id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
-    			nome: setor.nome,
-    			itens: setor.itens.map(it => {
-        			// Detecta se o item é um objeto (como o de fotos) ou apenas uma string (como "Limpeza")
-        			const isObjeto = (typeof it === 'object' && it !== null);
-        			const nomeFinal = isObjeto ? it.nome : it;
-        			const tipoFinal = isObjeto ? (it.tipo || 'single') : 'single';
-        
-        			const idSeguro = nomeFinal.replace(/\s+/g, '_').toUpperCase();
+                id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
+                nome: setor.nome,
+                itens: setor.itens.map(it => {
+                    const isObjeto = (typeof it === 'object' && it !== null);
+                    const nomeFinal = isObjeto ? it.nome : it;
+                    const tipoFinal = isObjeto ? (it.tipo || 'single') : 'single';
+                    const idSeguro = nomeFinal.replace(/\s+/g, '_').toUpperCase();
 
-        			return {
-            			id: "item_" + Math.random().toString(36).substr(2, 9),
-            			nome: nomeFinal.toUpperCase(),
-            			tipo: tipoFinal,
-            			quantidadeEsperada: 1,
-            			uid_global: "ITEM_VISTORIA_LIVRE",
-            			referencia_template: idSeguro,
-            			categoria: "VISTORIA",
-            			// Preserva propriedades extras (como 'max' para fotos) se existirem
-            			...(isObjeto ? it : {}) 
-        			};
-    			})
-			}));
+                    return {
+                        id: "item_" + Math.random().toString(36).substr(2, 9),
+                        nome: nomeFinal.toUpperCase(),
+                        tipo: tipoFinal,
+                        quantidadeEsperada: 1,
+                        uid_global: "ITEM_VISTORIA_LIVRE",
+                        referencia_template: idSeguro,
+                        categoria: "VISTORIA",
+                        ...(isObjeto ? it : {}) 
+                    };
+                })
+            }));
 
-            // ✅ CORREÇÃO: Usamos o AWAIT para garantir que a gravação termine antes de prosseguir
-            await docRef.set({
-                uid: checklistId,
-                ativo_id: vtrId,
-                ativo_nome: prefixo,
-                unidade_id: vtrData.unidade_atual_id || "", 
-                unidade_sigla: vtrData.unidade_atual_nome || "N/D",
-                posto_nome: "PÁTIO / MANUTENÇÃO",
-                ativo: true,
-                tipo: 'checklist_viatura',
-                list: novaListaFormatada,
-                criado_em: firebase.firestore.FieldValue.serverTimestamp(),
-                criado_por: currentUserData.nome_militar_completo
-            });
-            
-            console.log("✅ Documento gravado com sucesso.");
+            // Tenta gravar e captura erro de permissão ou rede
+            try {
+                await docRef.set({
+                    uid: checklistId,
+                    ativo_id: vtrId,
+                    ativo_nome: prefixo,
+                    unidade_id: vtrData.unidade_atual_id || "", 
+                    unidade_sigla: vtrData.unidade_atual_nome || "N/D",
+                    posto_nome: "PÁTIO / MANUTENÇÃO",
+                    ativo: true,
+                    tipo: 'checklist_viatura',
+                    list: novaListaFormatada,
+                    criado_em: firebase.firestore.FieldValue.serverTimestamp(),
+                    criado_por: currentUserData.nome_militar_completo
+                });
+                console.log("✅ Documento gravado com sucesso em listas_checklist");
+            } catch (errSet) {
+                console.error("❌ ERRO AO GRAVAR:", errSet);
+                return alert("Erro de Permissão: Verifique se a coleção 'listas_checklist' está liberada nas regras do Firebase.");
+            }
         }
 
+        // Se chegou aqui, o documento existe ou foi criado
         fecharModalVtr();
         switchView('editor-arquitetura'); 
 
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // ✅ CORREÇÃO: Adicionamos um pequeno delay de 300ms apenas na criação 
-        // para evitar erro de leitura imediata (consistência eventual do Firestore)
-        setTimeout(async () => {
-            await abrirModalEditorItens(checklistId, prefixo, 'listas_checklist');
-        }, 300);
+        // Chamada imediata com AWAIT (o await segura o processo até carregar)
+        await abrirModalEditorItens(checklistId, prefixo, colecaoAlvo);
 
     } catch (error) {
-        console.error("Erro no fluxo de checklist:", error);
-        alert("Erro ao acessar o checklist: " + error.message);
+        console.error("Erro crítico no gerenciarChecklistVtr:", error);
+        alert("Falha no processo: " + error.message);
     }
 }
     </script>
