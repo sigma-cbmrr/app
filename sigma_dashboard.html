@@ -3712,6 +3712,7 @@ input:checked + .slider:before {
 		let vtrSelecionadaNoModal = null;
 		let materialSelecionadoNoModal = null;
 		let dadosChecklistTemp = { vtr: null, km: 0, combustivel: '1/2' };
+		let isModoVistoria = false;
 		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -11679,8 +11680,9 @@ async function carregarCardsListasExistentes() {
     try {
         // 2. Busca apenas listas ativas no banco
         const snap = await db.collection('listas_conferencia')
-                             .where('ativo', '==', true)
-                             .get();
+            .where('ativo', '==', true)
+            .where('tipo', '==', 'conferencia_materiais') // ⬅️ FILTRO CIRÚRGICO
+            .get();
 
         if (snap.empty) {
             container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; padding:30px; color:#999;">Nenhuma lista de conferência criada ainda.</p>';
@@ -12002,8 +12004,18 @@ async function abrirModalEditorItens(uid, nome) {
         if (!doc.exists) throw new Error("Lista não localizada no banco de dados.");
         
         const dados = doc.data();
-        arquiteturaAtiva = dados.list || []; // Carrega o array de setores/itens
+        arquiteturaAtiva = dados.list || []; 
+        
+        // 🛑 IDENTIFICAÇÃO DE MODO: Checklist ou Materiais
+        isModoVistoria = (dados.tipo === 'checklist_viatura');
+        
         document.getElementById('edit-vtr-unidade').textContent = `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        
+        // Muda o placeholder para dar o feedback visual
+        const inputBusca = document.getElementById('input-busca-estoque');
+        if (inputBusca) {
+            inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
+        }
 
         // 5. Carrega o estoque disponível do Gestor para a barra de busca rápida
         // Usamos o unidade_id salvo na lista para garantir o filtro correto
@@ -12518,6 +12530,7 @@ function buscarItemParaAdicionar(termo) {
     const t = termo.toLowerCase().trim();
     const suggestions = [];
 
+    // 1. Busca no estoque (Mantém lógica original para materiais)
     estoqueGestorLocal.forEach(item => {
         const nomeMatch = item.nome.toLowerCase().includes(t);
         if (item.tipo === 'multi') {
@@ -12539,39 +12552,78 @@ function buscarItemParaAdicionar(termo) {
     });
 
     const matches = suggestions.slice(0, 10);
+    window.tempSuggestionsSearch = matches; 
 
+    // 2. Lógica de Renderização Híbrida
     if (matches.length === 0) {
-        box.innerHTML = '<div style="padding:15px; color:#94a3b8; text-align:center;">Nada disponível.</div>';
+        if (isModoVistoria) {
+            // MODO VISTORIA: Permite criar item novo se não houver no estoque
+            box.innerHTML = `
+                <div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" 
+                     style="padding:15px; background:#f0f9ff; border:1px dashed #0369a1; border-radius:6px; cursor:pointer; text-align:center;">
+                    <i class="fas fa-plus-circle" style="color:#0369a1;"></i>
+                    <b style="color:#0369a1; font-size:0.9em; display:block;">Adicionar "${termo}"</b>
+                    <small style="color:#64748b; font-size:0.75em;">Como item de vistoria técnica</small>
+                </div>`;
+        } else {
+            box.innerHTML = '<div style="padding:15px; color:#94a3b8; text-align:center;">Nada disponível.</div>';
+        }
     } else {
-        window.tempSuggestionsSearch = matches; 
-
-        // Limpamos o box antes de injetar para evitar resíduos
-        box.innerHTML = '';
-        
-        const htmlFinal = matches.map((i, index) => `
+        // Renderização normal das sugestões do estoque
+        let htmlFinal = matches.map((i, index) => `
             <div class="suggestion-item" onclick="selecionarSugestaoPorIndex(${index})" 
                  style="display: table !important; width: 100% !important; border-bottom: 1px solid #f1f5f9; padding: 10px 0; cursor: pointer; background: white;">
-                
                 <div style="display: table-cell !important; vertical-align: middle !important; width: 45px !important; text-align: center !important;">
                     <i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'}" 
-                       style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1.1em; display: inline-block !important; position: static !important; margin: 0 !important;"></i>
+                       style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1.1em; display: inline-block !important;"></i>
                 </div>
-
                 <div style="display: table-cell !important; vertical-align: middle !important; text-align: left !important; line-height: 1.2 !important;">
-                    <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase; display: block; margin: 0;">
-                        ${i.nome}
-                    </b>
-                    <small style="color: #64748b; font-size: 0.72em; font-weight: 600; display: block; margin-top: 2px;">
+                    <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase; display: block;">${i.nome}</b>
+                    <small style="color: #64748b; font-size: 0.72em; font-weight: 600; display: block;">
                         ${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'SALDO: ' + i.disponivel}
                     </small>
                 </div>
             </div>
         `).join('');
+
+        // Se estiver em modo vistoria, adiciona a opção de texto livre ao final da lista de sugestões
+        if (isModoVistoria) {
+            htmlFinal += `
+                <div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" 
+                     style="padding:10px; background:#fff8e1; border-top:2px solid #ffb300; cursor:pointer; text-align:center; margin-top:5px;">
+                    <span style="font-size:0.8em; color:#856404; font-weight:bold;">+ ADICIONAR COMO TEXTO LIVRE</span>
+                </div>`;
+        }
         
         box.innerHTML = htmlFinal;
     }
     box.style.display = 'block';
 }
+	function prepararInclusaoTextoLivre(nomeDigitado) {
+    const box = document.getElementById('sugestoes-estoque-editor');
+    const inputBusca = document.getElementById('input-busca-estoque');
+
+    // 1. Cria o objeto do item no formato que o seu editor espera
+    const novoItemVistoria = {
+        id_almox: "VISTORIA_" + Date.now(), // ID temporário único
+        nome: nomeDigitado.toUpperCase(),
+        tipo: "single",
+        disponivel: 1,
+        uid_global: "ITEM_VISTORIA_LIVRE",
+        categoria: "VISTORIA"
+    };
+
+    // 2. Simula a seleção de uma sugestão para abrir o popover de quantidade/setor
+    // Usamos a lógica que você já tem no sistema para manter a consistência
+    window.tempSuggestionsSearch = [novoItemVistoria];
+    selecionarSugestaoPorIndex(0);
+
+    // 3. Limpa a interface de busca
+    if (box) box.style.display = 'none';
+    if (inputBusca) inputBusca.value = '';
+    
+    console.log("🛠️ Preparando inclusão de item de vistoria:", nomeDigitado);
+}	
 
 // Função de apoio para evitar passar JSON gigante no HTML
 function selecionarSugestaoPorIndex(index) {
@@ -13583,14 +13635,20 @@ function finalizarPreCheckEIrProApp() {
                 id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
                 nome: setor.nome,
                 itens: setor.itens.map(it => {
-                    const nome = typeof it === 'object' ? it.nome : it;
-                    const tipo = typeof it === 'object' ? it.tipo : 'single';
+                    const nomeItem = typeof it === 'object' ? it.nome : it;
+                    const tipoItem = typeof it === 'object' ? it.tipo : 'single';
+                    
+                    // Geramos um UID que identifica que este item é de vistoria técnica
+                    const idSeguro = nomeItem.replace(/\s+/g, '_').toUpperCase();
+
                     return {
                         id: "item_" + Math.random().toString(36).substr(2, 9),
-                        nome: nome,
-                        tipo: tipo,
+                        nome: nomeItem.toUpperCase(),
+                        tipo: tipoItem,
                         quantidadeEsperada: 1,
-                        uid_global: "VTR_PADRAO_" + nome.replace(/\s+/g, '_').toUpperCase()
+                        uid_global: "ITEM_VISTORIA_LIVRE", // Mantém o padrão de rastreio
+                        referencia_template: idSeguro,    // Guarda a referência do que ele é
+                        categoria: "VISTORIA"             // Etiqueta de categoria
                     };
                 })
             }));
