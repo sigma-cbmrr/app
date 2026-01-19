@@ -11986,9 +11986,17 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferencia') {
     // 1. Definições Iniciais
     idListaSendoEditada = uid;
-    // 🟢 IMPORTANTE: Guardamos a coleção atual para o botão "Salvar/Publicar" saber onde gravar depois
-    colecaoAtivaNoEditor = colecaoAlvo; 
     
+    // ✅ CORREÇÃO CIRÚRGICA 1: Auto-ajuste de Coleção
+    // Se o UID começar com 'CHECKLIST_VTR_', forçamos a coleção 'listas_checklist'
+    // Isso evita que o parâmetro padrão ou nulo direcione para a coleção errada.
+    if (uid && uid.startsWith('CHECKLIST_VTR_')) {
+        colecaoAlvo = 'listas_checklist';
+    }
+    
+    colecaoAtivaNoEditor = colecaoAlvo; 
+    console.log(`🔎 Tentando abrir: [${uid}] na coleção: [${colecaoAlvo}]`);
+
     // 2. UI: Transição de Telas
     const menuCards = document.getElementById('menu-editor-listas');
     const palcoEditor = document.getElementById('view-editor-arquitetura');
@@ -12000,29 +12008,31 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
     document.getElementById('edit-vtr-nome').textContent = nome;
     document.getElementById('setores-drag-container').innerHTML = `
         <div style="grid-column:1/-1; text-align:center; padding:50px;">
-            <i class="fas fa-sync fa-spin fa-2x"></i><br>Carregando dados...
+            <i class="fas fa-sync fa-spin fa-2x"></i><br>Consultando base de dados...
         </div>`;
 
     try {
+        // 4. Busca o documento com lógica de retry para consistência eventual
         let doc = await db.collection(colecaoAlvo).doc(uid).get();
         
-        // 🔄 TENTATIVA DE RE-LEITURA SE FALHAR (Consistência Eventual)
         if (!doc.exists) {
-            console.log("Aguardando propagação do banco...");
-            await new Promise(resolve => setTimeout(resolve, 800)); // Espera 800ms
+            console.log("⏱️ Aguardando propagação do banco...");
+            await new Promise(resolve => setTimeout(resolve, 800)); // Delay para indexação do Google
             doc = await db.collection(colecaoAlvo).doc(uid).get();
         }
 
-        if (!doc.exists) throw new Error("Lista não encontrada.");
+        if (!doc.exists) {
+            throw new Error(`O documento ${uid} não foi localizado na coleção ${colecaoAlvo}.`);
+        }
         
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 🛑 MODO INTELIGENTE: Se vier da coleção de checklist ou tiver o tipo correto
+        // 🛑 MODO INTELIGENTE: Identifica se é Checklist (Viatura) ou Conferência (Material)
         isModoVistoria = (colecaoAlvo === 'listas_checklist' || dados.tipo === 'checklist_viatura');
         
-        // Atualiza a Unidade/Origem na tela
-        const labelUnidade = isModoVistoria ? `Viatura: ${dados.ativo_nome}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
+        // Ajusta rótulos dinamicamente
+        const labelUnidade = isModoVistoria ? `Origem: ${dados.unidade_sigla || 'PÁTIO'}` : `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         document.getElementById('edit-vtr-unidade').textContent = labelUnidade;
         
         const inputBusca = document.getElementById('input-busca-estoque');
@@ -12030,19 +12040,19 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo = 'listas_conferenci
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 5. Carrega estoque apenas se NÃO for modo vistoria
+        // 5. Gestão de Estoque Local (Apenas para materiais reais)
         if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
-            estoqueGestorLocal = []; 
+            estoqueGestorLocal = []; // Limpa cache para itens de vistoria técnica
         }
 
         renderizarArquiteturaEditor();
         atualizarSelectSetores();
 
     } catch (e) {
-        console.error("Erro ao abrir editor:", e);
-        alert("Falha ao carregar: " + e.message);
+        console.error("❌ Erro crítico no Editor:", e);
+        alert("Falha ao abrir editor: " + e.message);
         fecharEditorArquitetura();
     }
 }
@@ -13630,6 +13640,7 @@ function finalizarPreCheckEIrProApp() {
 }
 		async function gerenciarChecklistVtr(vtrId, prefixo) {
     const checklistId = `CHECKLIST_VTR_${vtrId}`;
+    const colecaoAlvo = 'listas_checklist'; // Definido no topo para consistência
     console.log("Iniciando gestão para:", checklistId);
     
     try {
@@ -13637,16 +13648,15 @@ function finalizarPreCheckEIrProApp() {
         if (!vtrDoc.exists) return alert("Erro: Viatura não localizada.");
         const vtrData = vtrDoc.data();
 
-        // Referência direta e explícita à nova coleção
-        const colecaoAlvo = 'listas_checklist';
         const docRef = db.collection(colecaoAlvo).doc(checklistId);
-        const doc = await docRef.get();
+        const snapChecklist = await docRef.get();
 
-        if (!doc.exists) {
+        // ✅ SE NÃO EXISTIR, CRIA
+        if (!snapChecklist.exists) {
             console.log("Criando novo checklist na coleção:", colecaoAlvo);
             
             const templateDoc = await db.collection('config_checklists').doc('vtr_padrao').get();
-            if (!templateDoc.exists) throw new Error("Template 'vtr_padrao' não encontrado no Firestore.");
+            if (!templateDoc.exists) throw new Error("Template 'vtr_padrao' não encontrado.");
             const template = templateDoc.data();
 
             const novaListaFormatada = template.setores.map(setor => ({
@@ -13671,39 +13681,33 @@ function finalizarPreCheckEIrProApp() {
                 })
             }));
 
-            // Tenta gravar e captura erro de permissão ou rede
-            try {
-                await docRef.set({
-                    uid: checklistId,
-                    ativo_id: vtrId,
-                    ativo_nome: prefixo,
-                    unidade_id: vtrData.unidade_atual_id || "", 
-                    unidade_sigla: vtrData.unidade_atual_nome || "N/D",
-                    posto_nome: "PÁTIO / MANUTENÇÃO",
-                    ativo: true,
-                    tipo: 'checklist_viatura',
-                    list: novaListaFormatada,
-                    criado_em: firebase.firestore.FieldValue.serverTimestamp(),
-                    criado_por: currentUserData.nome_militar_completo
-                });
-                console.log("✅ Documento gravado com sucesso em listas_checklist");
-            } catch (errSet) {
-                console.error("❌ ERRO AO GRAVAR:", errSet);
-                return alert("Erro de Permissão: Verifique se a coleção 'listas_checklist' está liberada nas regras do Firebase.");
-            }
+            await docRef.set({
+                uid: checklistId,
+                ativo_id: vtrId,
+                ativo_nome: prefixo,
+                unidade_id: vtrData.unidade_atual_id || "", 
+                unidade_sigla: vtrData.unidade_atual_nome || "N/D",
+                posto_nome: "PÁTIO / MANUTENÇÃO",
+                ativo: true,
+                tipo: 'checklist_viatura',
+                list: novaListaFormatada,
+                criado_em: firebase.firestore.FieldValue.serverTimestamp(),
+                criado_por: currentUserData.nome_militar_completo
+            });
+            console.log("✅ Documento gravado com sucesso.");
         }
 
-        // Se chegou aqui, o documento existe ou foi criado
+        // ✅ TRANSIÇÃO DE TELA
         fecharModalVtr();
         switchView('editor-arquitetura'); 
 
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // ✅ CORREÇÃO CIRÚRGICA: Pequeno delay de 400ms para propagação do Firestore
-        // Isso evita o erro de "Lista não encontrada" em coleções recém-criadas.
+        // ✅ TIMEOUT DE PROPAGAÇÃO (Ouvindo a colecaoAlvo correta)
         setTimeout(async () => {
-            console.log("Chamando abertura do editor para:", checklistId);
+            console.log("🚀 Abrindo editor para:", checklistId);
+            // Passamos colecaoAlvo explicitamente para não haver dúvida
             await abrirModalEditorItens(checklistId, prefixo, colecaoAlvo);
         }, 400);
 
