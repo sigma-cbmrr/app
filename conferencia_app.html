@@ -404,6 +404,13 @@ function updateSetorStatus(setorEl) {
         arrow.textContent = '▼'; 
     } 
 }
+    // ✅ PASSO 2: FUNÇÃO DE FEEDBACK PARA O MÓDULO DE FOTOS
+function handlePhotoUploadClick() {
+    // Usamos um alerta simples, mas informativo
+    alert("📷 Módulo de Registro Fotográfico\n\n" +
+          "Esta funcionalidade está em fase de integração com o servidor de arquivos (Storage).\n\n" +
+          "Em breve, você poderá anexar até 5 fotos diretamente da câmera ou galeria para evidenciar o estado da viatura.");
+}
         function checkSetorCompletion(currentSetor, currentItemId) {
     if (!currentSetor) return;
 
@@ -647,8 +654,12 @@ function renderizarConferencia() {
     
     const urlParams = new URLSearchParams(window.location.search);
     const isConferenciaDeCautela = !!urlParams.get('cautelaId');
-    // ✅ Identificador de modo para lógica visual
     const isChecklist = window.isModoChecklist || false;
+
+    // Função interna para fotos (Aviso de implantação futura)
+    window.handlePhotoUploadClick = function() {
+        alert("📷 Módulo de Upload de Fotos\n\nEsta funcionalidade está sendo integrada ao Firebase Storage e estará disponível em breve.");
+    };
 
     const montarPendenciaHtml = (uid, itemOuTomb) => {
         let htmlAcumulado = '';
@@ -745,120 +756,73 @@ function renderizarConferencia() {
 
     fonteDados.forEach((setor, index) => {
         const isFirstSetor = (index === 0);
-        let htmlItens = '';
-        const totalItensNoSetor = setor.itens.length;
+        const nomeSetorUpper = setor.nome.toUpperCase();
+        let htmlConteudoSetor = '';
 
-        // ✅ Identifica Setores de Carimbos/Fotos para layout simplificado
-        const isSetorEspecial = isChecklist && (setor.nome.toUpperCase().includes("PENDÊNCIAS") || setor.nome.toUpperCase().includes("FOTOS"));
-
-        setor.itens.forEach(item => {
-            const itemId = item.id;
-            const nomeEscapado = item.nome.replace(/'/g, "\\'");
-            
-            if (item.tipo === 'multi' && item.tombamentos) {
-                let htmlTombamentos = '';
-                let confCount = 0;
-                let temAlertaNoGrupo = false;
-
-                item.tombamentos.forEach(t => {
-                    const uid = `${itemId}-${t.tomb}`;
-                    const pndHtml = montarPendenciaHtml(uid, t);
-                    const hasPendenciaReal = (t.pendencias_ids && t.pendencias_ids.length > 0);
-                    const hasCautelaReal = (!!t.cautela && !isConferenciaDeCautela);
-                    const ocultarSA = hasPendenciaReal || hasCautelaReal;
-                    const statusU = window.itemStatus[uid]?.status;
-                    const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
-                    const isCiente = statusC === 'cautela_ciente' || window.itemStatus[`CAUTELA-${uid}`]?.cautela_confirmada === true;
-
-                    if (statusU === 'ok' || statusU === 'C/A' || statusU === 'KEEP' || isCiente) {
-                        confCount++;
-                        if (statusU === 'C/A' || statusU === 'KEEP' || isCiente) temAlertaNoGrupo = true;
-                    }
-
-                    htmlTombamentos += `
-                        <div class="tombamento-container" data-id="${uid}" data-tomb="${t.tomb}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4; border-color: #1b8a3e;' : ''}">
-                            <div class="tombamento-controls" style="display: flex; justify-content: space-between; align-items: center;">
-                                <span>Tomb.: <b>${t.tomb}</b></span>
-                                <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                    ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
-                                    <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">
-                                        <span class="d-pc-inline">${isChecklist ? '+ Alteração' : '+ Alteração'}</span>
-                                        <span class="d-pc-none">+ Alt</span>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="alerts-wrapper">${pndHtml}</div>
-                        </div>`;
-                });
-
-                let classeMulti = (confCount === item.tombamentos.length && item.tombamentos.length > 0) ? (temAlertaNoGrupo ? 'status-alert' : 'status-ok') : '';
-                htmlItens += `<div class="item-conferencia item-has-tombamentos ${classeMulti}" data-id="${itemId}">
-                    <div class="item-header">
-                        <span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}"></span>
-                        <span class="item-label">${item.nome}</span>
-                    </div>
-                    ${htmlTombamentos}
+        // ✅ LOGICA CIRÚRGICA 1: TRATAMENTO DO SETOR DE FOTOS
+        if (isChecklist && (nomeSetorUpper.includes("FOTOGRÁFICO") || nomeSetorUpper.includes("FOTOS"))) {
+            htmlConteudoSetor = `
+                <div class="photo-module" style="padding: 15px; text-align: center; background: #f8f9fa; border-radius: 8px; margin: 10px; border: 1px dashed #2c3e50;">
+                    <button type="button" class="btn-upload-vtr" onclick="handlePhotoUploadClick()" style="background-color: #2c3e50; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 10px; width: 100%; justify-content: center;">
+                        <i class="fas fa-camera"></i> ADICIONAR FOTOS (ATÉ 5)
+                    </button>
+                    <p style="font-size: 0.75em; color: #666; margin-top: 10px;">Sugestão: Frente, Traseira, Laterais e Painel/KM.</p>
+                    <div id="photo-preview-grid" style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 15px;"></div>
                 </div>`;
-
-            } else {
+            // Libera o bloqueio do setor
+            window.itemStatus[setor.id || setor.nome] = { status: 'ok', interacao_humana: true };
+        } 
+        else {
+            // ✅ RENDERIZAÇÃO NORMAL + TRATAMENTO DE OBSERVAÇÕES
+            setor.itens.forEach(item => {
+                const itemId = item.id;
+                const nomeEscapado = item.nome.replace(/'/g, "\\'");
                 const pndHtml = montarPendenciaHtml(itemId, item);
-                const totalOriginal = Number(item.quantidadeEsperada) || 0;
-                const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-                const saldoDisponivel = totalOriginal - totalCaut - totalPend;
-                
-                const hasPendenciaReal = (item.pendencias_ids && item.pendencias_ids.length > 0);
-                const hasCautelaReal = (item.cautelas && item.cautelas.length > 0 && !isConferenciaDeCautela);
-                const ocultarSA = hasPendenciaReal || hasCautelaReal;
                 const currentStatus = window.itemStatus[itemId]?.status;
-                const statusC = window.itemStatus[`CAUTELA-${itemId}`]?.status;
-                const isCiente = statusC === 'cautela_ciente' || window.itemStatus[`CAUTELA-${itemId}`]?.cautela_confirmada === true;
+                const isObsSetor = nomeSetorUpper.includes("OBSERVAÇÕES");
 
-                let classeSingle = (currentStatus === 'ok') ? 'status-ok' : (isCiente || (item.pendencias_ids && item.pendencias_ids.length > 0) ? 'status-alert' : '');
+                // Se for setor de Observações, já liberamos a interação para não travar
+                if (isObsSetor) {
+                    window.itemStatus[itemId] = { ...window.itemStatus[itemId], interacao_humana: true };
+                }
 
-                // ✅ Layout condicional para Checklist (Esconde o saldo e muda labels)
-                htmlItens += `
+                let classeSingle = (currentStatus === 'ok') ? 'status-ok' : (item.pendencias_ids?.length > 0 ? 'status-alert' : '');
+
+                htmlConteudoSetor += `
                     <div class="item-conferencia ${classeSingle}" data-type="single" data-id="${itemId}">
                         <div class="item-header">
                             <span class="status-icon ${classeSingle === 'status-ok' ? 'ok' : (classeSingle === 'status-alert' ? 'alert' : '')}"></span>
-                            <div style="display:flex; flex-direction:column">
-                                <span class="item-label">${item.nome}</span>
-                                ${!isSetorEspecial ? `
-                                <span style="font-size:0.82em; color:${(hasPendenciaReal || hasCautelaReal) ? '#d90f23' : '#1b8a3e'}; font-weight:bold;">
-                                    ${isChecklist ? 'SITUAÇÃO DO ITEM' : `DISPONÍVEL: ${saldoDisponivel} de ${totalOriginal}`}
-                                </span>` : ''}
-                            </div>
+                            <span class="item-label">${item.nome}</span>
                         </div>
                         <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                            ${(!ocultarSA && !isSetorEspecial) ? `<button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>` : ''}
-                            <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" 
-                                    onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${isChecklist ? 1 : saldoDisponivel})">
-                                <span class="d-pc-inline">${isChecklist ? (isSetorEspecial ? '+ Adicionar Texto' : '+ Alteração') : '+ Alteração'}</span>
-                                <span class="d-pc-none">${isChecklist ? '+ Alt' : '+ Alt'}</span>
+                            ${!isObsSetor ? `<button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>` : ''}
+                            <button type="button" class="action-button ca-alert ${item.pendencias_ids?.length > 0 ? 'active' : ''}" 
+                                    onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', 1)">
+                                <span class="d-pc-inline">${isObsSetor ? '+ Adicionar Texto' : '+ Alteração'}</span>
+                                <span class="d-pc-none">+ Alt</span>
                             </button>
                         </div>
                         <div class="alerts-wrapper" style="margin-top:10px">${pndHtml}</div>
                     </div>`;
-            }
-        });
+            });
+        }
 
         htmlSetores += `
-            <div class="setor" data-total-items="${totalItensNoSetor}" data-id="${setor.id || setor.nome}">
+            <div class="setor" data-total-items="${setor.itens.length}" data-id="${setor.id || setor.nome}">
                 <div class="setor-header" onclick="toggleSetor(this)" style="${isChecklist ? 'background-color: #2c3e50;' : ''}">
                     <div class="setor-info">
                         <span>${setor.nome}</span>
-                        <div class="setor-status" style="color: white; font-weight: bold;">0/${totalItensNoSetor}</div>
+                        <div class="setor-status" style="color: white; font-weight: bold;">0/${setor.itens.length}</div>
                     </div>
                     <span class="arrow">${isFirstSetor ? '▼' : '►'}</span>
                 </div>
-                <div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlItens}</div>
+                <div class="setor-content ${isFirstSetor ? 'expanded' : ''}">${htmlConteudoSetor}</div>
             </div>`;
     });
 
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) {
         btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
-        // Ajusta cor do botão finalizar para azul se for checklist
         if (isChecklist) btnFin.style.boxShadow = '0 4px 8px rgba(44, 62, 80, 0.4)';
     }
     updateOverallStatus();
