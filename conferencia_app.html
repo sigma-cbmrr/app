@@ -1111,7 +1111,14 @@ async function carregarDadosRemotos() {
     btn.disabled = true;
 
     try {
-        const p = userInfo;
+        // ✅ CORREÇÃO 1: Proteção do objeto userInfo (p)
+        const p = {
+            uid: userInfo?.uid || "ND",
+            postoGraduacao: userInfo?.postoGraduacao || "ND",
+            quadro: userInfo?.quadro || "ND",
+            nomeGuerra: userInfo?.nomeGuerra || "ND"
+        };
+
         const militarInfoEl = document.getElementById('militar-info');
         const conferenteCompleto = militarInfoEl ? 
             militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : 
@@ -1121,7 +1128,6 @@ async function carregarDadosRemotos() {
         const timestampAgora = firebase.firestore.Timestamp.now();
         
         const urlParams = new URLSearchParams(window.location.search);
-        // ✅ Ajuste Cirúrgico: Fallback para evitar undefined nas variáveis de VTR
         const kmEntrada = urlParams.get('km') || "0";
         const combustivelEntrada = urlParams.get('combustivel') || "N/D";
         const obsGeraisEl = document.getElementById('obs-geral-vistoria');
@@ -1150,9 +1156,9 @@ async function carregarDadosRemotos() {
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
-                                id: uid, nomeCompleto: nomeParaRelatorio, status: 'S/A',
+                                id: uid || "", nomeCompleto: nomeParaRelatorio || "", status: 'S/A',
                                 situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                                quantidade: qtdFix, setor: setor.nome, obs: ""
+                                quantidade: qtdFix, setor: setor.nome || "", obs: ""
                             });
                             return entidade;
                         }
@@ -1164,8 +1170,8 @@ async function carregarDadosRemotos() {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
                                     entidade.historico_vida.push({
                                         evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
-                                        id_pendencia_origem: pendenciaMorta.id, quem: res.resolvido_por,
-                                        data: res.data_solucao, detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
+                                        id_pendencia_origem: pendenciaMorta.id || "", quem: res.resolvido_por || "",
+                                        data: res.data_solucao || "", detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
                                     });
                                     entidade.pendencias_ids.splice(idx, 1);
                                     if (res.qtd_remanescente > 0) {
@@ -1173,6 +1179,7 @@ async function carregarDadosRemotos() {
                                             ...pendenciaMorta, id: "PEND_" + Date.now() + "_RES",
                                             quantidade: res.qtd_remanescente, descricao: pendenciaMorta.descricao + " (SALDO)",
                                             herdado_de: pendenciaMorta.id
+                                            // ✅ Removido campo 'undefined' em potencial
                                         });
                                     }
                                 }
@@ -1180,12 +1187,12 @@ async function carregarDadosRemotos() {
                         }
 
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
-                            if (p.id.startsWith('TEMP-')) {
+                            if (p.id && String(p.id).startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
                                 entidade.historico_vida.push({
                                     evento: isChecklist ? "ALTERACAO_VISTORIA" : "NOVA_PENDENCIA", 
-                                    id_pendencia: novoId, quem: p.autor_nome,
-                                    data: p.data_criacao, detalhes: `${p.quantidade}un - ${p.descricao}`
+                                    id_pendencia: novoId, quem: p.autor_nome || "",
+                                    data: p.data_criacao || "", detalhes: `${p.quantidade}un - ${p.descricao || ""}`
                                 });
                                 return { ...p, id: novoId };
                             }
@@ -1221,14 +1228,14 @@ async function carregarDadosRemotos() {
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
                         const dRel = {
-                            id: uid, 
+                            id: uid || "", 
                             uid_global: entidade.uid_global || "",
-                            nomeCompleto: nomeParaRelatorio, 
+                            nomeCompleto: nomeParaRelatorio || "", 
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                             pendencias_ids: pendenciasParaRelatorio,
                             quantidade: quantidadeReal,
-                            setor: setor.nome, 
+                            setor: setor.nome || "", 
                             obs: pendenciasParaRelatorio.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
 
@@ -1249,7 +1256,7 @@ async function carregarDadosRemotos() {
 
         const batch = db.batch();
         
-        const colecaoListaOrigem = isChecklist ? 'listas_checklist' : COLECAO_LISTAS;
+        const colecaoListaOrigem = isChecklist ? 'listas_checklist' : (typeof COLECAO_LISTAS !== 'undefined' ? COLECAO_LISTAS : 'listas_conferencia');
         const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
 
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
@@ -1274,9 +1281,9 @@ async function carregarDadosRemotos() {
             itensCaa: itensCaa, 
             itensRelatorio: itensRelatorio,
             modo: isChecklist ? 'CHECKLIST_VISTORIA' : 'CONFERENCIA_PADRAO',
-            km_entrada: kmEntrada,
-            combustivel_entrada: combustivelEntrada,
-            obs_gerais_vistoria: obsGeraisTexto,
+            km_entrada: kmEntrada || "0",
+            combustivel_entrada: combustivelEntrada || "N/D",
+            obs_gerais_vistoria: obsGeraisTexto || "",
             fotos: [] 
         });
 
@@ -1289,7 +1296,7 @@ async function carregarDadosRemotos() {
                 const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
                 const resumoPendencias = (itemAlterado.pendencias_ids || [])
                     .filter(p => p.id && (String(p.id).startsWith('PEND-') || String(p.id).startsWith('TEMP-'))) 
-                    .map(p => p.descricao)
+                    .map(p => p.descricao || "")
                     .join(' | ');
 
                 if (resumoPendencias) {
@@ -1297,9 +1304,9 @@ async function carregarDadosRemotos() {
                         eventos: firebase.firestore.FieldValue.arrayUnion({
                             data: new Date().toLocaleString('pt-BR'),
                             evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
-                            quem: conferenteCompleto,
+                            quem: conferenteCompleto || "",
                             detalhes: `⚠️ ${isChecklist ? 'Vistoria' : 'Conferência'} em ${localNome}: ${resumoPendencias}`,
-                            lista_id: LISTA_ID
+                            lista_id: LISTA_ID || ""
                         })
                     }, { merge: true });
                 }
