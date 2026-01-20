@@ -1098,6 +1098,10 @@ async function carregarDadosRemotos() {
     if (btn.disabled && btn.textContent.includes("SALVANDO")) return;
 
     if (!LISTA_ID) {
+        console.warn("Redirecionando fluxo: LISTA_ID ausente.");
+        if (typeof finalizarRecebimentoDevolucao === 'function' && CAUTELA_ID) {
+            return finalizarRecebimentoDevolucao(window._dadosCautelaOriginal || dadosConferencia[0]);
+        }
         alert("Erro: Identificador da lista não encontrado.");
         return;
     }
@@ -1107,7 +1111,7 @@ async function carregarDadosRemotos() {
     btn.disabled = true;
 
     try {
-        // ✅ Ajuste Cirúrgico: Garante que userInfo nunca seja undefined
+        // ✅ Proteção do objeto userInfo (p) para evitar undefined no Firestore
         const p = {
             uid: userInfo?.uid || "S_UID",
             postoGraduacao: userInfo?.postoGraduacao || "ND",
@@ -1152,9 +1156,13 @@ async function carregarDadosRemotos() {
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
-                                id: uid || "S_ID", nomeCompleto: nomeParaRelatorio || "Item", status: 'S/A',
+                                id: String(uid || ""), 
+                                nomeCompleto: String(nomeParaRelatorio || ""), 
+                                status: 'S/A',
                                 situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                                quantidade: qtdFix, setor: setor.nome || "GERAL", obs: ""
+                                quantidade: qtdFix, 
+                                setor: String(setor.nome || ""), 
+                                obs: ""
                             });
                             return entidade;
                         }
@@ -1166,15 +1174,18 @@ async function carregarDadosRemotos() {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
                                     entidade.historico_vida.push({
                                         evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
-                                        id_pendencia_origem: pendenciaMorta.id || "S_ID", quem: res.resolvido_por || conferenteCompleto,
-                                        data: res.data_solucao || new Date().toLocaleDateString('pt-BR'), 
+                                        id_pendencia_origem: String(pendenciaMorta.id || ""), 
+                                        quem: String(res.resolvido_por || ""),
+                                        data: String(res.data_solucao || ""), 
                                         detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
                                     });
                                     entidade.pendencias_ids.splice(idx, 1);
                                     if (res.qtd_remanescente > 0) {
                                         entidade.pendencias_ids.push({
-                                            ...pendenciaMorta, id: "PEND_" + Date.now() + "_RES",
-                                            quantidade: res.qtd_remanescente, descricao: pendenciaMorta.descricao + " (SALDO)",
+                                            ...pendenciaMorta, 
+                                            id: "PEND_" + Date.now() + "_RES",
+                                            quantidade: res.qtd_remanescente, 
+                                            descricao: pendenciaMorta.descricao + " (SALDO)",
                                             herdado_de: pendenciaMorta.id
                                         });
                                     }
@@ -1187,8 +1198,9 @@ async function carregarDadosRemotos() {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
                                 entidade.historico_vida.push({
                                     evento: isChecklist ? "ALTERACAO_VISTORIA" : "NOVA_PENDENCIA", 
-                                    id_pendencia: novoId, quem: p.autor_nome || conferenteCompleto,
-                                    data: p.data_criacao || new Date().toLocaleDateString('pt-BR'), 
+                                    id_pendencia: novoId, 
+                                    quem: String(p.autor_nome || ""),
+                                    data: String(p.data_criacao || ""), 
                                     detalhes: `${p.quantidade}un - ${p.descricao || ""}`
                                 });
                                 return { ...p, id: novoId };
@@ -1201,8 +1213,8 @@ async function carregarDadosRemotos() {
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
                             entidade.cautelas.forEach(c => {
                                 pendenciasParaRelatorio.push({
-                                    autor_nome: c.emitente || "SISTEMA",
-                                    data_criacao: c.data || "",
+                                    autor_nome: String(c.emitente || "SISTEMA"),
+                                    data_criacao: String(c.data || ""),
                                     quantidade: c.quantidade || 0,
                                     descricao: `Cautelado para ${c.destinatario} (ID: ${c.id}).`,
                                     status_gestao: "CAUTELADO"
@@ -1212,8 +1224,8 @@ async function carregarDadosRemotos() {
                         if (entidade.cautela && entidade.cautela.id) {
                             const c = entidade.cautela;
                             pendenciasParaRelatorio.push({
-                                autor_nome: c.emitente || "SISTEMA",
-                                data_criacao: c.data || "",
+                                autor_nome: String(c.emitente || "SISTEMA"),
+                                data_criacao: String(c.data || ""),
                                 quantidade: c.quantidade || 1,
                                 descricao: `Cautelado para ${c.destinatario} (ID: ${c.id}).`,
                                 status_gestao: "CAUTELADO"
@@ -1225,14 +1237,14 @@ async function carregarDadosRemotos() {
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
                         const dRel = {
-                            id: uid || "S_ID", 
-                            uid_global: entidade.uid_global || "",
-                            nomeCompleto: nomeParaRelatorio || "Item", 
+                            id: String(uid || ""), 
+                            uid_global: String(entidade.uid_global || ""),
+                            nomeCompleto: String(nomeParaRelatorio || ""), 
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                             pendencias_ids: pendenciasParaRelatorio,
                             quantidade: quantidadeReal,
-                            setor: setor.nome || "GERAL", 
+                            setor: String(setor.nome || ""), 
                             obs: pendenciasParaRelatorio.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
 
@@ -1259,28 +1271,28 @@ async function carregarDadosRemotos() {
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
 
         batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
-            lista_id: LISTA_ID || "ND", 
-            local_nome: localNome || "ND", 
-            conferente_uid: p.uid || "S_UID",
-            conferente_completo: conferenteCompleto || "ND", 
+            lista_id: String(LISTA_ID || ""), 
+            local_nome: String(localNome || ""), 
+            conferente_uid: String(p.uid || ""),
+            conferente_completo: String(conferenteCompleto || ""), 
             timestamp_ultima_conferencia: timestampAgora,
             tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
         }, { merge: true });
         
         batch.set(db.collection(colecaoResultadosDestino).doc(), {
-            local: localNome || "ND", 
-            lista_id: LISTA_ID || "ND", 
-            conferente_uid: p.uid || "S_UID", 
-            conferente: conferenteCompleto || "ND",
+            local: String(localNome || ""), 
+            lista_id: String(LISTA_ID || ""), 
+            conferente_uid: String(p.uid || ""), 
+            conferente: String(conferenteCompleto || ""),
             timestamp: timestampAgora, 
             totalItensConferidos: itensRelatorio.length,
             totalCaa: totalCaa, 
-            itensCaa: itensCaa, 
-            itensRelatorio: itensRelatorio,
+            itensCaa: itensCaa || [], 
+            itensRelatorio: itensRelatorio || [],
             modo: isChecklist ? 'CHECKLIST_VISTORIA' : 'CONFERENCIA_PADRAO',
-            km_entrada: kmEntrada || "0",
-            combustivel_entrada: combustivelEntrada || "N/D",
-            obs_gerais_vistoria: obsGeraisTexto || "",
+            km_entrada: String(kmEntrada || "0"),
+            combustivel_entrada: String(combustivelEntrada || "N/D"),
+            obs_gerais_vistoria: String(obsGeraisTexto || ""),
             fotos: [] 
         });
 
@@ -1293,7 +1305,7 @@ async function carregarDadosRemotos() {
                 const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
                 const resumoPendencias = (itemAlterado.pendencias_ids || [])
                     .filter(p => p.id && (String(p.id).startsWith('PEND-') || String(p.id).startsWith('TEMP-'))) 
-                    .map(p => p.descricao || "")
+                    .map(p => String(p.descricao || ""))
                     .join(' | ');
 
                 if (resumoPendencias) {
@@ -1301,9 +1313,9 @@ async function carregarDadosRemotos() {
                         eventos: firebase.firestore.FieldValue.arrayUnion({
                             data: new Date().toLocaleString('pt-BR'),
                             evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
-                            quem: conferenteCompleto || "ND",
+                            quem: String(conferenteCompleto || ""),
                             detalhes: `⚠️ ${isChecklist ? 'Vistoria' : 'Conferência'} em ${localNome}: ${resumoPendencias}`,
-                            lista_id: LISTA_ID || "ND"
+                            lista_id: String(LISTA_ID || "")
                         })
                     }, { merge: true });
                 }
