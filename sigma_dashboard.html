@@ -4008,7 +4008,6 @@ async function updateOperacionalCards() {
     const cautelaReceiveCountEl = document.getElementById('op-cautela-receive-count');
     const myActiveCautelaCountEl = document.getElementById('op-my-active-cautela-count');
     
-    // 🛑 VILÃO 1: Obtém o UID para todas as consultas relacionadas ao usuário logado
     const conferenteUid = firebase.auth().currentUser.uid;
     if (!conferenteUid || !ul || !countEl || !cautelaReceiveCountEl || !myActiveCautelaCountEl) {
         console.warn("Elemento de card operacional ou UID ausente. Pulando atualização.");
@@ -4016,46 +4015,60 @@ async function updateOperacionalCards() {
     }
     
     try {
-        // --- 1. CONSULTA DE TODAS AS CONFERÊNCIAS (SNAP TOTAL) ---
-        // 🛑 CORREÇÃO CRÍTICA: Filtra por conferente_uid (imutável)
-        const snapTotal = await db.collection(COLECAO_RESULTADOS)
-            .where('conferente_uid', '==', conferenteUid) 
-            .orderBy('timestamp', 'desc') // Ordena para pegar os mais recentes
-            .get();
+        // --- 1. CONSULTA DUPLA (MATERIAIS E VISTORIAS) ---
+        // Buscamos os últimos registros de ambas as coleções para este usuário
+        const [snapMateriais, snapChecklists] = await Promise.all([
+            db.collection('resultados_conferencias')
+                .where('conferente_uid', '==', conferenteUid)
+                .orderBy('timestamp', 'desc')
+                .limit(50)
+                .get(),
+            db.collection('resultados_checklist')
+                .where('conferente_uid', '==', conferenteUid)
+                .orderBy('timestamp', 'desc')
+                .limit(50)
+                .get()
+        ]);
 
-        const totalConferences = snapTotal.size; 
-        countEl.textContent = totalConferences; 
+        // Unifica os documentos na memória para processar a "Lista de Hoje"
+        let todosDocs = [];
+        snapMateriais.forEach(doc => todosDocs.push(doc.data()));
+        snapChecklists.forEach(doc => todosDocs.push(doc.data()));
 
-        // --- 2. CONTAGEM DE CAUTELAS A RECEBER (NOVO) ---
-        const totalCautelasAReceber = await getCautelasAReceberCount();
+        // Atualiza o contador total (Soma das duas frentes de trabalho)
+        const totalGeralAtividades = snapMateriais.size + snapChecklists.size;
+        countEl.textContent = totalGeralAtividades; 
+
+        // --- 2. OUTROS CONTADORES (CAUTELAS) ---
+        const [totalCautelasAReceber, totalMyActiveCautelas] = await Promise.all([
+            getCautelasAReceberCount(),
+            countActiveCautelas()
+        ]);
         cautelaReceiveCountEl.textContent = totalCautelasAReceber; 
-        
-        // --- 3. CONTAR MINHAS CAUTELAS ATIVAS (NOVO) ---
-        const totalMyActiveCautelas = await countActiveCautelas();
         myActiveCautelaCountEl.textContent = totalMyActiveCautelas; 
         
-        // --- 4. FILTRAGEM PARA CONFERÊNCIAS DE HOJE (DO SNAP TOTAL) ---
+        // --- 3. FILTRAGEM PARA "HOJE" E RENDERIZAÇÃO ---
         const hojeStr = new Date().toLocaleDateString('pt-BR');
-        let html = '';
         
-        snapTotal.docs.forEach(doc => {
-            const data = doc.data();
+        // Ordena por timestamp antes de filtrar
+        todosDocs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+
+        let html = '';
+        todosDocs.forEach(data => {
             const dt = data.timestamp.toDate();
-            
             // Filtro de data local (apenas as que caem na data de hoje)
             if(dt.toLocaleDateString('pt-BR') === hojeStr) {
                 html += criarItemHistoricoHTML(data);
             }
         });
         
-        // Atualiza a lista de hoje
         ul.innerHTML = html ||
-        '<li style="padding:15px; text-align:center; color:#999;">Nenhuma conferência hoje.</li>';
+        '<li style="padding:15px; text-align:center; color:#999;">Nenhuma atividade hoje.</li>';
         
     } catch(e) { 
-        console.error("Erro ao carregar dados operacionais:", e);
+        console.error("Erro ao carregar dados operacionais unificados:", e);
         if(countEl) countEl.textContent = 'Erro';
-        if(ul) ul.innerHTML = 'Erro.';
+        if(ul) ul.innerHTML = '<li style="text-align:center; color:red;">Erro ao carregar lista de hoje.</li>';
     }
 }
         
@@ -4408,9 +4421,8 @@ function confirmarInicioMaterial() {
     
     if (!ul || !conferenteUid) return;
 
-    ul.innerHTML = '<li>Buscando...</li>';
+    ul.innerHTML = '<li style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Buscando atividades...</li>';
     
-    // 1. Cria objetos Date dos campos de input, garantindo o início e fim do dia
     const startDateInput = document.getElementById('my-hist-start').value;
     const endDateInput = document.getElementById('my-hist-end').value;
 
@@ -4419,94 +4431,114 @@ function confirmarInicioMaterial() {
         return;
     }
 
-    // 2. Cria Timestamps para filtro do Firestore
     const dI = new Date(startDateInput + 'T00:00:00'); 
     const dF = new Date(endDateInput + 'T23:59:59'); 
-
     const startTimestamp = firebase.firestore.Timestamp.fromDate(dI);
     const endTimestamp = firebase.firestore.Timestamp.fromDate(dF);
 
     try {
-        // 🛑 CORREÇÃO CRÍTICA: Filtra por conferente_uid
-        const snap = await db.collection(COLECAO_RESULTADOS)
-            .where('conferente_uid', '==', conferenteUid) 
-            .where('timestamp', '>=', startTimestamp) // Data de início
-            .where('timestamp', '<=', endTimestamp)    // Data de fim
-            .orderBy('timestamp', 'desc') // Ordena (necessário ao usar where em timestamp)
-            .limit(100)
-            .get();
+        // ✅ BUSCA DUPLA: Dispara as duas consultas ao mesmo tempo
+        const [snapMateriais, snapChecklists] = await Promise.all([
+            db.collection('resultados_conferencias')
+                .where('conferente_uid', '==', conferenteUid)
+                .where('timestamp', '>=', startTimestamp)
+                .where('timestamp', '<=', endTimestamp)
+                .get(),
+            db.collection('resultados_checklist')
+                .where('conferente_uid', '==', conferenteUid)
+                .where('timestamp', '>=', startTimestamp)
+                .where('timestamp', '<=', endTimestamp)
+                .get()
+        ]);
             
         let docs = [];
-        snap.forEach(doc => docs.push(doc.data()));
+        
+        // Junta os resultados de materiais
+        snapMateriais.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
+        
+        // Junta os resultados de checklists
+        snapChecklists.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
+
+        // ✅ ORDENAÇÃO: Como vieram de coleções diferentes, precisamos ordenar por data na memória
+        docs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
 
         let html = '';
         docs.forEach(d => {
             html += criarItemHistoricoHTML(d);
         });
         
-        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nada encontrado no período selecionado.</li>';
+        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma atividade encontrada no período.</li>';
         
     } catch(e){ 
-        console.error("Erro no loadMyHistory:", e);
-        ul.innerHTML='<li>Erro ao carregar histórico.</li>';
+        console.error("Erro no loadMyHistory unificado:", e);
+        ul.innerHTML='<li style="color:red;">Erro ao carregar seu histórico de atividades.</li>';
     }
 }
 	async function loadGlobalHistory() {
     const ul = document.getElementById('global-history-list');
     const localFilter = document.getElementById('glob-hist-local').value;
-    const conferenteFilter = document.getElementById('glob-hist-user').value; // Valor do Conferente (Nome Completo)
+    const conferenteFilter = document.getElementById('glob-hist-user').value; 
     
     if (!ul) return;
 
-    ul.innerHTML = '<li>Buscando...</li>';
+    ul.innerHTML = '<li style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Buscando histórico global...</li>';
     
-    // Captura o valor dos filtros
     const dI = new Date(document.getElementById('glob-hist-start').value + 'T00:00:00');
     const dF = new Date(document.getElementById('glob-hist-end').value + 'T23:59:59');
+    const startTS = firebase.firestore.Timestamp.fromDate(dI);
+    const endTS = firebase.firestore.Timestamp.fromDate(dF);
 
     try {
-        // 1. Inicia a consulta com os filtros de data (obrigatório para orderBy)
-        let queryRef = db.collection(COLECAO_RESULTADOS)
-            .where('timestamp', '>=', firebase.firestore.Timestamp.fromDate(dI))
-            .where('timestamp', '<=', firebase.firestore.Timestamp.fromDate(dF))
-            .orderBy('timestamp', 'desc');
+        // 1. Prepara as referências das duas coleções
+        let refConf = db.collection('resultados_conferencias').where('timestamp', '>=', startTS).where('timestamp', '<=', endTS);
+        let refCheck = db.collection('resultados_checklist').where('timestamp', '>=', startTS).where('timestamp', '<=', endTS);
 
-        // 2. CORREÇÃO: Aplica o filtro 'where' se um Conferente específico for selecionado (Usa o nome, pois o filtro é baseado no nome)
+        // 2. Aplica filtro de Conferente (por nome) em ambas, se selecionado
         if (conferenteFilter) {
-            // Nota: Este filtro usará o nome completo, o que pode causar problemas se o militar for promovido *APÓS* a conferência.
-            // Para relatórios globais, geralmente se aceita o nome exato da conferência.
-            queryRef = queryRef.where('conferente', '==', conferenteFilter);
+            refConf = refConf.where('conferente', '==', conferenteFilter);
+            refCheck = refCheck.where('conferente', '==', conferenteFilter);
         }
 
-        const snap = await queryRef.limit(100).get();
-        
-        // Carrega o mapeamento de Unidades (necessário para o filtro de Gestor)
+        // 3. Executa as buscas em paralelo
+        const [snapConf, snapCheck] = await Promise.all([
+            refConf.orderBy('timestamp', 'desc').limit(100).get(),
+            refCheck.orderBy('timestamp', 'desc').limit(100).get()
+        ]);
+
+        // 4. Carrega mapeamento de unidades
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         const listToUnitMap = {};
         Object.keys(rotas).forEach(key => listToUnitMap[rotas[key].nome] = rotas[key].unidade || 'GERAL');
 
         let docs = [];
-        snap.forEach(d => docs.push(d.data()));
+        snapConf.forEach(d => docs.push({ ...d.data(), id_doc: d.id }));
+        snapCheck.forEach(d => docs.push({ ...d.data(), id_doc: d.id }));
+
+        // 5. Ordenação e Filtragem por Unidade/Local
+        docs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
 
         let html = '';
         docs.forEach(d => {
-            const localNome = d.local.split(' - ')[1] || d.local;
-            const unit = listToUnitMap[localNome] || 'GERAL';
+            // Extrai o nome do local para bater com o mapa de unidades
+            // Ex: "VISTORIA: ABT-18" vira "ABT-18" ou "1º PEL - ALMOX" vira "ALMOX"
+            const localLimpo = d.local.includes(': ') ? d.local.split(': ')[1] : (d.local.split(' - ')[1] || d.local);
+            const unit = listToUnitMap[localLimpo] || 'GERAL';
 
-            // Filtro de segurança (Gestor)
+            // Filtro de Hierarquia (Gestor de Unidade só vê a dele)
             if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; 
             
-            // Filtro Local: só aplica na memória se for necessário
-            if(!localFilter || localNome === localFilter) {
+            // Filtro por Local específico do formulário
+            if(!localFilter || localLimpo === localFilter) {
                 html += criarItemHistoricoHTML(d);
             }
         });
 
-        ul.innerHTML = html || '<li>Nada encontrado.</li>';
+        ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhum registro encontrado com estes filtros.</li>';
+
     } catch(e){ 
-        console.error("Erro ao carregar histórico global:", e);
-        ul.innerHTML='Erro ao carregar histórico.';
+        console.error("Erro no loadGlobalHistory unificado:", e);
+        ul.innerHTML='<li style="color:red;">Erro ao processar histórico global.</li>';
     }
 }
        function criarItemHistoricoHTML(data) {
@@ -5141,12 +5173,17 @@ function formatarDataSimples(timestamp) {
     return date.toLocaleDateString('pt-BR');
 }
 	
-// --- PDF GENERATOR (FUNÇÃO ATUALIZADA) ---
+// --- PDF GENERATOR (VERSÃO UNIFICADA INTEGRAL: MATERIAL + VISTORIA) ---
 function reimprimirPDF(data) {
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
+
+        // ✅ Identificação de Modo e Definição de Identidade Visual
+        const isChecklist = data.modo === 'CHECKLIST_VISTORIA';
+        const COR_PRIMARIA = isChecklist ? [44, 62, 80] : [128, 0, 32]; // Azul Petróleo vs Bordô
+        const TITULO_DOC = isChecklist ? "RELATÓRIO DE VISTORIA DE VIATURA" : "RELATÓRIO DE CONFERÊNCIA";
 
         const logoDraw = (domId, x) => { 
             const el = document.querySelector(`img[src*="${domId}"]`);
@@ -5163,32 +5200,50 @@ function reimprimirPDF(data) {
         logoDraw('cbmrr.png', MARGIN);
         logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
 
+        // Cabeçalho Institucional
         doc.setFontSize(10).setTextColor(51).setFont('helvetica', 'bold');
         doc.text('GOVERNO DE RORAIMA', PG_W/2, 15, {align:'center'}); 
         doc.setTextColor(217,15,35).text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W/2, 20, {align:'center'}); 
         doc.setTextColor(51).setFont('helvetica', 'italic').text('"Amazônia: patrimônio dos brasileiros"', PG_W/2, 25, {align:'center'});
-        doc.setFontSize(14).setTextColor(0).setFont('helvetica', 'bold').text("RELATÓRIO DE CONFERÊNCIA", PG_W/2, 35, {align:'center'});
+        
+        // Título Dinâmico
+        doc.setFontSize(14).setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]).setFont('helvetica', 'bold').text(TITULO_DOC, PG_W/2, 35, {align:'center'});
 
-        doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), 25, 2, 2, 'FD');
+        // Container de Informações (Altura variável para caber KM se for checklist)
+        const boxHeight = isChecklist ? 32 : 25;
+        doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), boxHeight, 2, 2, 'FD');
         
         const dataTimestamp = data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000) : new Date();
         
-        doc.setFontSize(10).setTextColor(50).setFont('helvetica','bold').text('Local:', MARGIN + 5, 46); 
+        doc.setFontSize(9).setTextColor(50).setFont('helvetica','bold').text(isChecklist ? 'Viatura:' : 'Local:', MARGIN + 5, 46); 
         doc.setFont('helvetica','normal').text(data.local || '', MARGIN + 35, 46); 
         doc.setFont('helvetica','bold').text('Conferente:', MARGIN + 5, 52); 
         doc.setFont('helvetica','normal').text(data.conferente || '', MARGIN + 35, 52); 
         doc.setFont('helvetica','bold').text('Data/Hora:', MARGIN + 5, 58); 
         doc.setFont('helvetica','normal').text(dataTimestamp.toLocaleString('pt-BR'), MARGIN + 35, 58); 
         
-        doc.setFont('helvetica','bold').setTextColor(128, 0, 32).text(`TOTAL: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
+        // ✅ [VISTORIA] Injeção de KM e Combustível no Cabeçalho
+        if (isChecklist) {
+            doc.setFont('helvetica','bold').text('Odômetro:', MARGIN + 5, 64);
+            doc.setFont('helvetica','normal').text(`${data.km_entrada || '0'} KM`, MARGIN + 35, 64);
+            doc.setFont('helvetica','bold').text('Tanque:', MARGIN + 100, 64);
+            doc.setFont('helvetica','normal').text(`${data.combustivel_entrada || 'N/D'}`, MARGIN + 120, 64);
+        }
 
+        doc.setFont('helvetica','bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]).text(`ITENS: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
+
+        // Montagem da Tabela
         let tableBody = [];
-        const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = [60, 60, 60];
+        const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = isChecklist ? [44, 62, 80] : [60, 60, 60];
         let listaParaImprimir = data.itensRelatorio || data.itensCaa || [];
         
         if (listaParaImprimir.length > 0) {
             let currentSector = null;
             listaParaImprimir.forEach(item => {
+                // Pular setores de Fotos ou Observações para não duplicar na tabela (eles terão seções próprias no final)
+                const nomeSetor = (item.setor || "").toUpperCase();
+                if (isChecklist && (nomeSetor.includes("FOTO") || nomeSetor.includes("OBSERVAÇ"))) return;
+
                 let setorItem = item.setor || "ITENS GERAIS";
                 if(setorItem !== currentSector) {
                     tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
@@ -5196,56 +5251,82 @@ function reimprimirPDF(data) {
                 }
 
                 let finalObs = '-';
-                
-                if (item.pendencias_ids && Array.isArray(item.pendencias_ids) && item.pendencias_ids.length > 0) {
-                    finalObs = item.pendencias_ids.map(p => {
-                        const autor = p.autor_nome || 'Não identificado';
-                        const dataP = p.data_criacao || '';
-                        const desc = p.descricao || '';
-                        const qtd = String(p.quantidade || 0).padStart(2, '0');
-                        // Formatação solicitada: Bullet + Cabeçalho + Quantidade + Descrição
-                        return `\u2022 Por ${autor} em ${dataP}:\n  ${qtd}un - ${desc}`;
-                    }).join('\n\n'); // Espaçamento extra entre pendências diferentes
-                } 
-                else if (item.obs && item.obs !== "") {
+                if (item.pendencias_ids && item.pendencias_ids.length > 0) {
+                    finalObs = item.pendencias_ids.map(p => `\u2022 ${p.autor_nome} (${p.data_criacao}): ${p.descricao}`).join('\n');
+                } else if (item.obs) {
                     finalObs = item.obs;
                 }
 
                 let bgStatus = (item.status === 'C/A') ? RED_FILL : GREEN_FILL;
-
+                
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
-                    { content: `QTD: ${item.quantidade || 0}`, styles: { halign: 'center' } }, 
+                    { content: isChecklist ? '1 un.' : `${item.quantidade || 0} un.`, styles: { halign: 'center' } }, 
                     { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center' } }, 
-                    { content: finalObs, styles: { halign: 'left', fontSize: 7 } } // Reduzi levemente a fonte da obs para caber o novo layout
+                    { content: finalObs, styles: { halign: 'left', fontSize: 7 } }
                 ]);
             });
         }
         
         doc.autoTable({ 
-            startY: 70, 
-            head: [['Material', 'Quantidade', 'Status', 'Observação']], 
+            startY: 45 + boxHeight, 
+            head: [['Descrição do Item', 'Qtd', 'Status', 'Observações / Pendências']], 
             body: tableBody, 
             theme: 'striped', 
             styles: { fontSize: 8, valign: 'middle', textColor: 51, cellPadding: 2 }, 
-            columnStyles: { 0:{cellWidth:70}, 1:{cellWidth:18}, 2:{cellWidth:18}, 3:{cellWidth:'auto'} }, 
-            headStyles: { fillColor: [128, 0, 32], textColor: 255, fontStyle: 'bold', halign: 'center' } 
+            columnStyles: { 0:{cellWidth:75}, 1:{cellWidth:15}, 2:{cellWidth:15}, 3:{cellWidth:'auto'} }, 
+            headStyles: { fillColor: COR_PRIMARIA, textColor: 255, fontStyle: 'bold', halign: 'center' } 
         });
 
+        let finalY = doc.lastAutoTable.finalY + 10;
+
+        // ✅ [VISTORIA] Seção de Observações Gerais (Considerações Finais)
+        if (isChecklist && data.obs_gerais_vistoria) {
+            if (finalY > 250) { doc.addPage(); finalY = 20; }
+            doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]);
+            doc.text("CONSIDERAÇÕES GERAIS DA VISTORIA:", MARGIN, finalY);
+            doc.setFont('helvetica', 'normal').setTextColor(50).setFontSize(9);
+            const splitObs = doc.splitTextToSize(data.obs_gerais_vistoria, PG_W - (MARGIN * 2));
+            doc.text(splitObs, MARGIN, finalY + 6);
+            finalY += (splitObs.length * 5) + 12;
+        }
+
+        // ✅ [VISTORIA] Seção de Registro Fotográfico (Anexos)
+        if (isChecklist) {
+            if (finalY > 230) { doc.addPage(); finalY = 20; }
+            doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]);
+            doc.text("EVIDÊNCIAS FOTOGRÁFICAS (ANEXOS):", MARGIN, finalY);
+            
+            // Layout de Grade para Fotos (3 colunas)
+            const boxW = 55, boxH = 40, spacing = 5;
+            for(let i=0; i<5; i++) {
+                const col = i % 3;
+                const row = Math.floor(i / 3);
+                const xPos = MARGIN + (col * (boxW + spacing));
+                const yPos = finalY + 5 + (row * (boxH + spacing));
+                
+                doc.setDrawColor(200).setFillColor(245).rect(xPos, yPos, boxW, boxH, 'F');
+                doc.setFontSize(7).setTextColor(150).text(`FOTO ${i+1}`, xPos + boxW/2, yPos + boxH/2, {align:'center'});
+                doc.text("(Aguardando Integração Storage)", xPos + boxW/2, yPos + boxH/2 + 4, {align:'center'});
+            }
+        }
+
+        // Rodapé de Autenticidade
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
-            doc.setFontSize(8); doc.setTextColor(100);
-            doc.text('SIGMA - Sistema Integrado de Gestão de Materiais', MARGIN, doc.internal.pageSize.height-10);
+            doc.setFontSize(8).setTextColor(100).setFont('helvetica', 'normal');
+            doc.text('SIGMA - Sistema Integrado de Gestão de Materiais e Vistorias', MARGIN, doc.internal.pageSize.height-10);
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
         }
         
         const dataIso = dataTimestamp.toISOString().split('T')[0];
-        const nomeArquivo = `Relatorio_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataIso}.pdf`;
+        const prefixo = isChecklist ? 'Vistoria' : 'Relatorio';
+        const nomeArquivo = `${prefixo}_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataIso}.pdf`;
         doc.save(nomeArquivo);
         
     } catch(e) { 
-        console.error("Erro PDF:", e);
+        console.error("Erro PDF Unificado:", e);
         alert("Erro ao gerar PDF: " + e.message);
     }
 }
