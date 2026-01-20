@@ -1095,13 +1095,9 @@ async function carregarDadosRemotos() {
         
        async function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
-    if (btn.disabled) return;
+    if (btn.disabled && btn.textContent.includes("SALVANDO")) return;
 
     if (!LISTA_ID) {
-        console.warn("Redirecionando fluxo: LISTA_ID ausente.");
-        if (typeof finalizarRecebimentoDevolucao === 'function' && CAUTELA_ID) {
-            return finalizarRecebimentoDevolucao(window._dadosCautelaOriginal || dadosConferencia[0]);
-        }
         alert("Erro: Identificador da lista não encontrado.");
         return;
     }
@@ -1111,9 +1107,9 @@ async function carregarDadosRemotos() {
     btn.disabled = true;
 
     try {
-        // ✅ CORREÇÃO 1: Proteção do objeto userInfo (p)
+        // ✅ Ajuste Cirúrgico: Garante que userInfo nunca seja undefined
         const p = {
-            uid: userInfo?.uid || "ND",
+            uid: userInfo?.uid || "S_UID",
             postoGraduacao: userInfo?.postoGraduacao || "ND",
             quadro: userInfo?.quadro || "ND",
             nomeGuerra: userInfo?.nomeGuerra || "ND"
@@ -1156,9 +1152,9 @@ async function carregarDadosRemotos() {
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
-                                id: uid || "", nomeCompleto: nomeParaRelatorio || "", status: 'S/A',
+                                id: uid || "S_ID", nomeCompleto: nomeParaRelatorio || "Item", status: 'S/A',
                                 situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                                quantidade: qtdFix, setor: setor.nome || "", obs: ""
+                                quantidade: qtdFix, setor: setor.nome || "GERAL", obs: ""
                             });
                             return entidade;
                         }
@@ -1170,8 +1166,9 @@ async function carregarDadosRemotos() {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
                                     entidade.historico_vida.push({
                                         evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
-                                        id_pendencia_origem: pendenciaMorta.id || "", quem: res.resolvido_por || "",
-                                        data: res.data_solucao || "", detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
+                                        id_pendencia_origem: pendenciaMorta.id || "S_ID", quem: res.resolvido_por || conferenteCompleto,
+                                        data: res.data_solucao || new Date().toLocaleDateString('pt-BR'), 
+                                        detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
                                     });
                                     entidade.pendencias_ids.splice(idx, 1);
                                     if (res.qtd_remanescente > 0) {
@@ -1179,7 +1176,6 @@ async function carregarDadosRemotos() {
                                             ...pendenciaMorta, id: "PEND_" + Date.now() + "_RES",
                                             quantidade: res.qtd_remanescente, descricao: pendenciaMorta.descricao + " (SALDO)",
                                             herdado_de: pendenciaMorta.id
-                                            // ✅ Removido campo 'undefined' em potencial
                                         });
                                     }
                                 }
@@ -1191,8 +1187,9 @@ async function carregarDadosRemotos() {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
                                 entidade.historico_vida.push({
                                     evento: isChecklist ? "ALTERACAO_VISTORIA" : "NOVA_PENDENCIA", 
-                                    id_pendencia: novoId, quem: p.autor_nome || "",
-                                    data: p.data_criacao || "", detalhes: `${p.quantidade}un - ${p.descricao || ""}`
+                                    id_pendencia: novoId, quem: p.autor_nome || conferenteCompleto,
+                                    data: p.data_criacao || new Date().toLocaleDateString('pt-BR'), 
+                                    detalhes: `${p.quantidade}un - ${p.descricao || ""}`
                                 });
                                 return { ...p, id: novoId };
                             }
@@ -1228,14 +1225,14 @@ async function carregarDadosRemotos() {
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
                         const dRel = {
-                            id: uid || "", 
+                            id: uid || "S_ID", 
                             uid_global: entidade.uid_global || "",
-                            nomeCompleto: nomeParaRelatorio || "", 
+                            nomeCompleto: nomeParaRelatorio || "Item", 
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                             pendencias_ids: pendenciasParaRelatorio,
                             quantidade: quantidadeReal,
-                            setor: setor.nome || "", 
+                            setor: setor.nome || "GERAL", 
                             obs: pendenciasParaRelatorio.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
 
@@ -1262,19 +1259,19 @@ async function carregarDadosRemotos() {
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
 
         batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
-            lista_id: LISTA_ID || "", 
-            local_nome: localNome || "", 
-            conferente_uid: p.uid || "",
-            conferente_completo: conferenteCompleto || "", 
+            lista_id: LISTA_ID || "ND", 
+            local_nome: localNome || "ND", 
+            conferente_uid: p.uid || "S_UID",
+            conferente_completo: conferenteCompleto || "ND", 
             timestamp_ultima_conferencia: timestampAgora,
             tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
         }, { merge: true });
         
         batch.set(db.collection(colecaoResultadosDestino).doc(), {
-            local: localNome || "", 
-            lista_id: LISTA_ID || "", 
-            conferente_uid: p.uid || "", 
-            conferente: conferenteCompleto || "",
+            local: localNome || "ND", 
+            lista_id: LISTA_ID || "ND", 
+            conferente_uid: p.uid || "S_UID", 
+            conferente: conferenteCompleto || "ND",
             timestamp: timestampAgora, 
             totalItensConferidos: itensRelatorio.length,
             totalCaa: totalCaa, 
@@ -1304,9 +1301,9 @@ async function carregarDadosRemotos() {
                         eventos: firebase.firestore.FieldValue.arrayUnion({
                             data: new Date().toLocaleString('pt-BR'),
                             evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
-                            quem: conferenteCompleto || "",
+                            quem: conferenteCompleto || "ND",
                             detalhes: `⚠️ ${isChecklist ? 'Vistoria' : 'Conferência'} em ${localNome}: ${resumoPendencias}`,
-                            lista_id: LISTA_ID || ""
+                            lista_id: LISTA_ID || "ND"
                         })
                     }, { merge: true });
                 }
