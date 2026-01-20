@@ -778,35 +778,59 @@ function renderizarConferencia() {
                 if (item.tipo === 'multi' && item.tombamentos) {
                     let htmlTombamentos = '';
                     let confCount = 0;
+                    let temAlertaNoGrupo = false;
+
                     item.tombamentos.forEach(t => {
                         const uid = `${itemId}-${t.tomb}`;
                         const pndHtml = montarPendenciaHtml(uid, t);
+                        const hasPendenciaReal = (t.pendencias_ids && t.pendencias_ids.length > 0);
+                        const hasCautelaReal = (!!t.cautela && !isConferenciaDeCautela);
+                        const ocultarSA = hasPendenciaReal || hasCautelaReal;
+
                         const statusU = window.itemStatus[uid]?.status;
-                        if (statusU === 'ok' || statusU === 'C/A' || statusU === 'KEEP') confCount++;
+                        const statusC = window.itemStatus[`CAUTELA-${uid}`]?.status;
+                        const isCiente = statusC === 'cautela_ciente' || window.itemStatus[`CAUTELA-${uid}`]?.cautela_confirmada === true;
+
+                        if (statusU === 'ok' || statusU === 'C/A' || statusU === 'KEEP' || isCiente) {
+                            confCount++;
+                            if (statusU === 'C/A' || statusU === 'KEEP' || isCiente) temAlertaNoGrupo = true;
+                        }
 
                         htmlTombamentos += `
-                            <div class="tombamento-container" data-id="${uid}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px;">
+                            <div class="tombamento-container" data-id="${uid}" style="border: 1px solid #eee; padding: 10px; margin-bottom: 5px; border-radius: 8px; ${isCiente ? 'background-color: #f0fff4; border-color: #1b8a3e;' : ''}">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <span>Tomb.: <b>${t.tomb}</b></span>
                                     <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                        <button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>
-                                        <button type="button" class="action-button ca-alert" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
+                                        ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                                        <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
                                     </div>
                                 </div>
                                 <div class="alerts-wrapper">${pndHtml}</div>
                             </div>`;
                     });
-                    let classeMulti = (confCount === item.tombamentos.length) ? 'status-ok' : '';
-                    htmlConteudoSetor += `<div class="item-conferencia ${classeMulti}" data-id="${itemId}">
-                        <div class="item-header"><span class="status-icon ${classeMulti ? 'ok' : ''}"></span><span class="item-label">${item.nome}</span></div>
+
+                    let classeMulti = (confCount === item.tombamentos.length && item.tombamentos.length > 0) ? (temAlertaNoGrupo ? 'status-alert' : 'status-ok') : '';
+                    htmlConteudoSetor += `<div class="item-conferencia item-has-tombamentos ${classeMulti}" data-id="${itemId}">
+                        <div class="item-header"><span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}"></span><span class="item-label">${item.nome}</span></div>
                         ${htmlTombamentos}
                     </div>`;
+
                 } else {
                     const pndHtml = montarPendenciaHtml(itemId, item);
-                    const statusLocal = window.itemStatus[itemId] || {};
-                    const currentStatus = statusLocal.status;
                     const totalOriginal = Number(item.quantidadeEsperada) || Number(item.quantidade) || 0;
-                    let classeSingle = (currentStatus === 'ok') ? 'status-ok' : (item.pendencias_ids?.length > 0 ? 'status-alert' : '');
+                    const totalCaut = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                    const totalPend = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+                    const saldoDisponivel = totalOriginal - totalCaut - totalPend;
+
+                    const hasPendenciaReal = (item.pendencias_ids && item.pendencias_ids.length > 0);
+                    const hasCautelaReal = (item.cautelas && item.cautelas.length > 0 && !isConferenciaDeCautela);
+                    const ocultarSA = hasPendenciaReal || hasCautelaReal;
+
+                    const currentStatus = window.itemStatus[itemId]?.status;
+                    const statusC = window.itemStatus[`CAUTELA-${itemId}`]?.status;
+                    const isCiente = statusC === 'cautela_ciente' || window.itemStatus[`CAUTELA-${itemId}`]?.cautela_confirmada === true;
+
+                    let classeSingle = (currentStatus === 'ok') ? 'status-ok' : (isCiente || hasPendenciaReal ? 'status-alert' : '');
 
                     htmlConteudoSetor += `
                         <div class="item-conferencia ${classeSingle}" data-type="single" data-id="${itemId}">
@@ -814,13 +838,16 @@ function renderizarConferencia() {
                                 <span class="status-icon ${classeSingle === 'status-ok' ? 'ok' : (classeSingle === 'status-alert' ? 'alert' : '')}"></span>
                                 <div style="display:flex; flex-direction:column">
                                     <span class="item-label">${item.nome}</span>
-                                    ${!isChecklist && !isObsSetor ? `<span style="font-size:0.82em; color:#1b8a3e; font-weight:bold;">DISPONÍVEL: ${totalOriginal} unidades</span>` : ''}
+                                    ${!isChecklist && !isObsSetor ? `
+                                        <span style="font-size:0.82em; color:${(hasPendenciaReal || hasCautelaReal) ? '#d90f23' : '#1b8a3e'}; font-weight:bold;">
+                                            DISPONÍVEL: ${saldoDisponivel} de ${totalOriginal}
+                                        </span>` : ''}
                                 </div>
                             </div>
                             <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                                <button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>
-                                <button type="button" class="action-button ca-alert ${item.pendencias_ids?.length > 0 ? 'active' : ''}" 
-                                        onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${isChecklist ? 1 : totalOriginal})">
+                                ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${itemId}')">S/A</button>` : ''}
+                                <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" 
+                                        onclick="abrirFormNovoID('${itemId}', 'single', '${nomeEscapado}', ${isChecklist ? 1 : saldoDisponivel})">
                                     <span class="d-pc-inline">${isObsSetor ? '+ Adicionar Texto' : '+ Alteração'}</span>
                                     <span class="d-pc-none">+ Alt</span>
                                 </button>
@@ -851,7 +878,6 @@ function renderizarConferencia() {
     }
     updateOverallStatus();
 }
-
 async function carregarDadosRemotos() {
     // 1. CAPTURA IMEDIATA DOS PARÂMETROS
     const urlParamsLocal = new URLSearchParams(window.location.search);
@@ -1818,7 +1844,7 @@ function processarAcaoFinalModal() {
     if (excluido) {
         // ESSENCIAL: Redesenha a tela. Como o item sumiu do Array, 
         // a renderização não vai mais criar o carimbo.
-        renderizarConferencia(); 
+        (); 
         updateOverallStatus();
         console.log("Sucesso: Relato temporário removido:", idProcurado);
     } else {
@@ -1881,7 +1907,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
             obs: obsDigitada // ⬅️ Isso permite que o log de cautela capture a descrição
         };
         
-        renderizarConferencia();
+        ();
         
         if (elementoPaiAlvo) {
             updateItemMainStatusDisplay(elementoPaiAlvo);
@@ -1915,7 +1941,7 @@ function manterID(pendenciaId, uid) {
     // 🛑 MARCAÇÃO CIRÚRGICA: Registra que o conferente interagiu com este item
     window.itemStatus[uid].interacao_humana = true;
 
-    renderizarConferencia();
+    ();
     updateOverallStatus();
     
     setTimeout(() => {
@@ -2006,7 +2032,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => id !== pendenciaId);
         }
 
-        renderizarConferencia();
+        ();
         updateOverallStatus();
 
         setTimeout(() => {
@@ -2050,7 +2076,7 @@ function setItemStatusID(btn, status, uid) {
         btn.style.backgroundColor = "#1b8a3e";
         
         setTimeout(() => {
-            renderizarConferencia();
+            ();
             updateOverallStatus();
         }, 400);
     }
