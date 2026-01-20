@@ -1120,8 +1120,8 @@ async function carregarDadosRemotos() {
         const localNome = isChecklist ? `VISTORIA: ${infoLocal.nome}` : `${infoLocal.posto} - ${infoLocal.nome}`;
         const timestampAgora = firebase.firestore.Timestamp.now();
         
-        // ✅ [NOVO] CAPTURA DE DADOS ESPECÍFICOS DE VISTORIA
         const urlParams = new URLSearchParams(window.location.search);
+        // ✅ Ajuste Cirúrgico: Fallback para evitar undefined nas variáveis de VTR
         const kmEntrada = urlParams.get('km') || "0";
         const combustivelEntrada = urlParams.get('combustivel') || "N/D";
         const obsGeraisEl = document.getElementById('obs-geral-vistoria');
@@ -1250,25 +1250,23 @@ async function carregarDadosRemotos() {
         const batch = db.batch();
         
         const colecaoListaOrigem = isChecklist ? 'listas_checklist' : COLECAO_LISTAS;
-        // ✅ [NOVO] COLEÇÃO DE RESULTADOS DINÂMICA
         const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
 
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
 
         batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
-            lista_id: LISTA_ID, 
-            local_nome: localNome, 
-            conferente_uid: p.uid,
-            conferente_completo: conferenteCompleto, 
+            lista_id: LISTA_ID || "", 
+            local_nome: localNome || "", 
+            conferente_uid: p.uid || "",
+            conferente_completo: conferenteCompleto || "", 
             timestamp_ultima_conferencia: timestampAgora,
             tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
         }, { merge: true });
         
-        // ✅ [NOVO] OBJETO DE RESULTADO ENRIQUECIDO PARA O PDF
         batch.set(db.collection(colecaoResultadosDestino).doc(), {
             local: localNome || "", 
-            lista_id: LISTA_ID, 
-            conferente_uid: p.uid, 
+            lista_id: LISTA_ID || "", 
+            conferente_uid: p.uid || "", 
             conferente: conferenteCompleto || "",
             timestamp: timestampAgora, 
             totalItensConferidos: itensRelatorio.length,
@@ -1276,11 +1274,9 @@ async function carregarDadosRemotos() {
             itensCaa: itensCaa, 
             itensRelatorio: itensRelatorio,
             modo: isChecklist ? 'CHECKLIST_VISTORIA' : 'CONFERENCIA_PADRAO',
-    
-            // ✅ Se for material, esses campos serão salvos como string vazia, evitando o erro
-            km_entrada: kmEntrada || "",
-            combustivel_entrada: combustivelEntrada || "",
-            obs_gerais_vistoria: obsGeraisTexto || "",
+            km_entrada: kmEntrada,
+            combustivel_entrada: combustivelEntrada,
+            obs_gerais_vistoria: obsGeraisTexto,
             fotos: [] 
         });
 
@@ -1292,7 +1288,7 @@ async function carregarDadosRemotos() {
             if (ehMulti && tombamentoAlvo) {
                 const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
                 const resumoPendencias = (itemAlterado.pendencias_ids || [])
-                    .filter(p => p.id && String(p.id).startsWith('PEND-') || String(p.id).startsWith('TEMP-')) 
+                    .filter(p => p.id && (String(p.id).startsWith('PEND-') || String(p.id).startsWith('TEMP-'))) 
                     .map(p => p.descricao)
                     .join(' | ');
 
