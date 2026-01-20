@@ -1919,25 +1919,30 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
 }
 
 function manterID(pendenciaId, uid) {
+    // Garante que o objeto de status existe
     if (!window.itemStatus[uid]) {
-        window.itemStatus[uid] = { status: 'pending' };
+        window.itemStatus[uid] = { status: 'C/A', ids_mantidos: [], interacao_humana: true };
     }
     
+    // Inicializa o array se não existir
     if (!window.itemStatus[uid].ids_mantidos) {
         window.itemStatus[uid].ids_mantidos = [];
     }
     
-    if (!window.itemStatus[uid].ids_mantidos.includes(pendenciaId)) {
-        window.itemStatus[uid].ids_mantidos.push(pendenciaId);
+    // Adiciona o ID garantindo que seja String para a comparação no montarPendenciaHtml
+    const idStr = String(pendenciaId);
+    if (!window.itemStatus[uid].ids_mantidos.includes(idStr)) {
+        window.itemStatus[uid].ids_mantidos.push(idStr);
     }
     
     window.itemStatus[uid].status = 'C/A';
-    // 🛑 MARCAÇÃO CIRÚRGICA: Registra que o conferente interagiu com este item
     window.itemStatus[uid].interacao_humana = true;
 
+    // ✅ ESSENCIAL: Redesenha a tela
     renderizarConferencia();
     updateOverallStatus();
     
+    // Scroll suave para o card mantido
     setTimeout(() => {
         const el = document.getElementById(`card-${pendenciaId}`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1948,9 +1953,9 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const qtdResolvida = parseInt(qtdResolvidaModal) || 1;
     const justificativa = justificativaModal ? justificativaModal.trim() : "";
     const nomeResolutor = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let acaoConcluida = false;
+    let pendenciasRestantes = 0;
 
     const isResolvendoAvaria = String(pendenciaId).startsWith('AVARIA-');
 
@@ -1972,12 +1977,10 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         }
 
         if (!obj.pendencias_ids) return false;
-        const index = obj.pendencias_ids.findIndex(p => p.id === pendenciaId);
+        const index = obj.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
         if (index === -1) return false;
 
         const pOriginal = obj.pendencias_ids[index];
-        const qtdAnterior = pOriginal.quantidade;
-
         if (!obj.historico_vida) obj.historico_vida = [];
         
         const registroHistorico = {
@@ -1991,7 +1994,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             status_final: "RESOLVIDO"
         };
 
-        if (qtdResolvida >= qtdAnterior) {
+        if (qtdResolvida >= pOriginal.quantidade) {
             obj.pendencias_ids.splice(index, 1);
         } else {
             pOriginal.quantidade -= qtdResolvida;
@@ -1999,6 +2002,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         }
 
         obj.historico_vida.push(registroHistorico);
+        pendenciasRestantes = obj.pendencias_ids.length;
         return true;
     }
 
@@ -2017,18 +2021,20 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     });
 
     if (acaoConcluida) {
+        // ✅ AJUSTE DE STATUS: Se não há mais pendências, o status vira 'ok'
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
-        window.itemStatus[uid].status = 'C/A';
-        // 🛑 MARCAÇÃO CIRÚRGICA: Registra que o conferente interagiu com este item
+        
+        window.itemStatus[uid].status = (pendenciasRestantes > 0) ? 'C/A' : 'ok';
         window.itemStatus[uid].interacao_humana = true;
         
         if (window.itemStatus[uid].ids_mantidos) {
-            window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => id !== pendenciaId);
+            window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== String(pendenciaId));
         }
 
         renderizarConferencia();
         updateOverallStatus();
 
+        // Scroll e feedback visual
         setTimeout(() => {
             let elItem = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (elItem) {
