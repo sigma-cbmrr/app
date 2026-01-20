@@ -1060,9 +1060,7 @@ async function carregarDadosRemotos() {
         return;
     }
     
-    // ✅ Identifica modo Checklist
     const isChecklist = window.isModoChecklist || false;
-    
     btn.textContent = isChecklist ? "SALVANDO VISTORIA..." : "SALVANDO CONFERÊNCIA..."; 
     btn.disabled = true;
 
@@ -1073,10 +1071,16 @@ async function carregarDadosRemotos() {
             militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : 
             `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
 
-        // ✅ Nome dinâmico para o relatório
         const localNome = isChecklist ? `VISTORIA: ${infoLocal.nome}` : `${infoLocal.posto} - ${infoLocal.nome}`;
         const timestampAgora = firebase.firestore.Timestamp.now();
         
+        // ✅ [NOVO] CAPTURA DE DADOS ESPECÍFICOS DE VISTORIA
+        const urlParams = new URLSearchParams(window.location.search);
+        const kmEntrada = urlParams.get('km') || "0";
+        const combustivelEntrada = urlParams.get('combustivel') || "N/D";
+        const obsGeraisEl = document.getElementById('obs-geral-vistoria');
+        const obsGeraisTexto = obsGeraisEl ? obsGeraisEl.value.trim() : "";
+
         let itensRelatorio = [];
         let itensCaa = []; 
         let totalCaa = 0;
@@ -1091,14 +1095,12 @@ async function carregarDadosRemotos() {
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // 1. Tratamento de Avarias Resolvidas
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
-                        // 2. Se o item não foi conferido (está pendente no app)
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
@@ -1109,7 +1111,6 @@ async function carregarDadosRemotos() {
                             return entidade;
                         }
 
-                        // 3. Resolução de Pendências Antigas
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -1132,7 +1133,6 @@ async function carregarDadosRemotos() {
                             });
                         }
 
-                        // 4. Efetivação de Novas Pendências (TEMP -> PEND)
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id.startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
@@ -1146,7 +1146,6 @@ async function carregarDadosRemotos() {
                             return p;
                         });
 
-                        // Captura de Cautelas/Alterações para o Relatório
                         let pendenciasParaRelatorio = [...entidade.pendencias_ids];
                         
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
@@ -1204,9 +1203,11 @@ async function carregarDadosRemotos() {
 
         const batch = db.batch();
         
-        // ✅ Grava na coleção correta (Vistoria ou Materiais)
-        const colecaoDestino = isChecklist ? 'listas_checklist' : COLECAO_LISTAS;
-        batch.update(db.collection(colecaoDestino).doc(LISTA_ID), { list: novaListaMestra });
+        const colecaoListaOrigem = isChecklist ? 'listas_checklist' : COLECAO_LISTAS;
+        // ✅ [NOVO] COLEÇÃO DE RESULTADOS DINÂMICA
+        const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
+
+        batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
 
         batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
             lista_id: LISTA_ID, 
@@ -1217,7 +1218,8 @@ async function carregarDadosRemotos() {
             tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
         }, { merge: true });
         
-        batch.set(db.collection('resultados_conferencias').doc(), {
+        // ✅ [NOVO] OBJETO DE RESULTADO ENRIQUECIDO PARA O PDF
+        batch.set(db.collection(colecaoResultadosDestino).doc(), {
             local: localNome, 
             lista_id: LISTA_ID, 
             conferente_uid: p.uid, 
@@ -1227,10 +1229,14 @@ async function carregarDadosRemotos() {
             totalCaa: totalCaa, 
             itensCaa: itensCaa, 
             itensRelatorio: itensRelatorio,
-            modo: isChecklist ? 'CHECKLIST_VISTORIA' : 'CONFERENCIA_PADRAO'
+            modo: isChecklist ? 'CHECKLIST_VISTORIA' : 'CONFERENCIA_PADRAO',
+            // Dados exclusivos de Vistoria:
+            km_entrada: kmEntrada,
+            combustivel_entrada: combustivelEntrada,
+            obs_gerais_vistoria: obsGeraisTexto,
+            fotos: [] // Espaço reservado para o futuro Storage
         });
 
-        // --- 🔗 CONECTIVIDADE COM HISTÓRICO INDIVIDUAL ---
         itensCaa.forEach(itemAlterado => {
             const partesId = itemAlterado.id.split('-');
             const ehMulti = partesId.length > 1;
@@ -1239,7 +1245,7 @@ async function carregarDadosRemotos() {
             if (ehMulti && tombamentoAlvo) {
                 const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
                 const resumoPendencias = (itemAlterado.pendencias_ids || [])
-                    .filter(p => p.id && String(p.id).startsWith('TEMP-')) 
+                    .filter(p => p.id && String(p.id).startsWith('PEND-') || String(p.id).startsWith('TEMP-')) 
                     .map(p => p.descricao)
                     .join(' | ');
 
