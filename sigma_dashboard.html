@@ -9614,10 +9614,11 @@ async function verDetalhesItemAlmox(docId) {
     tbodyRastreio.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Rastreando material em todo o Estado...</td></tr>';
 
     try {
-        const almoxDoc = await db.collection('almoxarifado_central').doc(docId).get();
-        if (!almoxDoc.exists) throw new Error("Item não encontrado.");
+        // 🛑 MUDANÇA CIRÚRGICA 1: Busca o DNA do item na coleção 'inventario'
+        const docAlvo = await db.collection('inventario').doc(docId).get();
+        if (!docAlvo.exists) throw new Error("Item não encontrado.");
         
-        const itemData = almoxDoc.data();
+        const itemData = docAlvo.data();
         const ehMulti = itemData.tipo === 'multi';
         const uidGlobal = itemData.uid_global;
         const role = currentUserData.role;
@@ -9625,7 +9626,7 @@ async function verDetalhesItemAlmox(docId) {
 
         if (breadcrumb) breadcrumb.innerHTML = `Almoxarifado > Detalhes > <b style="color:#800020;">${itemData.nome}</b>`;
 
-        // ✅ NOVO HEADER DE IDENTIDADE (UX IMPROVEMENT)
+        // ✅ HEADER DE IDENTIDADE
         const btnHistGlobal = !ehMulti ? 
             `<button class="btn-modern-action" title="Histórico Global do Lote" onclick="verHistoricoVidaGlobal('${docId}')" style="background:#fef3c7!important; color:#92400e!important; padding:8px 15px!important; border-radius:6px;"><i class="fas fa-history"></i> Ver Histórico do Lote</button>` : '';
 
@@ -9642,7 +9643,7 @@ async function verDetalhesItemAlmox(docId) {
         if(oldHeader) oldHeader.remove();
         palcoRastreio.prepend(new DOMParser().parseFromString(headerHtml, 'text/html').body.firstChild);
 
-        // ✅ AJUSTE NO THEAD (Remove identificação para Single)
+        // ✅ AJUSTE NO THEAD
         theadRastreio.innerHTML = `
             <tr>
                 ${ehMulti ? '<th>Tombamento / Unidade</th>' : ''}
@@ -9655,114 +9656,112 @@ async function verDetalhesItemAlmox(docId) {
         let htmlRestante = '';   
         let cDisp = 0, cUso = 0, cCaut = 0, cPend = 0;
 
-        const snapAlmoxs = await db.collection('almoxarifado_central').where('uid_global', '==', uidGlobal).get();
-        
-        // 1. PROCESSAMENTO DE ESTOQUES (ALMOXARIFADOS)
-        snapAlmoxs.forEach(docAl => {
-            const d = docAl.data();
-            const unitIdDoc = docAl.id;
-            if (d.total <= 0) return;
+        // 🛑 MUDANÇA CIRÚRGICA 2: PROCESSAMENTO DE ESTOQUES VIA SUB-COLEÇÕES
+        if (ehMulti) {
+            // Busca todos os documentos na sub-coleção 'tombamentos' do item
+            const snapTombs = await db.collection('inventario').doc(docId).collection('tombamentos').get();
+            
+            snapTombs.forEach(tDoc => {
+                const t = tDoc.data();
+                const ehDono = (t.local_id === currentUserData.unidade_id);
+                const podeEnviar = (souAdminGeral && t.local_id === "ADMIN") || (ehDono && !souAdminGeral);
+                
+                // Só processa se não estiver em viatura (lógica original do seu almoxarifado)
+                if (!t.viatura_id) {
+                    const temP = t.pendencias_ids?.length > 0;
+                    if (ehDono || souAdminGeral) { if (temP) cPend++; else cDisp++; }
 
-            const ehDono = (d.unidade_id === currentUserData.unidade_id) || (d.unidade === currentUserData.unidade);
-            const podeEnviar = (souAdminGeral && d.unidade === "ADMINISTRATIVO") || (ehDono && !souAdminGeral);
-
-            let bufferHtml = '';
-
-            if (ehMulti) {
-                const tombDisponiveis = (d.tombamentos || []).filter(t => !t.viatura_id);
-                if (ehDono || (souAdminGeral && d.unidade === "ADMINISTRATIVO")) {
-                    tombDisponiveis.forEach(t => {
-                        const temP = t.pendencias_ids?.length > 0;
-                        if (ehDono || souAdminGeral) { if (temP) cPend++; else cDisp++; }
-
-                        const btnAcao = podeEnviar 
-                            ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
-                            : `<small style="color:#999; font-style:italic;">Visualização</small>`;
-
-                        const btnHistorico = `<button onclick="abrirRGIndividual('${t.tomb}')" class="btn-modern-action" title="Ver RG do Ativo" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
-
-                        bufferHtml += `
-                            <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
-                                <td><i class="fas fa-tag" style="color:#2c7399; margin-right:8px; font-size:0.9em;"></i><strong>${t.tomb}</strong></td>
-                                <td style="text-align:center;"><i class="fas fa-warehouse"></i> Estoque: <b>${d.unidade}</b></td>
-                                <td style="text-align:center;"><span class="status-badge" style="background:${temP ? '#ffebee' : '#dcfce7'};color:${temP ? '#c62828' : '#166534'};">${temP ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
-                                <td style="text-align:right;">${btnAcao}${btnHistorico}</td>
-                            </tr>`;
-                    });
-                } else {
-                    const qtdOutros = tombDisponiveis.length;
-                    if (souAdminGeral) cDisp += qtdOutros;
-                    const listaTombStr = JSON.stringify(tombDisponiveis.map(t => t.tomb)).replace(/"/g, '&quot;');
-                    bufferHtml += `<tr style="background:#f8fafc;">
-                        <td><i class="fas fa-warehouse" style="color:#94a3b8;"></i> Estoque Setorial</td>
-                        <td style="text-align:center;">Unidade: <b>${d.unidade}</b></td>
-                        <td style="text-align:center;"><span class="status-badge" style="background:#e2e8f0;color:#475569; font-weight:bold;">${qtdOutros} TOMBAMENTOS</span></td>
-                        <td style="text-align:right;"><button onclick="abrirModalConsultaTombamentos('${d.unidade}', '${listaTombStr}')" class="btn-modern-action" style="background:#64748b!important; padding:5px 10px!important;"><i class="fas fa-eye"></i></button></td>
-                    </tr>`;
-                }
-            } else {
-                // ✅ ITEM SINGLE: REMOVIDO COLUNA DE NOME DO ITEM (REDUNDANTE)
-                const saldoDisp = Number(d.disponivel) || 0;
-                if (ehDono || souAdminGeral) cDisp += saldoDisp;
-                if (saldoDisp > 0) {
-                    const btnAcaoSingle = podeEnviar
-                        ? `<button onclick="prepararMovimentacao('${unitIdDoc}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
+                    const btnAcao = podeEnviar 
+                        ? `<button onclick="prepararMovimentacao('${docId}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
                         : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
-                    bufferHtml += `<tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
-                        <td style="text-align:center;"><i class="fas fa-warehouse"></i> Almoxarifado: <b>${d.unidade}</b></td>
+                    const btnHistorico = `<button onclick="abrirRGIndividual('${t.tomb}')" class="btn-modern-action" title="Ver RG do Ativo" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
+
+                    let bufferHtml = `
+                        <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
+                            <td><i class="fas fa-tag" style="color:#2c7399; margin-right:8px; font-size:0.9em;"></i><strong>${t.tomb}</strong></td>
+                            <td style="text-align:center;"><i class="fas fa-warehouse"></i> Estoque: <b>${t.unidade_sigla || '---'}</b></td>
+                            <td style="text-align:center;"><span class="status-badge" style="background:${temP ? '#ffebee' : '#dcfce7'};color:${temP ? '#c62828' : '#166534'};">${temP ? 'PENDENTE' : 'DISPONÍVEL'}</span></td>
+                            <td style="text-align:right;">${btnAcao}${btnHistorico}</td>
+                        </tr>`;
+                    
+                    if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
+                }
+            });
+        } else {
+            // Busca todos os documentos na sub-coleção 'saldos_unidades' do item
+            const snapSaldos = await db.collection('inventario').doc(docId).collection('saldos_unidades').get();
+            
+            snapSaldos.forEach(sDoc => {
+                const s = sDoc.data();
+                const ehDono = (sDoc.id === currentUserData.unidade_id);
+                const podeEnviar = (souAdminGeral && sDoc.id === "ADMIN") || (ehDono && !souAdminGeral);
+                
+                const saldoDisp = Number(s.qtd_disp) || 0;
+                if (ehDono || souAdminGeral) cDisp += saldoDisp;
+
+                if (saldoDisp > 0) {
+                    const btnAcaoSingle = podeEnviar
+                        ? `<button onclick="prepararMovimentacao('${docId}','ENVIO')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
+                        : `<small style="color:#999; font-style:italic;">Visualização</small>`;
+
+                    let bufferHtml = `<tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
+                        <td style="text-align:center;"><i class="fas fa-warehouse"></i> Almoxarifado: <b>${s.unidade_sigla}</b></td>
                         <td style="text-align:center;"><span class="status-badge" style="background:#dcfce7;color:#166534;">${saldoDisp} un. DISPONÍVEL</span></td>
                         <td style="text-align:right;">${btnAcaoSingle}</td>
                     </tr>`;
-                }
-            }
-            if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
-        });
 
-        // 2. BUSCA NAS VIATURAS
+                    if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
+                }
+            });
+        }
+
+        // 🛑 MUDANÇA CIRÚRGICA 3: BUSCA NAS VIATURAS (Varredura nas Listas)
         const snapListas = await db.collection('listas_conferencia').where('ativo', '==', true).get();
         snapListas.forEach(docVtr => {
             const vtrData = docVtr.data();
             const siglaVtr = vtrData.unidade_sigla || "---";
-            const idAlmoxVolta = `${vtrData.unidade_id || siglaVtr}_${uidGlobal}`;
-            const ehMinhaVtr = (vtrData.unidade_id === currentUserData.unidade_id) || (vtrData.unidade_sigla === currentUserData.unidade);
+            const ehMinhaVtr = (vtrData.unidade_id === currentUserData.unidade_id);
 
-            vtrData.list.forEach(setor => {
+            (vtrData.list || []).forEach(setor => {
                 const itNaVtr = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
                 if (!itNaVtr) return;
+                
                 let bufferVtr = '';
 
                 if (ehMulti) {
                     (itNaVtr.tombamentos || []).forEach(t => {
-                        const temC = !!t.cautela; const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
+                        const temC = !!t.cautela; 
+                        const temP = t.pendencias_ids && t.pendencias_ids.length > 0;
                         if (ehMinhaVtr || souAdminGeral) { if (temP) cPend++; else if (temC) cCaut++; else cUso++; }
+                        
                         const statusTxt = temP ? 'PENDENTE' : (temC ? 'CAUTELADO' : 'EM USO');
                         const corStatus = temP ? 'background:#ffebee;color:#c62828;' : (temC ? 'background:#fff3e0;color:#e65100;' : 'background:#f5f5f5;color:#616161;');
                         const btnRecolher = ehMinhaVtr || role === 'admin' 
-                            ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`;
+                            ? `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`;
                         const btnHistVtr = `<button onclick="abrirRGIndividual('${t.tomb}')" class="btn-modern-action" title="Ver RG do Ativo" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
+                        
                         bufferVtr += `<tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
                             <td><i class="fas fa-tag" style="color:#2c7399; margin-right:8px; font-size:0.9em;"></i><strong>${t.tomb}</strong></td>
-                            <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
+                            <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.ativo_nome || 'Vtr'} <small>(${siglaVtr})</small></td>
                             <td style="text-align:center;"><span class="status-badge" style="${corStatus}">${statusTxt}</span></td>
                             <td style="text-align:right;">${btnRecolher}${btnHistVtr}</td>
                         </tr>`;
                     });
                 } else {
-                    // ✅ AJUSTE SOLICITADO: Item Single agora usa 'status-badge' padronizada para o "EM USO"
                     const qtdVtr = Number(itNaVtr.quantidadeEsperada) || 0;
                     if (ehMinhaVtr || souAdminGeral) cUso += qtdVtr;
                     bufferVtr += `<tr style="background:${ehMinhaVtr ? '#f0fdf4' : '#fff'};">
-                        <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.nome_local || vtrData.ativo_nome} <small>(${siglaVtr})</small></td>
+                        <td style="text-align:center;"><i class="fas fa-truck"></i> ${vtrData.ativo_nome || 'Vtr'} <small>(${siglaVtr})</small></td>
                         <td style="text-align:center;"><span class="status-badge" style="background:#f5f5f5; color:#616161;">${qtdVtr} un. EM USO</span></td>
-                        <td style="text-align:right;">${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${idAlmoxVolta}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}</td>
+                        <td style="text-align:right;">${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO', null,'${docVtr.id}')" class="btn-modern-action" style="background:#f57c00!important; padding:5px 10px!important;"><i class="fas fa-arrow-down"></i></button>` : `<small style="color:#999;">Carga Setorial</small>`}</td>
                     </tr>`;
                 }
                 if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
             });
         });
 
-        // 3. EXTRATO DE TOPO
+        // ✅ EXTRATO DE TOPO
         const totalG = cDisp + cUso + cCaut + cPend;
         const extratoHtml = `
             <div id="almox-resumo-topo" style="display:flex; gap:10px; padding:15px; background:#fff; border:1px solid #eee; border-radius:8px; justify-content:space-around; flex-wrap:wrap; margin-bottom:20px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
@@ -9780,10 +9779,11 @@ async function verDetalhesItemAlmox(docId) {
         tbodyRastreio.innerHTML = (htmlPrioridade + htmlRestante) || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum registro localizado.</td></tr>';
 
     } catch (e) {
-        console.error(e);
+        console.error("Erro no rastreio global:", e);
         tbodyRastreio.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Erro ao processar rastreio.</td></tr>';
     }
 }
+		
 		async function abrirRGIndividual(tombamento) {
     const container = document.getElementById('timeline-container');
     const modal = document.getElementById('modal-timeline-global');
