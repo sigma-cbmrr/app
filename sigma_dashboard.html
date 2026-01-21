@@ -9675,7 +9675,7 @@ async function verDetalhesItemAlmox(docId) {
                         ? `<button onclick="prepararMovimentacao('${docId}','ENVIO','${t.tomb}')" class="btn-modern-action" style="background:#2c7399!important; padding:5px 10px!important;"><i class="fas fa-paper-plane"></i></button>`
                         : `<small style="color:#999; font-style:italic;">Visualização</small>`;
 
-                    const btnHistorico = `<button onclick="verHistoricoVidaGlobal('${uidGlobal}', '${t.tomb}')" class="btn-modern-action" title="Ver RG do Ativo" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
+                    const btnHistorico = `<button onclick="verHistoricoVidaGlobal('${uidGlobal}', '${t.tomb}')" class="btn-modern-action" title="Histórico" style="background:#fef3c7!important; color:#92400e!important; padding:5px 10px!important; margin-left:5px;"><i class="fas fa-history"></i></button>`;
 
                     let bufferHtml = `
                         <tr style="background:${ehDono ? '#f0fdf4' : '#fff'};">
@@ -9784,75 +9784,6 @@ async function verDetalhesItemAlmox(docId) {
     }
 }
 		
-		async function abrirRGIndividual(tombamento) {
-    const container = document.getElementById('timeline-container');
-    const modal = document.getElementById('modal-timeline-global');
-    const labelNome = document.getElementById('timeline-item-nome');
-
-    if (!container || !modal) return;
-
-    // Abrir o modal
-    modal.style.display = 'flex';
-    container.innerHTML = '<div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin fa-2x"></i><br><br>Acessando prontuário do ativo...</div>';
-    labelNome.textContent = `RG do Material: Tombamento ${tombamento}`;
-
-    try {
-        const doc = await db.collection('historico_ativos_individuais').doc(tombamento).get();
-        
-        if (!doc.exists || !doc.data().eventos || doc.data().eventos.length === 0) {
-            container.innerHTML = `
-                <div style="text-align:center; color:#999; padding:40px;">
-                    <i class="fas fa-folder-open fa-3x" style="margin-bottom:15px;"></i>
-                    <p>Nenhum evento registrado no RG deste item até o momento.</p>
-                </div>`;
-            return;
-        }
-
-        const eventos = doc.data().eventos;
-
-        // Ordenação Robusta: Do mais recente para o mais antigo
-        eventos.sort((a, b) => {
-            const parseDate = (str) => {
-                const [date, time] = str.split(', ');
-                const [d, m, y] = date.split('/');
-                return new Date(`${y}-${m}-${d}T${time || '00:00:00'}`);
-            };
-            return parseDate(b.data) - parseDate(a.data);
-        });
-
-        container.innerHTML = eventos.map(ev => {
-            // Define ícone baseado no tipo de evento
-            let icon = 'fa-info-circle';
-            let color = '#2c7399';
-            
-            if (ev.evento.includes('SAIDA')) { icon = 'fa-arrow-right'; color = '#d90f23'; }
-            if (ev.evento.includes('RETORNO') || ev.evento.includes('ESTORNO')) { icon = 'fa-arrow-left'; color = '#1b8a3e'; }
-            if (ev.evento.includes('ALERTA')) { icon = 'fa-exclamation-triangle'; color = '#f57c00'; }
-
-            return `
-                <div class="timeline-event" style="border-left: 3px solid ${color}; margin-bottom: 15px; padding-left: 15px; position: relative;">
-                    <div style="position: absolute; left: -11px; top: 0; background: #fff; padding: 2px;">
-                        <i class="fas ${icon}" style="color: ${color}; font-size: 14px;"></i>
-                    </div>
-                    <span class="event-date" style="font-size: 0.85em; color: #666; font-weight: bold;">${ev.data}</span>
-                    <span class="event-title" style="display: block; font-weight: bold; color: #333; text-transform: uppercase; font-size: 0.9em; margin: 4px 0;">
-                        ${ev.evento.replace(/_/g, ' ')}
-                    </span>
-                    <div class="event-desc" style="font-size: 0.95em; color: #444; background: #f9f9f9; padding: 8px; border-radius: 4px; border: 1px solid #eee;">
-                        ${ev.detalhes}
-                    </div>
-                    <span class="event-user" style="font-size: 0.8em; color: #888; display: block; margin-top: 5px;">
-                        <i class="fas fa-user-edit"></i> Resp: ${ev.quem}
-                    </span>
-                </div>
-            `;
-        }).join('');
-
-    } catch (e) {
-        console.error("Erro ao carregar RG:", e);
-        container.innerHTML = '<p style="color:red; text-align:center; padding:20px;">Erro técnico ao carregar prontuário.</p>';
-    }
-}
 		
 // FUNÇÃO COMPLEMENTAR DO MODAL DE CONSULTA (Agrupamento Logístico)
 function abrirModalConsultaTombamentos(unidade, listaJson) {
@@ -9921,13 +9852,14 @@ function filtrarRastreioMulti() {
  * Função de ponte que prepara o modal de transferência com os dados clicados na lupa
  */
 async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaId = null) {
-    // 1. Abre o modal base
-    abrirModalTransferencia(docId);
+    // 1. Abre o modal base buscando no novo inventário
+    // Importante: o docId aqui deve ser o UID_GLOBAL (ex: FAM-000001-MOD-1)
+    await abrirModalTransferencia(docId);
     
     // 2. Aguarda o carregamento para manipular os elementos específicos do seu HTML
     setTimeout(() => {
         const selectTipo = document.getElementById('almox-operacao-tipo');
-        const tituloModal = document.getElementById('almox-transf-titulo'); // ID correto do seu H2
+        const tituloModal = document.getElementById('almox-transf-titulo'); // ID do seu H2
         const modalContent = document.querySelector('#modal-almox-transferencia .modal-content');
         const btnConfirmar = document.getElementById('btn-confirmar-movimentacao');
 
@@ -9970,7 +9902,7 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
             localStorage.removeItem('sigma_tomb_foco');
         }
 
-    }, 200); // 200ms é o tempo ideal para o DOM processar a abertura
+    }, 250); 
 }
 /**
  * Função que renderiza os carimbos originais do Conferencia App dentro do modal
@@ -10772,7 +10704,7 @@ async function executarAporteEstoque() {
 }
 		
 	async function abrirModalTransferencia(docId) {
-    // 1. PROTEÇÃO E LIMPEZA IMEDIATA (Reseta o modal antes de qualquer busca)
+    // 1. PROTEÇÃO E LIMPEZA IMEDIATA
     if (!docId || docId === "" || docId === "undefined") {
         console.error("ERRO: abrirModalTransferencia recebeu um ID inválido.");
         return; 
@@ -10790,27 +10722,36 @@ async function executarAporteEstoque() {
     }
     
     // Garante que o tipo de operação volte ao padrão ao abrir
-    if (opTipo) opTipo.value = "ENVIO"; 
+    if (opTipo) {
+        opTipo.value = "ENVIO"; 
+        const containerTipo = opTipo.closest('.form-group');
+        if (containerTipo) containerTipo.style.display = 'block'; // Garante que reapareça se foi escondido antes
+    }
     
     // Esconde as divs de Multi/Setor antes de carregar o novo item
     resetarVisibilidadeModal();
 
     try {
-        // 2. BUSCA DE DADOS
-        const doc = await db.collection('almoxarifado_central').doc(docId).get();
+        // 2. BUSCA DE DADOS NA NOVA COLEÇÃO 'inventario'
+        // ✅ CORREÇÃO: Removido 'almoxarifado_central'
+        const doc = await db.collection('inventario').doc(docId).get();
+        
         if (!doc.exists) {
-            alert("Erro: Item não localizado no estoque.");
+            console.error("UID não encontrado no inventário:", docId);
+            alert("Erro: Material não localizado no prontuário global.");
             return;
         }
+        
         const item = doc.data();
 
-        // 3. INJEÇÃO DE DADOS (Agora o data-tipo estará presente ANTES de qualquer função de UI rodar)
+        // 3. INJEÇÃO DE DADOS
         tituloNome.textContent = item.nome;
         tituloNome.setAttribute('data-tipo', item.tipo); // 'single' ou 'multi'
 
         // 4. POPULAR DESTINOS (Lógica Admin vs Gestor)
         const role = currentUserData.role;
         if (selectViatura) {
+            selectViatura.disabled = false; // Garante que esteja habilitado
             selectViatura.innerHTML = '<option value="" disabled selected>Selecione o destino...</option>';
             
             if (role === 'admin') {
@@ -10819,7 +10760,7 @@ async function executarAporteEstoque() {
                 snapU.forEach(uDoc => {
                     const u = uDoc.data();
                     const opt = document.createElement('option');
-                    opt.value = uDoc.id; // UID da Unidade
+                    opt.value = uDoc.id; 
                     opt.textContent = u.sigla;
                     selectViatura.appendChild(opt);
                 });
@@ -10840,7 +10781,6 @@ async function executarAporteEstoque() {
         }
 
         // 5. CONFIGURAÇÃO FINAL DA INTERFACE
-        // Chama a configuração para decidir se mostra campos Multi ou Single baseado no item recém-carregado
         configurarInterfaceMovimentacao();
 
         // 6. EXIBIÇÃO
@@ -10848,7 +10788,7 @@ async function executarAporteEstoque() {
 
     } catch (e) {
         console.error("Erro ao abrir transferência:", e);
-        alert("Erro técnico ao abrir o modal.");
+        alert("Erro técnico ao carregar dados do material.");
     }
 }
 		
