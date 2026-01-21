@@ -10688,32 +10688,43 @@ async function executarAporteEstoque() {
 
             if (ehMulti) {
                 const linhas = document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb');
+                
+                // Array para coletar os tombamentos deste aporte e gerar um log único no "Pai"
+                let listaTombsAportados = [];
+
                 linhas.forEach(linha => {
                     const t = linha.querySelector('.val-tomb').value.trim().toUpperCase();
                     const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
                     
                     if (t) {
                         qtdEfetiva++;
+                        listaTombsAportados.push(t);
                         const tombRef = itemRef.collection('tombamentos').doc(t);
+                        
+                        // Registro no Prontuário Individual (RG do Ativo)
                         transaction.set(tombRef, {
-                            tomb: t,
-                            serie: s || "N/A",
-                            situacao_atual: "DISPONÍVEL",
-                            local_id: minhaUnidadeId, // ✅ Unidade dinâmica
-                            unidade_sigla: minhaUnidadeSigla,
-                            sub_local: "ALMOXARIFADO CENTRAL",
-                            data_entrada: dataReg,
-                            criado_por: autorNome
+                            tomb: t, serie: s || "N/A", situacao_atual: "DISPONÍVEL",
+                            local_id: minhaUnidadeId, unidade_sigla: minhaUnidadeSigla,
+                            sub_local: "ALMOXARIFADO CENTRAL", data_entrada: dataReg, criado_por: autorNome
                         });
 
-                        const histRef = tombRef.collection('historico_vida').doc(idEvento);
-                        transaction.set(histRef, {
-                            data: dataReg,
-                            evento: "NASCIMENTO_SISTEMA",
-                            quem: autorNome,
+                        // Log específico no prontuário daquela unidade física
+                        transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
+                            data: dataReg, evento: "NASCIMENTO_SISTEMA", quem: autorNome,
                             detalhes: `Incorporado via Aporte. Justificativa: ${obs}`
                         });
                     }
+                });
+
+                // ✅ REGISTRO NO "PAI" PARA APARECER NO HISTÓRICO GLOBAL
+                // Isso resolve o problema de não aparecer nada na timeline geral
+                transaction.update(itemRef, {
+                    historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
+                        data: dataReg,
+                        evento: "APORTE_LOTE_MULTI",
+                        quem: autorNome,
+                        detalhes: `Aporte de ${qtdEfetiva} unidades na unidade ${minhaUnidadeSigla}. Tombamentos: ${listaTombsAportados.join(', ')}. Obs: ${obs}`
+                    })
                 });
             } else {
                 qtdEfetiva = qtdInput;
