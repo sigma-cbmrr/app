@@ -12308,32 +12308,37 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     if (!container || !modal) return;
 
     modal.style.display = 'flex';
-    container.innerHTML = '<div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Acessando registros históricos...</div>';
+    container.innerHTML = '<div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Acessando prontuário...</div>';
 
     try {
-        // 🛑 MUDANÇA CIRÚRGICA 1: Referência ao DNA do item
         const docRef = db.collection('inventario').doc(uidGlobal);
         const snap = await docRef.get();
         
-        if (!snap.exists) throw new Error("Material não localizado no inventário global.");
-        
+        if (!snap.exists) throw new Error("Material não localizado.");
         const itemData = snap.data();
-        labelNome.textContent = tombamento ? `RG Individual: Tomb. ${tombamento}` : `Histórico Global: ${itemData.nome}`;
 
         let eventos = [];
 
-        // 🛑 MUDANÇA CIRÚRGICA 2: Lógica de Captura Híbrida
         if (tombamento) {
-            // MODO INDIVIDUAL: Busca logs específicos dentro da sub-coleção do tombamento
-            const histSnap = await docRef.collection('tombamentos').doc(tombamento).collection('historico_vida').get();
-            eventos = histSnap.docs.map(d => d.data());
+            // ✅ MUDANÇA CIRÚRGICA: Varredura no caminho exato definido na sua doutrina
+            // /inventario/{uidGlobal}/tombamentos/{tombamento}/historico_vida/
+            labelNome.textContent = `Prontuário Individual: Tomb. ${tombamento} (${itemData.nome})`;
             
-            if (eventos.length === 0) {
-                container.innerHTML = `<p style="text-align:center; padding:40px; color:#999;">Nenhum registro individual para o tombamento ${tombamento}.</p>`;
-                return;
-            }
+            const histSnap = await docRef
+                .collection('tombamentos')
+                .doc(tombamento)
+                .collection('historico_vida')
+                .get();
+
+            eventos = histSnap.docs.map(d => ({
+                ...d.data(),
+                id_evento: d.id
+            }));
+
         } else {
-            // MODO GLOBAL: Busca logs de todas as unidades (Itens Single) e logs do lote
+            // Modo Global (Lote/Single) - Busca logs de saldos e do documento pai
+            labelNome.textContent = `Histórico de Vida: ${itemData.nome}`;
+            
             const saldosSnap = await docRef.collection('saldos_unidades').get();
             const buscaLogsPromessas = saldosSnap.docs.map(async (docUnidade) => {
                 const hSnap = await docUnidade.ref.collection('historico_vida').get();
@@ -12352,15 +12357,11 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         }
 
         if (eventos.length === 0) {
-            container.innerHTML = `
-                <div style="text-align:center; color:#999; padding:40px;">
-                    <i class="fas fa-history fa-3x" style="margin-bottom:15px; opacity:0.2;"></i>
-                    <p>Nenhum registro de movimentação encontrado.</p>
-                </div>`;
+            container.innerHTML = '<p style="text-align:center; color:#999; padding:40px;">Nenhum registro localizado neste nível.</p>';
             return;
         }
 
-        // 🛑 MUDANÇA CIRÚRGICA 3: Ordenação (Mais recentes primeiro)
+        // Ordenação: Do mais recente para o mais antigo
         eventos.sort((a, b) => {
             const parseDate = (str) => {
                 if (!str) return new Date(0);
@@ -12371,15 +12372,15 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
             return parseDate(b.data) - parseDate(a.data);
         });
 
-        // 🛑 MUDANÇA CIRÚRGICA 4: Renderização
+        // Renderização da Timeline
         container.innerHTML = eventos.map(ev => {
-            let icon = 'fa-exchange-alt';
+            let icon = 'fa-history';
             let color = '#2c7399';
-            
             const evNome = (ev.evento || "").toUpperCase();
-            if (evNome.includes('APORTE') || evNome.includes('NASCIMENTO') || evNome.includes('ENTRADA')) { icon = 'fa-plus-circle'; color = '#1b8a3e'; }
-            if (evNome.includes('SAIDA') || evNome.includes('TRANSFERENCIA')) { icon = 'fa-paper-plane'; color = '#800020'; }
-            if (evNome.includes('PENDENCIA') || evNome.includes('ALERTA')) { icon = 'fa-exclamation-triangle'; color = '#d90f23'; }
+
+            if (evNome.includes('APORTE') || evNome.includes('NASCIMENTO')) { icon = 'fa-birthday-cake'; color = '#1b8a3e'; }
+            if (evNome.includes('TRANSFERENCIA') || evNome.includes('SAIDA')) { icon = 'fa-exchange-alt'; color = '#800020'; }
+            if (evNome.includes('MANUTENCAO') || evNome.includes('CONSERTO')) { icon = 'fa-tools'; color = '#f57c00'; }
 
             return `
                 <div class="timeline-event" style="border-left: 3px solid ${color}; margin-bottom: 20px; padding-left: 20px; position: relative;">
@@ -12391,20 +12392,18 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
                         ${evNome.replace(/_/g, ' ')} 
                         ${ev.unidade_ref ? `<small style="color:${color}">[${ev.unidade_ref}]</small>` : ''}
                     </span>
-                    <div class="event-desc" style="font-size: 0.9em; color: #444; background: #f8fafc; padding: 8px; border-radius: 4px; border: 1px solid #edf2f7; margin-top: 5px;">
-                        ${ev.detalhes || ev.descricao || 'Sem detalhes registrados.'}
-                        ${ev.quantidade ? `<br><b>Qtd: ${ev.quantidade} un.</b>` : ''}
+                    <div class="event-desc" style="font-size: 0.9em; color: #444; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-top: 5px;">
+                        ${ev.detalhes || ev.descricao || 'Registro sem descrição.'}
                     </div>
-                    <span class="event-user" style="font-size: 0.75em; color: #888; display: block; margin-top: 4px;">
-                        <i class="fas fa-user-edit"></i> Resp: ${ev.quem || ev.autor || 'Sistema'}
+                    <span class="event-user" style="font-size: 0.75em; color: #999; display: block; margin-top: 4px;">
+                        <i class="fas fa-user-edit"></i> Responsável: ${ev.quem || 'Sistema'}
                     </span>
-                </div>
-            `;
+                </div>`;
         }).join('');
 
     } catch (e) {
-        console.error("Erro no histórico:", e);
-        container.innerHTML = `<p style="color:red; text-align:center; padding:20px;">Erro técnico: ${e.message}</p>`;
+        console.error("Erro ao carregar prontuário:", e);
+        container.innerHTML = `<p style="color:red; text-align:center; padding:20px;">Erro ao acessar histórico: ${e.message}</p>`;
     }
 }
 	async function executarEnvioUnidade() {
