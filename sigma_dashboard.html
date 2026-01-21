@@ -3750,6 +3750,7 @@ input:checked + .slider:before {
     		const p = currentUserData.permissoes || {};
 
     		atualizarSaudacao(currentUserData);
+			carregarAlertasTransferencia();
 
     		const isAdmin = (role === 'admin');
     		const isGestorGeral = (role === 'gestor_geral');
@@ -5344,49 +5345,53 @@ function reimprimirPDF(data) {
         
         function switchView(v) {
 			const editorArq = document.getElementById('view-editor-arquitetura');
-    if (editorArq) editorArq.style.display = 'none';
+    		if (editorArq) editorArq.style.display = 'none';
 
-    // 2. Remove o bloqueio de padding (caso tenha ficado preso do editor)
-    const contentPrincipal = document.querySelector('.content');
-    if (contentPrincipal) contentPrincipal.style.padding = '20px';
-    // 1. Esconde todas as seções de visualização
-    document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
+    		// 2. Remove o bloqueio de padding (caso tenha ficado preso do editor)
+    		const contentPrincipal = document.querySelector('.content');
+    		if (contentPrincipal) contentPrincipal.style.padding = '20px';
+    		// 1. Esconde todas as seções de visualização
+    		document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
 
-    // 2. Fecha o container do App (Iframe) caso esteja aberto
-    const appRunner = document.getElementById('app-runner-container');
-    if (appRunner) { appRunner.style.display = 'none'; }
+    		// 2. Fecha o container do App (Iframe) caso esteja aberto
+    		const appRunner = document.getElementById('app-runner-container');
+    		if (appRunner) { appRunner.style.display = 'none'; }
 
-    // 3. Mapeamento de IDs Específicos
-    let targetId;
-    if (v === 'listas') {
-        targetId = 'menu-editor-listas';
-    } else if (v === 'editor-arquitetura') {
-        targetId = 'view-editor-arquitetura';
-    } else {
-        targetId = `view-${v}`;
-    }
+    		// 3. Mapeamento de IDs Específicos
+    		let targetId;
+    		if (v === 'listas') {
+        		targetId = 'menu-editor-listas';
+    		} else if (v === 'editor-arquitetura') {
+        		targetId = 'view-editor-arquitetura';
+    		} else {
+        		targetId = `view-${v}`;
+    		}
 
-    const viewElement = document.getElementById(targetId);
+    		const viewElement = document.getElementById(targetId);
     
-    if (viewElement) {
-        viewElement.style.display = 'block';
-    } else {
-        console.error(`View não encontrada: ${targetId}`);
-        return;
-    }
+    		if (viewElement) {
+        		viewElement.style.display = 'block';
+    		} else {
+        		console.error(`View não encontrada: ${targetId}`);
+        		return;
+    		}
     
-    // 4. Gerenciamento de classes 'active' na Sidebar
-    document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
-    const activeLink = document.getElementById(`link-${v}`);
-    if (activeLink) {
-        activeLink.classList.add('active');
-    }
+    		// 4. Gerenciamento de classes 'active' na Sidebar
+    		document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
+    		const activeLink = document.getElementById(`link-${v}`);
+    		if (activeLink) {
+        		activeLink.classList.add('active');
+    		}
 
-    // 5. DISPARO DE CARREGAMENTO DE DADOS (Lógica por View)
-    
-    if (v === 'almoxarifado') {
-        carregarAlmoxarifadoUI();
-    }
+    		// 5. DISPARO DE CARREGAMENTO DE DADOS (Lógica por View)
+    		if (v === 'dashboard') {
+        		const resCont = document.getElementById('resume-container');
+        		if(resCont) resCont.innerHTML = ''; 
+        		carregarAlertasTransferencia();
+    		}
+    		if (v === 'almoxarifado') {
+        		carregarAlmoxarifadoUI();
+    		}
 
     if (v === 'unidades') {
         carregarUnidadesVisuais();
@@ -13964,6 +13969,103 @@ function finalizarPreCheckEIrProApp() {
         alert("Falha no processo: " + error.message);
     }
 }
+	async function carregarAlertasTransferencia() {
+    const container = document.getElementById('resume-container'); // Onde ficam os avisos de rascunho
+    if (!container || !currentUserData) return;
+
+    try {
+        const minhaUnidadeId = currentUserData.unidade_id;
+        
+        // Busca transferências em trânsito para a unidade do Gestor
+        const snap = await db.collection('transferencias_pendentes')
+            .where('destino_id', '==', minhaUnidadeId)
+            .where('status', '==', 'EM_TRANSITO')
+            .get();
+
+        if (snap.empty) return;
+
+        const totalCargas = snap.size;
+        
+        // Monta o Card de Alerta (Estilo "Resume" laranja que você já usa)
+        const alertaHtml = `
+            <div class="op-card resume" style="background-color: #fff8e1; border-left-color: #f57c00; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <i class="fas fa-truck-loading fa-2x" style="color: #f57c00;"></i>
+                    <div style="flex: 1; text-align: left;">
+                        <h3 style="margin: 0; color: #e65100; font-size: 1.1em;">Carga em Trânsito</h3>
+                        <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #666;">
+                            Você possui <b>${totalCargas}</b> guia(s) enviada(s) pela DLOG aguardando recebimento.
+                        </p>
+                    </div>
+                    <button class="btn-modern-action" style="background-color: #f57c00 !important;" onclick="abrirListaRecebimentoCarga()">
+                        <i class="fas fa-clipboard-check"></i> Conferir
+                    </button>
+                </div>
+            </div>`;
+
+        container.insertAdjacentHTML('afterbegin', alertaHtml);
+
+    } catch (e) {
+        console.error("Erro ao carregar alertas de carga:", e);
+    }
+}
+		async function abrirListaRecebimentoCarga() {
+    const minhaUnidadeId = currentUserData.unidade_id;
+    const snap = await db.collection('transferencias_pendentes')
+        .where('destino_id', '==', minhaUnidadeId)
+        .where('status', '==', 'EM_TRANSITO')
+        .get();
+
+    let htmlLista = '<div style="text-align: left; max-height: 300px; overflow-y: auto;">';
+    
+    snap.forEach(doc => {
+        const tr = doc.data();
+        htmlLista += `
+            <div class="result-vtr-card" onclick="iniciarRecebimentoCargaApp('${doc.id}')" style="border-left-color: #000; margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-left: 5px solid #000; border-radius: 8px; cursor: pointer;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <b>Guia: ${doc.id.substring(0,8)}...</b>
+                    <small style="color: #666;">${tr.timestamp_envio?.toDate().toLocaleDateString('pt-BR')}</small>
+                </div>
+                <div style="font-size: 0.8em; color: #555; margin-top: 5px;">
+                    Enviado por: <b>${tr.emitente}</b><br>
+                    Itens: <b>${tr.itens.length}</b>
+                </div>
+            </div>`;
+    });
+    htmlLista += '</div>';
+
+    Swal.fire({
+        title: 'Escolha a Guia para Receber',
+        html: htmlLista,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Fechar'
+    });
+}
+		function iniciarRecebimentoCargaApp(transferenciaId) {
+    Swal.close();
+    
+    const userUid = firebase.auth().currentUser.uid;
+    const guerra = (currentUserData.nome_guerra || 'ND').toUpperCase();
+    const posto = (currentUserData.posto || 'ND');
+    const quadro = (currentUserData.quadro || 'ND');
+
+    const url = `conferencia_app.html?transferenciaId=${transferenciaId}` +
+                `&modo=recebimento_carga` +
+                `&posto_grad=${encodeURIComponent(posto)}` +
+                `&quadro_mil=${encodeURIComponent(quadro)}` +
+                `&nome_guerra=${encodeURIComponent(guerra)}` +
+                `&user_uid=${userUid}`;
+
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+    
+    if (container && iframe) {
+        iframe.src = url;
+        container.style.display = 'block';
+    }
+}		
+		
     </script>
 </body>
 </html>
