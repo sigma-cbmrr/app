@@ -12378,41 +12378,45 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     if (!obs) return alert("A justificativa da transferência é obrigatória.");
 
     const btn = document.getElementById('btn-confirmar-movimentacao');
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processando Envio...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparando Guia de Trânsito...';
 
     try {
-        // ✅ REFERÊNCIA ÚNICA NO INVENTÁRIO
         const itemRef = db.collection('inventario').doc(uidGlobal);
+        const transRef = db.collection('transferencias_pendentes').doc(); // Nova coleção para o App
         const idEvento = "TRF-" + Date.now();
 
         await db.runTransaction(async (transaction) => {
             const snapItem = await transaction.get(itemRef);
             if (!snapItem.exists) throw new Error("Item não localizado no inventário.");
+            const dItem = snapItem.data();
+
+            let detalhesItens = []; // Para a Guia de Transferência
 
             // 1. TRATAMENTO PARA ITENS MULTI (TOMBAMENTOS)
             if (ehMulti) {
                 const selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
-                if (selecionados.length !== qtd) throw new Error("Selecione os tombamentos correspondentes à quantidade.");
+                if (selecionados.length !== qtd) throw new Error("Selecione os tombamentos correspondentes.");
 
                 for (let t of selecionados) {
                     const tombRef = itemRef.collection('tombamentos').doc(t);
                     
-                    // Atualiza o Prontuário (RG) do Ativo
+                    // ✅ DOUTRINA: Muda para "EM TRÂNSITO" e remove local atual
                     transaction.update(tombRef, {
-                        local_id: unidadeDestinoUid,
-                        sub_local: `ALMOXARIFADO ${nomeUnidadeDestino}`,
-                        situacao_atual: "DISPONÍVEL", // Reset de situação ao transferir
-                        ultima_unidade_nome: nomeUnidadeDestino
+                        situacao_atual: "EM TRÂNSITO",
+                        unidade_destino_id: unidadeDestinoUid,
+                        unidade_destino_sigla: nomeUnidadeDestino,
+                        enviado_por: autorNome,
+                        data_envio: dataReg
                     });
 
-                    // Grava o evento na sub-coleção de histórico do Ativo
-                    const histTombRef = tombRef.collection('historico_vida').doc(idEvento);
-                    transaction.set(histTombRef, {
+                    transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
                         data: dataReg,
-                        evento: "TRANSFERENCIA_UNIDADE",
+                        evento: "ENVIO_TRANSFERENCIA",
                         quem: autorNome,
-                        detalhes: `Transferido do Almox. Central para ${nomeUnidadeDestino}. Obs: ${obs}`
+                        detalhes: `Material em trânsito para ${nomeUnidadeDestino}. Guia: ${transRef.id}. Obs: ${obs}`
                     });
+
+                    detalhesItens.push({ id_base: uidGlobal, nome: dItem.nome, tombamento: t, quantidade: 1 });
                 }
             } else {
                 // 2. TRATAMENTO PARA ITENS SINGLE (SALDOS)
@@ -12428,41 +12432,59 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
                     throw new Error("Saldo disponível insuficiente no Almoxarifado Central.");
                 }
 
-                // Subtrai da Origem (ADMIN)
+                // Subtrai do Disponível DLOG
                 transaction.update(refSaldoOrigem, {
                     qtd_total: snapOrigem.data().qtd_total - qtd,
                     qtd_disp: snapOrigem.data().qtd_disp - qtd,
                     last_update: dataReg
                 });
 
-                // Soma no Destino (Unidade)
-                const dadosDest = snapDestino.exists ? snapDestino.data() : { qtd_total: 0, qtd_disp: 0, qtd_em_carga: 0, qtd_pend: 0, qtd_caut: 0 };
+                // ✅ DOUTRINA: Incrementa o Trânsito no Destino (Não o Disponível!)
+                const dadosDest = snapDestino.exists ? snapDestino.data() : { qtd_total: 0, qtd_disp: 0, qtd_transito: 0 };
                 transaction.set(refSaldoDestino, {
                     unidade_sigla: nomeUnidadeDestino,
-                    qtd_total: dadosDest.qtd_total + qtd,
-                    qtd_disp: dadosDest.qtd_disp + qtd,
+                    qtd_transito: (dadosDest.qtd_transito || 0) + qtd,
                     last_update: dataReg
                 }, { merge: true });
 
-                // Registra Histórico na Origem e no Destino (Opcional, mas recomendado para Single)
-                const histDestRef = refSaldoDestino.collection('historico_vida').doc(idEvento);
-                transaction.set(histDestRef, {
+                transaction.set(refSaldoDestino.collection('historico_vida').doc(idEvento), {
                     data: dataReg,
                     evento: "ENVIO_TRANSFERENCIA",
                     quem: autorNome,
                     quantidade: qtd,
-                    detalhes: `Envio de material do Almox. Central para ${nomeUnidadeDestino}. Obs: ${obs}`
+                    detalhes: `Lote em trânsito vindo da DLOG. Guia: ${transRef.id}. Obs: ${obs}`
                 });
+
+                detalhesItens.push({ id_base: uidGlobal, nome: dItem.nome, quantidade: qtd });
             }
+
+            // 3. ✅ GERAÇÃO DO DOCUMENTO DE CONFERÊNCIA PARA O APP
+            transaction.set(transRef, {
+                transferencia_id: transRef.id,
+                origem_id: "ADMIN",
+                origem_sigla: "DLOG",
+                destino_id: unidadeDestinoUid,
+                destino_sigla: nomeUnidadeDestino,
+                emitente: autorNome,
+                timestamp_envio: firebase.firestore.FieldValue.serverTimestamp(),
+                status: "EM_TRANSITO",
+                observacoes: obs,
+                itens: detalhesItens,
+                tipo_conferencia: "RECEBIMENTO_CARGA"
+            });
         });
 
-        alert(`✅ Sucesso! ${qtd}un transferidas para ${nomeUnidadeDestino}.`);
+        alert(`📦 Material enviado!\n\nO saldo está agora como 'EM TRÂNSITO' para ${nomeUnidadeDestino}.\n\nA Guia de Transferência foi gerada para conferência via App.`);
         document.getElementById('modal-almox-transferencia').style.display = 'none';
+        
+        // Opcional: Aqui poderíamos disparar a função de PDF que você mencionou
+        // gerarPDFTransferencia(transRef.id);
+
         carregarAlmoxarifadoUI();
 
     } catch (e) {
         console.error("Erro na transferência:", e);
-        alert("❌ Erro na transferência: " + e.message);
+        alert("❌ Erro no envio: " + e.message);
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-check"></i> Confirmar';
