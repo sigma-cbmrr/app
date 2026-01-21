@@ -12300,7 +12300,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
-		async function verHistoricoVidaGlobal(uidGlobal) {
+		async function verHistoricoVidaGlobal(uidGlobal, tombamento = null) {
     const container = document.getElementById('timeline-container');
     const modal = document.getElementById('modal-timeline-global');
     const labelNome = document.getElementById('timeline-item-nome');
@@ -12311,48 +12311,56 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     container.innerHTML = '<div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Acessando registros históricos...</div>';
 
     try {
-        // 🛑 MUDANÇA CIRÚRGICA 1: Busca o DNA do item na coleção 'inventario'
+        // 🛑 MUDANÇA CIRÚRGICA 1: Referência ao DNA do item
         const docRef = db.collection('inventario').doc(uidGlobal);
         const snap = await docRef.get();
         
         if (!snap.exists) throw new Error("Material não localizado no inventário global.");
         
         const itemData = snap.data();
-        labelNome.textContent = `Material: ${itemData.nome}`;
+        labelNome.textContent = tombamento ? `RG Individual: Tomb. ${tombamento}` : `Histórico Global: ${itemData.nome}`;
 
         let eventos = [];
 
-        // 🛑 MUDANÇA CIRÚRGICA 2: Captura logs de todas as sub-coleções de saldo (Visão Admin)
-        // Buscamos em 'saldos_unidades' todos os documentos e suas respectivas sub-coleções 'historico_vida'
-        const saldosSnap = await docRef.collection('saldos_unidades').get();
-        
-        const buscaLogsPromessas = saldosSnap.docs.map(async (docUnidade) => {
-            const histSnap = await docUnidade.ref.collection('historico_vida').get();
-            return histSnap.docs.map(d => ({
-                ...d.data(),
-                unidade_ref: docUnidade.data().unidade_sigla // Identifica de onde veio o log
-            }));
-        });
+        // 🛑 MUDANÇA CIRÚRGICA 2: Lógica de Captura Híbrida
+        if (tombamento) {
+            // MODO INDIVIDUAL: Busca logs específicos dentro da sub-coleção do tombamento
+            const histSnap = await docRef.collection('tombamentos').doc(tombamento).collection('historico_vida').get();
+            eventos = histSnap.docs.map(d => d.data());
+            
+            if (eventos.length === 0) {
+                container.innerHTML = `<p style="text-align:center; padding:40px; color:#999;">Nenhum registro individual para o tombamento ${tombamento}.</p>`;
+                return;
+            }
+        } else {
+            // MODO GLOBAL: Busca logs de todas as unidades (Itens Single) e logs do lote
+            const saldosSnap = await docRef.collection('saldos_unidades').get();
+            const buscaLogsPromessas = saldosSnap.docs.map(async (docUnidade) => {
+                const hSnap = await docUnidade.ref.collection('historico_vida').get();
+                return hSnap.docs.map(d => ({
+                    ...d.data(),
+                    unidade_ref: docUnidade.data().unidade_sigla
+                }));
+            });
 
-        const resultadosLogs = await Promise.all(buscaLogsPromessas);
-        eventos = resultadosLogs.flat(); // Achata os arrays de cada unidade em um só
+            const resultadosLogs = await Promise.all(buscaLogsPromessas);
+            eventos = resultadosLogs.flat();
 
-        // Se for Multi, também podemos querer ver logs de "Nascimento" ou "Transferência Geral" 
-        // que porventura estejam no documento pai ou em uma sub-coleção global de auditoria
-        if (itemData.historico_movimentacoes) {
-            eventos = [...eventos, ...itemData.historico_movimentacoes];
+            if (itemData.historico_movimentacoes) {
+                eventos = [...eventos, ...itemData.historico_movimentacoes];
+            }
         }
 
         if (eventos.length === 0) {
             container.innerHTML = `
                 <div style="text-align:center; color:#999; padding:40px;">
                     <i class="fas fa-history fa-3x" style="margin-bottom:15px; opacity:0.2;"></i>
-                    <p>Nenhum registro de movimentação global encontrado para este lote.</p>
+                    <p>Nenhum registro de movimentação encontrado.</p>
                 </div>`;
             return;
         }
 
-        // 🛑 MUDANÇA CIRÚRGICA 3: Ordenação Robusta (Mais recentes primeiro)
+        // 🛑 MUDANÇA CIRÚRGICA 3: Ordenação (Mais recentes primeiro)
         eventos.sort((a, b) => {
             const parseDate = (str) => {
                 if (!str) return new Date(0);
@@ -12363,14 +12371,15 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
             return parseDate(b.data) - parseDate(a.data);
         });
 
-        // 🛑 MUDANÇA CIRÚRGICA 4: Renderização com Identidade Visual
+        // 🛑 MUDANÇA CIRÚRGICA 4: Renderização
         container.innerHTML = eventos.map(ev => {
             let icon = 'fa-exchange-alt';
             let color = '#2c7399';
             
-            if (ev.evento?.includes('APORTE') || ev.evento?.includes('ENTRADA')) { icon = 'fa-plus-circle'; color = '#1b8a3e'; }
-            if (ev.evento?.includes('SAIDA') || ev.evento?.includes('TRANSFERENCIA')) { icon = 'fa-paper-plane'; color = '#800020'; }
-            if (ev.evento?.includes('PENDENCIA') || ev.evento?.includes('ALERTA')) { icon = 'fa-exclamation-triangle'; color = '#d90f23'; }
+            const evNome = (ev.evento || "").toUpperCase();
+            if (evNome.includes('APORTE') || evNome.includes('NASCIMENTO') || evNome.includes('ENTRADA')) { icon = 'fa-plus-circle'; color = '#1b8a3e'; }
+            if (evNome.includes('SAIDA') || evNome.includes('TRANSFERENCIA')) { icon = 'fa-paper-plane'; color = '#800020'; }
+            if (evNome.includes('PENDENCIA') || evNome.includes('ALERTA')) { icon = 'fa-exclamation-triangle'; color = '#d90f23'; }
 
             return `
                 <div class="timeline-event" style="border-left: 3px solid ${color}; margin-bottom: 20px; padding-left: 20px; position: relative;">
@@ -12379,7 +12388,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
                     </div>
                     <span class="event-date" style="font-size: 0.8em; color: #666; font-weight: bold;">${ev.data}</span>
                     <span class="event-title" style="display: block; font-weight: 800; color: #333; font-size: 0.85em; text-transform: uppercase; margin: 2px 0;">
-                        ${ev.evento?.replace(/_/g, ' ') || 'MOVIMENTAÇÃO'} 
+                        ${evNome.replace(/_/g, ' ')} 
                         ${ev.unidade_ref ? `<small style="color:${color}">[${ev.unidade_ref}]</small>` : ''}
                     </span>
                     <div class="event-desc" style="font-size: 0.9em; color: #444; background: #f8fafc; padding: 8px; border-radius: 4px; border: 1px solid #edf2f7; margin-top: 5px;">
@@ -12394,7 +12403,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         }).join('');
 
     } catch (e) {
-        console.error("Erro ao carregar histórico global:", e);
+        console.error("Erro no histórico:", e);
         container.innerHTML = `<p style="color:red; text-align:center; padding:20px;">Erro técnico: ${e.message}</p>`;
     }
 }
