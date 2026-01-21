@@ -633,6 +633,38 @@ function renderizarConferencia() {
     const urlParams = new URLSearchParams(window.location.search);
     const isConferenciaDeCautela = !!urlParams.get('cautelaId');
     const isChecklist = window.isModoChecklist || false;
+    const isRecebimentoCarga = urlParams.get('modo') === 'recebimento_carga'; // ✅ NOVO MODO
+
+    // --- CONFIGURAÇÃO DE IDENTIDADE VISUAL CIRÚRGICA ---
+    let corTema = '#800020'; // Padrão: Vermelho Bordô
+    if (isChecklist) corTema = '#2c3e50'; // Checklist: Azul Petróleo
+    if (isRecebimentoCarga) corTema = '#000000'; // Recebimento: Preto
+
+    // ✅ INJEÇÃO DO CABEÇALHO DE TRANSFERÊNCIA (Modo Carga)
+    if (isRecebimentoCarga && window.dadosTransferencia) {
+        const tr = window.dadosTransferencia;
+        const htmlHeaderTr = `
+            <div class="setor" style="margin-bottom: 20px;">
+                <div class="setor-header" style="background-color: #000 !important; cursor: default;">
+                    <div class="setor-info">
+                        <i class="fas fa-exchange-alt"></i> <span>TRANSFERÊNCIA DE CARGA</span>
+                    </div>
+                    <span style="font-size: 0.7em; background: #d90f23; padding: 2px 8px; border-radius: 4px;">EM TRÂNSITO</span>
+                </div>
+                <div class="setor-content expanded" style="padding: 15px; border: 1px solid #000; border-top: none; text-align: left; font-size: 0.85em; line-height: 1.6;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div><b style="color:#666">ENVIADO POR:</b><br> ${tr.emitente || 'N/D'}</div>
+                        <div><b style="color:#666">UNIDADE ORIGEM:</b><br> ${tr.origem_sigla || 'N/D'}</div>
+                        <div style="grid-column: span 2; border-top: 1px solid #eee; pt: 8px; margin-top: 5px;">
+                            <b style="color:#666">RESPONSÁVEL PELO RECEBIMENTO:</b><br> 
+                            <i class="fas fa-user-check"></i> ${userInfo.postoGraduacao} ${userInfo.nomeGuerra}
+                        </div>
+                        <div style="grid-column: span 2;"><b style="color:#666">UNIDADE DE DESTINO:</b><br> ${tr.destino_sigla || 'N/D'}</div>
+                    </div>
+                </div>
+            </div>`;
+        mainContent.insertAdjacentHTML('afterbegin', htmlHeaderTr);
+    }
 
     window.handlePhotoUploadClick = function() {
         alert("📷 Módulo de Upload de Fotos\n\nEsta funcionalidade está sendo integrada ao Firebase Storage e estará disponível em breve.");
@@ -679,7 +711,6 @@ function renderizarConferencia() {
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
-                // ✅ GARANTIA: Usa string literal para verificar se foi mantido
                 const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(String(p.id));
                 const nomeExibicao = p.autor_nome || "Conferente";
                 let acoesHtml = '';
@@ -750,7 +781,6 @@ function renderizarConferencia() {
         }
         else {
             setor.itens.forEach(item => {
-                // ✅ AJUSTE CIRÚRGICO 1: Garante que itemId sempre tenha valor (usa id_base se item.id falhar)
                 const itemId = item.id || item.id_base || "S_ID";
                 const nomeEscapado = item.nome.replace(/'/g, "\\'");
                 const isObsSetor = nomeSetorUpper.includes("OBSERVAÇÕES");
@@ -761,7 +791,6 @@ function renderizarConferencia() {
                     let temAlertaNoGrupo = false;
 
                     item.tombamentos.forEach(t => {
-                        // ✅ AJUSTE CIRÚRGICO 2: UID fixo para evitar o "undefined-480.475"
                         const uid = `${itemId}-${t.tomb}`;
                         const pndHtml = montarPendenciaHtml(uid, t);
                         const statusU = window.itemStatus[uid]?.status;
@@ -782,8 +811,8 @@ function renderizarConferencia() {
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <span>Tomb.: <b>${t.tomb}</b></span>
                                     <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                        ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
-                                        <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">+ Alt</button>
+                                        ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" style="${statusU === 'ok' ? `background-color:${corTema}!important` : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">${isRecebimentoCarga ? 'CONFERIDO' : 'S/A'}</button>` : ''}
+                                        <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">${isRecebimentoCarga ? 'AVARIA' : '+ Alt'}</button>
                                     </div>
                                 </div>
                                 <div class="alerts-wrapper">${pndHtml}</div>
@@ -791,11 +820,10 @@ function renderizarConferencia() {
                     });
                     let classeMulti = (confCount === item.tombamentos.length && item.tombamentos.length > 0) ? (temAlertaNoGrupo ? 'status-alert' : 'status-ok') : '';
                     htmlConteudoSetor += `<div class="item-conferencia item-has-tombamentos ${classeMulti}" data-id="${itemId}">
-                        <div class="item-header"><span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}"></span><span class="item-label">${item.nome}</span></div>
+                        <div class="item-header"><span class="status-icon ${classeMulti === 'status-ok' ? 'ok' : (classeMulti === 'status-alert' ? 'alert' : '')}" style="${classeMulti === 'status-ok' ? `background-color:${corTema}!important` : ''}"></span><span class="item-label">${item.nome}</span></div>
                         ${htmlTombamentos}
                     </div>`;
                 } else {
-                    // ✅ AJUSTE CIRÚRGICO 3: Garante o UID para itens single
                     const uid = itemId; 
                     const pndHtml = montarPendenciaHtml(uid, item);
                     const statusLocal = window.itemStatus[uid] || {};
@@ -817,18 +845,18 @@ function renderizarConferencia() {
                     htmlConteudoSetor += `
                         <div class="item-conferencia ${classeSingle}" data-type="single" data-id="${uid}">
                             <div class="item-header">
-                                <span class="status-icon ${classeSingle === 'status-ok' ? 'ok' : (classeSingle === 'status-alert' ? 'alert' : '')}"></span>
+                                <span class="status-icon ${classeSingle === 'status-ok' ? 'ok' : (classeSingle === 'status-alert' ? 'alert' : '')}" style="${classeSingle === 'status-ok' ? `background-color:${corTema}!important` : ''}"></span>
                                 <div style="display:flex; flex-direction:column">
                                     <span class="item-label">${item.nome}</span>
-                                    ${!isChecklist && !isObsSetor ? `<span style="font-size:0.82em; color:${(hasPendenciaReal || hasCautelaReal) ? '#d90f23' : '#1b8a3e'}; font-weight:bold;">DISPONÍVEL: ${saldoDisponivel} de ${totalOriginal}</span>` : ''}
+                                    ${!isChecklist && !isObsSetor ? `<span style="font-size:0.82em; color:${(hasPendenciaReal || hasCautelaReal) ? '#d90f23' : corTema}; font-weight:bold;">${isRecebimentoCarga ? 'A RECEBER' : 'DISPONÍVEL'}: ${isRecebimentoCarga ? totalOriginal : saldoDisponivel} un.</span>` : ''}
                                 </div>
                             </div>
                             <div class="item-options" style="margin-top:10px; display: flex; gap: 5px;">
-                                ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">S/A</button>` : ''}
+                                ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${currentStatus === 'ok' ? 'active' : ''}" style="${currentStatus === 'ok' ? `background-color:${corTema}!important` : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">${isRecebimentoCarga ? 'ÍNTEGRO' : 'S/A'}</button>` : ''}
                                 <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" 
-                                        onclick="abrirFormNovoID('${uid}', 'single', '${nomeEscapado}', ${isChecklist ? 1 : saldoDisponivel})">
-                                    <span class="d-pc-inline">${isObsSetor ? '+ Adicionar Texto' : '+ Alteração'}</span>
-                                    <span class="d-pc-none">+ Alt</span>
+                                        onclick="abrirFormNovoID('${uid}', 'single', '${nomeEscapado}', ${isChecklist ? 1 : (isRecebimentoCarga ? totalOriginal : saldoDisponivel)})">
+                                    <span class="d-pc-inline">${isRecebimentoCarga ? 'DIVERGÊNCIA' : (isObsSetor ? '+ Adicionar Texto' : '+ Alteração')}</span>
+                                    <span class="d-pc-none">${isRecebimentoCarga ? 'DIVERG.' : '+ Alt'}</span>
                                 </button>
                             </div>
                             <div class="alerts-wrapper" style="margin-top:10px">${pndHtml}</div>
@@ -839,7 +867,7 @@ function renderizarConferencia() {
 
         htmlSetores += `
             <div class="setor" data-total-items="${setor.itens.length}" data-id="${setor.id || setor.nome}">
-                <div class="setor-header" onclick="toggleSetor(this)" style="${isChecklist ? 'background-color: #2c3e50;' : ''}">
+                <div class="setor-header" onclick="toggleSetor(this)" style="background-color: ${corTema} !important;">
                     <div class="setor-info">
                         <span>${setor.nome}</span>
                         <div class="setor-status" style="color: white; font-weight: bold;">0/${setor.itens.length}</div>
@@ -853,7 +881,7 @@ function renderizarConferencia() {
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) {
         btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
-        if (isChecklist) btnFin.style.boxShadow = '0 4px 8px rgba(44, 62, 80, 0.4)';
+        btnFin.style.backgroundColor = corTema;
     }
     updateOverallStatus();
 }
@@ -864,10 +892,12 @@ async function carregarDadosRemotos() {
     const idUrl = urlParamsLocal.get('id');
     const cautelaIdUrl = urlParamsLocal.get('cautelaId');
     const modoUrl = urlParamsLocal.get('modo');
+    const transferenciaIdUrl = urlParamsLocal.get('transferenciaId'); 
 
     // 2. DEFINIÇÃO DO MODO (Garante identidade visual correta)
-    let ID_ALVO = cautelaIdUrl || idUrl;
+    let ID_ALVO = transferenciaIdUrl || cautelaIdUrl || idUrl; 
     const isCautelaLocal = !!cautelaIdUrl;
+    const isRecebimentoCarga = modoUrl === 'recebimento_carga'; 
     
     if (modoUrl === 'checklist_vtr' && ID_ALVO && !ID_ALVO.startsWith('CHECKLIST_VTR_')) {
         ID_ALVO = 'CHECKLIST_VTR_' + ID_ALVO;
@@ -875,7 +905,7 @@ async function carregarDadosRemotos() {
 
     window.isModoChecklist = (modoUrl === 'checklist_vtr') || (ID_ALVO && ID_ALVO.startsWith('CHECKLIST_VTR_'));
     
-    // 3. CONFIGURAÇÃO VISUAL (Bordô para Material, Azul para Vistoria)
+    // 3. CONFIGURAÇÃO VISUAL
     const tituloPrincipal = document.getElementById('titulo-conferencia');
     const btnFinalizar = document.getElementById('btn-finalizar');
     
@@ -890,12 +920,12 @@ async function carregarDadosRemotos() {
         }
     } else {
         if (tituloPrincipal) {
-            tituloPrincipal.innerText = isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais";
-            tituloPrincipal.style.color = "#800020";
+            tituloPrincipal.innerText = isRecebimentoCarga ? "Recebimento de Carga" : (isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais");
+            tituloPrincipal.style.color = isRecebimentoCarga ? "#000000" : "#800020";
         }
         if (btnFinalizar) {
-            btnFinalizar.innerText = "FINALIZAR CONFERÊNCIA";
-            btnFinalizar.style.backgroundColor = "#800020";
+            btnFinalizar.innerText = isRecebimentoCarga ? "CONFIRMAR RECEBIMENTO" : "FINALIZAR CONFERÊNCIA";
+            btnFinalizar.style.backgroundColor = isRecebimentoCarga ? "#000000" : "#800020";
         }
     }
 
@@ -925,25 +955,28 @@ async function carregarDadosRemotos() {
 
     let COLECAO_ALVO = isCautelaLocal ? 'cautelas_abertas' : 'listas_conferencia';
     if (window.isModoChecklist) COLECAO_ALVO = 'listas_checklist';
+    if (isRecebimentoCarga) COLECAO_ALVO = 'transferencias_pendentes';
 
     const loadingMsg = document.getElementById('loading-message');
     try {
-        // 5. BUSCA NO FIRESTORE (Fonte da Verdade)
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
         if (!doc.exists) throw new Error(`Documento não encontrado na coleção ${COLECAO_ALVO}`);
         
         const data = doc.data();
         const isDevolucaoFinal = modoUrl === 'devolucao_final';
+
+        // ✅ NOVO: Armazena os dados da transferência para o cabeçalho preto
+        if (isRecebimentoCarga) {
+            window.dadosTransferencia = data;
+        }
         
-        // 6. TRATAMENTO E NORMALIZAÇÃO DOS DADOS PARA O ENGINE
-        if (isCautelaLocal) {
+        if (isCautelaLocal || isRecebimentoCarga) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
             const listaBruta = data.list || [];
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
-                    // Normalização para evitar erros de tipo em cálculos de saldo
                     item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     item._ocultarCarimbo = isDevolucaoFinal;
                     return item;
@@ -953,28 +986,26 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        // 7. ATUALIZAÇÃO DO SUBTÍTULO
         infoLocal = { 
-            nome: isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista"),
-            posto: isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || "Geral")
+            nome: isRecebimentoCarga ? `GUIA: ${ID_ALVO}` : (isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista")),
+            posto: isRecebimentoCarga ? `ORIGEM: ${data.origem_sigla}` : (isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || "Geral"))
         };
         
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
             const separador = infoLocal.posto ? " - " : "";
-            const corDinamica = window.isModoChecklist ? "#2c3e50" : "#0000ff";
+            const corDinamica = window.isModoChecklist ? "#2c3e50" : (isRecebimentoCarga ? "#000000" : "#800020");
             infoElement.innerHTML = `<span style="color:${corDinamica};font-weight:bold">${infoLocal.nome}${separador}${infoLocal.posto}</span>`;
         }
 
-        // 8. CONFIGURAÇÃO DO BOTÃO DE FINALIZAÇÃO
         if (btnFinalizar) {
             btnFinalizar.disabled = false;
             if (isDevolucaoFinal) btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
+            else if (isRecebimentoCarga) btnFinalizar.onclick = () => finalizarRecebimentoCarga(data); 
             else if (isCautelaLocal) btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
             else btnFinalizar.onclick = () => finalizarConferencia();
         }
 
-        // 9. RENDERIZAÇÃO DA INTERFACE
         renderizarConferencia(); 
         if (typeof updateOverallStatus === "function") updateOverallStatus();
         
@@ -2211,6 +2242,103 @@ function setItemStatusID(btn, status, uid) {
             </div>`;
         document.body.insertAdjacentHTML('beforeend', html);
     } catch (e) { console.error(e); }
+}
+    async function finalizarRecebimentoCarga(transferenciaData) {
+    const btn = document.getElementById('btn-finalizar');
+    btn.textContent = "PROCESSANDO RECEBIMENTO...";
+    btn.disabled = true;
+
+    const transferenciaId = transferenciaData.transferencia_id;
+    const unidadeDestinoId = transferenciaData.destino_id;
+    const siglaDestino = transferenciaData.destino_sigla;
+    const meuNomeCompleto = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
+    const dataAtual = new Date().toLocaleString('pt-BR');
+
+    try {
+        const batch = db.batch();
+        const transRef = db.collection('transferencias_pendentes').doc(transferenciaId);
+
+        // 1. MAPEAMENTO DOS RESULTADOS DA CONFERÊNCIA (O que o militar marcou no App)
+        // Usamos o window.itemStatus para saber o que foi S/A ou C/A
+        for (const item of transferenciaData.itens) {
+            const uidBusca = item.tombamento ? `${item.id_base || item.id}-${item.tombamento}` : (item.id_base || item.id);
+            const statusLocal = window.itemStatus[uidBusca] || { status: 'ok' };
+            const uidGlobal = item.id_base || item.id;
+            const itemRef = db.collection('inventario').doc(uidGlobal);
+
+            if (item.tombamento) {
+                // ✅ LÓGICA MULTI: Atualiza o Prontuário do Tombamento
+                const tombRef = itemRef.collection('tombamentos').doc(item.tombamento);
+                
+                batch.update(tombRef, {
+                    situacao_atual: statusLocal.status === 'ok' ? "DISPONÍVEL" : "PENDENTE",
+                    local_id: unidadeDestinoId,
+                    unidade_sigla: siglaDestino,
+                    sub_local: "ALMOXARIFADO SETORIAL",
+                    recebido_por: meuNomeCompleto,
+                    data_recebimento: dataAtual,
+                    unidade_destino_id: firebase.firestore.FieldValue.delete(), // Limpa rastro de trânsito
+                    unidade_destino_sigla: firebase.firestore.FieldValue.delete()
+                });
+
+                // Registra o evento de recebimento no RG do Ativo
+                const idEvt = "REC-" + Date.now();
+                batch.set(tombRef.collection('historico_vida').doc(idEvt), {
+                    data: dataAtual,
+                    evento: "RECEBIMENTO_CARGA",
+                    quem: meuNomeCompleto,
+                    detalhes: statusLocal.status === 'ok' 
+                        ? `Material recebido e conferido S/A na unidade ${siglaDestino}.` 
+                        : `Material recebido com ALTERAÇÃO: ${statusLocal.obs || 'Não descrita'}.`
+                });
+
+            } else {
+                // ✅ LÓGICA SINGLE: Move de Trânsito para Disponível
+                const qtdRecebida = Number(item.quantidade || 1);
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeDestinoId);
+
+                batch.update(saldoRef, {
+                    qtd_transito: firebase.firestore.FieldValue.increment(-qtdRecebida),
+                    qtd_disp: firebase.firestore.FieldValue.increment(qtdRecebida),
+                    qtd_total: firebase.firestore.FieldValue.increment(qtdRecebida),
+                    last_update: dataAtual
+                });
+
+                // Log no histórico do saldo da unidade
+                const idEvtS = "REC-S-" + Date.now();
+                batch.set(saldoRef.collection('historico_vida').doc(idEvtS), {
+                    data: dataAtual,
+                    evento: "RECEBIMENTO_CARGA",
+                    quem: meuNomeCompleto,
+                    quantidade: qtdRecebida,
+                    detalhes: `Carga recebida da DLOG. Status: ${statusLocal.status.toUpperCase()}. Obs: ${statusLocal.obs || 'S/A'}`
+                });
+            }
+        }
+
+        // 2. ATUALIZA O STATUS DA TRANSFERÊNCIA PARA CONCLUÍDA
+        batch.update(transRef, {
+            status: "RECEBIDO",
+            recebedor_nome: meuNomeCompleto,
+            timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        // 3. EXECUÇÃO ATÔMICA
+        await batch.commit();
+
+        alert(`✅ Carga recebida com sucesso!\nO material agora consta como DISPONÍVEL no estoque do ${siglaDestino}.`);
+        
+        // 4. RETORNO AO DASHBOARD
+        if (window.parent) {
+            window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        }
+
+    } catch (e) {
+        console.error("Erro ao finalizar recebimento:", e);
+        alert("Erro técnico ao processar recebimento: " + e.message);
+        btn.disabled = false;
+        btn.textContent = "CONFIRMAR RECEBIMENTO";
+    }
 }
     window.onload = carregarDadosRemotos;
     </script>
