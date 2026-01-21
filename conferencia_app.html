@@ -865,26 +865,24 @@ async function carregarDadosRemotos() {
     const cautelaIdUrl = urlParamsLocal.get('cautelaId');
     const modoUrl = urlParamsLocal.get('modo');
 
-    // 2. DEFINIÇÃO PRECOCE DO MODO (Para evitar o "pisca-pisca" na tela)
+    // 2. DEFINIÇÃO DO MODO (Garante identidade visual correta)
     let ID_ALVO = cautelaIdUrl || idUrl;
     const isCautelaLocal = !!cautelaIdUrl;
     
-    // Normaliza ID do Checklist
     if (modoUrl === 'checklist_vtr' && ID_ALVO && !ID_ALVO.startsWith('CHECKLIST_VTR_')) {
         ID_ALVO = 'CHECKLIST_VTR_' + ID_ALVO;
     }
 
-    // Define o modo globalmente ANTES de qualquer busca
     window.isModoChecklist = (modoUrl === 'checklist_vtr') || (ID_ALVO && ID_ALVO.startsWith('CHECKLIST_VTR_'));
     
-    // 3. CONFIGURAÇÃO VISUAL IMEDIATA (Antes de carregar os dados)
+    // 3. CONFIGURAÇÃO VISUAL (Bordô para Material, Azul para Vistoria)
     const tituloPrincipal = document.getElementById('titulo-conferencia');
     const btnFinalizar = document.getElementById('btn-finalizar');
     
     if (window.isModoChecklist) {
         if (tituloPrincipal) {
             tituloPrincipal.innerText = "Vistoria de Viatura";
-            tituloPrincipal.style.color = "#2c3e50"; // Azul Petróleo
+            tituloPrincipal.style.color = "#2c3e50";
         }
         if (btnFinalizar) {
             btnFinalizar.innerText = "FINALIZAR VISTORIA";
@@ -893,7 +891,7 @@ async function carregarDadosRemotos() {
     } else {
         if (tituloPrincipal) {
             tituloPrincipal.innerText = isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais";
-            tituloPrincipal.style.color = "#800020"; // Bordô padrão
+            tituloPrincipal.style.color = "#800020";
         }
         if (btnFinalizar) {
             btnFinalizar.innerText = "FINALIZAR CONFERÊNCIA";
@@ -901,7 +899,7 @@ async function carregarDadosRemotos() {
         }
     }
 
-    // 4. PREENCHIMENTO DO CABEÇALHO (Conferente + Vtr Info)
+    // 4. IDENTIDADE DO CONFERENTE
     userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
     userInfo.quadro = urlParamsLocal.get('quadro_mil') || "ND";
     userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
@@ -914,18 +912,15 @@ async function carregarDadosRemotos() {
         if (window.isModoChecklist) {
             const km = urlParamsLocal.get('km') || "0";
             const combustivel = urlParamsLocal.get('combustivel') || "N/D";
-            const kmFmt = Number(km).toLocaleString('pt-BR');
-
             headerHTML += `
                 <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ccc; display: flex; gap: 15px; color: #2c3e50; font-weight: bold; font-size: 0.95em;">
-                    <span><i class="fas fa-tachometer-alt"></i> KM: ${kmFmt}</span>
+                    <span><i class="fas fa-tachometer-alt"></i> KM: ${Number(km).toLocaleString('pt-BR')}</span>
                     <span><i class="fas fa-gas-pump"></i> Tanque: ${combustivel}</span>
                 </div>`;
         }
         elHeader.innerHTML = headerHTML;
     }
 
-    // Trava de segurança
     if (!ID_ALVO || ID_ALVO === "null") return;
 
     let COLECAO_ALVO = isCautelaLocal ? 'cautelas_abertas' : 'listas_conferencia';
@@ -933,14 +928,14 @@ async function carregarDadosRemotos() {
 
     const loadingMsg = document.getElementById('loading-message');
     try {
-        // 5. BUSCA NO FIRESTORE
+        // 5. BUSCA NO FIRESTORE (Fonte da Verdade)
         const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
         if (!doc.exists) throw new Error(`Documento não encontrado na coleção ${COLECAO_ALVO}`);
         
         const data = doc.data();
         const isDevolucaoFinal = modoUrl === 'devolucao_final';
         
-        // 6. TRATAMENTO DOS DADOS
+        // 6. TRATAMENTO E NORMALIZAÇÃO DOS DADOS PARA O ENGINE
         if (isCautelaLocal) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
@@ -948,10 +943,8 @@ async function carregarDadosRemotos() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
-                    if (item.tombamentos?.some(t => t.tomb === item.nome || t.tomb === "S/T") || item.tipo === 'single') {
-                        item.tipo = 'single';
-                        item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
-                    }
+                    // Normalização para evitar erros de tipo em cálculos de saldo
+                    item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     item._ocultarCarimbo = isDevolucaoFinal;
                     return item;
                 })
@@ -960,20 +953,20 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        // Atualiza Nome do Local/Vtr no Subtítulo
+        // 7. ATUALIZAÇÃO DO SUBTÍTULO
         infoLocal = { 
-            nome: isCautelaLocal ? `${cautelaIdUrl}` : (data.ativo_nome || data.nome_local || "Lista"),
-            posto: isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || data.posto || (window.isModoChecklist ? "VTR" : "Geral"))
+            nome: isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista"),
+            posto: isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || "Geral")
         };
         
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
             const separador = infoLocal.posto ? " - " : "";
-            const corDinamica = window.isModoChecklist ? "#2c3e50" : "blue";
+            const corDinamica = window.isModoChecklist ? "#2c3e50" : "#0000ff";
             infoElement.innerHTML = `<span style="color:${corDinamica};font-weight:bold">${infoLocal.nome}${separador}${infoLocal.posto}</span>`;
         }
 
-        // Configura ações do botão
+        // 8. CONFIGURAÇÃO DO BOTÃO DE FINALIZAÇÃO
         if (btnFinalizar) {
             btnFinalizar.disabled = false;
             if (isDevolucaoFinal) btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
@@ -981,17 +974,16 @@ async function carregarDadosRemotos() {
             else btnFinalizar.onclick = () => finalizarConferencia();
         }
 
-        // 7. RENDERIZAÇÃO E EXIBIÇÃO FINAL
+        // 9. RENDERIZAÇÃO DA INTERFACE
         renderizarConferencia(); 
         if (typeof updateOverallStatus === "function") updateOverallStatus();
         
-        // "Abre a cortina"
         if (loadingMsg) loadingMsg.style.display = 'none'; 
         document.getElementById('main-content').style.display = 'block';
 
     } catch (e) { 
-        console.error(e);
-        if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro: ${e.message}</span>`;
+        console.error("Erro no carregamento remoto:", e);
+        if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro ao carregar dados: ${e.message}</span>`;
     }
 }
     
@@ -1096,7 +1088,6 @@ async function carregarDadosRemotos() {
     btn.disabled = true;
 
     try {
-        // ✅ Proteção do objeto userInfo (p) para evitar undefined no Firestore
         const p = {
             uid: userInfo?.uid || "S_UID",
             postoGraduacao: userInfo?.postoGraduacao || "ND",
@@ -1132,16 +1123,19 @@ async function carregarDadosRemotos() {
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
+                        // Limpeza de situação ao resolver avaria
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
+                        // Registro de itens S/A sem interação
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
                                 id: String(uid || ""), 
+                                uid_global: String(item.uid_global || ""),
                                 nomeCompleto: String(nomeParaRelatorio || ""), 
                                 status: 'S/A',
                                 situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
@@ -1152,6 +1146,7 @@ async function carregarDadosRemotos() {
                             return entidade;
                         }
 
+                        // Processamento de Resoluções
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -1178,6 +1173,7 @@ async function carregarDadosRemotos() {
                             });
                         }
 
+                        // Conversão de IDs Temporários em Definitivos
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id && String(p.id).startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
@@ -1193,6 +1189,7 @@ async function carregarDadosRemotos() {
                             return p;
                         });
 
+                        // Consolidação para Relatórios
                         let pendenciasParaRelatorio = [...entidade.pendencias_ids];
                         
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
@@ -1223,7 +1220,7 @@ async function carregarDadosRemotos() {
 
                         const dRel = {
                             id: String(uid || ""), 
-                            uid_global: String(entidade.uid_global || ""),
+                            uid_global: String(item.uid_global || ""),
                             nomeCompleto: String(nomeParaRelatorio || ""), 
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
@@ -1248,23 +1245,20 @@ async function carregarDadosRemotos() {
             };
         });
 
+        // ================================================================
+        // ✅ INÍCIO DA ATUALIZAÇÃO ATÔMICA (NOVA ARQUITETURA)
+        // ================================================================
         const batch = db.batch();
         
         const colecaoListaOrigem = isChecklist ? 'listas_checklist' : (typeof COLECAO_LISTAS !== 'undefined' ? COLECAO_LISTAS : 'listas_conferencia');
         const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
 
+        // 1. Atualiza a "Foto" da Viatura (Lista Mestra)
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
 
-        batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
-            lista_id: String(LISTA_ID || ""), 
-            local_nome: String(localNome || ""), 
-            conferente_uid: String(p.uid || ""),
-            conferente_completo: String(conferenteCompleto || ""), 
-            timestamp_ultima_conferencia: timestampAgora,
-            tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
-        }, { merge: true });
-        
-        batch.set(db.collection(colecaoResultadosDestino).doc(), {
+        // 2. Registra o Log da Conferência/Vistoria
+        const resRef = db.collection(colecaoResultadosDestino).doc();
+        batch.set(resRef, {
             local: String(localNome || ""), 
             lista_id: String(LISTA_ID || ""), 
             conferente_uid: String(p.uid || ""), 
@@ -1281,45 +1275,95 @@ async function carregarDadosRemotos() {
             fotos: [] 
         });
 
-        itensCaa.forEach(itemAlterado => {
+        // 3. Atualiza a Custódia Atual para Rastreio Rápido
+        batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
+            lista_id: String(LISTA_ID || ""), 
+            local_nome: String(localNome || ""), 
+            conferente_uid: String(p.uid || ""),
+            conferente_completo: String(conferenteCompleto || ""), 
+            timestamp_ultima_conferencia: timestampAgora,
+            tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
+        }, { merge: true });
+
+        // 4. ✅ SINCRONIZAÇÃO COM O INVENTÁRIO (PRONTUÁRIOS)
+        for (const itemAlterado of itensCaa) {
+            const uidGlobal = itemAlterado.uid_global;
+            if (!uidGlobal) continue;
+
+            const itemRef = db.collection('inventario').doc(uidGlobal);
             const partesId = itemAlterado.id.split('-');
-            const ehMulti = partesId.length > 1;
-            const tombamentoAlvo = ehMulti ? partesId[partesId.length - 1] : null;
+            const ehMulti = itemAlterado.id.includes('-') && itemAlterado.id !== uidGlobal;
+            
+            // LÓGICA MULTI: Atualiza o Prontuário do Tombamento
+            if (ehMulti) {
+                const tombamentoAlvo = partesId[partesId.length - 1];
+                const tombRef = itemRef.collection('tombamentos').doc(tombamentoAlvo);
+                
+                // Converte as pendências da conferência para o histórico do ativo
+                const novosLogs = (itemAlterado.pendencias_ids || [])
+                    .filter(p => p.id && String(p.id).startsWith('PEND-'))
+                    .map(p => ({
+                        data: dataAtual,
+                        evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
+                        quem: conferenteCompleto,
+                        detalhes: `⚠️ Relatada alteração em ${localNome}: ${p.descricao}`,
+                        uid_pendencia: p.id
+                    }));
 
-            if (ehMulti && tombamentoAlvo) {
-                const historicoRef = db.collection('historico_ativos_individuais').doc(tombamentoAlvo);
-                const resumoPendencias = (itemAlterado.pendencias_ids || [])
-                    .filter(p => p.id && (String(p.id).startsWith('PEND-') || String(p.id).startsWith('TEMP-'))) 
-                    .map(p => String(p.descricao || ""))
-                    .join(' | ');
+                if (novosLogs.length > 0) {
+                    const idEvento = "EVT-" + Date.now();
+                    novosLogs.forEach((log, idx) => {
+                        batch.set(tombRef.collection('historico_vida').doc(idEvento + idx), log);
+                    });
+                    batch.update(tombRef, { situacao_atual: "PENDENTE" });
+                }
+            } 
+            // LÓGICA SINGLE: Atualiza o Saldo da Unidade
+            else {
+                const unidadeId = urlParams.get('unidade_id') || currentUserData.unidade_id;
+                if (unidadeId) {
+                    const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+                    
+                    // Captura as novas pendências para ajustar o saldo disponível vs pendente
+                    const novasPendencias = (itemAlterado.pendencias_ids || [])
+                        .filter(p => p.id && String(p.id).startsWith('PEND-'));
+                    
+                    if (novasPendencias.length > 0) {
+                        const qtdPendenteTotal = novasPendencias.reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+                        
+                        batch.update(saldoRef, {
+                            qtd_disp: firebase.firestore.FieldValue.increment(-qtdPendenteTotal),
+                            qtd_pend: firebase.firestore.FieldValue.increment(qtdPendenteTotal),
+                            last_update: dataAtual
+                        });
 
-                if (resumoPendencias) {
-                    batch.set(historicoRef, {
-                        eventos: firebase.firestore.FieldValue.arrayUnion({
-                            data: new Date().toLocaleString('pt-BR'),
-                            evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
-                            quem: String(conferenteCompleto || ""),
-                            detalhes: `⚠️ ${isChecklist ? 'Vistoria' : 'Conferência'} em ${localNome}: ${resumoPendencias}`,
-                            lista_id: String(LISTA_ID || "")
-                        })
-                    }, { merge: true });
+                        // Log na sub-coleção de histórico do saldo
+                        novasPendencias.forEach((p, idx) => {
+                            batch.set(saldoRef.collection('historico_vida').doc("EVT-S-" + Date.now() + idx), {
+                                data: dataAtual,
+                                evento: "PENDENCIA_RELATADA",
+                                quem: conferenteCompleto,
+                                detalhes: `⚠️ Alteração em ${localNome}: ${p.descricao}`,
+                                quantidade: p.quantidade,
+                                uid_pendencia: p.id
+                            });
+                        });
+                    }
                 }
             }
-        });
+        }
         
+        // Finalização
         await batch.commit();
-            alert(isChecklist ? "✅ Vistoria Finalizada com Sucesso!" : "✅ Conferência Finalizada com Sucesso!");
+        alert(isChecklist ? "✅ Vistoria Finalizada com Sucesso!" : "✅ Conferência Finalizada com Sucesso!");
         
-            // 1. Tenta avisar ao SIGMA (janela pai) para fechar o modal
-            if (window.parent) {
-                window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-            }
-
-        // 2. Redirecionamento forçado para garantir que não fique travado
+        if (window.parent) {
+            window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
+        }
         window.top.location.href = "sigma_dashboard.html";
 
     } catch (e) {
-        console.error("Erro fatal:", e);
+        console.error("Erro fatal no salvamento:", e);
         alert("Erro ao gravar dados: " + e.message);
         btn.disabled = false;
         btn.textContent = isChecklist ? "FINALIZAR VISTORIA" : "FINALIZAR CONFERÊNCIA";
@@ -1855,6 +1899,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     const obsDigitada = obsModal ? obsModal.trim() : "";
     const qtdInformada = parseInt(qtd) || 1;
 
+    // 1. CAPTURA DE ASSINATURA SEGURA
     const militarInfoEl = document.getElementById('militar-info');
     let nomeAssinatura = militarInfoEl ? militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : "";
     
@@ -1862,11 +1907,12 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         nomeAssinatura = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     }
 
+    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA (FORMATO TÉCNICO)
     const novoID = {
-        id: "TEMP-" + Date.now(),
+        id: "TEMP-" + Date.now(), // ID temporário que será convertido em PEND- no salvamento final
         tipo: "PENDENCIA",
         data_criacao: new Date().toLocaleDateString('pt-BR'),
-        autor_uid: userInfo.uid,
+        autor_uid: String(userInfo.uid || "S_UID"),
         autor_nome: nomeAssinatura,
         descricao: obsDigitada,
         quantidade: qtdInformada,
@@ -1877,18 +1923,24 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     let elementoPaiAlvo = null;
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
+    // 3. BUSCA E INJEÇÃO NA MEMÓRIA VOLÁTIL
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
+            // ✅ AJUSTE: Comparação de string forçada para evitar falhas de tipo (Single)
             if (tipo === 'single' && String(item.id) === String(uid)) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
-            } else if (tipo === 'multi' && item.tombamentos) {
+            } 
+            // ✅ AJUSTE: Lógica Multi (Tombamentos)
+            else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    if (String(`${item.id}-${t.tomb}`) === String(uid)) {
+                    const uidComposto = `${item.id}-${t.tomb}`;
+                    if (String(uidComposto) === String(uid)) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
+                        // Localiza o elemento visual para update de status
                         elementoPaiAlvo = document.querySelector(`[data-id="${item.id}"]`);
                     }
                 });
@@ -1897,59 +1949,82 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     });
 
     if (itemEncontrado) {
-        // 🛑 AJUSTE CIRÚRGICO PARA O EXTRATO DETALHADO 🛑
-        // Mantemos o seu status original e apenas injetamos a 'obs' para leitura posterior
+        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO (Essencial para o motor de salvamento)
         window.itemStatus[uid] = { 
             status: 'C/A', 
             interacao_humana: true,
-            obs: obsDigitada // ⬅️ Isso permite que o log de cautela capture a descrição
+            obs: obsDigitada,
+            uid_global_ref: String(uid).split('-')[0] // Vincula ao DNA do item
         };
         
+        // 5. ATUALIZAÇÃO DA INTERFACE
         renderizarConferencia();
         
         if (elementoPaiAlvo) {
             updateItemMainStatusDisplay(elementoPaiAlvo);
         }
 
+        // 6. FEEDBACK VISUAL (SCROLL E DESTAQUE)
         setTimeout(() => {
-            let el = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-id="${uid}"]`);
+            let el = document.querySelector(`[data-id="${uid}"]`) || 
+                     document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.backgroundColor = "#fff9c4";
-                setTimeout(() => { el.style.backgroundColor = ""; }, 1000);
+                el.style.transition = "background-color 0.5s";
+                el.style.backgroundColor = "#fff9c4"; // Amarelo suave de "novo item"
+                setTimeout(() => { el.style.backgroundColor = ""; }, 1500);
             }
         }, 300);
+    } else {
+        console.error("ERRO: Alvo da pendência não localizado na memória.", { uid, tipo });
+        alert("Erro técnico: Não foi possível vincular a alteração ao item selecionado.");
     }
 }
 
 function manterID(pendenciaId, uid) {
-    // Garante que o objeto de status existe
+    // 1. GARANTE A EXISTÊNCIA DO OBJETO DE STATUS
     if (!window.itemStatus[uid]) {
-        window.itemStatus[uid] = { status: 'C/A', ids_mantidos: [], interacao_humana: true };
+        window.itemStatus[uid] = { 
+            status: 'C/A', 
+            ids_mantidos: [], 
+            interacao_humana: true 
+        };
     }
     
-    // Inicializa o array se não existir
     if (!window.itemStatus[uid].ids_mantidos) {
         window.itemStatus[uid].ids_mantidos = [];
     }
     
-    // Adiciona o ID garantindo que seja String para a comparação no montarPendenciaHtml
+    // 2. REGISTRO DO ID MANTIDO (CONVERSÃO PARA STRING SEGURA)
     const idStr = String(pendenciaId);
     if (!window.itemStatus[uid].ids_mantidos.includes(idStr)) {
         window.itemStatus[uid].ids_mantidos.push(idStr);
     }
     
+    // 3. ATUALIZAÇÃO DO ESTADO GLOBAL DO ITEM
     window.itemStatus[uid].status = 'C/A';
     window.itemStatus[uid].interacao_humana = true;
 
-    // ✅ ESSENCIAL: Redesenha a tela
+    // ✅ NOVO: VÍNCULO COM O UID GLOBAL (Para a função de finalização localizar no Inventário)
+    // Extraímos o UID Global do ID do item (remove o sufixo de tombamento se existir)
+    if (!window.itemStatus[uid].uid_global_ref) {
+        window.itemStatus[uid].uid_global_ref = idStr.includes('-') ? idStr.split('-')[0] : uid;
+    }
+
+    // 4. ATUALIZAÇÃO DA INTERFACE VISUAL
     renderizarConferencia();
     updateOverallStatus();
     
-    // Scroll suave para o card mantido
+    // Feedback visual e Scroll
     setTimeout(() => {
-        const el = document.getElementById(`card-${pendenciaId}`);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const el = document.getElementById(`card-${idStr}`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Pisca o card em verde para confirmar que o "Manter" foi aceito
+            el.style.transition = "background-color 0.5s";
+            el.style.backgroundColor = "#e8f5e9"; 
+            setTimeout(() => { el.style.backgroundColor = "#fff"; }, 1000);
+        }
     }, 100);
 }
 
@@ -1964,13 +2039,14 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const isResolvendoAvaria = String(pendenciaId).startsWith('AVARIA-');
 
     function executarBaixaNoObjeto(obj) {
+        // 1. TRATAMENTO PARA AVARIAS DE CAUTELA (LEGADO/FLUXO ESPECÍFICO)
         if (isResolvendoAvaria) {
             if (!obj.historico_vida) obj.historico_vida = [];
             obj.historico_vida.push({
-                tipo: "RESOLUÇÃO_AVARIA_CAUTELA",
+                evento: "RESOLUÇÃO_AVARIA_CAUTELA",
                 data: new Date().toLocaleDateString('pt-BR'),
-                resolvido_por: nomeResolutor,
-                justificativa: justificativa,
+                quem: nomeResolutor,
+                detalhes: `Avaria resolvida. Justificativa: ${justificativa}`,
                 cautela_origem: pendenciaId.replace('AVARIA-', '')
             });
             obj.situacao = "DISPONÍVEL"; 
@@ -1980,29 +2056,31 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             return true;
         }
 
+        // 2. TRATAMENTO PARA PENDÊNCIAS DE CONFERÊNCIA (CARIMBOS VERMELHOS)
         if (!obj.pendencias_ids) return false;
-        const index = obj.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+        const idProcurado = String(pendenciaId);
+        const index = obj.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
+        
         if (index === -1) return false;
 
         const pOriginal = obj.pendencias_ids[index];
         if (!obj.historico_vida) obj.historico_vida = [];
         
+        // Criamos o registro de solução para o histórico de vida
         const registroHistorico = {
-            ...pOriginal,
             id_referencia: pOriginal.id,
-            id: pOriginal.id + "-RES-" + Date.now(),
+            evento: qtdResolvida >= pOriginal.quantidade ? "SOLUCAO_TOTAL" : "SOLUCAO_PARCIAL",
             quantidade: qtdResolvida,
-            data_resolucao: new Date().toLocaleDateString('pt-BR'),
-            resolvido_por: nomeResolutor,
-            justificativa_resolucao: justificativa,
-            status_final: "RESOLVIDO"
+            data: new Date().toLocaleDateString('pt-BR'),
+            quem: nomeResolutor,
+            detalhes: `Resolvido via Conferência. Justificativa: ${justificativa}. (Ref: ${pOriginal.descricao})`
         };
 
+        // Lógica de abatimento de quantidade
         if (qtdResolvida >= pOriginal.quantidade) {
             obj.pendencias_ids.splice(index, 1);
         } else {
             pOriginal.quantidade -= qtdResolvida;
-            registroHistorico.justificativa_resolucao += " (Resolução Parcial)";
         }
 
         obj.historico_vida.push(registroHistorico);
@@ -2010,13 +2088,15 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         return true;
     }
 
+    // 3. BUSCA DO ALVO NA MEMÓRIA (SINGLE OU MULTI)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             if (String(item.id) === String(uid)) {
                 acaoConcluida = executarBaixaNoObjeto(item);
             } else if (item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    if (String(`${item.id}-${t.tomb}`) === String(uid)) {
+                    const uidComposto = `${item.id}-${t.tomb}`;
+                    if (String(uidComposto) === String(uid)) {
                         acaoConcluida = executarBaixaNoObjeto(t);
                     }
                 });
@@ -2025,28 +2105,35 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     });
 
     if (acaoConcluida) {
-        // ✅ AJUSTE DE STATUS: Se não há mais pendências, o status vira 'ok'
+        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         
+        // Se não sobraram pendências, o item volta a ser Verde (ok)
         window.itemStatus[uid].status = (pendenciasRestantes > 0) ? 'C/A' : 'ok';
         window.itemStatus[uid].interacao_humana = true;
         
+        // Remove dos mantidos se estava lá
         if (window.itemStatus[uid].ids_mantidos) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== String(pendenciaId));
         }
 
+        // 5. ATUALIZAÇÃO DA UI
         renderizarConferencia();
         updateOverallStatus();
 
-        // Scroll e feedback visual
+        // 6. FEEDBACK VISUAL (PISCAR VERDE)
         setTimeout(() => {
-            let elItem = document.querySelector(`[data-id="${uid}"]`) || document.querySelector(`.tombamento-container[data-id="${uid}"]`);
+            let elItem = document.querySelector(`[data-id="${uid}"]`) || 
+                         document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (elItem) {
                 elItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                elItem.style.backgroundColor = "#e8f5e9"; 
-                setTimeout(() => { elItem.style.backgroundColor = ""; }, 1000);
+                elItem.style.transition = "background-color 0.5s";
+                elItem.style.backgroundColor = "#e8f5e9"; // Verde suave
+                setTimeout(() => { elItem.style.backgroundColor = ""; }, 1500);
             }
         }, 300);
+    } else {
+        alert("Erro: Não foi possível localizar a pendência para aplicar a solução.");
     }
 }
 function setItemStatusID(btn, status, uid) {
