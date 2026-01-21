@@ -9339,12 +9339,11 @@ async function abrirSeletorGlobalSubstituicao() {
     const tbody = document.getElementById('almox-body');
     if(tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Sincronizando dados das viaturas...</td></tr>';
 
-    const almoxRef = db.collection('almoxarifado_central');
-    
     try {
         const unitListIds = await getUnitListIds(); 
-        const inventario = {};
+        const inventarioCalculado = {};
 
+        // 1. Varre todas as listas (viaturas/bases) vinculadas à unidade
         for (const listaId of unitListIds) {
             const doc = await db.collection('listas_conferencia').doc(listaId).get();
             if (!doc.exists) continue;
@@ -9352,9 +9351,11 @@ async function abrirSeletorGlobalSubstituicao() {
             const data = doc.data().list || [];
             data.forEach(setor => {
                 setor.itens.forEach(item => {
-                    const nome = item.nome.trim().toUpperCase();
-                    if (!inventario[nome]) {
-                        inventario[nome] = { total: 0, emCarga: 0, emAlteracao: 0, tipo: item.tipo };
+                    const uidGlobal = item.uid_global; // Usamos o UID Global como chave única
+                    if (!uidGlobal) return;
+
+                    if (!inventarioCalculado[uidGlobal]) {
+                        inventarioCalculado[uidGlobal] = { emCarga: 0, emAlteracao: 0, tipo: item.tipo };
                     }
                     
                     if (item.tipo === 'single') {
@@ -9362,46 +9363,51 @@ async function abrirSeletorGlobalSubstituicao() {
                         const cautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
                         const pendente = (item.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
                         
-                        inventario[nome].total += esperado;
-                        inventario[nome].emCarga += (esperado - cautelado - pendente);
-                        inventario[nome].emAlteracao += (cautelado + pendente);
+                        inventarioCalculado[uidGlobal].emCarga += (esperado - cautelado - pendente);
+                        inventarioCalculado[uidGlobal].emAlteracao += (cautelado + pendente);
                     } else {
                         const tombamentos = item.tombamentos || [];
-                        inventario[nome].total += tombamentos.length;
-                        inventario[nome].emCarga += tombamentos.filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
-                        inventario[nome].emAlteracao += tombamentos.filter(t => t.cautela || (t.pendencias_ids && t.pendencias_ids.length > 0)).length;
+                        inventarioCalculado[uidGlobal].emCarga += tombamentos.filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
+                        inventarioCalculado[uidGlobal].emAlteracao += tombamentos.filter(t => t.cautela || (t.pendencias_ids && t.pendencias_ids.length > 0)).length;
                     }
                 });
             });
         }
 
+        // 2. Atualiza os saldos nas sub-coleções de cada item no Inventário
         const batch = db.batch();
-        // Prefixo para garantir que uma unidade não sobrescreva a outra no Firestore
-        const prefixo = currentUserData.unidade.replace(/[^a-zA-Z0-9]/g, '_');
+        const minhaUnidadeId = currentUserData.unidade_id;
+        const dataReg = new Date().toLocaleString('pt-BR');
 
-        for (const [nome, dados] of Object.entries(inventario)) {
-            const safeNome = nome.replace(/[^a-zA-Z0-9]/g, '_');
-            const docId = `${prefixo}_${safeNome}`;
-
-            batch.set(almoxRef.doc(docId), {
-                nome: nome,
-                total: dados.total,
-                emCarga: dados.emCarga,
-                emAlteracao: dados.emAlteracao,
-                unidade: currentUserData.unidade,
-                lastUpdate: firebase.firestore.FieldValue.serverTimestamp()
-                // Nota: NÃO zeramos o 'disponivel' aqui para não perder o que já foi guardado fisicamente
-            }, { merge: true }); 
+        for (const [uidGlobal, dados] of Object.entries(inventarioCalculado)) {
+            const itemRef = db.collection('inventario').doc(uidGlobal);
+            
+            if (dados.tipo === 'single') {
+                const saldoRef = itemRef.collection('saldos_unidades').doc(minhaUnidadeId);
+                // Sincroniza apenas os campos de carga e alteração, mantendo o total e disponível
+                batch.update(saldoRef, {
+                    qtd_em_carga: dados.emCarga,
+                    qtd_pend: dados.emAlteracao,
+                    last_sync: dataReg
+                });
+            }
+            // Itens Multi não precisam de update aqui pois o status está no documento do próprio tombamento
         }
 
         await batch.commit();
-        alert("✅ Sincronização concluída! Inventário das viaturas atualizado.");
-        ();
+        alert("✅ Sincronização concluída! Saldos de carga atualizados no inventário.");
+        
+        // 3. Recarrega a UI (Substituindo o "();" anterior pela chamada correta)
+        if (typeof carregarAlmoxarifadoUI === 'function') {
+            await carregarAlmoxarifadoUI();
+        }
 
     } catch (e) {
         console.error("Erro na sincronização:", e);
         alert("Erro ao sincronizar. Verifique o console.");
-        (); // Tenta recarregar a UI mesmo com erro
+        if (typeof carregarAlmoxarifadoUI === 'function') {
+            carregarAlmoxarifadoUI();
+        }
     }
 }
 		
