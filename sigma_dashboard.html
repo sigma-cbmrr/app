@@ -9396,12 +9396,12 @@ async function abrirSeletorGlobalSubstituicao() {
 
         await batch.commit();
         alert("✅ Sincronização concluída! Inventário das viaturas atualizado.");
-        carregarAlmoxarifadoUI();
+        ();
 
     } catch (e) {
         console.error("Erro na sincronização:", e);
         alert("Erro ao sincronizar. Verifique o console.");
-        carregarAlmoxarifadoUI(); // Tenta recarregar a UI mesmo com erro
+        (); // Tenta recarregar a UI mesmo com erro
     }
 }
 		
@@ -9425,64 +9425,88 @@ async function carregarAlmoxarifadoUI() {
 
     if (!tbody) return;
 
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Consolidando dados...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Consolidando dados do inventário...</td></tr>';
 
     try {
         const role = currentUserData.role;
+        const minhaUnidadeId = currentUserData.unidade_id;
 
-        let query = db.collection('almoxarifado_central');
-        if (role !== 'admin') {
-            query = query.where('unidade_id', '==', currentUserData.unidade_id);
+        // 1. Busca todos os itens (DNA) registrados
+        const snapItens = await db.collection('inventario').get();
+        const listaFinal = [];
+
+        // 2. Processamento assíncrono para calcular saldos reais de sub-coleções
+        for (const doc of snapItens.docs) {
+            const d = doc.data();
+            const itemConsolidado = {
+                id: doc.id,
+                nome: d.nome,
+                tipo: d.tipo,
+                categoria: d.categoria || "OUTROS",
+                total: 0,
+                disponivel: 0,
+                emCarga: 0,
+                emAlteracao: 0,
+                locais: []
+            };
+
+            if (d.tipo === 'multi') {
+                // ✅ LÓGICA MULTI: Soma baseada no status de cada tombamento
+                let queryTomb = doc.ref.collection('tombamentos');
+                // Se não for admin, filtra apenas tombamentos que estão na sua unidade
+                if (role !== 'admin') {
+                    queryTomb = queryTomb.where('local_id', '==', minhaUnidadeId);
+                }
+
+                const snapTomb = await queryTomb.get();
+                snapTomb.forEach(tDoc => {
+                    const t = tDoc.data();
+                    itemConsolidado.total++;
+                    
+                    if (t.situacao_atual === 'DISPONÍVEL') itemConsolidado.disponivel++;
+                    else if (t.situacao_atual === 'EM CARGA') itemConsolidado.emCarga++;
+                    else if (t.situacao_atual === 'AVARIADO' || t.situacao_atual === 'PENDENTE') itemConsolidado.emAlteracao++;
+                    
+                    if (t.local_id && !itemConsolidado.locais.includes(t.local_id)) itemConsolidado.locais.push(t.local_id);
+                });
+            } else {
+                // ✅ LÓGICA SINGLE: Soma baseada nos documentos de saldos_unidades
+                let querySaldo = doc.ref.collection('saldos_unidades');
+                if (role !== 'admin') {
+                    querySaldo = querySaldo.where(firebase.firestore.FieldPath.documentId(), '==', minhaUnidadeId);
+                }
+
+                const snapSaldo = await querySaldo.get();
+                snapSaldo.forEach(sDoc => {
+                    const s = sDoc.data();
+                    itemConsolidado.total += (Number(s.qtd_total) || 0);
+                    itemConsolidado.disponivel += (Number(s.qtd_disp) || 0);
+                    itemConsolidado.emCarga += (Number(s.qtd_em_carga) || 0);
+                    itemConsolidado.emAlteracao += (Number(s.qtd_pend) || 0) + (Number(s.qtd_caut) || 0);
+                    
+                    if (s.unidade_sigla && !itemConsolidado.locais.includes(s.unidade_sigla)) itemConsolidado.locais.push(s.unidade_sigla);
+                });
+            }
+
+            // Só adiciona na lista se houver saldo para mostrar (especialmente para gestores)
+            if (itemConsolidado.total > 0 || role === 'admin') {
+                listaFinal.push(itemConsolidado);
+            }
         }
 
-        const snap = await query.get();
-        const inventarioAgrupado = {};
-
-        snap.forEach(doc => {
-            const d = doc.data();
-            const uid = d.uid_global;
-
-            if (!inventarioAgrupado[uid]) {
-                inventarioAgrupado[uid] = {
-                    id: doc.id, 
-                    nome: d.nome,
-                    tipo: d.tipo,
-                    categoria: d.categoria || "OUTROS",
-                    total: 0,
-                    disponivel: 0,
-                    emCarga: 0,
-                    emAlteracao: 0,
-                    locais: []
-                };
-            }
-
-            inventarioAgrupado[uid].total += (Number(d.total) || 0);
-            inventarioAgrupado[uid].disponivel += (Number(d.disponivel) || 0);
-            inventarioAgrupado[uid].emCarga += (Number(d.emCarga) || 0);
-            inventarioAgrupado[uid].emAlteracao += (Number(d.emAlteracao) || 0);
-            
-            if (d.unidade && !inventarioAgrupado[uid].locais.includes(d.unidade)) {
-                inventarioAgrupado[uid].locais.push(d.unidade);
-            }
-        });
-
+        // 3. Renderização do HTML (Mantendo seu padrão visual original)
         let html = '';
-        const listaFinal = Object.values(inventarioAgrupado).sort((a, b) => a.nome.localeCompare(b.nome));
+        listaFinal.sort((a, b) => a.nome.localeCompare(b.nome));
 
         if (listaFinal.length === 0) {
-            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum material encontrado.</td></tr>';
+            html = '<tr><td colspan="6" style="text-align:center; padding:20px; color:#999;">Nenhum material sob custódia localizado.</td></tr>';
         } else {
             listaFinal.forEach(d => {
-                const total = d.total;
-                const disponivel = d.disponivel;
-                let statusColor = (disponivel === 0) ? '#d90f23' : (disponivel < (total * 0.25)) ? '#f57c00' : '#1b8a3e';
-
+                let statusColor = (d.disponivel === 0) ? '#d90f23' : (d.disponivel < (d.total * 0.25)) ? '#f57c00' : '#1b8a3e';
                 const labelLocais = role === 'admin' 
                     ? `<br><span style="font-size:0.75em; color:#2c7399; font-weight:bold;"><i class="fas fa-map-marker-alt"></i> LOCAIS: ${d.locais.join(', ')}</span>` 
                     : '';
 
-                // ✅ PADRONIZAÇÃO UX: O BOTÃO DE HISTÓRICO FOI REMOVIDO DAQUI PARA TODOS OS ITENS
-                // Agora o acesso é centralizado dentro da Lupa (verDetalhesItemAlmox)
                 html += `
                 <tr data-categoria="${d.categoria.toUpperCase()}">
                     <td data-label="Material">
@@ -9492,10 +9516,10 @@ async function carregarAlmoxarifadoUI() {
                             <br><small style="color:#888;">TIPO: ${d.tipo.toUpperCase()}</small>
                         </div>
                     </td>
-                    <td style="text-align:center; font-weight:500;" data-label="Total">${total}</td>
+                    <td style="text-align:center; font-weight:500;" data-label="Total">${d.total}</td>
                     <td style="text-align:center; color:#555;" data-label="Em Carga">${d.emCarga}</td>
                     <td style="text-align:center; color:#d90f23;" data-label="Pendente">${d.emAlteracao}</td>
-                    <td style="text-align:center; font-weight:800; color:${statusColor}; background-color:rgba(0,0,0,0.02);" data-label="Disponível">${disponivel}</td>
+                    <td style="text-align:center; font-weight:800; color:${statusColor}; background-color:rgba(0,0,0,0.02);" data-label="Disponível">${d.disponivel}</td>
                     <td style="text-align:center;" data-label="Ações">
                         <div style="display:flex; gap:6px; justify-content:center;">
                             <button class="btn-modern-action" title="Rastreio Global" onclick="verDetalhesItemAlmox('${d.id}')" style="background:#e0f2fe!important; color:#0369a1!important; padding:7px 10px!important;"><i class="fas fa-search-location"></i></button>
@@ -9508,8 +9532,8 @@ async function carregarAlmoxarifadoUI() {
         tbody.innerHTML = html;
 
     } catch (e) {
-        console.error("Erro no Almoxarifado:", e);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao consolidar dados.</td></tr>';
+        console.error("Erro na consolidação do inventário:", e);
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao consolidar dados de sub-coleções.</td></tr>';
     }
 }
 /**
@@ -10308,33 +10332,32 @@ async function salvarCadastroGlobalHierarquico() {
     btn.disabled = true; 
     btn.textContent = "Processando DNA...";
 
-    // Captura dados do autor e data para o primeiro registro do histórico
     const autorNome = currentUserData.nome_militar_completo;
     const dataRegistro = new Date().toLocaleString('pt-BR');
 
     try {
         await db.runTransaction(async (transaction) => {
+            const contRef = db.collection('config_geral').doc('contadores');
+            const contSnap = await transaction.get(contRef);
+            const contData = contSnap.data() || { ultimo_id_pai: 0, ultimo_id_modelo: 0 };
+
             // 1. GERENCIAR UID PAI (FAMÍLIA)
             if (!uidPai) {
-                const contRef = db.collection('config_geral').doc('contadores');
-                const contSnap = await transaction.get(contRef);
-                const proximoNum = (contSnap.data().ultimo_id_pai || 0) + 1;
-                uidPai = `item_${String(proximoNum).padStart(6, '0')}`;
+                const proximoPai = contData.ultimo_id_pai + 1;
+                uidPai = `FAM-${String(proximoPai).padStart(6, '0')}`;
                 
-                // Cria a Família
                 transaction.set(db.collection('catalogo_familias').doc(uidPai), {
                     uid_pai: uidPai,
                     nome_pai: nomePai,
                     tags_busca: [nomePai],
                     criado_em: firebase.firestore.FieldValue.serverTimestamp()
                 });
-                // Atualiza contador
-                transaction.update(contRef, { ultimo_id_pai: proximoNum });
+                transaction.update(contRef, { ultimo_id_pai: proximoPai });
             }
 
-            // 2. GERENCIAR UID FILHO (MODELO TÉCNICO)
-            const slugModelo = `${marca}_${modelo}`.toLowerCase().replace(/\s+/g, '_').replace(/[^\w]/g, '');
-            const uidGlobal = `${uidPai}-${slugModelo}`;
+            // 2. GERENCIAR UID GLOBAL (MODELO TÉCNICO - AGORA NUMÉRICO)
+            const proximoMod = contData.ultimo_id_modelo + 1;
+            const uidGlobal = `${uidPai}-MOD-${proximoMod}`;
             const nomeTecnicoCompleto = `${nomePai} ${marca} ${modelo}`;
 
             // 3. SALVAR NO CATÁLOGO GLOBAL (DNA)
@@ -10351,45 +10374,32 @@ async function salvarCadastroGlobalHierarquico() {
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-            // 4. ATUALIZAR TAGS DA FAMÍLIA (Para buscas futuras por marca)
+            // 4. ATUALIZAR TAGS DA FAMÍLIA E CONTADOR DE MODELO
             transaction.update(db.collection('catalogo_familias').doc(uidPai), {
                 tags_busca: firebase.firestore.FieldValue.arrayUnion(marca, modelo)
             });
+            transaction.update(contRef, { ultimo_id_modelo: proximoMod });
 
-            // 5. HABILITAR NO ALMOXARIFADO CENTRAL (ADMIN)
-            // Aqui inserimos a CATEGORIA para permitir filtragem eficiente na UI
-            const docIdAlmox = `ADMIN_${uidGlobal}`;
-            transaction.set(db.collection('almoxarifado_central').doc(docIdAlmox), {
+            // 5. INICIALIZAR NO NOVO INVENTÁRIO (ESTRUTURA ÚNICA)
+            // Aqui o item "nasce" no inventário mas com saldos zerados
+            transaction.set(db.collection('inventario').doc(uidGlobal), {
                 uid_global: uidGlobal,
                 nome: nomeTecnicoCompleto,
-                unidade: "ADMINISTRATIVO",
-                categoria: categoria, // ⬅️ VÍNCULO PARA FILTRAGEM "POR BAIXO DOS PANOS"
-                total: 0,
-                disponivel: 0,
-                emCarga: 0,
-                emAlteracao: 0,
                 tipo: tipoControle,
-                // Registro de vida inicial do item
-                historico_movimentacoes: [{
-                    data: dataRegistro,
-                    evento: "CADASTRO_DNA",
-                    detalhes: `DNA do material criado no Catálogo Global e habilitado para estoque.`,
-                    quem: autorNome
-                }]
-            }, { merge: true });
+                categoria: categoria,
+                qtd_corporativa_total: 0,
+                criado_em: dataRegistro,
+                criado_por: autorNome
+            });
         });
 
-        alert("✅ Cadastro Global realizado com sucesso!\nO item já está registrado e disponível para aporte.");
+        alert("✅ Cadastro Global realizado!\nDNA salvo e item habilitado no Inventário.");
         fecharModalCadastroGlobal();
-        
-        // Atualiza a interface do Almoxarifado para exibir o novo item
-        if (typeof carregarAlmoxarifadoUI === 'function') {
-            carregarAlmoxarifadoUI();
-        }
+        if (typeof carregarAlmoxarifadoUI === 'function') carregarAlmoxarifadoUI();
 
     } catch (e) {
-        console.error("Erro na transação de cadastro:", e);
-        alert("Erro ao salvar cadastro: " + e.message);
+        console.error("Erro na transação:", e);
+        alert("Erro ao salvar: " + e.message);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -10612,7 +10622,7 @@ function gerarInputsTombamentoAporte(qtd) {
 
 async function executarAporteEstoque() {
     const docElement = document.getElementById('almox-aporte-item-nome');
-    const docIdAlmox = docElement.getAttribute('data-docid');
+    const uidGlobal = docElement.getAttribute('data-docid').replace('ADMIN_', ''); // Normaliza o ID para a nova estrutura
     const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
     const qtd = parseInt(document.getElementById('almox-aporte-qtd').value);
     const obs = document.getElementById('almox-aporte-obs').value.trim();
@@ -10625,18 +10635,18 @@ async function executarAporteEstoque() {
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
 
     try {
-        const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
+        // ✅ REFERÊNCIA PARA A NOVA COLEÇÃO ÚNICA
+        const itemRef = db.collection('inventario').doc(uidGlobal);
         const autorNome = currentUserData.nome_militar_completo;
         
         await db.runTransaction(async (transaction) => {
-            const snapAlmox = await transaction.get(almoxRef);
-            if (!snapAlmox.exists) throw new Error("Item não localizado no almoxarifado.");
+            const snapItem = await transaction.get(itemRef);
+            if (!snapItem.exists) throw new Error("DNA do material não encontrado no inventário.");
             
-            const d = snapAlmox.data();
-            const uidGlobal = d.uid_global;
-            let novosTombamentos = [];
+            const d = snapItem.data();
+            const idEvento = "EVT-" + Date.now();
 
-            // 1. TRATAMENTO PARA ITENS MULTI
+            // 1. TRATAMENTO PARA ITENS MULTI (TOMBAMENTOS)
             if (ehMulti) {
                 const linhas = document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb');
                 linhas.forEach(linha => {
@@ -10644,47 +10654,60 @@ async function executarAporteEstoque() {
                     const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
                     
                     if (t) {
-                        novosTombamentos.push({
-                            tomb: t, serie: s || "N/A", situacao: "DISPONÍVEL",
-                            viatura_id: null, data_entrada: dataReg
+                        // Prontuário Individual do Tombamento
+                        const tombRef = itemRef.collection('tombamentos').doc(t);
+                        transaction.set(tombRef, {
+                            tomb: t,
+                            serie: s || "N/A",
+                            situacao_atual: "DISPONÍVEL",
+                            local_id: "ADMIN",
+                            sub_local: "ALMOXARIFADO CENTRAL",
+                            data_entrada: dataReg,
+                            criado_por: autorNome
                         });
 
-                        // Histórico Individual do Ativo (RG do item)
-                        const historicoRef = db.collection('historico_ativos_individuais').doc(t);
-                        transaction.set(historicoRef, {
-                            tombamento: t, uid_global: uidGlobal, nome_material: d.nome,
-                            situacao_atual: "DISPONÍVEL (ALMOX. CENTRAL)",
-                            unidade_atual: currentUserData.unidade,
-                            eventos: [{
-                                data: dataReg, evento: "NASCIMENTO_SISTEMA", quem: autorNome,
-                                detalhes: `Item incorporado via Aporte Central. Obs: ${obs}`
-                            }]
-                        }, { merge: true });
+                        // Histórico de Vida Individual (RG do Ativo)
+                        const histRef = tombRef.collection('historico_vida').doc(idEvento);
+                        transaction.set(histRef, {
+                            data: dataReg,
+                            evento: "NASCIMENTO_SISTEMA",
+                            quem: autorNome,
+                            detalhes: `Incorporado via Aporte Central. Justificativa: ${obs}`
+                        });
                     }
                 });
-                if (novosTombamentos.length !== qtd) throw new Error("Preencha todos os campos de tombamento.");
+            } else {
+                // 2. TRATAMENTO PARA ITENS SINGLE (SALDOS POR UNIDADE)
+                const saldoUnidadeRef = itemRef.collection('saldos_unidades').doc('ADMIN');
+                const snapSaldo = await transaction.get(saldoUnidadeRef);
+                const dadosSaldo = snapSaldo.exists ? snapSaldo.data() : { qtd_total: 0, qtd_disp: 0, qtd_em_carga: 0, qtd_pend: 0, qtd_caut: 0 };
+
+                transaction.set(saldoUnidadeRef, {
+                    unidade_sigla: "ADMIN",
+                    qtd_total: dadosSaldo.qtd_total + qtd,
+                    qtd_disp: dadosSaldo.qtd_disp + qtd,
+                    last_update: dataReg
+                }, { merge: true });
+
+                // Histórico de Movimentação do Lote (Single)
+                const histSingleRef = saldoUnidadeRef.collection('historico_vida').doc(idEvento);
+                transaction.set(histSingleRef, {
+                    data: dataReg,
+                    evento: "APORTE_ESTOQUE",
+                    quem: autorNome,
+                    quantidade: qtd,
+                    detalhes: `Entrada física de estoque. Justificativa: ${obs}`
+                });
             }
 
-            // 2. REGISTRO NO HISTÓRICO GLOBAL (O que aparece no botão do Relógio)
-            // Criamos o log de movimentação para o lote/quantidade
-            const novoLogAporte = {
-                data: dataReg,
-                evento: "ENTRADA_ESTOQUE",
-                detalhes: `Aporte de ${qtd}un (${ehMulti ? 'Identificados por Tombamento' : 'Quantidade'}). Justificativa: ${obs}`,
-                quem: autorNome
-            };
-
-            // 3. ATUALIZAÇÃO DO SALDO E HISTÓRICO NO ALMOXARIFADO
-            transaction.update(almoxRef, {
-                total: (d.total || 0) + qtd,
-                disponivel: (d.disponivel || 0) + qtd,
-                tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...novosTombamentos) : (d.tombamentos || []),
-                // Garante que o log de aporte entre no histórico_movimentacoes do documento central
-                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLogAporte)
+            // 3. ATUALIZAÇÃO DO TOTAL CORPORATIVO NO DNA DO ITEM
+            transaction.update(itemRef, {
+                qtd_corporativa_total: (d.qtd_corporativa_total || 0) + qtd,
+                ultima_movimentacao: dataReg
             });
         });
 
-        alert("✅ Aporte realizado e registrado no histórico!");
+        alert("✅ Aporte realizado com sucesso!\nSaldos e Prontuários atualizados na nova arquitetura.");
         document.getElementById('modal-almox-aporte').style.display = 'none';
         carregarAlmoxarifadoUI();
 
@@ -10783,75 +10806,126 @@ async function executarAporteEstoque() {
     const viaturaId = document.getElementById('almox-viatura-alvo').value;
     const setorAlvo = document.getElementById('almox-setor-alvo').value;
     const obs = document.getElementById('almox-transf-obs').value.trim();
-    const tombFocado = document.getElementById('almox-tombamento-focado')?.value; // Pego da preparação
+    const tombFocado = localStorage.getItem('sigma_tomb_foco'); 
     const dataRegistro = new Date().toLocaleString('pt-BR');
+    const autorNome = currentUserData.nome_militar_completo;
     
     let qtd = parseInt(document.getElementById('almox-transf-qtd').value);
 
-    if (!viaturaId || !setorAlvo) return alert("Selecione o destino completo.");
+    if (!viaturaId || !setorAlvo) return alert("Selecione o destino completo (Viatura e Setor).");
     if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
 
     try {
-        const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
+        // ✅ NORMALIZAÇÃO DE IDS PARA A NOVA ARQUITETURA
+        // O docIdAlmox vinha como "CCI_item_0001", agora extraímos apenas o UID Global
+        const uidGlobal = docIdAlmox.includes('_') ? docIdAlmox.split('_').slice(1).join('_') : docIdAlmox;
+        const unidadeDonaId = currentUserData.unidade_id;
+
+        const itemRef = db.collection('inventario').doc(uidGlobal);
         const vtrRef = db.collection('listas_conferencia').doc(viaturaId);
+        const idEvento = "ENV-" + Date.now();
 
         await db.runTransaction(async (transaction) => {
-            const snapAlmox = await transaction.get(almoxRef);
-            const dAlmox = snapAlmox.data();
-            const ehMulti = dAlmox.tipo === 'multi';
-
-            if (dAlmox.disponivel < qtd) throw new Error("Saldo insuficiente no Almoxarifado.");
+            const snapItem = await transaction.get(itemRef);
+            if (!snapItem.exists) throw new Error("Item não localizado no inventário global.");
+            const dItem = snapItem.data();
+            const ehMulti = dItem.tipo === 'multi';
 
             const snapVtr = await transaction.get(vtrRef);
+            if (!snapVtr.exists) throw new Error("Viatura/Lista não encontrada.");
             let listVtr = snapVtr.data().list || [];
-            let itensParaVtr = [];
 
-            // Trata Tombamentos se for Multi
-            let arrayTombAlmox = dAlmox.tombamentos || [];
+            // --- 1. LÓGICA MULTI: ATUALIZA PRONTUÁRIOS INDIVIDUAIS ---
+            let itensParaVtr = [];
             if (ehMulti) {
-                // Se veio de um tombamento específico ou de checkboxes (mantendo compatibilidade)
-                const selecionados = tombFocado ? [tombFocado] : Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
+                const selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
                 
-                arrayTombAlmox = arrayTombAlmox.map(t => {
-                    if (selecionados.includes(t.tomb)) {
-                        const tAtu = { ...t, viatura_id: viaturaId, situacao: "EM CARGA" };
-                        tAtu.historico_vida = [...(t.historico_vida || []), { data: dataRegistro, evento: "ENVIO_VTR", detalhes: `Para ${viaturaId}. Obs: ${obs}`, quem: conferente }];
-                        itensParaVtr.push(tAtu); 
-                        return tAtu;
-                    }
-                    return t;
+                for (let t of selecionados) {
+                    const tombRef = itemRef.collection('tombamentos').doc(t);
+                    transaction.update(tombRef, {
+                        situacao_atual: "EM CARGA",
+                        viatura_id: viaturaId,
+                        sub_local: setorAlvo
+                    });
+
+                    // Registra no histórico do ativo
+                    transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
+                        data: dataRegistro,
+                        evento: "SAIDA_PARA_VTR",
+                        quem: autorNome,
+                        detalhes: `Enviado para ${viaturaId} (Setor: ${setorAlvo}). Obs: ${obs}`
+                    });
+
+                    itensParaVtr.push({ tomb: t, situacao: "EM CARGA" });
+                }
+            } else {
+                // --- 2. LÓGICA SINGLE: ATUALIZA SALDO DA UNIDADE ---
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeDonaId);
+                const snapSaldo = await transaction.get(saldoRef);
+                
+                if (!snapSaldo.exists || snapSaldo.data().qtd_disp < qtd) {
+                    throw new Error("Saldo disponível insuficiente na unidade.");
+                }
+
+                transaction.update(saldoRef, {
+                    qtd_disp: snapSaldo.data().qtd_disp - qtd,
+                    qtd_em_carga: (snapSaldo.data().qtd_em_carga || 0) + qtd,
+                    last_update: dataRegistro
+                });
+
+                // Registra histórico no saldo da unidade
+                transaction.set(saldoRef.collection('historico_vida').doc(idEvento), {
+                    data: dataRegistro,
+                    evento: "ENVIO_PARA_VTR",
+                    quem: autorNome,
+                    quantidade: qtd,
+                    detalhes: `Enviado para ${viaturaId} (Setor: ${setorAlvo}). Obs: ${obs}`
                 });
             }
 
-            // Injeta na Lista da Viatura
+            // --- 3. INJEÇÃO NA LISTA DA VIATURA (IGUAL À ANTERIOR, MAS COM IDS LIMPOS) ---
             let itemJaNaVtr = false;
             listVtr = listVtr.map(setor => {
                 if (setor.nome === setorAlvo) {
-                    setor.itens = (setor.itens || []).map(it => {
-                        if (it.uid_global === dAlmox.uid_global || it.nome === dAlmox.nome) {
+                    if (!setor.itens) setor.itens = [];
+                    setor.itens = setor.itens.map(it => {
+                        if (it.uid_global === uidGlobal) {
                             itemJaNaVtr = true;
-                            if (ehMulti) { it.tombamentos = [...(it.tombamentos || []), ...itensParaVtr]; it.quantidadeEsperada = it.tombamentos.length; }
-                            else { it.quantidadeEsperada = (Number(it.quantidadeEsperada) || 0) + qtd; }
+                            if (ehMulti) {
+                                it.tombamentos = [...(it.tombamentos || []), ...itensParaVtr];
+                                it.quantidadeEsperada = it.tombamentos.length;
+                            } else {
+                                it.quantidadeEsperada = (Number(it.quantidadeEsperada) || 0) + qtd;
+                            }
                         }
                         return it;
                     });
-                    if (!itemJaNaVtr) setor.itens.push({ id: dAlmox.uid_global + "_" + Date.now(), uid_global: dAlmox.uid_global, nome: dAlmox.nome, tipo: dAlmox.tipo, quantidadeEsperada: qtd, tombamentos: ehMulti ? itensParaVtr : [] });
+                    if (!itemJaNaVtr) {
+                        setor.itens.push({
+                            id: uidGlobal + "_" + Date.now(),
+                            uid_global: uidGlobal,
+                            nome: dItem.nome,
+                            tipo: dItem.tipo,
+                            quantidadeEsperada: qtd,
+                            tombamentos: ehMulti ? itensParaVtr : []
+                        });
+                    }
                 }
                 return setor;
             });
 
-            transaction.update(almoxRef, { 
-                disponivel: dAlmox.disponivel - qtd, 
-                emCarga: (dAlmox.emCarga || 0) + qtd, 
-                tombamentos: ehMulti ? arrayTombAlmox : dAlmox.tombamentos 
-            });
             transaction.update(vtrRef, { list: listVtr });
         });
 
-        alert("✅ Envio realizado com sucesso!");
+        alert("✅ Material enviado para a viatura com sucesso!");
+        localStorage.removeItem('sigma_tomb_foco');
         document.getElementById('modal-almox-transferencia').style.display = 'none';
         carregarAlmoxarifadoUI();
-    } catch (e) { alert("❌ Erro no envio: " + e.message); }
+
+    } catch (e) {
+        console.error("Erro no envio:", e);
+        alert("❌ Erro no envio: " + e.message);
+    }
 }
 		async function executarRecolhimento(docIdAlmox) {
     const viaturaId = document.getElementById('almox-viatura-alvo').value; // Estará disabled mas o valor existe
@@ -12233,9 +12307,8 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
 }
 	async function executarEnvioUnidade() {
     const docElement = document.getElementById('almox-transf-item-nome');
-    const docIdOrigem = docElement.getAttribute('data-docid'); 
+    const uidGlobal = docElement.getAttribute('data-docid').replace('ADMIN_', ''); 
     const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
-    const uidGlobal = docIdOrigem.replace('ADMIN_', ''); 
     
     const unidadeDestinoUid = document.getElementById('almox-viatura-alvo').value; 
     const obs = document.getElementById('almox-transf-obs').value.trim();
@@ -12254,89 +12327,77 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processando Envio...';
 
     try {
-        const refOrigem = db.collection('almoxarifado_central').doc(docIdOrigem);
-        
-        // 🛑 MUDANÇA CIRÚRGICA: O ID do documento agora usa o UID da Unidade para ser único e constante
-        const docIdDestino = `${unidadeDestinoUid}_${uidGlobal}`; 
-        const refDestino = db.collection('almoxarifado_central').doc(docIdDestino);
+        // ✅ REFERÊNCIA ÚNICA NO INVENTÁRIO
+        const itemRef = db.collection('inventario').doc(uidGlobal);
+        const idEvento = "TRF-" + Date.now();
 
         await db.runTransaction(async (transaction) => {
-            const snapOrigem = await transaction.get(refOrigem);
-            const snapDestino = await transaction.get(refDestino); 
+            const snapItem = await transaction.get(itemRef);
+            if (!snapItem.exists) throw new Error("Item não localizado no inventário.");
 
-            if (!snapOrigem.exists) throw new Error("Item de origem não localizado.");
-            const dOrigem = snapOrigem.data();
-
-            if (dOrigem.disponivel < qtd) throw new Error("Saldo insuficiente no Almoxarifado Central.");
-
-            let tombamentosParaMover = [];
-            let novosTombamentosOrigem = dOrigem.tombamentos || [];
-            let selecionados = [];
-
+            // 1. TRATAMENTO PARA ITENS MULTI (TOMBAMENTOS)
             if (ehMulti) {
-                selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
-                if (selecionados.length !== qtd) throw new Error("A quantidade informada não bate com os tombamentos selecionados.");
+                const selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
+                if (selecionados.length !== qtd) throw new Error("Selecione os tombamentos correspondentes à quantidade.");
 
-                novosTombamentosOrigem = (dOrigem.tombamentos || []).filter(t => !selecionados.includes(t.tomb));
-                tombamentosParaMover = (dOrigem.tombamentos || []).filter(t => selecionados.includes(t.tomb));
-            }
-
-            const logEnvio = {
-                data: dataReg, evento: "SAIDA_TRANSFERENCIA",
-                detalhes: `Enviado ${qtd}un para Unidade: ${nomeUnidadeDestino}. Motivo: ${obs}`,
-                quem: autorNome
-            };
-
-            const logRecebimento = {
-                data: dataReg, evento: "ENTRADA_TRANSFERENCIA",
-                detalhes: `Recebido do Almox. Central via Admin. Motivo: ${obs}`,
-                quem: autorNome
-            };
-
-            if (ehMulti) {
                 for (let t of selecionados) {
-                    const histRef = db.collection('historico_ativos_individuais').doc(t);
-                    transaction.set(histRef, {
-                        situacao_atual: `DISPONÍVEL (ESTOQUE ${nomeUnidadeDestino})`,
-                        unidade_atual: nomeUnidadeDestino,
-                        unidade_id: unidadeDestinoUid, // 🛑 Adicionado UID no histórico
-                        eventos: firebase.firestore.FieldValue.arrayUnion({
-                            data: dataReg, evento: "TRANSFERENCIA_UNIDADE", quem: autorNome,
-                            detalhes: `Transferido do Almox. Central para ${nomeUnidadeDestino}. Justificativa: ${obs}`
-                        })
-                    }, { merge: true });
+                    const tombRef = itemRef.collection('tombamentos').doc(t);
+                    
+                    // Atualiza o Prontuário (RG) do Ativo
+                    transaction.update(tombRef, {
+                        local_id: unidadeDestinoUid,
+                        sub_local: `ALMOXARIFADO ${nomeUnidadeDestino}`,
+                        situacao_atual: "DISPONÍVEL", // Reset de situação ao transferir
+                        ultima_unidade_nome: nomeUnidadeDestino
+                    });
+
+                    // Grava o evento na sub-coleção de histórico do Ativo
+                    const histTombRef = tombRef.collection('historico_vida').doc(idEvento);
+                    transaction.set(histTombRef, {
+                        data: dataReg,
+                        evento: "TRANSFERENCIA_UNIDADE",
+                        quem: autorNome,
+                        detalhes: `Transferido do Almox. Central para ${nomeUnidadeDestino}. Obs: ${obs}`
+                    });
                 }
-            }
-
-            transaction.update(refOrigem, {
-                total: (dOrigem.total || 0) - qtd,
-                disponivel: (dOrigem.disponivel || 0) - qtd,
-                tombamentos: ehMulti ? novosTombamentosOrigem : (dOrigem.tombamentos || []),
-                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logEnvio)
-            });
-
-            if (!snapDestino.exists) {
-                transaction.set(refDestino, {
-                    uid_global: uidGlobal,
-                    nome: dOrigem.nome,
-                    unidade: nomeUnidadeDestino,
-                    unidade_id: unidadeDestinoUid, // 🛑 CAMPO CHAVE PARA FILTRO DO GESTOR
-                    total: qtd,
-                    disponivel: qtd,
-                    emCarga: 0,
-                    emAlteracao: 0,
-                    tipo: dOrigem.tipo,
-                    tombamentos: tombamentosParaMover,
-                    historico_movimentacoes: [logRecebimento]
-                });
             } else {
-                const dDest = snapDestino.data();
-                transaction.update(refDestino, {
-                    total: (dDest.total || 0) + qtd,
-                    disponivel: (dDest.disponivel || 0) + qtd,
-                    unidade_id: unidadeDestinoUid, // 🛑 Garante que o ID esteja presente
-                    tombamentos: ehMulti ? firebase.firestore.FieldValue.arrayUnion(...tombamentosParaMover) : (dDest.tombamentos || []),
-                    historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(logRecebimento)
+                // 2. TRATAMENTO PARA ITENS SINGLE (SALDOS)
+                const refSaldoOrigem = itemRef.collection('saldos_unidades').doc('ADMIN');
+                const refSaldoDestino = itemRef.collection('saldos_unidades').doc(unidadeDestinoUid);
+
+                const [snapOrigem, snapDestino] = await Promise.all([
+                    transaction.get(refSaldoOrigem),
+                    transaction.get(refSaldoDestino)
+                ]);
+
+                if (!snapOrigem.exists || snapOrigem.data().qtd_disp < qtd) {
+                    throw new Error("Saldo disponível insuficiente no Almoxarifado Central.");
+                }
+
+                // Subtrai da Origem (ADMIN)
+                transaction.update(refSaldoOrigem, {
+                    qtd_total: snapOrigem.data().qtd_total - qtd,
+                    qtd_disp: snapOrigem.data().qtd_disp - qtd,
+                    last_update: dataReg
+                });
+
+                // Soma no Destino (Unidade)
+                const dadosDest = snapDestino.exists ? snapDestino.data() : { qtd_total: 0, qtd_disp: 0, qtd_em_carga: 0, qtd_pend: 0, qtd_caut: 0 };
+                transaction.set(refSaldoDestino, {
+                    unidade_sigla: nomeUnidadeDestino,
+                    qtd_total: dadosDest.qtd_total + qtd,
+                    qtd_disp: dadosDest.qtd_disp + qtd,
+                    last_update: dataReg
+                }, { merge: true });
+
+                // Registra Histórico na Origem e no Destino (Opcional, mas recomendado para Single)
+                const histDestRef = refSaldoDestino.collection('historico_vida').doc(idEvento);
+                transaction.set(histDestRef, {
+                    data: dataReg,
+                    evento: "RECEBIMENTO_TRANSFERENCIA",
+                    quem: autorNome,
+                    quantidade: qtd,
+                    detalhes: `Recebido do Almox. Central. Obs: ${obs}`
                 });
             }
         });
@@ -12346,7 +12407,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         carregarAlmoxarifadoUI();
 
     } catch (e) {
-        console.error(e);
+        console.error("Erro na transferência:", e);
         alert("❌ Erro na transferência: " + e.message);
     } finally {
         btn.disabled = false;
@@ -13211,12 +13272,12 @@ function cancelarEstorno(idx) {
 async function confirmarPublicacaoLista() {
     if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque (se houver itens de materiais).")) return;
 
-    // ✅ GARANTIA DE INSTÂNCIA: Usa o motor raiz para evitar falha de conexão
     const firestore = firebase.firestore();
     const nomeAmigavelVtr = document.getElementById('edit-vtr-nome').textContent;
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
-    
-    // Filtra itens de estorno que NÃO são de vistoria livre (apenas materiais reais)
+    const unidadeGestoraId = currentUserData.unidade_id; 
+
+    // Filtra itens de estorno (reais)
     const estornosReais = itensParaEstorno.filter(i => i.uid_global !== "ITEM_VISTORIA_LIVRE");
 
     if (estornosReais.length > 0 && !justificativa) {
@@ -13231,137 +13292,106 @@ async function confirmarPublicacaoLista() {
 
     try {
         const batch = firestore.batch();
-        // Usa a coleção global definida no momento da abertura
         const listaRef = firestore.collection(window.colecaoAtivaNoEditor).doc(idListaSendoEditada);
-
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
         
+        // 1. MAPEIA ESTADO ANTERIOR (Para calcular diferença de inclusão)
         const mapaAnterior = {};
         listaAnterior.forEach(setor => {
             (setor.itens || []).forEach(it => { 
-                mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 1); 
+                mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0); 
             });
         });
 
-        // 1. IDENTIFICA NOVAS INCLUSÕES DE MATERIAIS REAIS
+        // 2. IDENTIFICA NOVAS INCLUSÕES
         const itensNovosNaVtr = [];
         arquiteturaAtiva.forEach(setor => {
             (setor.itens || []).forEach(item => {
                 const qtdAnterior = mapaAnterior[item.uid_global] || 0;
-                const qtdAtual = Number(item.quantidadeEsperada) || 1;
-                
-                // Só processa movimentação se for material real (não vistoria livre)
+                const qtdAtual = Number(item.quantidadeEsperada) || 0;
                 if (qtdAtual > qtdAnterior && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
-                    itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior });
+                    itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior, setorNome: setor.nome });
                 }
             });
         });
 
-        // 2. MAPEAMENTO DE DOCUMENTOS DO ALMOXARIFADO
-        const mapearAcaoAlmox = (item, operacao) => {
-            if (item.uid_global === "ITEM_VISTORIA_LIVRE") return null;
-            const refEstoque = estoqueGestorLocal.find(e => e.uid_global === item.uid_global);
-            if (!refEstoque) return null;
-            return { docIdReal: refEstoque.id_almox, dados: item, tipoOperacao: operacao };
-        };
-
-        const acoesParaProcessar = [
-            ...itensNovosNaVtr.map(i => mapearAcaoAlmox(i, 'SAIDA')),
-            ...estornosReais.map(i => mapearAcaoAlmox(i, 'ESTORNO'))
-        ].filter(a => a !== null);
-
-        // 3. BUSCA DE SALDOS ATUAIS
-        const uniqueDocIds = [...new Set(acoesParaProcessar.map(a => a.docIdReal))];
-        const snapsAlmox = await Promise.all(uniqueDocIds.map(id => firestore.collection('almoxarifado_central').doc(id).get()));
-        const estoqueDataMap = {};
-        snapsAlmox.forEach(s => { if(s.exists) estoqueDataMap[s.id] = s.data(); });
-
-        // --- A. ATUALIZA A ESTRUTURA DA LISTA (Conferência ou Vistoria) ---
+        // --- A. ATUALIZA A ESTRUTURA DA LISTA NO FIREBASE ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        // --- B. PROCESSA LOGÍSTICA DE ESTOQUE ---
-        acoesParaProcessar.forEach(acao => {
-            const dataDoc = estoqueDataMap[acao.docIdReal];
-            const item = acao.dados;
-            if (!dataDoc) return;
+        const idEvento = "EDT-" + Date.now();
+        const dataReg = new Date().toLocaleString('pt-BR');
 
-            let novoDisp = Number(dataDoc.disponivel) || 0;
-            let novoEmCarga = Number(dataDoc.emCarga) || 0;
-            let listaTombamentos = [...(dataDoc.tombamentos || [])];
-            let msgLog = "";
-
-            if (acao.tipoOperacao === 'SAIDA') {
-                const qtd = Number(item.qtdParaSubtrair);
-                novoDisp -= qtd; novoEmCarga += qtd;
-                msgLog = `SAÍDA AUTOMÁTICA (EDITOR): ${qtd}un para ${nomeAmigavelVtr}`;
-
-                if (item.tipo === 'multi') {
-                    const idsTombEnviados = item.tombamentos.map(t => t.tomb);
-                    listaTombamentos = listaTombamentos.map(t => 
-                        idsTombEnviados.includes(t.tomb) ? { ...t, viatura_id: idListaSendoEditada, situacao: "EM_CARGA" } : t
-                    );
+        // --- B. PROCESSA LOGÍSTICA DE INVENTÁRIO (SUB-COLEÇÕES) ---
+        
+        // B1. PROCESSA SAÍDAS (Novos itens adicionados à VTR)
+        for (const item of itensNovosNaVtr) {
+            const itemRef = firestore.collection('inventario').doc(item.uid_global);
+            
+            if (item.tipo === 'multi') {
+                // Para cada tombamento novo no editor, atualiza seu prontuário
+                for (const t of (item.tombamentos || [])) {
+                    const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
+                    batch.update(tombRef, {
+                        situacao_atual: "EM CARGA",
+                        viatura_id: idListaSendoEditada,
+                        sub_local: item.setorNome
+                    });
+                    // Log no RG do ativo
+                    batch.set(tombRef.collection('historico_vida').doc(idEvento), {
+                        data: dataReg, evento: "SAIDA_EDITOR", quem: currentUserData.nome_militar_completo,
+                        detalhes: `Adicionado à lista ${nomeAmigavelVtr} via Editor.`
+                    });
                 }
             } else {
-                const qtd = Number(item.quantidadeEsperada);
-                novoDisp += qtd; novoEmCarga = Math.max(0, novoEmCarga - qtd);
-                msgLog = `ESTORNO (EDITOR): ${qtd}un de ${nomeAmigavelVtr}. Motivo: ${justificativa}`;
-
-                if (item.tipo === 'multi') {
-                    const idsTombRetorno = item.tombamentos.map(t => t.tomb);
-                    listaTombamentos = listaTombamentos.map(t => 
-                        idsTombRetorno.includes(t.tomb) ? { ...t, viatura_id: null, situacao: "DISPONÍVEL" } : t
-                    );
-                }
-            }
-
-            // Atualiza o documento no almoxarifado central
-            batch.update(firestore.collection('almoxarifado_central').doc(acao.docIdReal), {
-                disponivel: novoDisp,
-                emCarga: novoEmCarga,
-                tombamentos: listaTombamentos,
-                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
-                    data: new Date().toLocaleString('pt-BR'),
-                    evento: acao.tipoOperacao === 'SAIDA' ? "SAIDA_PARA_VTR" : "ESTORNO_EDITOR",
-                    detalhes: msgLog,
-                    quem: currentUserData.nome_militar_completo
-                })
-            });
-
-            // Sincroniza RGs Individuais (Apenas Patrimônio/Multi)
-            if (item.tipo === 'multi') {
-                item.tombamentos.forEach(t => {
-                    const histRef = firestore.collection('historico_ativos_individuais').doc(String(t.tomb));
-                    batch.set(histRef, {
-                        eventos: firebase.firestore.FieldValue.arrayUnion({
-                            data: new Date().toLocaleString('pt-BR'),
-                            evento: acao.tipoOperacao === 'SAIDA' ? "MOVIMENTACAO_CARGA" : "MOVIMENTACAO_ESTORNO",
-                            detalhes: `${acao.tipoOperacao === 'SAIDA' ? 'Enviado para' : 'Retornado de'} ${nomeAmigavelVtr}. Obs: ${justificativa || 'Via Editor'}`,
-                            quem: currentUserData.nome_militar_completo,
-                            lista_id: idListaSendoEditada
-                        })
-                    }, { merge: true });
+                // Item Single: Ajusta saldo na sub-coleção da unidade
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeGestoraId);
+                batch.update(saldoRef, {
+                    qtd_disp: firebase.firestore.FieldValue.increment(-item.qtdParaSubtrair),
+                    qtd_em_carga: firebase.firestore.FieldValue.increment(item.qtdParaSubtrair),
+                    last_update: dataReg
                 });
             }
-        });
+        }
+
+        // B2. PROCESSA ESTORNOS (Itens que foram para a Caixa de Saída)
+        for (const item of estornosReais) {
+            const itemRef = firestore.collection('inventario').doc(item.uid_global);
+            
+            if (item.tipo === 'multi') {
+                for (const t of (item.tombamentos || [])) {
+                    const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
+                    batch.update(tombRef, {
+                        situacao_atual: "DISPONÍVEL",
+                        viatura_id: null,
+                        sub_local: "ALMOXARIFADO"
+                    });
+                    // Log no RG do ativo
+                    batch.set(tombRef.collection('historico_vida').doc(idEvento), {
+                        data: dataReg, evento: "ESTORNO_EDITOR", quem: currentUserData.nome_militar_completo,
+                        detalhes: `Removido da lista ${nomeAmigavelVtr}. Motivo: ${justificativa}`
+                    });
+                }
+            } else {
+                // Item Single: Devolve saldo para disponível
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeGestoraId);
+                batch.update(saldoRef, {
+                    qtd_disp: firebase.firestore.FieldValue.increment(item.quantidadeEsperada),
+                    qtd_em_carga: firebase.firestore.FieldValue.increment(-item.quantidadeEsperada),
+                    last_update: dataReg
+                });
+            }
+        }
 
         // EXECUÇÃO ATÔMICA
         await batch.commit();
         
-        // UI: Feedback e Redirecionamento
-        await Swal.fire({
-            icon: 'success',
-            title: 'Publicado!',
-            text: 'As alterações foram salvas e o estoque atualizado.',
-            timer: 2000,
-            showConfirmButton: false
-        });
+        await Swal.fire({ icon: 'success', title: 'Publicado!', text: 'Inventário e Prontuários atualizados.', timer: 2000, showConfirmButton: false });
 
-        // Volta para a visão correta
         window.isModoVistoria ? switchView('vtr-bases') : switchView('listas');
         location.reload(); 
 
