@@ -12289,7 +12289,7 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
     }
 }
-		async function verHistoricoVidaGlobal(docIdAlmox) {
+		async function verHistoricoVidaGlobal(uidGlobal) {
     const container = document.getElementById('timeline-container');
     const modal = document.getElementById('modal-timeline-global');
     const labelNome = document.getElementById('timeline-item-nome');
@@ -12297,52 +12297,94 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     if (!container || !modal) return;
 
     modal.style.display = 'flex';
-    container.innerHTML = '<div style="text-align:center; padding:20px;"><i class="fas fa-spinner fa-spin"></i> Carregando registros...</div>';
+    container.innerHTML = '<div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Acessando registros históricos...</div>';
 
     try {
-        const snap = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
-        if (!snap.exists) throw new Error("Item não localizado.");
+        // 🛑 MUDANÇA CIRÚRGICA 1: Busca o DNA do item na coleção 'inventario'
+        const docRef = db.collection('inventario').doc(uidGlobal);
+        const snap = await docRef.get();
         
-        const data = snap.data();
-        labelNome.textContent = `Material: ${data.nome}`;
+        if (!snap.exists) throw new Error("Material não localizado no inventário global.");
+        
+        const itemData = snap.data();
+        labelNome.textContent = `Material: ${itemData.nome}`;
 
         let eventos = [];
 
-        // LÓGICA HÍBRIDA DE BUSCA
-        if (data.tipo === 'multi') {
-            // Para itens com tombamento, o histórico é a soma das vidas individuais de seus tombamentos
-            // ou o histórico de movimentações do lote
-            eventos = data.historico_movimentacoes || [];
-        } else {
-            // Para itens single, lemos o array de movimentações de estoque
-            eventos = data.historico_movimentacoes || [];
+        // 🛑 MUDANÇA CIRÚRGICA 2: Captura logs de todas as sub-coleções de saldo (Visão Admin)
+        // Buscamos em 'saldos_unidades' todos os documentos e suas respectivas sub-coleções 'historico_vida'
+        const saldosSnap = await docRef.collection('saldos_unidades').get();
+        
+        const buscaLogsPromessas = saldosSnap.docs.map(async (docUnidade) => {
+            const histSnap = await docUnidade.ref.collection('historico_vida').get();
+            return histSnap.docs.map(d => ({
+                ...d.data(),
+                unidade_ref: docUnidade.data().unidade_sigla // Identifica de onde veio o log
+            }));
+        });
+
+        const resultadosLogs = await Promise.all(buscaLogsPromessas);
+        eventos = resultadosLogs.flat(); // Achata os arrays de cada unidade em um só
+
+        // Se for Multi, também podemos querer ver logs de "Nascimento" ou "Transferência Geral" 
+        // que porventura estejam no documento pai ou em uma sub-coleção global de auditoria
+        if (itemData.historico_movimentacoes) {
+            eventos = [...eventos, ...itemData.historico_movimentacoes];
         }
 
         if (eventos.length === 0) {
-            container.innerHTML = '<p style="text-align:center; color:#999; padding:20px;">Nenhum registro histórico encontrado para este material.</p>';
+            container.innerHTML = `
+                <div style="text-align:center; color:#999; padding:40px;">
+                    <i class="fas fa-history fa-3x" style="margin-bottom:15px; opacity:0.2;"></i>
+                    <p>Nenhum registro de movimentação global encontrado para este lote.</p>
+                </div>`;
             return;
         }
 
-        // Ordena: Mais recentes primeiro
+        // 🛑 MUDANÇA CIRÚRGICA 3: Ordenação Robusta (Mais recentes primeiro)
         eventos.sort((a, b) => {
-            // Tenta converter datas string para objeto Date para comparação
-            const dateA = new Date(a.data.split('/').reverse().join('-'));
-            const dateB = new Date(b.data.split('/').reverse().join('-'));
-            return dateB - dateA;
+            const parseDate = (str) => {
+                if (!str) return new Date(0);
+                const [date, time] = str.split(', ');
+                const [d, m, y] = date.split('/');
+                return new Date(`${y}-${m}-${d}T${time || '00:00:00'}`);
+            };
+            return parseDate(b.data) - parseDate(a.data);
         });
 
-        container.innerHTML = eventos.map(ev => `
-            <div class="timeline-event">
-                <span class="event-date">${ev.data}</span>
-                <span class="event-title">${ev.evento.replace(/_/g, ' ')}</span>
-                <div class="event-desc">${ev.detalhes}</div>
-                <span class="event-user"><i class="fas fa-user-edit"></i> Resp: ${ev.quem}</span>
-            </div>
-        `).join('');
+        // 🛑 MUDANÇA CIRÚRGICA 4: Renderização com Identidade Visual
+        container.innerHTML = eventos.map(ev => {
+            let icon = 'fa-exchange-alt';
+            let color = '#2c7399';
+            
+            if (ev.evento?.includes('APORTE') || ev.evento?.includes('ENTRADA')) { icon = 'fa-plus-circle'; color = '#1b8a3e'; }
+            if (ev.evento?.includes('SAIDA') || ev.evento?.includes('TRANSFERENCIA')) { icon = 'fa-paper-plane'; color = '#800020'; }
+            if (ev.evento?.includes('PENDENCIA') || ev.evento?.includes('ALERTA')) { icon = 'fa-exclamation-triangle'; color = '#d90f23'; }
+
+            return `
+                <div class="timeline-event" style="border-left: 3px solid ${color}; margin-bottom: 20px; padding-left: 20px; position: relative;">
+                    <div style="position: absolute; left: -9px; top: 0; background: #fff; padding: 2px;">
+                        <i class="fas ${icon}" style="color: ${color}; font-size: 12px;"></i>
+                    </div>
+                    <span class="event-date" style="font-size: 0.8em; color: #666; font-weight: bold;">${ev.data}</span>
+                    <span class="event-title" style="display: block; font-weight: 800; color: #333; font-size: 0.85em; text-transform: uppercase; margin: 2px 0;">
+                        ${ev.evento?.replace(/_/g, ' ') || 'MOVIMENTAÇÃO'} 
+                        ${ev.unidade_ref ? `<small style="color:${color}">[${ev.unidade_ref}]</small>` : ''}
+                    </span>
+                    <div class="event-desc" style="font-size: 0.9em; color: #444; background: #f8fafc; padding: 8px; border-radius: 4px; border: 1px solid #edf2f7; margin-top: 5px;">
+                        ${ev.detalhes || ev.descricao || 'Sem detalhes registrados.'}
+                        ${ev.quantidade ? `<br><b>Qtd: ${ev.quantidade} un.</b>` : ''}
+                    </div>
+                    <span class="event-user" style="font-size: 0.75em; color: #888; display: block; margin-top: 4px;">
+                        <i class="fas fa-user-edit"></i> Resp: ${ev.quem || ev.autor || 'Sistema'}
+                    </span>
+                </div>
+            `;
+        }).join('');
 
     } catch (e) {
-        console.error(e);
-        container.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar histórico.</p>';
+        console.error("Erro ao carregar histórico global:", e);
+        container.innerHTML = `<p style="color:red; text-align:center; padding:20px;">Erro técnico: ${e.message}</p>`;
     }
 }
 	async function executarEnvioUnidade() {
