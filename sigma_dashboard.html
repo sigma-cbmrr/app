@@ -10599,9 +10599,16 @@ function atualizarQtdEnvio() {
     }
 }
 		async function prepararAporte(docId) {
+    // docId aqui será o UID_GLOBAL (ex: FAM-000001-MOD-1)
     try {
-        const doc = await db.collection('almoxarifado_central').doc(docId).get();
-        if (!doc.exists) return;
+        // ✅ MUDANÇA CIRÚRGICA: Busca na coleção 'inventario'
+        const doc = await db.collection('inventario').doc(docId).get();
+        
+        if (!doc.exists) {
+            console.error("Item não encontrado no inventário:", docId);
+            return;
+        }
+        
         const item = doc.data();
 
         const elNome = document.getElementById('almox-aporte-item-nome');
@@ -10618,17 +10625,20 @@ function atualizarQtdEnvio() {
         
         containerLista.innerHTML = '';
 
-        // Se for multi, dispara a geração inicial de 1 campo
+        // Lógica de interface baseada no DNA do item
         if (item.tipo === 'multi') {
+            // Se for patrimônio, gera campo para o primeiro tombamento
             gerarInputsTombamentoAporte(1);
             containerDiv.style.display = 'block';
         } else {
+            // Se for consumo, apenas quantidade
             containerDiv.style.display = 'none';
         }
 
         document.getElementById('modal-almox-aporte').style.display = 'flex';
     } catch (e) {
         console.error("Erro ao preparar aporte:", e);
+        alert("Erro ao carregar dados do item para entrada.");
     }
 }
 function gerarInputsTombamentoAporte(qtd) {
@@ -10647,31 +10657,35 @@ function gerarInputsTombamentoAporte(qtd) {
 
 async function executarAporteEstoque() {
     const docElement = document.getElementById('almox-aporte-item-nome');
-    const uidGlobal = docElement.getAttribute('data-docid').replace('ADMIN_', ''); // Normaliza o ID para a nova estrutura
+    // ✅ Remove o prefixo legado se existir, garantindo o UID_GLOBAL limpo
+    const uidGlobal = docElement.getAttribute('data-docid').replace('ADMIN_', ''); 
     const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
-    const qtd = parseInt(document.getElementById('almox-aporte-qtd').value);
+    const qtdInput = parseInt(document.getElementById('almox-aporte-qtd').value);
     const obs = document.getElementById('almox-aporte-obs').value.trim();
     const dataReg = new Date().toLocaleString('pt-BR');
 
-    if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
+    // ✅ Unidade dinâmica baseada no militar logado
+    const minhaUnidadeId = currentUserData.unidade_id || "ADMIN";
+    const minhaUnidadeSigla = currentUserData.unidade || "ADMINISTRATIVO";
+
+    if (!qtdInput || qtdInput < 1) return alert("Informe uma quantidade válida.");
     if (!obs) return alert("A justificativa (ex: NF ou Origem) é obrigatória para o histórico.");
 
     const btn = document.querySelector('#modal-almox-aporte .btn-sync');
     btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
 
     try {
-        // ✅ REFERÊNCIA PARA A NOVA COLEÇÃO ÚNICA
         const itemRef = db.collection('inventario').doc(uidGlobal);
         const autorNome = currentUserData.nome_militar_completo;
         
         await db.runTransaction(async (transaction) => {
             const snapItem = await transaction.get(itemRef);
-            if (!snapItem.exists) throw new Error("DNA do material não encontrado no inventário.");
+            if (!snapItem.exists) throw new Error("DNA do material não encontrado.");
             
             const d = snapItem.data();
             const idEvento = "EVT-" + Date.now();
+            let qtdEfetiva = 0;
 
-            // 1. TRATAMENTO PARA ITENS MULTI (TOMBAMENTOS)
             if (ehMulti) {
                 const linhas = document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb');
                 linhas.forEach(linha => {
@@ -10679,62 +10693,63 @@ async function executarAporteEstoque() {
                     const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
                     
                     if (t) {
-                        // Prontuário Individual do Tombamento
+                        qtdEfetiva++;
                         const tombRef = itemRef.collection('tombamentos').doc(t);
                         transaction.set(tombRef, {
                             tomb: t,
                             serie: s || "N/A",
                             situacao_atual: "DISPONÍVEL",
-                            local_id: "ADMIN",
+                            local_id: minhaUnidadeId, // ✅ Unidade dinâmica
+                            unidade_sigla: minhaUnidadeSigla,
                             sub_local: "ALMOXARIFADO CENTRAL",
                             data_entrada: dataReg,
                             criado_por: autorNome
                         });
 
-                        // Histórico de Vida Individual (RG do Ativo)
                         const histRef = tombRef.collection('historico_vida').doc(idEvento);
                         transaction.set(histRef, {
                             data: dataReg,
                             evento: "NASCIMENTO_SISTEMA",
                             quem: autorNome,
-                            detalhes: `Incorporado via Aporte Central. Justificativa: ${obs}`
+                            detalhes: `Incorporado via Aporte. Justificativa: ${obs}`
                         });
                     }
                 });
             } else {
-                // 2. TRATAMENTO PARA ITENS SINGLE (SALDOS POR UNIDADE)
-                const saldoUnidadeRef = itemRef.collection('saldos_unidades').doc('ADMIN');
+                qtdEfetiva = qtdInput;
+                // ✅ Busca saldo na unidade do militar logado
+                const saldoUnidadeRef = itemRef.collection('saldos_unidades').doc(minhaUnidadeId);
                 const snapSaldo = await transaction.get(saldoUnidadeRef);
                 const dadosSaldo = snapSaldo.exists ? snapSaldo.data() : { qtd_total: 0, qtd_disp: 0, qtd_em_carga: 0, qtd_pend: 0, qtd_caut: 0 };
 
                 transaction.set(saldoUnidadeRef, {
-                    unidade_sigla: "ADMIN",
-                    qtd_total: dadosSaldo.qtd_total + qtd,
-                    qtd_disp: dadosSaldo.qtd_disp + qtd,
+                    unidade_sigla: minhaUnidadeSigla,
+                    qtd_total: (dadosSaldo.qtd_total || 0) + qtdEfetiva,
+                    qtd_disp: (dadosSaldo.qtd_disp || 0) + qtdEfetiva,
                     last_update: dataReg
                 }, { merge: true });
 
-                // Histórico de Movimentação do Lote (Single)
                 const histSingleRef = saldoUnidadeRef.collection('historico_vida').doc(idEvento);
                 transaction.set(histSingleRef, {
                     data: dataReg,
                     evento: "APORTE_ESTOQUE",
                     quem: autorNome,
-                    quantidade: qtd,
-                    detalhes: `Entrada física de estoque. Justificativa: ${obs}`
+                    quantidade: qtdEfetiva,
+                    detalhes: `Entrada física. Justificativa: ${obs}`
                 });
             }
 
-            // 3. ATUALIZAÇÃO DO TOTAL CORPORATIVO NO DNA DO ITEM
+            // 3. Atualiza o consolidado corporativo
             transaction.update(itemRef, {
-                qtd_corporativa_total: (d.qtd_corporativa_total || 0) + qtd,
+                qtd_corporativa_total: (d.qtd_corporativa_total || 0) + qtdEfetiva,
                 ultima_movimentacao: dataReg
             });
         });
 
-        alert("✅ Aporte realizado com sucesso!\nSaldos e Prontuários atualizados na nova arquitetura.");
+        alert("✅ Aporte realizado com sucesso!");
         document.getElementById('modal-almox-aporte').style.display = 'none';
-        carregarAlmoxarifadoUI();
+        
+        if (typeof carregarAlmoxarifadoUI === 'function') await carregarAlmoxarifadoUI();
 
     } catch (e) {
         console.error(e);
