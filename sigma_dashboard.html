@@ -10339,6 +10339,9 @@ async function salvarCadastroGlobalHierarquico() {
     btn.textContent = "Processando DNA...";
 
     const autorNome = currentUserData.nome_militar_completo;
+    // ✅ CAPTURA A UNIDADE DO CRIADOR DINAMICAMENTE
+    const unidadeCriadorId = currentUserData.unidade_id || "ADMIN"; 
+    const unidadeCriadorSigla = currentUserData.unidade || "ADMINISTRATIVO";
     const dataRegistro = new Date().toLocaleString('pt-BR');
 
     try {
@@ -10349,7 +10352,7 @@ async function salvarCadastroGlobalHierarquico() {
 
             // 1. GERENCIAR UID PAI (FAMÍLIA)
             if (!uidPai) {
-                const proximoPai = contData.ultimo_id_pai + 1;
+                const proximoPai = (contData.ultimo_id_pai || 0) + 1;
                 uidPai = `FAM-${String(proximoPai).padStart(6, '0')}`;
                 
                 transaction.set(db.collection('catalogo_familias').doc(uidPai), {
@@ -10361,8 +10364,8 @@ async function salvarCadastroGlobalHierarquico() {
                 transaction.update(contRef, { ultimo_id_pai: proximoPai });
             }
 
-            // 2. GERENCIAR UID GLOBAL (MODELO TÉCNICO - AGORA NUMÉRICO)
-            const proximoMod = contData.ultimo_id_modelo + 1;
+            // 2. GERENCIAR UID GLOBAL (MODELO TÉCNICO)
+            const proximoMod = (contData.ultimo_id_modelo || 0) + 1;
             const uidGlobal = `${uidPai}-MOD-${proximoMod}`;
             const nomeTecnicoCompleto = `${nomePai} ${marca} ${modelo}`;
 
@@ -10380,26 +10383,42 @@ async function salvarCadastroGlobalHierarquico() {
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
 
-            // 4. ATUALIZAR TAGS DA FAMÍLIA E CONTADOR DE MODELO
+            // 4. ATUALIZAR TAGS DA FAMÍLIA E CONTADOR
             transaction.update(db.collection('catalogo_familias').doc(uidPai), {
                 tags_busca: firebase.firestore.FieldValue.arrayUnion(marca, modelo)
             });
             transaction.update(contRef, { ultimo_id_modelo: proximoMod });
 
-            // 5. INICIALIZAR NO NOVO INVENTÁRIO (ESTRUTURA ÚNICA)
-            // Aqui o item "nasce" no inventário mas com saldos zerados
-            transaction.set(db.collection('inventario').doc(uidGlobal), {
+            // 5. INICIALIZAR NO INVENTÁRIO COM VÍNCULO DE UNIDADE
+            const invRef = db.collection('inventario').doc(uidGlobal);
+            transaction.set(invRef, {
                 uid_global: uidGlobal,
                 nome: nomeTecnicoCompleto,
                 tipo: tipoControle,
                 categoria: categoria,
                 qtd_corporativa_total: 0,
                 criado_em: dataRegistro,
-                criado_por: autorNome
+                criado_por: autorNome,
+                unidade_origem_id: unidadeCriadorId // ✅ Rastro de quem criou
             });
+
+            // ✅ SE FOR SINGLE, JÁ CRIA O DOCUMENTO DE SALDO NA UNIDADE DO CRIADOR
+            if (tipoControle === 'single') {
+                const saldoRef = invRef.collection('saldos_unidades').doc(unidadeCriadorId);
+                transaction.set(saldoRef, {
+                    unidade_sigla: unidadeCriadorSigla,
+                    qtd_total: 0,
+                    qtd_disp: 0,
+                    qtd_em_carga: 0,
+                    qtd_pend: 0,
+                    qtd_caut: 0,
+                    last_update: dataRegistro
+                });
+            }
+            // Itens Multi não precisam de doc prévio, o local_id irá no tombamento no Teste 2.
         });
 
-        alert("✅ Cadastro Global realizado!\nDNA salvo e item habilitado no Inventário.");
+        alert(`✅ Cadastro Global realizado!\nItem vinculado à unidade ${unidadeCriadorSigla}.`);
         fecharModalCadastroGlobal();
         if (typeof carregarAlmoxarifadoUI === 'function') carregarAlmoxarifadoUI();
 
