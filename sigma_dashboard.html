@@ -2441,7 +2441,7 @@ input:checked + .slider:before {
         	<a onclick="switchView('postos')" id="link-postos" class="restricted-admin-only"><i class="fas fa-map-signs"></i> Postos</a>
 			<a onclick="switchView('vtr-bases')" id="link-vtr-bases" class="restricted-admin-only"><i class="fas fa-truck-monster"></i> Viaturas & Bases</a>
         	<a onclick="switchView('usuarios')" id="link-usuarios" class="restricted-admin-only"><i class="fas fa-users"></i> Usuários</a>
-        	<a onclick="switchView('listas')" id="link-listas" class="restricted-admin-only"><i class="fas fa-clipboard-list"></i> Gestão de Listas</a>
+        	<a onclick="switchView('listas')" id="link-listas" style="display:none;"><i class="fas fa-clipboard-list"></i> Gestão de Listas </a>
     	</div>
 
     <div class="content">
@@ -5486,6 +5486,14 @@ function reimprimirPDF(data) {
     const appRunner = document.getElementById('app-runner-container');
     if (appRunner) { appRunner.style.display = 'none'; }
 
+    // ✅ CONTROLE DE ACESSO DINÂMICO (Sidebar)
+    if (currentUserData) {
+        const role = currentUserData.role;
+        const linkListas = document.getElementById('link-listas');
+        const podeGerenciar = (role === 'admin' || role === 'gestor_geral' || role === 'gestor');
+        if (linkListas) linkListas.style.display = podeGerenciar ? 'block' : 'none';
+    }
+
     // 3. Mapeamento de IDs Específicos
     let targetId;
     if (v === 'listas') {
@@ -5517,13 +5525,9 @@ function reimprimirPDF(data) {
         const resCont = document.getElementById('resume-container');
         const adminCont = document.getElementById('admin-gestor-cards-container');
 
-        // 1. Limpa o palco de alertas (onde entra a Carga em Trânsito)
         if (resCont) resCont.innerHTML = ''; 
-
-        // 2. Busca Alertas de Carga (Injeta no resume-container)
         carregarAlertasTransferencia();
 
-        // 3. Gerencia os Cards de Pendências
         if (currentUserData) {
             const role = currentUserData.role || 'operacional';
             const isAdmin = (role === 'admin');
@@ -5534,14 +5538,12 @@ function reimprimirPDF(data) {
             if (role === 'operacional') {
                 renderOperacionalCards();
             } else {
-                // ✅ FORÇA a visibilidade do container antes de renderizar
                 if (adminCont) adminCont.style.display = 'block';
                 renderAdminGestorCards(canView);
             }
         }
     }
 
-    // ✅ REINSERÇÃO CIRÚRGICA: Carregamento do Almoxarifado
     if (v === 'almoxarifado') {
         carregarAlmoxarifadoUI();
     }
@@ -5570,6 +5572,7 @@ function reimprimirPDF(data) {
     }
             
     if (v === 'listas') {
+        // ✅ PROTEÇÃO: Garante que as funções carreguem apenas dados da unidade do usuário
         carregarFiltrosParaNovoEditor(); 
         carregarCardsListasExistentes(); 
     }
@@ -5600,7 +5603,7 @@ function reimprimirPDF(data) {
     // 6. Comportamento Mobile
     if (window.innerWidth <= 768) {
         history.pushState(null, null, location.href);
-        closeMenuMobile();
+        if (typeof closeMenuMobile === "function") closeMenuMobile();
     }
 }
         // Alterna entre abrir e fechar o menu lateral no mobile
@@ -12043,40 +12046,50 @@ async function carregarCardsListasExistentes() {
     const container = document.getElementById('container-cards-listas');
     if (!container) return;
 
-    // 1. Garante que o container use o grid do sistema
     container.className = "cards-grid"; 
     container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:50px;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Buscando inventários...</div>';
 
     try {
-        // 2. Busca apenas listas ativas no banco
-        const snap = await db.collection('listas_conferencia')
+        const role = currentUserData?.role;
+        const minhaUnidadeId = currentUserData?.unidade_id;
+        const isAdminGeral = (role === 'admin' || role === 'gestor_geral');
+
+        // 1. Definição da Query com Filtro de Segurança
+        let query = db.collection('listas_conferencia')
             .where('ativo', '==', true)
-            .where('tipo', '==', 'conferencia_materiais') // ⬅️ FILTRO CIRÚRGICO
-            .get();
+            .where('tipo', '==', 'conferencia_materiais');
+
+        // ✅ ISOLAMENTO CIRÚRGICO: O Gestor nunca verá listas de outras unidades.
+        if (!isAdminGeral) {
+            if (!minhaUnidadeId) throw new Error("Unidade não identificada no seu perfil.");
+            query = query.where('unidade_id', '==', minhaUnidadeId);
+        }
+
+        const snap = await query.get();
 
         if (snap.empty) {
-            container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; padding:30px; color:#999;">Nenhuma lista de conferência criada ainda.</p>';
+            container.innerHTML = '<p style="grid-column: 1/-1; text-align:center; padding:30px; color:#999;">Nenhuma lista de conferência localizada para sua unidade.</p>';
             return;
         }
 
         let html = '';
         snap.forEach(doc => {
             const lista = doc.data();
-            
-            // Calcula o total de itens
             const qtdItens = lista.list ? lista.list.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0) : 0;
 
-            // 3. Montagem do card (Com botão de Edição e Exclusão)
+            // ✅ GESTÃO DE BOTÕES: Gestor vê apenas 'Editar'. Admin vê 'Editar' e 'Excluir'.
+            const btnDelete = isAdminGeral ? `
+                <button class="btn-delete-unit-card" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
+                    <i class="fas fa-trash-alt"></i>
+                </button>` : '';
+
             html += `
                 <div class="unit-building-card" style="cursor:pointer; border-top: 6px solid #2c7399;" onclick="abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
                     <div class="card-actions-container">
-                        <button class="btn-edit-unit-card" title="Editar Cabeçalho" onclick="event.stopPropagation(); prepararEdicaoCabecalhoLista('${doc.id}')">
+                        <button class="btn-edit-unit-card" title="Editar Itens" onclick="event.stopPropagation(); abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
                             <i class="fas fa-pencil-alt" style="color: #555 !important;"></i>
                         </button>
-                        
-                        <button class="btn-delete-unit-card" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
+                        ${btnDelete}
                     </div>
                     
                     <div style="width: 100%; height: 70px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
@@ -12099,15 +12112,14 @@ async function carregarCardsListasExistentes() {
                             </div>
                         </div>
                     </div>
-                </div>
-            `;
+                </div>`;
         });
 
         container.innerHTML = html;
 
     } catch (e) {
         console.error("Erro ao carregar cards de listas:", e);
-        container.innerHTML = '<p style="color:red; text-align:center; padding:30px;">Erro ao carregar listas.</p>';
+        container.innerHTML = `<p style="color:red; text-align:center; padding:30px;">Erro: ${e.message}</p>`;
     }
 }
 		async function gravarCabecalhoLista(abrirEditor, idExistente = null) {
