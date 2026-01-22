@@ -9477,17 +9477,18 @@ async function carregarAlmoxarifadoUI() {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Consolidando dados do inventário...</td></tr>';
 
     try {
-        // 🛡️ VALIDAÇÃO APERFEIÇOADA: 
-        // Admin não precisa de unidade_id para carregar, Gestor sim.
-        const isAdmin = currentUserData && (currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral');
-		// 🛡️ INCLUSÃO CIRÚRGICA: Válvula de Segurança para carregamento de perfil
-        if (!currentUserData || !currentUserData.role || !currentUserData.unidade_id) {
-            console.warn("⏳ Almoxarifado aguardando carregamento do perfil...");
-            setTimeout(carregarAlmoxarifadoUI, 1000); // Tenta novamente após breve delay
+        // 🛡️ AJUSTE CIRÚRGICO: Válvula de Segurança Inteligente
+        // Se for Admin ou Gestor Geral, não exige unidade_id. Se for Gestor comum, exige.
+        const role = currentUserData ? currentUserData.role : null;
+        const isAdmin = (role === 'admin' || role === 'gestor_geral');
+        const temUnidade = !!(currentUserData && currentUserData.unidade_id);
+
+        if (!role || (!isAdmin && !temUnidade)) {
+            console.warn("⏳ Almoxarifado aguardando dados do perfil (Unidade ou Role)...");
+            setTimeout(carregarAlmoxarifadoUI, 1000);
             return;
         }
 
-        const role = currentUserData.role;
         const minhaUnidadeId = currentUserData.unidade_id;
 
         // 1. Busca todos os itens (DNA) registrados
@@ -9510,10 +9511,9 @@ async function carregarAlmoxarifadoUI() {
             };
 
             if (d.tipo === 'multi') {
-                // ✅ LÓGICA MULTI: Soma baseada no status de cada tombamento
                 let queryTomb = doc.ref.collection('tombamentos');
-                // Se não for admin, filtra apenas tombamentos que estão na sua unidade
-                if (role !== 'admin') {
+                // Filtro para Gestor (Admin vê tudo)
+                if (!isAdmin) {
                     queryTomb = queryTomb.where('local_id', '==', minhaUnidadeId);
                 }
 
@@ -9529,10 +9529,10 @@ async function carregarAlmoxarifadoUI() {
                     if (t.local_id && !itemConsolidado.locais.includes(t.local_id)) itemConsolidado.locais.push(t.local_id);
                 });
             } else {
-                // ✅ LÓGICA SINGLE: Soma baseada nos documentos de saldos_unidades
                 let querySaldo = doc.ref.collection('saldos_unidades');
-                if (role !== 'admin') {
-                    querySaldo = querySaldo.where(firebase.firestore.FieldPath.documentId(), '==', minhaUnidadeId);
+                // Filtro para Gestor (Admin vê tudo)
+                if (!isAdmin) {
+                    querySaldo = querySaldo.where(firebase.firestore.Path.documentId(), '==', minhaUnidadeId);
                 }
 
                 const snapSaldo = await querySaldo.get();
@@ -9547,13 +9547,12 @@ async function carregarAlmoxarifadoUI() {
                 });
             }
 
-            // Só adiciona na lista se houver saldo para mostrar (especialmente para gestores)
-            if (itemConsolidado.total > 0 || role === 'admin') {
+            if (itemConsolidado.total > 0 || isAdmin) {
                 listaFinal.push(itemConsolidado);
             }
         }
 
-        // 3. Renderização do HTML (Mantendo seu padrão visual original)
+        // 3. Renderização do HTML
         let html = '';
         listaFinal.sort((a, b) => a.nome.localeCompare(b.nome));
 
@@ -9562,7 +9561,7 @@ async function carregarAlmoxarifadoUI() {
         } else {
             listaFinal.forEach(d => {
                 let statusColor = (d.disponivel === 0) ? '#d90f23' : (d.disponivel < (d.total * 0.25)) ? '#f57c00' : '#1b8a3e';
-                const labelLocais = role === 'admin' 
+                const labelLocais = isAdmin 
                     ? `<br><span style="font-size:0.75em; color:#2c7399; font-weight:bold;"><i class="fas fa-map-marker-alt"></i> LOCAIS: ${d.locais.join(', ')}</span>` 
                     : '';
 
@@ -9592,7 +9591,7 @@ async function carregarAlmoxarifadoUI() {
 
     } catch (e) {
         console.error("Erro na consolidação do inventário:", e);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao consolidar dados de sub-coleções.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:red;">Erro ao consolidar dados. Verifique o console.</td></tr>';
     }
 }
 /**
