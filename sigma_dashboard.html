@@ -3751,6 +3751,11 @@ input:checked + .slider:before {
 
     		atualizarSaudacao(currentUserData);
 			carregarAlertasTransferencia();
+			setTimeout(() => {
+    			if (!document.getElementById('alerta-carga-transito')) {
+        			carregarAlertasTransferencia();
+    			}
+			}, 1500);
 
     		const isAdmin = (role === 'admin');
     		const isGestorGeral = (role === 'gestor_geral');
@@ -13972,38 +13977,42 @@ function finalizarPreCheckEIrProApp() {
 async function carregarAlertasTransferencia() {
     const container = document.getElementById('resume-container');
     
-    // 🛡️ TRAVA CIRÚRGICA: Só prossegue se o usuário e o ID da unidade existirem
-    if (!container || !currentUserData || !currentUserData.unidade_id) {
-        console.warn(" Aguardando carregamento do perfil para buscar alertas de carga...");
+    // Verifica se os dados básicos existem
+    if (!currentUserData || !currentUserData.unidade_id) {
+        // Se ainda não carregou, não exibe erro, apenas sai silenciosamente 
+        // pois o setTimeout ou o switchView tentarão novamente.
         return;
     }
+
+    // Se o usuário for Operacional, ele não recebe carga (geralmente), 
+    // então paramos aqui para poupar processamento
+    if (currentUserData.role === 'operacional') return;
 
     try {
         const minhaUnidadeId = currentUserData.unidade_id;
         
-        // Busca transferências em trânsito destinadas especificamente a esta unidade
         const snap = await db.collection('transferencias_pendentes')
             .where('destino_id', '==', minhaUnidadeId)
             .where('status', '==', 'EM_TRANSITO')
             .get();
 
-        // Se não houver carga, não limpa o container (para não apagar rascunhos), apenas sai
-        if (snap.empty) return;
+        if (snap.empty) {
+            console.log("Nenhuma carga em trânsito para a unidade:", minhaUnidadeId);
+            return;
+        }
 
-        const totalCargas = snap.size;
-        
-        // Remove alertas de carga duplicados antes de inserir o novo
-        const alertaAntigo = document.getElementById('alerta-carga-transito');
-        if (alertaAntigo) alertaAntigo.remove();
+        // Se chegou aqui, há carga. Remove duplicados e insere.
+        const alertaExistente = document.getElementById('alerta-carga-transito');
+        if (alertaExistente) alertaExistente.remove();
 
         const alertaHtml = `
-            <div id="alerta-carga-transito" class="op-card resume" style="background-color: #fff8e1; border-left-color: #f57c00; margin-bottom: 20px;">
+            <div id="alerta-carga-transito" class="op-card resume" style="background-color: #fff8e1; border-left-color: #f57c00; margin-bottom: 20px; animation: fadeIn 0.5s ease;">
                 <div style="display: flex; align-items: center; gap: 15px;">
                     <i class="fas fa-truck-loading fa-2x" style="color: #f57c00;"></i>
                     <div style="flex: 1; text-align: left;">
                         <h3 style="margin: 0; color: #e65100; font-size: 1.1em;">Carga em Trânsito</h3>
                         <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #666;">
-                            Você possui <b>${totalCargas}</b> guia(s) enviada(s) pela DLOG aguardando recebimento.
+                            Existem <b>${snap.size}</b> guias aguardando conferência nesta unidade.
                         </p>
                     </div>
                     <button class="btn-modern-action" style="background-color: #f57c00 !important;" onclick="abrirListaRecebimentoCarga()">
@@ -14012,10 +14021,12 @@ async function carregarAlertasTransferencia() {
                 </div>
             </div>`;
 
-        container.insertAdjacentHTML('afterbegin', alertaHtml);
+        if (container) {
+            container.insertAdjacentHTML('afterbegin', alertaHtml);
+        }
 
     } catch (e) {
-        console.error("Erro ao carregar alertas de carga:", e);
+        console.error("Erro na busca de transferências:", e);
     }
 }
 		async function abrirListaRecebimentoCarga() {
