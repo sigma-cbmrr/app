@@ -2285,8 +2285,9 @@ function setItemStatusID(btn, status, uid) {
         document.body.insertAdjacentHTML('beforeend', html);
     } catch (e) { console.error(e); }
 }
-   async function finalizarRecebimentoCarga(transferenciaData) {
+async function finalizarRecebimentoCarga(transferenciaData) {
     const btn = document.getElementById('btn-finalizar');
+    const originalText = btn.textContent;
     btn.textContent = "PROCESSANDO RECEBIMENTO...";
     btn.disabled = true;
 
@@ -2310,8 +2311,8 @@ function setItemStatusID(btn, status, uid) {
         const batch = db.batch();
         const transRef = db.collection('transferencias_pendentes').doc(transferenciaId);
 
+        // 1. PROCESSAMENTO DOS ITENS NO INVENTÁRIO
         for (const item of transferenciaData.itens) {
-            // ✅ CIRÚRGICO: Blindagem do UID de busca
             const uidGlobal = item.id_base || item.id;
             const uidBusca = item.tombamento ? `${uidGlobal}-${item.tombamento}` : uidGlobal;
             
@@ -2319,7 +2320,7 @@ function setItemStatusID(btn, status, uid) {
             const itemRef = db.collection('inventario').doc(uidGlobal);
 
             if (item.tombamento) {
-                // ✅ LÓGICA MULTI: Atualiza o Prontuário
+                // ✅ LÓGICA MULTI: Atualiza o Prontuário (Tombamento)
                 const tombRef = itemRef.collection('tombamentos').doc(item.tombamento);
                 
                 batch.update(tombRef, {
@@ -2367,24 +2368,32 @@ function setItemStatusID(btn, status, uid) {
             }
         }
 
-        // 2. ATUALIZA O STATUS DA TRANSFERÊNCIA
+        // 1.5 ✅ PREPARA OS ITENS COM O STATUS DA CONFERÊNCIA PARA O PDF POSTERIOR
+        // Isso garante que o histórico salve o que o CAP JOSÉ MIGUEL conferiu de fato.
+        const itensAtualizadosParaHistorico = transferenciaData.itens.map(item => {
+            const uidBusca = item.tombamento ? `${item.id_base || item.id}-${item.tombamento}` : (item.id_base || item.id);
+            const statusLocal = window.itemStatus[uidBusca] || { status: 'ok' };
+            
+            return {
+                ...item,
+                status_recebimento: statusLocal.status === 'ok' ? 'S/A' : 'C/A',
+                observacao_recebimento: statusLocal.obs || ''
+            };
+        });
+
+        // 2. ATUALIZA O STATUS DA TRANSFERÊNCIA NO BANCO
         batch.update(transRef, {
             status: "RECEBIDO",
             recebedor_nome: meuNomeCompleto,
-            recebedor_uid: userInfo.uid, // ✅ Essencial para o loadMyHistory (Minhas Atividades)
+            recebedor_uid: userInfo.uid, 
             timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
-            modo: 'TRANSFERENCIA_CARGA', // ✅ Indica ao histórico qual layout de PDF usar
-            
-            // ✅ IMPORTANTE: Se o seu PDF de histórico precisar listar os itens depois, 
-            // precisamos garantir que os itens com o status da conferência (S/A ou C/A) 
-            // estejam salvos aqui ou mapeados corretamente.
+            modo: 'TRANSFERENCIA_CARGA',
+            itens: itensAtualizadosParaHistorico // ✅ Salva a conferência final na guia
         });
 
         await batch.commit();
         
-        // Removida a geração automática do PDF conforme sua nova diretriz.
-        // O usuário fará isso manualmente em "Minhas Atividades".
-
+        // Conforme solicitado, a impressão agora é manual via "Minhas Atividades"
         alert(`✅ Carga recebida com sucesso!\nO Termo de Recebimento já está disponível em "Minhas Atividades".`);
         
         if (window.parent) {
@@ -2395,7 +2404,7 @@ function setItemStatusID(btn, status, uid) {
         console.error("Erro ao finalizar recebimento:", e);
         alert("Erro técnico ao processar recebimento: " + e.message);
         btn.disabled = false;
-        btn.textContent = "CONFIRMAR RECEBIMENTO";
+        btn.textContent = originalText;
     }
 }
     window.onload = carregarDadosRemotos;
