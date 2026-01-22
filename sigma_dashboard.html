@@ -4433,6 +4433,7 @@ function confirmarInicioMaterial() {
 async function loadMyHistory() {
     const ul = document.getElementById('my-history-list');
     const conferenteUid = firebase.auth().currentUser.uid;
+    
     if (!ul || !conferenteUid) return;
 
     ul.innerHTML = '<li style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Buscando atividades...</li>';
@@ -4449,40 +4450,73 @@ async function loadMyHistory() {
     const endTimestamp = firebase.firestore.Timestamp.fromDate(new Date(endDateInput + 'T23:59:59'));
 
     try {
+        // ✅ BUSCA TRIPLA: Materiais, Viaturas e Transferências Recebidas
         const [snapMat, snapCheck, snapTrans] = await Promise.all([
-            db.collection('resultados_conferencias').where('conferente_uid', '==', conferenteUid)
-                .where('timestamp', '>=', startTimestamp).where('timestamp', '<=', endTimestamp).get(),
-            db.collection('resultados_checklist').where('conferente_uid', '==', conferenteUid)
-                .where('timestamp', '>=', startTimestamp).where('timestamp', '<=', endTimestamp).get(),
-            db.collection('transferencias_pendentes').where('status', '==', 'RECEBIDO')
+            db.collection('resultados_conferencias')
+                .where('conferente_uid', '==', conferenteUid)
+                .where('timestamp', '>=', startTimestamp)
+                .where('timestamp', '<=', endTimestamp).get(),
+            
+            db.collection('resultados_checklist')
+                .where('conferente_uid', '==', conferenteUid)
+                .where('timestamp', '>=', startTimestamp)
+                .where('timestamp', '<=', endTimestamp).get(),
+            
+            db.collection('transferencias_pendentes')
+                .where('status', '==', 'RECEBIDO')
                 .where('recebedor_uid', '==', conferenteUid).get()
         ]);
             
         let docs = [];
+
+        // 1. Processa Conferências de Materiais
         snapMat.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
+        
+        // 2. Processa Checklists de Viaturas
         snapCheck.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
         
+        // 3. Processa Transferências de Carga (Com Normalização para o PDF)
         snapTrans.forEach(doc => {
             const d = doc.data();
             const ts = d.timestamp_recebimento;
-            // Filtro de data manual para transferências devido ao status indexado
+            
+            // Filtro de data manual (devido ao limite de índices compostos do Firestore)
             if (ts && ts.seconds >= startTimestamp.seconds && ts.seconds <= endTimestamp.seconds) {
+                
+                // ✅ TRADUÇÃO DE DADOS: Mapeia o formato da Transferência para o formato do PDF
+                const itensNormalizados = (d.itens || []).map(item => {
+                    const uidBusca = item.tombamento ? `${item.id_base || item.id}-${item.tombamento}` : (item.id_base || item.id);
+                    // Recupera o status salvo durante a conferência no Iframe
+                    return {
+                        nomeCompleto: item.tombamento ? `${item.nome} (Tomb: ${item.tombamento})` : item.nome,
+                        quantidade: item.quantidade || 1,
+                        status: item.status_recebimento || 'S/A', 
+                        setor: item.setor || "CARGA",
+                        obs: item.observacao_recebimento || ''
+                    };
+                });
+
                 docs.push({ 
                     ...d, 
                     id_doc: doc.id, 
                     modo: 'TRANSFERENCIA_CARGA',
                     local: `TRANSFERÊNCIA: ${d.origem_sigla} > ${d.destino_sigla}`,
                     timestamp: ts,
-                    conferente: d.recebedor_nome
+                    conferente: d.recebedor_nome,
+                    itensRelatorio: itensNormalizados, // Alvo da tabela no PDF
+                    totalItensConferidos: itensNormalizados.length,
+                    totalCaa: itensNormalizados.filter(i => i.status !== 'S/A').length,
+                    id_amigavel: `TR-${new Date(ts.seconds * 1000).getFullYear()}/${doc.id.substring(0,5).toUpperCase()}`
                 });
             }
         });
 
+        // ✅ ORDENAÇÃO: Garante que a atividade mais recente apareça primeiro
         docs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
 
         let html = '';
         docs.forEach(d => {
-            // CriarItemHistoricoHTML deve tratar d.modo === 'TRANSFERENCIA_CARGA'
+            // Chama a função que cria o <li> com ícones e cores específicas
             html += criarItemHistoricoHTML(d);
         });
         
@@ -4490,7 +4524,7 @@ async function loadMyHistory() {
         
     } catch(e){ 
         console.error("Erro no histórico unificado:", e);
-        ul.innerHTML='<li style="color:red;">Erro ao carregar atividades.</li>';
+        ul.innerHTML='<li style="color:red; padding:20px; text-align:center;">Erro ao carregar atividades. Verifique o console.</li>';
     }
 }
 	async function loadGlobalHistory() {
