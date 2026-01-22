@@ -4874,20 +4874,26 @@ async function loadMyHistory() {
     if (!modal || !containerGestao || !containerLeitura) return;
 
     try {
-        // 1. Busca os dados do Posto para o título
+        // 1. Busca os dados do Posto para o título e validação de posse
         const postoDoc = await db.collection('postos_estruturados').doc(postoUid).get();
         if (!postoDoc.exists) return;
+        
         const postoData = postoDoc.data();
+        const role = currentUserData?.role;
+        const minhaUnidadeId = currentUserData?.unidade_id;
+        const souAdmin = (role === 'admin' || role === 'gestor_geral');
+        
+        // ✅ MUDANÇA CIRÚRGICA: Verifica se o gestor é dono do POSTO
+        const souDonoDoPosto = (postoData.unidade_id === minhaUnidadeId);
 
-        // ✅ Uso dos IDs corretos do seu HTML para evitar o erro de 'null'
         document.getElementById('modal-posto-titulo').innerText = postoData.nome;
         document.getElementById('modal-posto-endereco').innerHTML = `<i class="fas fa-map-marker-alt"></i> ${postoData.endereco}`;
         
-        modal.style.display = 'flex'; // Usando flex para centralizar conforme seu CSS de modal
-        containerGestao.innerHTML = '<p style="font-size: 0.8em; color: #999;">Carregando ativos...</p>';
+        modal.style.display = 'flex'; 
+        containerGestao.innerHTML = '<p style="font-size: 0.8em; color: #999; padding: 10px;"><i class="fas fa-sync fa-spin"></i> Sincronizando ativos...</p>';
         containerLeitura.innerHTML = '';
 
-        // 2. Busca TODAS as listas ativas
+        // 2. Busca TODAS as listas ativas para o cruzamento de dados
         const listasSnapshot = await db.collection('listas_conferencia').where('ativo', '==', true).get();
         
         let htmlGestao = '';
@@ -4896,18 +4902,17 @@ async function loadMyHistory() {
         listasSnapshot.forEach(doc => {
             const lista = doc.data();
             const estaNestePosto = (lista.posto_id === postoUid);
+            const ehMinhaLista = (lista.unidade_id === minhaUnidadeId);
             
-            // ✅ LÓGICA DE ADMIN: Admin pode gerir TUDO. Gestor apenas a própria unidade.
-            const souAdmin = currentUserData.role === 'admin';
-            const ehMinhaUnidade = (lista.unidade_id === currentUserData.unidade_id);
-            const podeGerir = souAdmin || ehMinhaUnidade;
+            // ✅ REGRA DE OURO: Para gerir o vínculo (ligar/desligar switch), 
+            // o usuário deve ser Admin OU ser dono da Lista E estar em um Posto que ele gerencia.
+            const podeVincular = souAdmin || (ehMinhaLista && souDonoDoPosto);
 
-            // ✅ CORREÇÃO DO UNDEFINED: Busca 'ativo_nome' que é como salvamos no banco
             const nomeExibicao = lista.ativo_nome || "Ativo sem nome";
             const identificacaoExtra = lista.unidade_sigla ? ` | ${lista.unidade_sigla}` : "";
 
-            if (podeGerir) {
-                // Se pode gerir (Admin ou Dono), entra na lista com Switch
+            if (podeVincular) {
+                // Modo Interativo: O Gestor pode mover suas viaturas para seus postos
                 htmlGestao += `
                     <div style="display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-bottom: 5px;">
                         <span style="font-weight: 600; color: #333;">${nomeExibicao} <small style="color:#888; font-weight:normal;">${identificacaoExtra}</small></span>
@@ -4919,21 +4924,33 @@ async function loadMyHistory() {
                     </div>
                 `;
             } else if (estaNestePosto) {
-                // Se NÃO pode gerir, mas a VTR de outro está no seu posto, entra em Leitura
+                // Modo Leitura: Viatura externa estacionada aqui OU viatura do gestor em posto alheio
+                const motivoTrava = !ehMinhaLista ? "Viatura Externa" : "Posto sob outra gestão";
                 htmlLeitura += `
-                    <div style="display: flex; align-items: center; gap: 10px; background: #f0f0f0; padding: 8px; border-radius: 6px; font-size: 0.85em; margin-bottom: 5px;">
-                        <i class="fas fa-lock" style="color: #ccc;"></i>
-                        <span style="color: #777;">${nomeExibicao} - ${lista.unidade_sigla}</span>
+                    <div title="${motivoTrava}" style="display: flex; align-items: center; justify-content: space-between; background: #f9f9f9; padding: 8px 12px; border-radius: 6px; font-size: 0.85em; margin-bottom: 5px; border: 1px dashed #ddd;">
+                        <span style="color: #555;"><i class="fas fa-lock" style="color: #ccc; margin-right: 8px;"></i>${nomeExibicao} <small>(${lista.unidade_sigla})</small></span>
+                        <span style="font-size: 0.7em; color: #aaa; text-transform: uppercase;">Somente Leitura</span>
                     </div>
                 `;
             }
         });
 
-        containerGestao.innerHTML = htmlGestao || '<p style="color:#999; font-size:0.8em;">Nenhum ativo disponível para gestão.</p>';
-        containerLeitura.innerHTML = htmlLeitura || '<p style="color:#ccc; font-size:0.8em;">Nenhuma viatura externa vinculada.</p>';
+        // 3. Atualização da Interface do Modal
+        containerGestao.innerHTML = htmlGestao || '<p style="color:#999; font-size:0.8em; padding:10px; text-align:center;">Sem ativos disponíveis para vincular neste posto.</p>';
+        containerLeitura.innerHTML = htmlLeitura || '';
+
+        // Se o gestor não for dono do posto, avisa na UI do modal
+        if (!souAdmin && !souDonoDoPosto) {
+            containerGestao.insertAdjacentHTML('afterbegin', `
+                <div style="background: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; font-size: 0.75em; margin-bottom: 10px; border: 1px solid #ffeeba;">
+                    <i class="fas fa-info-circle"></i> Você está visualizando um posto de outra unidade. Apenas leitura permitida.
+                </div>
+            `);
+        }
 
     } catch (e) {
         console.error("Erro ao gerir posto:", e);
+        if (containerGestao) containerGestao.innerHTML = '<p style="color:red;">Erro ao carregar dados.</p>';
     }
 }
 
@@ -4943,24 +4960,51 @@ function fecharModalPosto() {
 		async function vincularListaAoPosto(listaUid, postoUid, associar) {
     try {
         const listaRef = db.collection('listas_conferencia').doc(listaUid);
-        
-        // Se 'associar' for true, grava o UID do posto. 
-        // Se for false, remove o vínculo (seta como null ou remove o campo).
-        await listaRef.update({
-            posto_id: associar ? postoUid : null,
-            ultima_movimentacao_posto: firebase.firestore.FieldValue.serverTimestamp(),
-            movimentado_por: currentUserData.nome_militar_completo
-        });
+        const postoRef = db.collection('postos_estruturados').doc(postoUid);
 
-        console.log(`Vínculo da lista ${listaUid} atualizado: ${associar ? 'Conectado' : 'Desconectado'}`);
+        // 🛡️ MUDANÇA CIRÚRGICA 1: Validação de Segurança em Tempo de Execução
+        const [snapLista, snapPosto] = await Promise.all([listaRef.get(), postoRef.get()]);
         
-        // Opcional: Atualiza o card de postos no fundo para refletir a nova contagem/lista
-        carregarPostosVisuais();
+        if (!snapLista.exists || !snapPosto.exists) throw new Error("Documentos não localizados.");
+
+        const dadosLista = snapLista.data();
+        const dadosPosto = snapPosto.data();
+        const role = currentUserData?.role;
+        const minhaUnidadeId = currentUserData?.unidade_id;
+        const souAdmin = (role === 'admin' || role === 'gestor_geral');
+
+        // ✅ TRAVA DE POSSE: O Gestor só vincula se for dono da LISTA e do POSTO
+        if (!souAdmin) {
+            const ehDonoDaLista = (dadosLista.unidade_id === minhaUnidadeId);
+            const ehDonoDoPosto = (dadosPosto.unidade_id === minhaUnidadeId);
+
+            if (!ehDonoDaLista || !ehDonoDoPosto) {
+                alert("⚠️ Ação Bloqueada: Você não tem permissão para alterar este vínculo.");
+                abrirGestaoPosto(postoUid); // Reseta o switch na interface
+                return;
+            }
+        }
+
+        // 🛡️ MUDANÇA CIRÚRGICA 2: Atualização com Denormalização
+        // Gravamos o nome do posto na lista para otimizar as buscas de inventário
+        const atualizacao = {
+            posto_id: associar ? postoUid : null,
+            posto_nome: associar ? dadosPosto.nome : "NÃO VINCULADO", // Útil para filtros de almoxarifado
+            ultima_movimentacao_posto: firebase.firestore.FieldValue.serverTimestamp(),
+            movimentado_por: `${currentUserData.postoGraduacao} ${currentUserData.nomeGuerra}` || "SISTEMA"
+        };
+
+        await listaRef.update(atualizacao);
+
+        console.log(`✅ Sucesso: Ativo ${dadosLista.ativo_nome} ${associar ? 'vinculado ao' : 'removido do'} posto ${dadosPosto.nome}`);
+
+        // Opcional: Toast ou Notificação silenciosa em vez de Alert
+        // carregarPostosVisuais(); // Comentado para evitar lag se houver muitos cards, mas use se necessário
 
     } catch (e) {
-        console.error("Erro ao vincular lista:", e);
-        alert("Erro ao salvar o vínculo. Tente novamente.");
-        // Opcional: Recarregar o modal para resetar o switch em caso de erro
+        console.error("❌ Erro ao vincular lista:", e);
+        alert("Erro técnico ao salvar o vínculo: " + e.message);
+        // Reseta a interface para o estado real do banco
         abrirGestaoPosto(postoUid);
     }
 }
@@ -5079,7 +5123,7 @@ function fecharModalPosto() {
     if (!container) return;
 
     try {
-        // 1. Busca os postos ativos na nova coleção
+        // 1. Busca todos os postos ativos (Visão Global)
         const snapshot = await db.collection('postos_estruturados')
             .where('ativo', '==', true)
             .orderBy('nome', 'asc')
@@ -5093,17 +5137,25 @@ function fecharModalPosto() {
 
         if (snapshot.empty) {
             container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: #666; padding: 20px;">
-                Nenhum posto cadastrado no novo sistema.</p>`;
+                Nenhum posto cadastrado no sistema.</p>`;
             return;
         }
+
+        // Dados do usuário logado para validação de posse
+        const minhaUnidadeId = currentUserData?.unidade_id;
+        const role = currentUserData?.role;
+        const isAdminGeral = (role === 'admin' || role === 'gestor_geral');
 
         snapshot.forEach(doc => {
             const posto = doc.data();
             
+            // ✅ LÓGICA DE PERMISSÃO: Admin vê tudo, Gestor vê tudo mas só mexe no dele
+            const ehDono = (posto.unidade_id === minhaUnidadeId);
+            const podeGerenciar = isAdminGeral || ehDono;
+
             // Filtra as viaturas/bases que estão vinculadas a ESTE posto
             const ativosNoPosto = todasListas.filter(l => l.posto_id === doc.id);
             
-            // Define o texto do rodapé dinamicamente
             const textoRodape = ativosNoPosto.length > 0 
                 ? ativosNoPosto.map(l => l.ativo_nome).join(', ') 
                 : "Nenhum ativo vinculado";
@@ -5111,23 +5163,33 @@ function fecharModalPosto() {
             const corTextoRodape = ativosNoPosto.length > 0 ? '#444' : '#999';
             const estiloFonteRodape = ativosNoPosto.length > 0 ? 'normal' : 'italic';
 
+            // Estilização diferenciada para o que pertence à unidade do Gestor
+            const borderStyle = ehDono ? 'border-top: 6px solid #1b8a3e !important;' : 'border-top: 6px solid #8e44ad !important;';
+            const badgeDono = ehDono ? `<span style="position:absolute; top:10px; left:10px; background:#1b8a3e; color:#fff; font-size:0.6em; padding:2px 6px; border-radius:4px; font-weight:bold; z-index:10;">SUA UNIDADE</span>` : '';
+
             html += `
-                <div class="unit-building-card" onclick="abrirGestaoPosto('${posto.uid}')" style="cursor:pointer; background: #ffffff !important; border: 1px solid #ddd !important; border-top: 6px solid #8e44ad !important; border-radius: 12px !important; position: relative !important; overflow: hidden !important; display: flex; flex-direction: column; min-height: 220px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+                <div class="unit-building-card" onclick="abrirGestaoPosto('${doc.id}')" style="cursor:pointer; background: #ffffff !important; border: 1px solid #ddd !important; ${borderStyle} border-radius: 12px !important; position: relative !important; overflow: hidden !important; display: flex; flex-direction: column; min-height: 220px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); ${!podeGerenciar ? 'opacity: 0.85;' : ''}">
                     
+                    ${badgeDono}
+
                     <div class="card-actions-container">
-                        <button class="btn-edit-unit-card" title="Editar Dados do Posto" 
-                                onclick="event.stopPropagation(); prepararEdicaoPosto('${posto.uid}', '${posto.nome}', '${posto.endereco}')">
-                            <i class="fas fa-pencil-alt"></i>
-                        </button>
-                        
-                        <button class="btn-delete-unit-card" title="Excluir Posto" 
-                                onclick="event.stopPropagation(); deletarPostoSistema('${posto.uid}', '${posto.nome}')">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
+                        ${podeGerenciar ? `
+                            <button class="btn-edit-unit-card" title="Editar Dados do Posto" 
+                                    onclick="event.stopPropagation(); prepararEdicaoPosto('${doc.id}', '${posto.nome}', '${posto.endereco}')">
+                                <i class="fas fa-pencil-alt" style="color:#555 !important;"></i>
+                            </button>
+                            
+                            <button class="btn-delete-unit-card" title="Excluir Posto" 
+                                    onclick="event.stopPropagation(); deletarPostoSistema('${doc.id}', '${posto.nome}')">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        ` : `
+                            <i class="fas fa-lock" title="Somente Visualização" style="margin: 10px; color: #ccc;"></i>
+                        `}
                     </div>
                     
                     <div style="width: 100%; height: 70px; display: flex; align-items: center; justify-content: center; background: #fcfcfc;">
-                        <i class="fas fa-flag" style="font-size: 2.2em; color: #8e44ad;"></i>
+                        <i class="fas fa-flag" style="font-size: 2.2em; color: ${ehDono ? '#1b8a3e' : '#8e44ad'};"></i>
                     </div>
 
                     <div style="padding: 15px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between;">
@@ -5138,10 +5200,11 @@ function fecharModalPosto() {
                                 <i class="fas fa-map-marker-alt" style="color: #e74c3c;"></i>
                                 <span>${posto.endereco}</span>
                             </div>
+                            <small style="color:#aaa; display:block; margin-top:5px;">${posto.unidade_sigla || '---'}</small>
                         </div>
                         
                         <div style="border-top: 1px solid #eee; padding-top:10px; margin-top: 15px;">
-                            <span style="font-weight:bold; color:#8e44ad; text-transform:uppercase; font-size:0.7em; display:block;">Carga / Listas:</span>
+                            <span style="font-weight:bold; color:${ehDono ? '#1b8a3e' : '#8e44ad'}; text-transform:uppercase; font-size:0.7em; display:block;">Carga / Listas:</span>
                             <div style="display:flex; align-items:center; gap:8px; margin-top:5px;">
                                 <i class="fas fa-clipboard-list" style="color:#555; font-size: 0.8em;"></i>
                                 <span style="color:${corTextoRodape}; font-weight:600; font-size:0.8em; font-style:${estiloFonteRodape};">${textoRodape}</span>
@@ -5475,26 +5538,27 @@ function reimprimirPDF(data) {
     const editorArq = document.getElementById('view-editor-arquitetura');
     if (editorArq) editorArq.style.display = 'none';
 
-    // 2. Remove o bloqueio de padding (caso tenha ficado preso do editor)
     const contentPrincipal = document.querySelector('.content');
     if (contentPrincipal) contentPrincipal.style.padding = '20px';
 
-    // 1. Esconde todas as seções de visualização
     document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
 
-    // 2. Fecha o container do App (Iframe) caso esteja aberto
     const appRunner = document.getElementById('app-runner-container');
     if (appRunner) { appRunner.style.display = 'none'; }
 
     // ✅ CONTROLE DE ACESSO DINÂMICO (Sidebar)
     if (currentUserData) {
         const role = currentUserData.role;
-        const linkListas = document.getElementById('link-listas');
         const podeGerenciar = (role === 'admin' || role === 'gestor_geral' || role === 'gestor');
+        
+        // Libera Listas e Postos para o Gestor
+        const linkListas = document.getElementById('link-listas');
+        const linkPostos = document.getElementById('link-postos');
+        
         if (linkListas) linkListas.style.display = podeGerenciar ? 'block' : 'none';
+        if (linkPostos) linkPostos.style.display = podeGerenciar ? 'block' : 'none';
     }
 
-    // 3. Mapeamento de IDs Específicos
     let targetId;
     if (v === 'listas') {
         targetId = 'menu-editor-listas';
@@ -5513,14 +5577,13 @@ function reimprimirPDF(data) {
         return;
     }
     
-    // 4. Gerenciamento de classes 'active' na Sidebar
     document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
     const activeLink = document.getElementById(`link-${v}`);
     if (activeLink) {
         activeLink.classList.add('active');
     }
 
-    // 5. DISPARO DE CARREGAMENTO DE DADOS (Lógica por View)
+    // 5. DISPARO DE CARREGAMENTO DE DADOS
     if (v === 'dashboard') {
         const resCont = document.getElementById('resume-container');
         const adminCont = document.getElementById('admin-gestor-cards-container');
@@ -5554,6 +5617,7 @@ function reimprimirPDF(data) {
     }
     
     if (v === 'postos') {
+        // ✅ DISPARO: Carrega todos os postos (a lógica de permissão de edição fica dentro da função)
         carregarPostosVisuais();
     }
 
@@ -5572,7 +5636,6 @@ function reimprimirPDF(data) {
     }
             
     if (v === 'listas') {
-        // ✅ PROTEÇÃO: Garante que as funções carreguem apenas dados da unidade do usuário
         carregarFiltrosParaNovoEditor(); 
         carregarCardsListasExistentes(); 
     }
@@ -5600,7 +5663,6 @@ function reimprimirPDF(data) {
         loadMyHistory();
     }
 
-    // 6. Comportamento Mobile
     if (window.innerWidth <= 768) {
         history.pushState(null, null, location.href);
         if (typeof closeMenuMobile === "function") closeMenuMobile();
