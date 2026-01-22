@@ -643,23 +643,35 @@ function renderizarConferencia() {
     // ✅ INJEÇÃO DO CABEÇALHO DE TRANSFERÊNCIA (Modo Carga)
     if (isRecebimentoCarga && window.dadosTransferencia) {
         const tr = window.dadosTransferencia;
+        const totalVolumes = tr.itens.reduce((acc, item) => acc + (Number(item.quantidade) || 0), 0);
+        
         const htmlHeaderTr = `
-            <div class="setor" style="margin-bottom: 20px;">
-                <div class="setor-header" style="background-color: #000 !important; cursor: default;">
-                    <div class="setor-info">
-                        <i class="fas fa-exchange-alt"></i> <span>TRANSFERÊNCIA DE CARGA</span>
-                    </div>
-                    <span style="font-size: 0.7em; background: #d90f23; padding: 2px 8px; border-radius: 4px;">EM TRÂNSITO</span>
+            <div class="setor" style="margin-bottom: 20px; border: 1px solid #000; border-radius: 8px; overflow: hidden;">
+                <div class="setor-header" style="background-color: #000 !important; cursor: default; display: flex; justify-content: space-between;">
+                    <div class="setor-info"><i class="fas fa-shipping-fast"></i> <span>EXTRATO DA GUIA</span></div>
+                    <span style="font-size: 0.75em; background: #333; padding: 2px 10px; border-radius: 4px;">${totalVolumes} VOLUMES</span>
                 </div>
-                <div class="setor-content expanded" style="padding: 15px; border: 1px solid #000; border-top: none; text-align: left; font-size: 0.85em; line-height: 1.6;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                        <div><b style="color:#666">ENVIADO POR:</b><br> ${tr.emitente || 'N/D'}</div>
-                        <div><b style="color:#666">UNIDADE ORIGEM:</b><br> ${tr.origem_sigla || 'N/D'}</div>
-                        <div style="grid-column: span 2; border-top: 1px solid #eee; pt: 8px; margin-top: 5px;">
-                            <b style="color:#666">RESPONSÁVEL PELO RECEBIMENTO:</b><br> 
-                            <i class="fas fa-user-check"></i> ${userInfo.postoGraduacao} ${userInfo.nomeGuerra}
+                <div class="setor-content expanded" style="padding: 15px; background: #fff; text-align: left; font-size: 0.85em;">
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                        <div style="flex: 1; padding: 10px; background: #f9f9f9; border-radius: 6px;">
+                            <small style="color:#999; font-weight:bold; font-size: 0.7em;">REMETENTE (ORIGEM)</small><br>
+                            <i class="fas fa-university"></i> <b>${tr.origem_sigla || 'DLOG'}</b><br>
+                            <i class="fas fa-user-tag"></i> ${tr.emitente || 'N/D'}
                         </div>
-                        <div style="grid-column: span 2;"><b style="color:#666">UNIDADE DE DESTINO:</b><br> ${tr.destino_sigla || 'N/D'}</div>
+
+                        <i class="fas fa-long-arrow-alt-right" style="color: #ccc; font-size: 1.5em;"></i>
+
+                        <div style="flex: 1; padding: 10px; background: #f0f7ff; border-radius: 6px; border-left: 3px solid #000;">
+                            <small style="color:#2c7399; font-weight:bold; font-size: 0.7em;">DESTINATÁRIO (VOCÊ)</small><br>
+                            <i class="fas fa-map-marker-alt"></i> <b>${tr.destino_sigla || 'CCI'}</b><br>
+                            <i class="fas fa-user-check"></i> ${userInfo.nomeGuerra}
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee; display: flex; justify-content: space-between; color: #666;">
+                         <span><i class="fas fa-calendar-day"></i> Envio: ${tr.timestamp_envio?.toDate().toLocaleDateString('pt-BR')}</span>
+                         <span><i class="fas fa-box-open"></i> Itens: ${tr.itens.length}</span>
                     </div>
                 </div>
             </div>`;
@@ -920,7 +932,13 @@ async function carregarDadosRemotos() {
         }
     } else {
         if (tituloPrincipal) {
-            tituloPrincipal.innerText = isRecebimentoCarga ? "Recebimento de Carga" : (isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais");
+            // ✅ AJUSTE CIRÚRGICO: Título amigável TR-AAAA apenas no Recebimento
+            if (isRecebimentoCarga) {
+                const ano = new Date().getFullYear();
+                tituloPrincipal.innerText = `GUIA: TR-${ano}/${ID_ALVO.substring(0,5).toUpperCase()}`;
+            } else {
+                tituloPrincipal.innerText = isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais";
+            }
             tituloPrincipal.style.color = isRecebimentoCarga ? "#000000" : "#800020";
         }
         if (btnFinalizar) {
@@ -937,7 +955,8 @@ async function carregarDadosRemotos() {
 
     const elHeader = document.getElementById('militar-info');
     if (elHeader) {
-        let headerHTML = `<strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
+        // ✅ AJUSTE CIRÚRGICO: Ícones intuitivos mantendo toda a lógica original (KM/Combustível)
+        let headerHTML = `<i class="fas fa-user-shield"></i> <strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><i class="fas fa-clock"></i> <strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
 
         if (window.isModoChecklist) {
             const km = urlParamsLocal.get('km') || "0";
@@ -986,16 +1005,20 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        infoLocal = { 
-            nome: isRecebimentoCarga ? `GUIA: ${ID_ALVO}` : (isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista")),
-            posto: isRecebimentoCarga ? `ORIGEM: ${data.origem_sigla}` : (isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || "Geral"))
-        };
-        
+        // ✅ AJUSTE CIRÚRGICO: Oculta infoLocal redundante apenas se for Recebimento
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
-            const separador = infoLocal.posto ? " - " : "";
-            const corDinamica = window.isModoChecklist ? "#2c3e50" : (isRecebimentoCarga ? "#000000" : "#800020");
-            infoElement.innerHTML = `<span style="color:${corDinamica};font-weight:bold">${infoLocal.nome}${separador}${infoLocal.posto}</span>`;
+            if (isRecebimentoCarga) {
+                infoElement.style.display = 'none';
+            } else {
+                infoLocal = { 
+                    nome: isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista"),
+                    posto: isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || "Geral")
+                };
+                const separador = infoLocal.posto ? " - " : "";
+                const corDinamica = window.isModoChecklist ? "#2c3e50" : "#800020";
+                infoElement.innerHTML = `<span style="color:${corDinamica};font-weight:bold">${infoLocal.nome}${separador}${infoLocal.posto}</span>`;
+            }
         }
 
         if (btnFinalizar) {
@@ -1917,7 +1940,7 @@ function processarAcaoFinalModal() {
     if (excluido) {
         // ESSENCIAL: Redesenha a tela. Como o item sumiu do Array, 
         // a renderização não vai mais criar o carimbo.
-        renderizarConferencia(); 
+        (); 
         updateOverallStatus();
         console.log("Sucesso: Relato temporário removido:", idProcurado);
     } else {
@@ -2149,7 +2172,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         }
 
         // 5. ATUALIZAÇÃO DA UI
-        renderizarConferencia();
+        ();
         updateOverallStatus();
 
         // 6. FEEDBACK VISUAL (PISCAR VERDE)
@@ -2198,7 +2221,7 @@ function setItemStatusID(btn, status, uid) {
         btn.style.backgroundColor = "#1b8a3e";
         
         setTimeout(() => {
-            renderizarConferencia();
+            ();
             updateOverallStatus();
         }, 400);
     }
