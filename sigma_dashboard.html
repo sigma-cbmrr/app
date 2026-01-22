@@ -13969,26 +13969,35 @@ function finalizarPreCheckEIrProApp() {
         alert("Falha no processo: " + error.message);
     }
 }
-	async function carregarAlertasTransferencia() {
-    const container = document.getElementById('resume-container'); // Onde ficam os avisos de rascunho
-    if (!container || !currentUserData) return;
+async function carregarAlertasTransferencia() {
+    const container = document.getElementById('resume-container');
+    
+    // 🛡️ TRAVA CIRÚRGICA: Só prossegue se o usuário e o ID da unidade existirem
+    if (!container || !currentUserData || !currentUserData.unidade_id) {
+        console.warn(" Aguardando carregamento do perfil para buscar alertas de carga...");
+        return;
+    }
 
     try {
         const minhaUnidadeId = currentUserData.unidade_id;
         
-        // Busca transferências em trânsito para a unidade do Gestor
+        // Busca transferências em trânsito destinadas especificamente a esta unidade
         const snap = await db.collection('transferencias_pendentes')
             .where('destino_id', '==', minhaUnidadeId)
             .where('status', '==', 'EM_TRANSITO')
             .get();
 
+        // Se não houver carga, não limpa o container (para não apagar rascunhos), apenas sai
         if (snap.empty) return;
 
         const totalCargas = snap.size;
         
-        // Monta o Card de Alerta (Estilo "Resume" laranja que você já usa)
+        // Remove alertas de carga duplicados antes de inserir o novo
+        const alertaAntigo = document.getElementById('alerta-carga-transito');
+        if (alertaAntigo) alertaAntigo.remove();
+
         const alertaHtml = `
-            <div class="op-card resume" style="background-color: #fff8e1; border-left-color: #f57c00; margin-bottom: 20px;">
+            <div id="alerta-carga-transito" class="op-card resume" style="background-color: #fff8e1; border-left-color: #f57c00; margin-bottom: 20px;">
                 <div style="display: flex; align-items: center; gap: 15px;">
                     <i class="fas fa-truck-loading fa-2x" style="color: #f57c00;"></i>
                     <div style="flex: 1; text-align: left;">
