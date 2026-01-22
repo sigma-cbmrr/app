@@ -12467,30 +12467,18 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     container.innerHTML = '<div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin"></i> Acessando prontuário...</div>';
 
     try {
-        console.log("🚀 Iniciando busca de histórico...");
-        console.log("ID Global:", uidGlobal);
-        console.log("Tombamento:", tombamento);
-
         const docRef = db.collection('inventario').doc(uidGlobal);
-        
         let eventos = [];
 
         if (tombamento) {
-            // ✅ MODO MULTI: ACESSO AO CAMINHO QUE VOCÊ FORNECEU
-            // /inventario/{uidGlobal}/tombamentos/{tombamento}/historico_vida
+            // ✅ MODO MULTI: ACESSO AO PRONTUÁRIO INDIVIDUAL
             labelNome.textContent = `RG Individual: Tomb. ${tombamento}`;
             
-            console.log(`📂 Varrendo sub-coleção: /inventario/${uidGlobal}/tombamentos/${tombamento}/historico_vida`);
-
             const histSnap = await docRef
                 .collection('tombamentos')
                 .doc(tombamento)
                 .collection('historico_vida')
                 .get();
-
-            if (histSnap.empty) {
-                console.warn("⚠️ Atenção: A sub-coleção 'historico_vida' deste tombamento retornou vazia.");
-            }
 
             eventos = histSnap.docs.map(d => ({
                 ...d.data(),
@@ -12498,16 +12486,16 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
             }));
 
         } else {
-            // ✅ MODO SINGLE/GLOBAL
+            // ✅ MODO SINGLE/LOTE
             labelNome.textContent = `Histórico de Lote`;
             
-            // Busca logs no Pai (array)
+            // 1. Busca logs no Documento Principal
             const snapPai = await docRef.get();
             if (snapPai.exists && snapPai.data().historico_movimentacoes) {
                 eventos = [...snapPai.data().historico_movimentacoes];
             }
 
-            // Busca logs nas sub-coleções de saldos das unidades
+            // 2. Busca logs distribuídos nas sub-coleções de saldos das unidades
             const saldosSnap = await docRef.collection('saldos_unidades').get();
             for (const docUnid of saldosSnap.docs) {
                 const hSnap = await docUnid.ref.collection('historico_vida').get();
@@ -12525,16 +12513,14 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
                 <div style="text-align:center; color:#999; padding:40px;">
                     <i class="fas fa-search fa-3x" style="opacity:0.2; margin-bottom:10px;"></i>
                     <p>Nenhum registro encontrado para este nível.</p>
-                    <small>Verifique se o ID ${uidGlobal} e Tombamento ${tombamento} estão corretos no banco.</small>
                 </div>`;
             return;
         }
 
-        // Ordenação por data (Mais recente primeiro)
+        // Ordenação Cronológica (Mais recente primeiro)
         eventos.sort((a, b) => {
             const parseDate = (str) => {
                 if (!str) return new Date(0);
-                // Assume o formato "DD/MM/YYYY, HH:MM:SS" que você enviou
                 const parts = str.split(', ');
                 const dateParts = parts[0].split('/');
                 const timeParts = parts[1] ? parts[1].split(':') : [0,0,0];
@@ -12543,14 +12529,27 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
             return parseDate(b.data) - parseDate(a.data);
         });
 
-        // Montagem da UI
+        // ✅ MONTAGEM DA UI COM TRATAMENTO DE QUANTIDADE E GUIA AMIGÁVEL
         container.innerHTML = eventos.map(ev => {
             let icon = 'fa-history';
-            let color = '#2c7399';
+            let color = '#4b5563'; // Cinza escuro padrão
             const evNome = (ev.evento || "").toUpperCase();
 
-            if (evNome.includes('APORTE') || evNome.includes('NASCIMENTO')) { icon = 'fa-plus-circle'; color = '#1b8a3e'; }
-            if (evNome.includes('SAIDA') || evNome.includes('TRANSFERENCIA')) { icon = 'fa-exchange-alt'; color = '#800020'; }
+            // Lógica de Cores e Ícones
+            if (evNome.includes('APORTE')) { icon = 'fa-plus-circle'; color = '#1b8a3e'; }
+            if (evNome.includes('RECEBIMENTO')) { icon = 'fa-file-import'; color = '#1b8a3e'; }
+            if (evNome.includes('ENVIO') || evNome.includes('TRANSFERENCIA')) { icon = 'fa-exchange-alt'; color = '#2c7399'; }
+            if (evNome.includes('AVARIA') || evNome.includes('PENDENCIA')) { icon = 'fa-exclamation-triangle'; color = '#800020'; }
+
+            // ✅ Tratamento da Quantidade (Apenas se houver e for lote)
+            const labelQtd = ev.quantidade ? `<span style="background:${color}22; color:${color}; padding:2px 6px; border-radius:4px; margin-left:8px; font-size:0.9em;">[${ev.quantidade} un.]</span>` : '';
+
+            // ✅ Tratamento da Guia Amigável (Converte ID longo em TR-ANO/ID)
+            let detalhesTexto = ev.detalhes || ev.descricao || 'Sem descrição.';
+            const regexFirestoreID = /[a-zA-Z0-9]{20}/g; // Identifica IDs padrão do Firestore
+            detalhesTexto = detalhesTexto.replace(regexFirestoreID, (match) => {
+                return `<b>TR-2026/${match.substring(0, 5).toUpperCase()}</b>`;
+            });
 
             return `
                 <div class="timeline-event" style="border-left: 3px solid ${color}; margin-bottom: 20px; padding-left: 20px; position: relative;">
@@ -12559,12 +12558,12 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
                     </div>
                     <span class="event-date" style="font-size: 0.8em; color: #666; font-weight: bold;">${ev.data}</span>
                     <span class="event-title" style="display: block; font-weight: 800; color: #333; font-size: 0.85em; text-transform: uppercase;">
-                        ${evNome.replace(/_/g, ' ')} ${ev.unidade_ref ? `[${ev.unidade_ref}]` : ''}
+                        ${evNome.replace(/_/g, ' ')} ${ev.unidade_ref ? `[${ev.unidade_ref}]` : ''} ${labelQtd}
                     </span>
-                    <div class="event-desc" style="font-size: 0.9em; color: #444; background: #f8fafc; padding: 8px; border-radius: 4px; border: 1px solid #eee; margin-top: 5px;">
-                        ${ev.detalhes || ev.descricao || 'Sem descrição.'}
+                    <div class="event-desc" style="font-size: 0.9em; color: #444; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-top: 5px; line-height: 1.4;">
+                        ${detalhesTexto}
                     </div>
-                    <span class="event-user" style="font-size: 0.75em; color: #999; display: block; margin-top: 4px;">
+                    <span class="event-user" style="font-size: 0.75em; color: #999; display: block; margin-top: 5px;">
                         <i class="fas fa-user-edit"></i> Resp: ${ev.quem || 'Sistema'}
                     </span>
                 </div>`;
