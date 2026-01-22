@@ -4430,10 +4430,9 @@ function confirmarInicioMaterial() {
     // Isso garante que a lógica de filtro UID/Data seja sempre a mesma.
     await updateOperacionalCards(); 
 }
-	async function loadMyHistory() {
+async function loadMyHistory() {
     const ul = document.getElementById('my-history-list');
     const conferenteUid = firebase.auth().currentUser.uid;
-    
     if (!ul || !conferenteUid) return;
 
     ul.innerHTML = '<li style="text-align:center; padding:20px;"><i class="fas fa-sync fa-spin"></i> Buscando atividades...</li>';
@@ -4446,47 +4445,52 @@ function confirmarInicioMaterial() {
         return;
     }
 
-    const dI = new Date(startDateInput + 'T00:00:00'); 
-    const dF = new Date(endDateInput + 'T23:59:59'); 
-    const startTimestamp = firebase.firestore.Timestamp.fromDate(dI);
-    const endTimestamp = firebase.firestore.Timestamp.fromDate(dF);
+    const startTimestamp = firebase.firestore.Timestamp.fromDate(new Date(startDateInput + 'T00:00:00'));
+    const endTimestamp = firebase.firestore.Timestamp.fromDate(new Date(endDateInput + 'T23:59:59'));
 
     try {
-        // ✅ BUSCA DUPLA: Dispara as duas consultas ao mesmo tempo
-        const [snapMateriais, snapChecklists] = await Promise.all([
-            db.collection('resultados_conferencias')
-                .where('conferente_uid', '==', conferenteUid)
-                .where('timestamp', '>=', startTimestamp)
-                .where('timestamp', '<=', endTimestamp)
-                .get(),
-            db.collection('resultados_checklist')
-                .where('conferente_uid', '==', conferenteUid)
-                .where('timestamp', '>=', startTimestamp)
-                .where('timestamp', '<=', endTimestamp)
-                .get()
+        const [snapMat, snapCheck, snapTrans] = await Promise.all([
+            db.collection('resultados_conferencias').where('conferente_uid', '==', conferenteUid)
+                .where('timestamp', '>=', startTimestamp).where('timestamp', '<=', endTimestamp).get(),
+            db.collection('resultados_checklist').where('conferente_uid', '==', conferenteUid)
+                .where('timestamp', '>=', startTimestamp).where('timestamp', '<=', endTimestamp).get(),
+            db.collection('transferencias_pendentes').where('status', '==', 'RECEBIDO')
+                .where('recebedor_uid', '==', conferenteUid).get()
         ]);
             
         let docs = [];
+        snapMat.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
+        snapCheck.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
         
-        // Junta os resultados de materiais
-        snapMateriais.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
-        
-        // Junta os resultados de checklists
-        snapChecklists.forEach(doc => docs.push({ ...doc.data(), id_doc: doc.id }));
+        snapTrans.forEach(doc => {
+            const d = doc.data();
+            const ts = d.timestamp_recebimento;
+            // Filtro de data manual para transferências devido ao status indexado
+            if (ts && ts.seconds >= startTimestamp.seconds && ts.seconds <= endTimestamp.seconds) {
+                docs.push({ 
+                    ...d, 
+                    id_doc: doc.id, 
+                    modo: 'TRANSFERENCIA_CARGA',
+                    local: `TRANSFERÊNCIA: ${d.origem_sigla} > ${d.destino_sigla}`,
+                    timestamp: ts,
+                    conferente: d.recebedor_nome
+                });
+            }
+        });
 
-        // ✅ ORDENAÇÃO: Como vieram de coleções diferentes, precisamos ordenar por data na memória
         docs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
 
         let html = '';
         docs.forEach(d => {
+            // CriarItemHistoricoHTML deve tratar d.modo === 'TRANSFERENCIA_CARGA'
             html += criarItemHistoricoHTML(d);
         });
         
         ul.innerHTML = html || '<li style="padding:15px; text-align:center; color:#999;">Nenhuma atividade encontrada no período.</li>';
         
     } catch(e){ 
-        console.error("Erro no loadMyHistory unificado:", e);
-        ul.innerHTML='<li style="color:red;">Erro ao carregar seu histórico de atividades.</li>';
+        console.error("Erro no histórico unificado:", e);
+        ul.innerHTML='<li style="color:red;">Erro ao carregar atividades.</li>';
     }
 }
 	async function loadGlobalHistory() {
@@ -5187,18 +5191,57 @@ function formatarDataSimples(timestamp) {
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
     return date.toLocaleDateString('pt-BR');
 }
-	
-// --- PDF GENERATOR (VERSÃO UNIFICADA INTEGRAL: MATERIAL + VISTORIA) ---
+
+	function prepararDadosParaTransferencia(transferenciaData) {
+    const itensConferidos = [];
+    let totalCaa = 0;
+
+    window.dadosConferencia.forEach(setor => {
+        setor.itens.forEach(item => {
+            const uidBusca = item.tombamento ? `${item.id_base || item.id}-${item.tombamento}` : (item.id_base || item.id);
+            const statusLocal = window.itemStatus[uidBusca] || { status: 'ok' };
+            
+            if (statusLocal.status !== 'ok') totalCaa++;
+
+            itensConferidos.push({
+                nomeCompleto: item.tombamento ? `${item.nome} (Tomb: ${item.tombamento})` : item.nome,
+                quantidade: item.quantidade || 1,
+                status: statusLocal.status === 'ok' ? 'S/A' : 'C/A',
+                setor: setor.nome,
+                pendencias_ids: item.pendencias_ids || [],
+                obs: statusLocal.obs || ''
+            });
+        });
+    });
+
+    return {
+        id: transferenciaData.id || transferenciaData.transferencia_id,
+        id_amigavel: `TR-${new Date().getFullYear()}/${(transferenciaData.id || '').substring(0,5).toUpperCase()}`,
+        modo: 'TRANSFERENCIA_CARGA',
+        local: transferenciaData.destino_sigla,
+        origem_sigla: transferenciaData.origem_sigla,
+        destino_sigla: transferenciaData.destino_sigla,
+        emitente: transferenciaData.emitente || 'DLOG',
+        conferente: `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`,
+        timestamp: { seconds: Math.floor(Date.now() / 1000) },
+        totalItensConferidos: itensConferidos.length,
+        totalCaa: totalCaa,
+        itensRelatorio: itensConferidos
+    };
+}	
 function reimprimirPDF(data) {
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
 
-        // ✅ Identificação de Modo e Definição de Identidade Visual
+        // ✅ Identificação de Modo e Identidade Visual (Adicionado TRANSFERENCIA)
         const isChecklist = data.modo === 'CHECKLIST_VISTORIA';
-        const COR_PRIMARIA = isChecklist ? [44, 62, 80] : [128, 0, 32]; // Azul Petróleo vs Bordô
-        const TITULO_DOC = isChecklist ? "RELATÓRIO DE VISTORIA DE VIATURA" : "RELATÓRIO DE CONFERÊNCIA";
+        const isTransferencia = data.modo === 'TRANSFERENCIA_CARGA';
+        
+        // Cores: Bordô para Relatórios, Azul Petróleo para Vistorias, Cinza Grafite para Transferências
+        const COR_PRIMARIA = isChecklist ? [44, 62, 80] : (isTransferencia ? [33, 37, 41] : [128, 0, 32]);
+        const TITULO_DOC = isChecklist ? "RELATÓRIO DE VISTORIA DE VIATURA" : (isTransferencia ? "TERMO DE TRANSFERÊNCIA DE CARGA" : "RELATÓRIO DE CONFERÊNCIA");
 
         const logoDraw = (domId, x) => { 
             const el = document.querySelector(`img[src*="${domId}"]`);
@@ -5224,38 +5267,49 @@ function reimprimirPDF(data) {
         // Título Dinâmico
         doc.setFontSize(14).setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]).setFont('helvetica', 'bold').text(TITULO_DOC, PG_W/2, 35, {align:'center'});
 
-        // Container de Informações (Altura variável para caber KM se for checklist)
-        const boxHeight = isChecklist ? 32 : 25;
+        // ✅ Container de Informações Adaptável (Box Cinza)
+        const boxHeight = (isChecklist || isTransferencia) ? 32 : 25;
         doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN*2), boxHeight, 2, 2, 'FD');
         
         const dataTimestamp = data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000) : new Date();
         
-        doc.setFontSize(9).setTextColor(50).setFont('helvetica','bold').text(isChecklist ? 'Viatura:' : 'Local:', MARGIN + 5, 46); 
-        doc.setFont('helvetica','normal').text(data.local || '', MARGIN + 35, 46); 
-        doc.setFont('helvetica','bold').text('Conferente:', MARGIN + 5, 52); 
-        doc.setFont('helvetica','normal').text(data.conferente || '', MARGIN + 35, 52); 
-        doc.setFont('helvetica','bold').text('Data/Hora:', MARGIN + 5, 58); 
-        doc.setFont('helvetica','normal').text(dataTimestamp.toLocaleString('pt-BR'), MARGIN + 35, 58); 
-        
-        // ✅ [VISTORIA] Injeção de KM e Combustível no Cabeçalho
-        if (isChecklist) {
-            doc.setFont('helvetica','bold').text('Odômetro:', MARGIN + 5, 64);
-            doc.setFont('helvetica','normal').text(`${data.km_entrada || '0'} KM`, MARGIN + 35, 64);
-            doc.setFont('helvetica','bold').text('Tanque:', MARGIN + 100, 64);
-            doc.setFont('helvetica','normal').text(`${data.combustivel_entrada || 'N/D'}`, MARGIN + 120, 64);
+        if (isTransferencia) {
+            // Layout Específico para Transferência (Origem vs Destino)
+            doc.setFontSize(9).setTextColor(50).setFont('helvetica','bold').text('GUIA Nº:', MARGIN + 5, 46); 
+            doc.setFont('helvetica','normal').text(data.id_amigavel || data.id, MARGIN + 35, 46); 
+            doc.setFont('helvetica','bold').text('ORIGEM:', MARGIN + 5, 52); 
+            doc.setFont('helvetica','normal').text(`${data.origem_sigla} (${data.emitente})`, MARGIN + 35, 52); 
+            doc.setFont('helvetica','bold').text('DESTINO:', MARGIN + 5, 58); 
+            doc.setFont('helvetica','normal').text(`${data.destino_sigla} (${data.conferente})`, MARGIN + 35, 58);
+            doc.setFont('helvetica','bold').text('DATA REC:', MARGIN + 5, 64); 
+            doc.setFont('helvetica','normal').text(dataTimestamp.toLocaleString('pt-BR'), MARGIN + 35, 64);
+        } else {
+            // Layout Original (Checklist/Conferência)
+            doc.setFontSize(9).setTextColor(50).setFont('helvetica','bold').text(isChecklist ? 'Viatura:' : 'Local:', MARGIN + 5, 46); 
+            doc.setFont('helvetica','normal').text(data.local || '', MARGIN + 35, 46); 
+            doc.setFont('helvetica','bold').text('Conferente:', MARGIN + 5, 52); 
+            doc.setFont('helvetica','normal').text(data.conferente || '', MARGIN + 35, 52); 
+            doc.setFont('helvetica','bold').text('Data/Hora:', MARGIN + 5, 58); 
+            doc.setFont('helvetica','normal').text(dataTimestamp.toLocaleString('pt-BR'), MARGIN + 35, 58); 
+
+            if (isChecklist) {
+                doc.setFont('helvetica','bold').text('Odômetro:', MARGIN + 5, 64);
+                doc.setFont('helvetica','normal').text(`${data.km_entrada || '0'} KM`, MARGIN + 35, 64);
+                doc.setFont('helvetica','bold').text('Tanque:', MARGIN + 100, 64);
+                doc.setFont('helvetica','normal').text(`${data.combustivel_entrada || 'N/D'}`, MARGIN + 120, 64);
+            }
         }
 
         doc.setFont('helvetica','bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]).text(`ITENS: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, {align:'right'});
 
         // Montagem da Tabela
         let tableBody = [];
-        const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = isChecklist ? [44, 62, 80] : [60, 60, 60];
+        const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = (isChecklist || isTransferencia) ? COR_PRIMARIA : [60, 60, 60];
         let listaParaImprimir = data.itensRelatorio || data.itensCaa || [];
         
         if (listaParaImprimir.length > 0) {
             let currentSector = null;
             listaParaImprimir.forEach(item => {
-                // Pular setores de Fotos ou Observações para não duplicar na tabela (eles terão seções próprias no final)
                 const nomeSetor = (item.setor || "").toUpperCase();
                 if (isChecklist && (nomeSetor.includes("FOTO") || nomeSetor.includes("OBSERVAÇ"))) return;
 
@@ -5267,7 +5321,7 @@ function reimprimirPDF(data) {
 
                 let finalObs = '-';
                 if (item.pendencias_ids && item.pendencias_ids.length > 0) {
-                    finalObs = item.pendencias_ids.map(p => `\u2022 ${p.autor_nome} (${p.data_criacao}): ${p.descricao}`).join('\n');
+                    finalObs = item.pendencias_ids.map(p => `\u2022 ${p.autor_nome}: ${p.descricao}`).join('\n');
                 } else if (item.obs) {
                     finalObs = item.obs;
                 }
@@ -5276,7 +5330,7 @@ function reimprimirPDF(data) {
                 
                 tableBody.push([ 
                     item.nomeCompleto || 'Item', 
-                    { content: isChecklist ? '1 un.' : `${item.quantidade || 0} un.`, styles: { halign: 'center' } }, 
+                    { content: `${item.quantidade || 1} un.`, styles: { halign: 'center' } }, 
                     { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center' } }, 
                     { content: finalObs, styles: { halign: 'left', fontSize: 7 } }
                 ]);
@@ -5295,7 +5349,7 @@ function reimprimirPDF(data) {
 
         let finalY = doc.lastAutoTable.finalY + 10;
 
-        // ✅ [VISTORIA] Seção de Observações Gerais (Considerações Finais)
+        // ✅ SEÇÃO ORIGINAL PRESERVADA: Considerações Gerais
         if (isChecklist && data.obs_gerais_vistoria) {
             if (finalY > 250) { doc.addPage(); finalY = 20; }
             doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]);
@@ -5306,13 +5360,12 @@ function reimprimirPDF(data) {
             finalY += (splitObs.length * 5) + 12;
         }
 
-        // ✅ [VISTORIA] Seção de Registro Fotográfico (Anexos)
+        // ✅ SEÇÃO ORIGINAL PRESERVADA: Registro Fotográfico
         if (isChecklist) {
             if (finalY > 230) { doc.addPage(); finalY = 20; }
             doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]);
             doc.text("EVIDÊNCIAS FOTOGRÁFICAS (ANEXOS):", MARGIN, finalY);
             
-            // Layout de Grade para Fotos (3 colunas)
             const boxW = 55, boxH = 40, spacing = 5;
             for(let i=0; i<5; i++) {
                 const col = i % 3;
@@ -5326,17 +5379,24 @@ function reimprimirPDF(data) {
             }
         }
 
-        // Rodapé de Autenticidade
+        // Rodapé Institucional + Autenticidade Digital
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
             doc.setFontSize(8).setTextColor(100).setFont('helvetica', 'normal');
+            
+            // Texto original
             doc.text('SIGMA - Sistema Integrado de Gestão de Materiais e Vistorias', MARGIN, doc.internal.pageSize.height-10);
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W-MARGIN, doc.internal.pageSize.height-10, {align:'right'});
+
+            // ✅ NOVO: Hash de Autenticidade (Selo de segurança)
+            const hashSimples = btoa(`${data.id}-${data.conferente}`).substring(0, 20).toUpperCase();
+            doc.setFontSize(7).setTextColor(150).setFont('courier', 'normal');
+            doc.text(`CHAVE DE AUTENTICIDADE: ${hashSimples}`, MARGIN, doc.internal.pageSize.height-15);
         }
         
         const dataIso = dataTimestamp.toISOString().split('T')[0];
-        const prefixo = isChecklist ? 'Vistoria' : 'Relatorio';
+        const prefixo = isTransferencia ? 'Termo_Carga' : (isChecklist ? 'Vistoria' : 'Relatorio');
         const nomeArquivo = `${prefixo}_${(data.local||'Conf').replace(/[^a-zA-Z0-9]/g,'')}_${dataIso}.pdf`;
         doc.save(nomeArquivo);
         
@@ -5344,7 +5404,7 @@ function reimprimirPDF(data) {
         console.error("Erro PDF Unificado:", e);
         alert("Erro ao gerar PDF: " + e.message);
     }
-}
+}		
 		// --- OUTROS E FUNÇÕES GLOBAIS (UI) ---
         
         function sairDoSistema() { 
