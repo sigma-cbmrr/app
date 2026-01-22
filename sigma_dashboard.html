@@ -9934,7 +9934,7 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
             const isCentralLogistics = (role === 'admin' || role === 'gestor_geral');
             
             let textoTitulo = isCentralLogistics 
-                ? "Transferência de Carga (Inter-Unidades)" 
+                ? "Transferência de Carga" 
                 : "Enviar para Viatura";
 
             if (tituloModal) {
@@ -14102,30 +14102,58 @@ async function carregarAlertasTransferencia() {
         .where('status', '==', 'EM_TRANSITO')
         .get();
 
-    let htmlLista = '<div style="text-align: left; max-height: 300px; overflow-y: auto;">';
+    if (snap.empty) {
+        Swal.fire('Informação', 'Nenhuma carga em trânsito para sua unidade.', 'info');
+        return;
+    }
+
+    let htmlLista = '<div style="text-align: left; max-height: 350px; overflow-y: auto; padding: 5px;">';
     
     snap.forEach(doc => {
         const tr = doc.data();
+        
+        // 1. Lógica do Número da Guia (TR-AAAA / Prefixo do ID)
+        const ano = tr.timestamp_envio ? tr.timestamp_envio.toDate().getFullYear() : new Date().getFullYear();
+        const guiaLegivel = `TR-${ano}/${doc.id.substring(0, 5).toUpperCase()}`;
+
+        // 2. Cálculo do Volume Total (Soma das quantidades de cada item)
+        const totalVolumes = tr.itens.reduce((acc, item) => acc + (Number(item.qtd) || 0), 0);
+
         htmlLista += `
-            <div class="result-vtr-card" onclick="iniciarRecebimentoCargaApp('${doc.id}')" style="border-left-color: #000; margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-left: 5px solid #000; border-radius: 8px; cursor: pointer;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <b>Guia: ${doc.id.substring(0,8)}...</b>
-                    <small style="color: #666;">${tr.timestamp_envio?.toDate().toLocaleDateString('pt-BR')}</small>
+            <div class="result-vtr-card" onclick="iniciarRecebimentoCargaApp('${doc.id}')" 
+                 style="margin-bottom: 12px; padding: 15px; border: 1px solid #eee; border-left: 6px solid #000; border-radius: 10px; cursor: pointer; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: transform 0.2s;">
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                    <span style="font-weight: 800; color: #000; font-size: 1.1em;">${guiaLegivel}</span>
+                    <span style="font-size: 0.75em; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; color: #666;">
+                        <i class="far fa-calendar-alt"></i> ${tr.timestamp_envio?.toDate().toLocaleDateString('pt-BR')}
+                    </span>
                 </div>
-                <div style="font-size: 0.8em; color: #555; margin-top: 5px;">
-                    Enviado por: <b>${tr.emitente}</b><br>
-                    Itens: <b>${tr.itens.length}</b>
+
+                <div style="font-size: 0.85em; color: #444; line-height: 1.5;">
+                    <div style="margin-bottom: 4px;">
+                        <i class="fas fa-user-edit" style="width: 18px; color: #888;"></i> 
+                        Origem: <b>${tr.origem_sigla || 'DLOG'}</b> (${tr.emitente})
+                    </div>
+                    <div style="display: flex; gap: 15px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
+                        <span><i class="fas fa-boxes" style="color: #2c3e50;"></i> Itens: <b>${tr.itens.length}</b></span>
+                        <span><i class="fas fa-layer-group" style="color: #2c3e50;"></i> Volume Total: <b>${totalVolumes}</b></span>
+                    </div>
                 </div>
             </div>`;
     });
+    
     htmlLista += '</div>';
 
     Swal.fire({
-        title: 'Escolha a Guia para Receber',
+        title: '<i class="fas fa-truck-loading"></i> Cargas Destinadas à Unidade',
         html: htmlLista,
         showConfirmButton: false,
         showCancelButton: true,
-        cancelButtonText: 'Fechar'
+        cancelButtonText: 'Fechar',
+        customClass: {
+            title: 'swal-title-left'
+        }
     });
 }
 		function iniciarRecebimentoCargaApp(transferenciaId) {
