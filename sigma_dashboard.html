@@ -4078,13 +4078,17 @@ async function updateOperacionalCards() {
     }
 }
         
-            // --- NOVO: Cards Específicos para Admin/Gestor ---
-// --- NOVO: Cards Específicos para Admin/Gestor ---
 function renderAdminGestorCards(canViewDashboardCards) {
     const container = document.getElementById('admin-gestor-cards-container');
     if (!container) return;
+    
+    // 🛡️ TRAVA CIRÚRGICA: Se os dados do usuário ainda não carregaram, sai silenciosamente.
+    // O switchView ou o setTimeout cuidarão de chamar novamente.
+    if (!currentUserData || !currentUserData.unidade_id) return;
+
     const opContainer = document.getElementById('operacional-cards-container');
     if(opContainer) opContainer.style.display = 'none';
+
     if (canViewDashboardCards) {
         container.innerHTML = `
             <div id="dash-cards-restricted" class="op-card history" style="padding-top: 15px;">
@@ -4092,12 +4096,11 @@ function renderAdminGestorCards(canViewDashboardCards) {
                     <i class="fas fa-exclamation-triangle"></i> Pendências da Unidade
                 </h2>
                 <div id="loading-message-dashboard">Carregando dados...</div>
-                <div id="cards-container" class="cards-grid">
-                    </div>
+                <div id="cards-container" class="cards-grid"></div>
             </div>
         `;
-            loadCaaData(); 
-            container.style.display = 'block';
+        loadCaaData(); 
+        container.style.display = 'block';
     } else {
         container.style.display = 'none';
     }
@@ -5391,11 +5394,27 @@ function reimprimirPDF(data) {
     		// 5. DISPARO DE CARREGAMENTO DE DADOS (Lógica por View)
     		if (v === 'dashboard') {
         		const resCont = document.getElementById('resume-container');
+        
+        		// 1. Limpa o palco de avisos temporários
         		if(resCont) resCont.innerHTML = ''; 
+
+        		// 2. Busca Alertas de Carga (Injeta no resume-container se houver)
         		carregarAlertasTransferencia();
-    		}
-    		if (v === 'almoxarifado') {
-        		carregarAlmoxarifadoUI();
+
+        		// 3. Renderiza os Cards de Pendências (Injeta no admin-gestor-cards-container)
+        		if (currentUserData) {
+            		const role = currentUserData.role || 'operacional';
+            		const isAdmin = (role === 'admin');
+            		const isGestorGeral = (role === 'gestor_geral');
+            		const p = currentUserData.permissoes || {};
+            		const canView = isAdmin || isGestorGeral || (role === 'gestor' && p.canViewDashboardCards);
+
+            		if (role === 'operacional') {
+                		renderOperacionalCards();
+            		} else {
+                		renderAdminGestorCards(canView);
+            		}
+       			}
     		}
 
     if (v === 'unidades') {
@@ -14021,9 +14040,12 @@ async function carregarAlertasTransferencia() {
                 </div>
             </div>`;
 
-        if (container) {
-            container.insertAdjacentHTML('afterbegin', alertaHtml);
-        }
+       if (container) {
+    		const alertaAntigo = document.getElementById('alerta-carga-transito');
+    		if (alertaAntigo) alertaAntigo.remove(); // Limpa apenas o dele, se houver
+    
+    		container.insertAdjacentHTML('afterbegin', alertaHtml); // Insere no topo sem apagar os outros
+		}
 
     } catch (e) {
         console.error("Erro na busca de transferências:", e);
