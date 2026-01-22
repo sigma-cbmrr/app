@@ -4874,17 +4874,13 @@ async function loadMyHistory() {
     if (!modal || !containerGestao || !containerLeitura) return;
 
     try {
-        // 1. Busca os dados do Posto para o título e validação de posse
+        // 1. Busca os dados do Posto (Território Neutro)
         const postoDoc = await db.collection('postos_estruturados').doc(postoUid).get();
         if (!postoDoc.exists) return;
         
         const postoData = postoDoc.data();
-        const role = currentUserData?.role;
         const minhaUnidadeId = currentUserData?.unidade_id;
-        const souAdmin = (role === 'admin' || role === 'gestor_geral');
-        
-        // ✅ MUDANÇA CIRÚRGICA: Verifica se o gestor é dono do POSTO
-        const souDonoDoPosto = (postoData.unidade_id === minhaUnidadeId);
+        const souAdmin = (currentUserData?.role === 'admin' || currentUserData?.role === 'gestor_geral');
 
         document.getElementById('modal-posto-titulo').innerText = postoData.nome;
         document.getElementById('modal-posto-endereco').innerHTML = `<i class="fas fa-map-marker-alt"></i> ${postoData.endereco}`;
@@ -4893,7 +4889,7 @@ async function loadMyHistory() {
         containerGestao.innerHTML = '<p style="font-size: 0.8em; color: #999; padding: 10px;"><i class="fas fa-sync fa-spin"></i> Sincronizando ativos...</p>';
         containerLeitura.innerHTML = '';
 
-        // 2. Busca TODAS as listas ativas para o cruzamento de dados
+        // 2. Busca TODAS as listas ativas para cruzamento
         const listasSnapshot = await db.collection('listas_conferencia').where('ativo', '==', true).get();
         
         let htmlGestao = '';
@@ -4904,15 +4900,15 @@ async function loadMyHistory() {
             const estaNestePosto = (lista.posto_id === postoUid);
             const ehMinhaLista = (lista.unidade_id === minhaUnidadeId);
             
-            // ✅ REGRA DE OURO: Para gerir o vínculo (ligar/desligar switch), 
-            // o usuário deve ser Admin OU ser dono da Lista E estar em um Posto que ele gerencia.
-            const podeVincular = souAdmin || (ehMinhaLista && souDonoDoPosto);
+            // ✅ LÓGICA CIRÚRGICA: Pode gerir se for Admin OU se a LISTA for da sua unidade.
+            // O Posto não tem dono restritivo; o gestor move o que é dele para onde quiser.
+            const podeVincular = souAdmin || ehMinhaLista;
 
             const nomeExibicao = lista.ativo_nome || "Ativo sem nome";
             const identificacaoExtra = lista.unidade_sigla ? ` | ${lista.unidade_sigla}` : "";
 
             if (podeVincular) {
-                // Modo Interativo: O Gestor pode mover suas viaturas para seus postos
+                // Modo Interativo: O Gestor vê suas viaturas para ligar/desligar o vínculo neste posto
                 htmlGestao += `
                     <div style="display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 10px; border-radius: 6px; border: 1px solid #eee; margin-bottom: 5px;">
                         <span style="font-weight: 600; color: #333;">${nomeExibicao} <small style="color:#888; font-weight:normal;">${identificacaoExtra}</small></span>
@@ -4924,36 +4920,26 @@ async function loadMyHistory() {
                     </div>
                 `;
             } else if (estaNestePosto) {
-                // Modo Leitura: Viatura externa estacionada aqui OU viatura do gestor em posto alheio
-                const motivoTrava = !ehMinhaLista ? "Viatura Externa" : "Posto sob outra gestão";
+                // Modo Leitura: Viatura de OUTRA unidade que já está alocada aqui
                 htmlLeitura += `
-                    <div title="${motivoTrava}" style="display: flex; align-items: center; justify-content: space-between; background: #f9f9f9; padding: 8px 12px; border-radius: 6px; font-size: 0.85em; margin-bottom: 5px; border: 1px dashed #ddd;">
-                        <span style="color: #555;"><i class="fas fa-lock" style="color: #ccc; margin-right: 8px;"></i>${nomeExibicao} <small>(${lista.unidade_sigla})</small></span>
-                        <span style="font-size: 0.7em; color: #aaa; text-transform: uppercase;">Somente Leitura</span>
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #f0f0f0; padding: 8px 12px; border-radius: 6px; font-size: 0.85em; margin-bottom: 5px;">
+                        <span style="color: #777;"><i class="fas fa-lock" style="color: #ccc; margin-right: 8px;"></i>${nomeExibicao} <small>(${lista.unidade_sigla})</small></span>
+                        <span style="font-size: 0.7em; color: #aaa; text-transform: uppercase;">Unidade Externa</span>
                     </div>
                 `;
             }
         });
 
-        // 3. Atualização da Interface do Modal
-        containerGestao.innerHTML = htmlGestao || '<p style="color:#999; font-size:0.8em; padding:10px; text-align:center;">Sem ativos disponíveis para vincular neste posto.</p>';
+        // 3. Atualização da Interface
+        containerGestao.innerHTML = htmlGestao || '<p style="color:#999; font-size:0.8em; padding:10px; text-align:center;">Nenhuma viatura da sua unidade disponível para alocação.</p>';
         containerLeitura.innerHTML = htmlLeitura || '';
-
-        // Se o gestor não for dono do posto, avisa na UI do modal
-        if (!souAdmin && !souDonoDoPosto) {
-            containerGestao.insertAdjacentHTML('afterbegin', `
-                <div style="background: #fff3cd; color: #856404; padding: 8px; border-radius: 4px; font-size: 0.75em; margin-bottom: 10px; border: 1px solid #ffeeba;">
-                    <i class="fas fa-info-circle"></i> Você está visualizando um posto de outra unidade. Apenas leitura permitida.
-                </div>
-            `);
-        }
 
     } catch (e) {
         console.error("Erro ao gerir posto:", e);
         if (containerGestao) containerGestao.innerHTML = '<p style="color:red;">Erro ao carregar dados.</p>';
     }
 }
-
+		
 function fecharModalPosto() {
     document.getElementById('modal-gestao-vincos-posto').style.display = 'none';
 }
@@ -4962,7 +4948,7 @@ function fecharModalPosto() {
         const listaRef = db.collection('listas_conferencia').doc(listaUid);
         const postoRef = db.collection('postos_estruturados').doc(postoUid);
 
-        // 🛡️ MUDANÇA CIRÚRGICA 1: Validação de Segurança em Tempo de Execução
+        // 🛡️ MUDANÇA CIRÚRGICA 1: Busca dados para validação e denormalização
         const [snapLista, snapPosto] = await Promise.all([listaRef.get(), postoRef.get()]);
         
         if (!snapLista.exists || !snapPosto.exists) throw new Error("Documentos não localizados.");
@@ -4973,38 +4959,35 @@ function fecharModalPosto() {
         const minhaUnidadeId = currentUserData?.unidade_id;
         const souAdmin = (role === 'admin' || role === 'gestor_geral');
 
-        // ✅ TRAVA DE POSSE: O Gestor só vincula se for dono da LISTA e do POSTO
+        // ✅ TRAVA DE POSSE ATUALIZADA: Valida APENAS a posse da LISTA (Viatura)
+        // O posto é território neutro; o gestor tem liberdade para alocar o que é dele em qualquer lugar.
         if (!souAdmin) {
             const ehDonoDaLista = (dadosLista.unidade_id === minhaUnidadeId);
-            const ehDonoDoPosto = (dadosPosto.unidade_id === minhaUnidadeId);
 
-            if (!ehDonoDaLista || !ehDonoDoPosto) {
-                alert("⚠️ Ação Bloqueada: Você não tem permissão para alterar este vínculo.");
+            if (!ehDonoDaLista) {
+                alert("⚠️ Ação Bloqueada: Você não tem permissão para movimentar esta viatura.");
                 abrirGestaoPosto(postoUid); // Reseta o switch na interface
                 return;
             }
         }
 
         // 🛡️ MUDANÇA CIRÚRGICA 2: Atualização com Denormalização
-        // Gravamos o nome do posto na lista para otimizar as buscas de inventário
+        // Registra o vínculo e o nome do posto para facilitar buscas e filtros
         const atualizacao = {
             posto_id: associar ? postoUid : null,
-            posto_nome: associar ? dadosPosto.nome : "NÃO VINCULADO", // Útil para filtros de almoxarifado
+            posto_nome: associar ? dadosPosto.nome : "NÃO VINCULADO",
             ultima_movimentacao_posto: firebase.firestore.FieldValue.serverTimestamp(),
             movimentado_por: `${currentUserData.postoGraduacao} ${currentUserData.nomeGuerra}` || "SISTEMA"
         };
 
         await listaRef.update(atualizacao);
 
-        console.log(`✅ Sucesso: Ativo ${dadosLista.ativo_nome} ${associar ? 'vinculado ao' : 'removido do'} posto ${dadosPosto.nome}`);
-
-        // Opcional: Toast ou Notificação silenciosa em vez de Alert
-        // carregarPostosVisuais(); // Comentado para evitar lag se houver muitos cards, mas use se necessário
+        console.log(`✅ Sucesso: Ativo ${dadosLista.ativo_nome} ${associar ? 'alocado no' : 'removido do'} posto ${dadosPosto.nome}`);
 
     } catch (e) {
         console.error("❌ Erro ao vincular lista:", e);
         alert("Erro técnico ao salvar o vínculo: " + e.message);
-        // Reseta a interface para o estado real do banco
+        // Garante que o Switch volte para a posição correta em caso de erro
         abrirGestaoPosto(postoUid);
     }
 }
