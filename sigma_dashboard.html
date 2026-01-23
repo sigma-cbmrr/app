@@ -3636,62 +3636,89 @@ input:checked + .slider:before {
     	const secondaryAuth = secondaryApp.auth();
         
         async function openNewConferenceModal() {
-    	materialSelecionadoNoModal = null; // Reseta
-    
-    // Busca os setores (Postos) disponíveis para montar o primeiro Select
-    const docRotas = await db.collection('config_geral').doc('rotas').get();
-    const rotas = docRotas.data() || {};
-    const setoresUnicos = [...new Set(Object.values(rotas).map(r => r.posto))].sort();
+    materialSelecionadoNoModal = null; // Reseta variável global
 
-    Swal.fire({
-        title: '<i class="fas fa-clipboard-check"></i> Conferência de Materiais',
-        backdrop: `rgba(0,0,0,0.6)`,
-        target: 'body',
-        allowOutsideClick: false,
-        html: `
-            <div style="text-align: left; padding: 5px;">
-                <div id="area-selecao-material">
-                    <div class="form-group">
-                        <label style="font-size: 0.85em; font-weight:bold; color:#800020;">1. SELECIONE O POSTO / SETOR:</label>
-                        <select id="swal-select-posto" class="swal2-select" style="width: 100%; margin: 10px 0;" onchange="filtrarListasParaMaterial(this.value)">
-                            <option value="" disabled selected>Escolha o posto...</option>
-                            ${setoresUnicos.map(s => `<option value="${s}">${s}</option>`).join('')}
-                        </select>
-                    </div>
+    try {
+        // 🛡️ MUDANÇA CIRÚRGICA 1: Busca apenas as listas que REALMENTE estão em prontidão (tem posto_id)
+        const snapListas = await db.collection('listas_conferencia')
+            .where('ativo', '==', true)
+            .get();
 
-                    <div class="form-group" id="group-select-lista" style="display:none; margin-top:15px;">
-                        <label style="font-size: 0.85em; font-weight:bold; color:#800020;">2. ESCOLHA A VIATURA / LISTA:</label>
-                        <select id="swal-select-lista" class="swal2-select" style="width: 100%; margin: 10px 0;" onchange="selecionarMaterialVisual()">
-                            <option value="" disabled selected>Selecione a lista...</option>
-                        </select>
-                    </div>
-                </div>
+        if (snapListas.empty) {
+            Swal.fire('Aviso', 'Não há nenhuma viatura ou lista alocada em postos no momento.', 'info');
+            return;
+        }
 
-                <div id="resumo-material-vtr" style="display:none;">
-                    <div class="vtr-selected-summary" style="border-color: #2c7399;">
-                        <i class="fas fa-file-invoice" style="color:#2c7399; font-size:1.5em; margin-bottom:10px;"></i>
-                        <p>Lista Selecionada</p>
-                        <h2 id="resumo-nome-lista" style="font-size:1.5em; color:#2c7399;">---</h2>
-                        <div id="resumo-detalhe-posto" style="margin-top:10px; color:#475569; font-size:0.85em; font-weight:bold; text-transform:uppercase;">
-                            POSTO: ---
+        // Transforma os documentos em objetos e filtra quem tem posto_id
+        const todasListasAtivas = snapListas.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const listasComPosto = todasListasAtivas.filter(l => l.posto_id && l.posto_nome);
+
+        // 🛡️ MUDANÇA CIRÚRGICA 2: Gera os setores (Postos) ÚNICOS baseados nos vínculos reais
+        const setoresUnicos = [...new Set(listasComPosto.map(l => l.posto_nome))].sort();
+
+        if (setoresUnicos.length === 0) {
+            Swal.fire('Aviso', 'Nenhuma lista foi vinculada a um posto pela Gestão.', 'warning');
+            return;
+        }
+
+        // Guardamos as listas filtradas em uma variável temporária para a função de filtragem usar
+        window.listasVigentesParaModal = listasComPosto;
+
+        Swal.fire({
+            title: '<i class="fas fa-clipboard-check"></i> Conferência de Materiais',
+            backdrop: `rgba(0,0,0,0.6)`,
+            target: 'body',
+            allowOutsideClick: false,
+            html: `
+                <div style="text-align: left; padding: 5px;">
+                    <div id="area-selecao-material">
+                        <div class="form-group">
+                            <label style="font-size: 0.85em; font-weight:bold; color:#800020;">1. SELECIONE O POSTO / SETOR:</label>
+                            <select id="swal-select-posto" class="swal2-select" style="width: 100%; margin: 10px 0;" onchange="filtrarListasParaMaterial(this.value)">
+                                <option value="" disabled selected>Escolha o posto...</option>
+                                ${setoresUnicos.map(s => `<option value="${s}">${s}</option>`).join('')}
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="group-select-lista" style="display:none; margin-top:15px;">
+                            <label style="font-size: 0.85em; font-weight:bold; color:#800020;">2. ESCOLHA A VIATURA / LISTA:</label>
+                            <select id="swal-select-lista" class="swal2-select" style="width: 100%; margin: 10px 0;" onchange="selecionarMaterialVisual()">
+                                <option value="" disabled selected>Selecione a lista...</option>
+                            </select>
                         </div>
                     </div>
-                </div>
 
-                <button id="btn-confirmar-material-modal" class="btn-iniciar-check-modal" style="display:none; background-color:#2c7399 !important;" onclick="confirmarInicioMaterial()">
-                    INICIAR CONFERÊNCIA
-                </button>
-                
-                <button id="btn-trocar-material" style="display:none; background:none; border:none; color:#2c7399; cursor:pointer; width:100%; margin-top:10px; font-size:0.8em; text-decoration:underline;" onclick="resetarSelecaoMaterial()">
-                    Trocar material selecionado
-                </button>
-            </div>
-        `,
-        showConfirmButton: false,
-        showCancelButton: true,
-        cancelButtonText: 'Cancelar'
-    });
+                    <div id="resumo-material-vtr" style="display:none;">
+                        <div class="vtr-selected-summary" style="border-color: #2c7399; padding:15px; border:2px solid #2c7399; border-radius:8px; text-align:center;">
+                            <i class="fas fa-file-invoice" style="color:#2c7399; font-size:1.5em; margin-bottom:10px;"></i>
+                            <p style="margin:0; font-size:0.9em; color:#666;">Lista Selecionada</p>
+                            <h2 id="resumo-nome-lista" style="font-size:1.5em; color:#2c7399; margin:5px 0;">---</h2>
+                            <div id="resumo-detalhe-posto" style="margin-top:10px; color:#475569; font-size:0.85em; font-weight:bold; text-transform:uppercase;">
+                                POSTO: ---
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="btn-confirmar-material-modal" class="btn-iniciar-check-modal" style="display:none; background-color:#2c7399 !important; width:100%; color:white; padding:12px; border:none; border-radius:6px; font-weight:bold; margin-top:15px; cursor:pointer;" onclick="confirmarInicioMaterial()">
+                        INICIAR CONFERÊNCIA
+                    </button>
+                    
+                    <button id="btn-trocar-material" style="display:none; background:none; border:none; color:#2c7399; cursor:pointer; width:100%; margin-top:10px; font-size:0.8em; text-decoration:underline;" onclick="resetarSelecaoMaterial()">
+                        Trocar material selecionado
+                    </button>
+                </div>
+            `,
+            showConfirmButton: false,
+            showCancelButton: true,
+            cancelButtonText: 'Cancelar'
+        });
+
+    } catch (e) {
+        console.error("Erro ao abrir modal de conferência:", e);
+        Swal.fire('Erro', 'Falha ao carregar dados do inventário.', 'error');
+    }
 }
+
         // Constantes Globais
         const COLECAO_RESULTADOS = 'resultados_conferencias';
         const COLECAO_LISTAS = 'listas_conferencia';
@@ -4356,22 +4383,28 @@ function renderAdminGestorCards(canViewDashboardCards) {
     const selectLista = document.getElementById('swal-select-lista');
     const groupLista = document.getElementById('group-select-lista');
     
-    // Busca nas rotas quais listas pertencem a esse posto
-    const docRotas = await db.collection('config_geral').doc('rotas').get();
-    const rotas = docRotas.data() || {};
+    if (!selectLista || !groupLista) return;
+
+    // 🛡️ MUDANÇA CIRÚRGICA: Não busca mais em 'config_geral/rotas'
+    // Usa a variável global que populamos com dados REAIS na openNewConferenceModal
+    const listasVigentes = window.listasVigentesParaModal || [];
+    
+    // Filtra apenas as listas que pertencem ao posto selecionado pelo usuário
+    const filtradas = listasVigentes.filter(l => l.posto_nome === postoNome);
     
     let options = '<option value="" disabled selected>Selecione a lista...</option>';
-    let encontrou = false;
 
-    Object.entries(rotas).forEach(([id, info]) => {
-        if (info.posto === postoNome && info.ativo !== false) {
-            options += `<option value="${id}">${info.nome}</option>`;
-            encontrou = true;
-        }
-    });
+    if (filtradas.length > 0) {
+        filtradas.forEach(lista => {
+            // Usamos o ID do documento da 'listas_conferencia' e o nome real gravado nela
+            options += `<option value="${lista.id}">${lista.ativo_nome}</option>`;
+        });
 
-    if (encontrou) {
         selectLista.innerHTML = options;
+        groupLista.style.display = 'block';
+    } else {
+        // Caso de segurança: se por algum motivo o posto aparecer mas não tiver listas
+        selectLista.innerHTML = '<option value="">Nenhuma viatura disponível</option>';
         groupLista.style.display = 'block';
     }
 }
@@ -4381,25 +4414,31 @@ function selecionarMaterialVisual() {
     const selectPosto = document.getElementById('swal-select-posto');
     const selectLista = document.getElementById('swal-select-lista');
     
+    if (!selectLista.value) return;
+
     const idLista = selectLista.value;
     const nomeLista = selectLista.options[selectLista.selectedIndex].text;
     const nomePosto = selectPosto.value;
 
+    // Armazena o objeto completo para o início da conferência
     materialSelecionadoNoModal = { id: idLista, nome: nomeLista, posto: nomePosto };
 
-    // Esconde a seleção e mostra o resumo
+    // UI: Transição suave para o resumo
     document.getElementById('area-selecao-material').style.display = 'none';
     document.getElementById('resumo-nome-lista').textContent = nomeLista;
     document.getElementById('resumo-detalhe-posto').textContent = `POSTO: ${nomePosto}`;
     document.getElementById('resumo-material-vtr').style.display = 'block';
 
-    // Mostra botões de ação
+    // Exibe botões de ação
     document.getElementById('btn-confirmar-material-modal').style.display = 'block';
     document.getElementById('btn-trocar-material').style.display = 'block';
 }
 
 function resetarSelecaoMaterial() {
     materialSelecionadoNoModal = null;
+    const selectLista = document.getElementById('swal-select-lista');
+    if (selectLista) selectLista.value = ""; // Limpa o select anterior
+
     document.getElementById('area-selecao-material').style.display = 'block';
     document.getElementById('resumo-material-vtr').style.display = 'none';
     document.getElementById('btn-confirmar-material-modal').style.display = 'none';
@@ -4410,20 +4449,30 @@ function confirmarInicioMaterial() {
     if (!materialSelecionadoNoModal) return;
     
     const { id, nome, posto } = materialSelecionadoNoModal;
-    const userUid = firebase.auth().currentUser.uid;
-    const userForDraft = (currentUserData.nome_guerra || 'ND').toUpperCase();
+    const userUid = firebase.auth()?.currentUser?.uid || 'SISTEMA';
+    
+    // Preparação do nome de guerra
+    const userForDraft = (currentUserData?.nome_guerra || 'ND').toUpperCase();
+    const postoGrad = (currentUserData?.posto || 'MILITAR').toUpperCase();
 
-    // Monta a URL (Mesma lógica que você já tinha)
-    const url = `conferencia_app.html?id=${id}&posto_grad=${encodeURIComponent(currentUserData.posto)}&quadro_mil=${encodeURIComponent(currentUserData.quadro)}&nome_guerra=${encodeURIComponent(userForDraft)}&user_uid=${userUid}`;
+    // ✅ MUDANÇA CIRÚRGICA: A URL agora leva o ID real da 'listas_conferencia'
+    // Isso garante que o app-conferência.html carregue os itens reais vinculados.
+    const url = `conferencia_app.html?id=${id}&posto_grad=${encodeURIComponent(postoGrad)}&nome_guerra=${encodeURIComponent(userForDraft)}&user_uid=${userUid}`;
 
     Swal.close();
 
-    // Abre o Iframe
+    // Disparo do Iframe
     const container = document.getElementById('app-runner-container');
     const iframe = document.getElementById('app-iframe');
-    iframe.src = url;
-    container.style.display = 'block';
-}        
+    
+    if (iframe && container) {
+        iframe.src = url;
+        container.style.display = 'block';
+        console.log(`🚀 Iniciando Conferência: ${nome} no posto ${posto}`);
+    } else {
+        console.error("Erro: Container do App não localizado no DOM.");
+    }
+}      
         // --- 5. HISTÓRICOS ---
         async function carregarConferenciasHoje() {
     // 🛑 CHAMA A FUNÇÃO UNIFICADA QUE JÁ ATUALIZA TODOS OS CARDS E A LISTA DE HOJE
