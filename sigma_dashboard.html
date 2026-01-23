@@ -12862,40 +12862,65 @@ function fecharEditorArquitetura() {
 // ================================================================
 async function carregarEstoqueParaEditor(unidadeId) {
     try {
-        // RESET: Garante que o cache comece limpo
+        // 1. RESET: Limpa o cache para garantir que não haja "lixo" de outras unidades
         estoqueGestorLocal = [];
 
-        // BUSCA HÍBRIDA: Tenta buscar pelo unidade_id (UID)
-        // Se a busca falhar ou estiver vazia, buscaremos pela sigla (legado)
-        let snap = await db.collection('almoxarifado_central')
-                             .where('unidade_id', '==', unidadeId)
-                             .get();
+        // 2. BUSCA NA NOVA ARQUITETURA:
+        // Entramos no Inventário Único. O desafio aqui é listar apenas os itens 
+        // onde a unidade possui um documento de saldo criado.
+        // Usamos uma "Group Query" ou buscamos os itens globais e filtramos o saldo local.
+        const snapItens = await db.collection('inventario').get();
 
-        // Se não achou nada pelo UID, tenta buscar pelo campo 'unidade' (Ex: "CCI")
-        if (snap.empty) {
-            console.log("Busca por UID vazia, tentando buscar por Sigla...");
-            snap = await db.collection('almoxarifado_central')
-                             .where('unidade', '==', unidadeId) 
-                             .get();
+        for (const doc of snapItens.docs) {
+            const itemGlobal = doc.data();
+            const ehMulti = itemGlobal.tipo === 'multi';
+
+            // 3. CAPTURA DO SALDO ESPECÍFICO DA UNIDADE
+            // Buscamos na sub-coleção 'saldos_unidades' pelo ID da unidade do gestor
+            const saldoDoc = await doc.ref.collection('saldos_unidades').doc(unidadeId).get();
+
+            if (saldoDoc.exists) {
+                const s = saldoDoc.data();
+                const totalDisponivel = Number(s.qtd_disp) || 0;
+
+                // 4. MAPEAMENTO PARA O BUSCADOR (estoqueGestorLocal)
+                const objetoParaBusca = {
+                    id_almox: doc.id, // O UID_GLOBAL (Ex: FAM-001-MOD-1)
+                    nome: itemGlobal.nome,
+                    tipo: itemGlobal.tipo,
+                    categoria: itemGlobal.categoria,
+                    disponivel: totalDisponivel,
+                    unidade_id: unidadeId,
+                    uid_global: doc.id
+                };
+
+                // Se for MULTI, precisamos carregar os tombamentos disponíveis para o autocomplete
+                if (ehMulti) {
+                    const snapTombs = await doc.ref.collection('tombamentos')
+                        .where('local_id', '==', unidadeId)
+                        .where('situacao_atual', '==', 'DISPONÍVEL')
+                        .get();
+                    
+                    objetoParaBusca.tombamentos = snapTombs.docs.map(t => t.data());
+                    // Para itens multi, o 'disponivel' é a contagem de tombamentos livres
+                    objetoParaBusca.disponivel = snapTombs.size;
+                }
+
+                // 5. ALIMENTA O CACHE
+                // Só adicionamos se houver o que gerenciar (saldo > 0 ou tombamentos livres)
+                if (objetoParaBusca.disponivel > 0) {
+                    estoqueGestorLocal.push(objetoParaBusca);
+                }
+            }
         }
-        
-        snap.forEach(doc => {
-            const d = doc.data();
-            // REMOVI a trava de 'd.disponivel > 0'
-            // MOTIVO: Se você for remover um item da VTR (Estorno), o saldo no almox pode estar 0, 
-            // mas você precisa do ID do documento para devolver o item para lá.
-            estoqueGestorLocal.push({
-                id_almox: doc.id, // O ID REAL (Ex: CCI_item...)
-                ...d
-            });
-        });
 
-        console.log(`Estoque carregado no editor: ${estoqueGestorLocal.length} referências mapeadas.`);
+        console.log(`🚀 Buscador Inteligente: ${estoqueGestorLocal.length} itens do Inventário mapeados para a unidade ${unidadeId}`);
+
     } catch (e) {
-        console.error("Erro crítico ao carregar estoque para busca:", e);
+        console.error("Erro ao mapear Inventário para o Editor:", e);
     }
 }
-	// ================================================================
+		// ================================================================
 // 4. RENDERIZAÇÃO DA INTERFACE (GRID E CARDS)
 // ================================================================
 function renderizarArquiteturaEditor() {
