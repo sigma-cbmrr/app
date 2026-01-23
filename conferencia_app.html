@@ -1217,7 +1217,7 @@ async function carregarDadosRemotos() {
 
         const localNome = isChecklist ? `VISTORIA: ${infoLocal.nome}` : `${infoLocal.posto} - ${infoLocal.nome}`;
         const timestampAgora = firebase.firestore.Timestamp.now();
-        const dataAtualLog = new Date().toLocaleString('pt-BR'); // Para registros de data no histórico
+        const dataAtualLog = new Date().toLocaleString('pt-BR');
         
         const urlParams = new URLSearchParams(window.location.search);
         const kmEntrada = urlParams.get('km') || "0";
@@ -1230,6 +1230,7 @@ async function carregarDadosRemotos() {
         let totalCaa = 0;
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
+        // --- PROCESSAMENTO DA LISTA MESTRA ---
         const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
@@ -1239,14 +1240,12 @@ async function carregarDadosRemotos() {
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // Limpeza de situação ao resolver avaria
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
-                        // Registro de itens S/A sem interação
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
@@ -1262,7 +1261,7 @@ async function carregarDadosRemotos() {
                             return entidade;
                         }
 
-                        // Processamento de Resoluções
+                        // Resoluções
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -1289,7 +1288,7 @@ async function carregarDadosRemotos() {
                             });
                         }
 
-                        // ✅ AJUSTE CIRÚRGICO: Conversão de IDs Temporários em Definitivos (Metamorfose)
+                        // Metamorfose TEMP -> PEND
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id && String(p.id).startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
@@ -1305,9 +1304,9 @@ async function carregarDadosRemotos() {
                             return p;
                         });
 
-                        // Consolidação para Relatórios
                         let pendenciasParaRelatorio = [...entidade.pendencias_ids];
                         
+                        // Cautelas
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
                             entidade.cautelas.forEach(c => {
                                 pendenciasParaRelatorio.push({
@@ -1319,18 +1318,7 @@ async function carregarDadosRemotos() {
                                 });
                             });
                         }
-                        if (entidade.cautela && entidade.cautela.id) {
-                            const c = entidade.cautela;
-                            pendenciasParaRelatorio.push({
-                                autor_nome: String(c.emitente || "SISTEMA"),
-                                data_criacao: String(c.data || ""),
-                                quantidade: c.quantidade || 1,
-                                descricao: `Cautelado para ${c.destinatario} (ID: ${c.id}).`,
-                                status_gestao: "CAUTELADO"
-                            });
-                        }
 
-                        // ✅ AJUSTE CIRÚRGICO: Correção de status para o PDF
                         const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
@@ -1362,18 +1350,35 @@ async function carregarDadosRemotos() {
             };
         });
 
-        // ================================================================
-        // ✅ ATUALIZAÇÃO ATÔMICA
-        // ================================================================
+        // --- PREPARAÇÃO PARA O SALVAMENTO ---
         const batch = db.batch();
         
+        // ✅ AJUSTE CIRÚRGICO 1: Gera versão LIMPA para a arquitetura (Remove o lixo de TEMP/PEND/Histórico)
+        const listaLimpaParaArquitetura = novaListaMestra.map(setor => ({
+            ...setor,
+            itens: setor.itens.map(item => {
+                const i = { ...item };
+                delete i.pendencias_ids; // Não salva pendências na arquitetura
+                delete i.historico_vida; // Não salva histórico na arquitetura
+                if (item.tombamentos) {
+                    i.tombamentos = item.tombamentos.map(t => {
+                        const tt = { ...t };
+                        delete tt.pendencias_ids;
+                        delete tt.historico_vida;
+                        return tt;
+                    });
+                }
+                return i;
+            })
+        }));
+
         const colecaoListaOrigem = isChecklist ? 'listas_checklist' : (typeof COLECAO_LISTAS !== 'undefined' ? COLECAO_LISTAS : 'listas_conferencia');
         const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
 
-        // 1. Atualiza a "Foto" da Viatura (Lista Mestra)
-        batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: novaListaMestra });
+        // 1. Atualiza a Arquitetura com a lista LIMPA
+        batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: listaLimpaParaArquitetura });
 
-        // 2. Registra o Log da Conferência/Vistoria
+        // 2. Registra o Resultado Oficial com as Pendências Processadas
         const resRef = db.collection(colecaoResultadosDestino).doc();
         batch.set(resRef, {
             local: String(localNome || ""), 
@@ -1388,21 +1393,19 @@ async function carregarDadosRemotos() {
             modo: isChecklist ? 'CHECKLIST_VISTORIA' : 'CONFERENCIA_PADRAO',
             km_entrada: String(kmEntrada || "0"),
             combustivel_entrada: String(combustivelEntrada || "N/D"),
-            obs_gerais_vistoria: String(obsGeraisTexto || ""),
-            fotos: [] 
+            obs_gerais_vistoria: String(obsGeraisTexto || "")
         });
 
-        // 3. Atualiza a Custódia Atual para Rastreio Rápido
+        // 3. Custódia Atual
         batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
             lista_id: String(LISTA_ID || ""), 
             local_nome: String(localNome || ""), 
-            conferente_uid: String(p.uid || ""),
             conferente_completo: String(conferenteCompleto || ""), 
             timestamp_ultima_conferencia: timestampAgora,
             tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
         }, { merge: true });
 
-        // 4. ✅ SINCRONIZAÇÃO COM O INVENTÁRIO (PRONTUÁRIOS)
+        // 4. Sincronização Inventário
         for (const itemAlterado of itensCaa) {
             const uidGlobal = itemAlterado.uid_global;
             if (!uidGlobal) continue;
@@ -1411,18 +1414,16 @@ async function carregarDadosRemotos() {
             const partesId = itemAlterado.id.split('-');
             const ehMulti = itemAlterado.id.includes('-') && itemAlterado.id !== uidGlobal;
             
-            // LÓGICA MULTI: Atualiza o Prontuário do Tombamento
             if (ehMulti) {
                 const tombamentoAlvo = partesId[partesId.length - 1];
                 const tombRef = itemRef.collection('tombamentos').doc(tombamentoAlvo);
-                
                 const novosLogs = (itemAlterado.pendencias_ids || [])
                     .filter(pend => pend.id && String(pend.id).startsWith('PEND-'))
                     .map(pend => ({
                         data: dataAtualLog,
                         evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
                         quem: conferenteCompleto,
-                        detalhes: `⚠️ Relatada alteração em ${localNome}: ${pend.descricao}`,
+                        detalhes: `⚠️ Alteração em ${localNome}: ${pend.descricao}`,
                         uid_pendencia: pend.id
                     }));
 
@@ -1430,24 +1431,18 @@ async function carregarDadosRemotos() {
                     batch.set(tombRef.collection('historico_vida').doc("EVT-P-" + Date.now() + idx), log);
                 });
                 batch.update(tombRef, { situacao_atual: "PENDENTE" });
-            } 
-            // LÓGICA SINGLE: Atualiza o Saldo da Unidade
-            else {
-                const unidadeId = urlParams.get('unidade_id') || "UNID-1767838511310"; // Pega o ID da unidade
+            } else {
+                const unidadeId = urlParams.get('unidade_id') || "UNID-1767838511310";
                 const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
-                
-                const novasPendencias = (itemAlterado.pendencias_ids || [])
-                    .filter(pend => pend.id && String(pend.id).startsWith('PEND-'));
+                const novasPendencias = (itemAlterado.pendencias_ids || []).filter(pend => pend.id && String(pend.id).startsWith('PEND-'));
                 
                 if (novasPendencias.length > 0) {
                     const qtdPendenteTotal = novasPendencias.reduce((sum, pend) => sum + (Number(pend.quantidade) || 0), 0);
-                    
                     batch.update(saldoRef, {
                         qtd_disp: firebase.firestore.FieldValue.increment(-qtdPendenteTotal),
                         qtd_pend: firebase.firestore.FieldValue.increment(qtdPendenteTotal),
                         last_update: dataAtualLog
                     });
-
                     novasPendencias.forEach((pend, idx) => {
                         batch.set(saldoRef.collection('historico_vida').doc("EVT-S-P-" + Date.now() + idx), {
                             data: dataAtualLog,
@@ -1463,11 +1458,7 @@ async function carregarDadosRemotos() {
         }
         
         await batch.commit();
-        alert(isChecklist ? "✅ Vistoria Finalizada com Sucesso!" : "✅ Conferência Finalizada com Sucesso!");
-        
-        if (window.parent) {
-            window.parent.postMessage({ type: 'SIGMA_FINISHED' }, '*');
-        }
+        alert(isChecklist ? "✅ Vistoria Finalizada!" : "✅ Conferência Finalizada!");
         window.top.location.href = "sigma_dashboard.html";
 
     } catch (e) {
