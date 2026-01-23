@@ -4195,21 +4195,21 @@ function renderAdminGestorCards(canViewDashboardCards) {
         // Mantém a chamada original das cautelas
         await loadCautelaPendencies(); 
 
-        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-        const rotas = rotasDoc.data() || {};
-        
-        // 1. Buscamos os resultados (onde as pendências PEND- agora residem)
+        // 1. Buscamos os resultados (onde as pendências PEND- residem)
+        // Filtramos os últimos 100 resultados
         const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(100).get();
         const map = {}; 
         
-        // 2. Filtro de permissão por unidade
+        // Dados do Gestor Logado
+        const gestorUnidadeId = currentUserData.unidade_id;
+        const isAdmin = currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral';
+
+        // 2. Filtro de permissão por Unidade ID (Moderno)
         const filteredDocs = snap.docs.filter(doc => {
             const d = doc.data();
-            const listaId = d.lista_id;
-            if (!rotas[listaId]) return false;
-            const listUnit = rotas[listaId].unidade || 'GERAL';
-            if (currentUserData.role === 'gestor' && listUnit !== currentUserData.unidade) return false;
-            return true;
+            // Se for admin vê tudo. Se for gestor, vê apenas o da sua unidade_id.
+            if (isAdmin) return true;
+            return d.unidade_id === gestorUnidadeId;
         });
 
         // 3. Processamento Cirúrgico
@@ -4217,14 +4217,15 @@ function renderAdminGestorCards(canViewDashboardCards) {
             const d = doc.data();
             const listaId = d.lista_id;
 
+            // Só processamos o resultado mais recente de cada lista_id/viatura
             if (!map[listaId]) {
                 let pendenciasReais = [];
 
-                // ✅ NOVO ALVO: Extraímos do itensRelatorio (que contém o que foi conferido)
+                // Extraímos do itensRelatorio (que contém o que foi salvo na conferência)
                 const itensDoRelatorio = d.itensRelatorio || [];
                 
                 for (const it of itensDoRelatorio) {
-                    // PENDÊNCIAS (Vermelhas - vindas da conferência)
+                    // Captura apenas itens com pendências ativas (C/A)
                     if (it.status === 'C/A' && it.pendencias_ids) {
                         it.pendencias_ids.forEach(p => {
                             if (p.status_gestao !== 'RESOLVIDO') {
@@ -4239,7 +4240,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
                     }
                 }
 
-                // ✅ BUSCA DE CAUTELAS (Mantendo sua lógica original de busca no banco)
+                // BUSCA DE OBSERVAÇÕES DE CAUTELAS (Lógica original preservada)
                 const getObsReal = async (cautelaId) => {
                     try {
                         const cDoc = await db.collection('cautelas_abertas').doc(String(cautelaId)).get();
@@ -4247,39 +4248,34 @@ function renderAdminGestorCards(canViewDashboardCards) {
                     } catch (err) { return "Material em carga individual."; }
                 };
 
-                // Aqui integramos a lógica de busca de cautelas baseada no estado atual
-                // Como a lista mestra está limpa, o itensRelatorio é nosso melhor mapa de cautelas ativas
-                for (const it of itensDoRelatorio) {
-                    if (it.pendencias_ids) {
-                        for (const p of it.pendencias_ids) {
-                            if (p.status_gestao === 'CAUTELADO') {
-                                const obsReal = await getObsReal(p.id);
-                                p.descricao = obsReal; // Atualiza com a obs real do banco
-                            }
-                        }
+                for (const p of pendenciasReais) {
+                    if (p.status_gestao === 'CAUTELADO') {
+                        p.descricao = await getObsReal(p.id);
                     }
                 }
 
-                map[listaId] = { 
-                    docId: doc.id, 
-                    lista_id: listaId, 
-                    local: d.local, 
-                    conferente: d.conferente, 
-                    date: d.timestamp.toDate().toLocaleString('pt-BR'), 
-                    items: pendenciasReais 
-                };
+                // Só cria o card se houver pendências reais para tratar
+                if (pendenciasReais.length > 0) {
+                    map[listaId] = { 
+                        docId: doc.id, 
+                        lista_id: listaId, 
+                        local: d.local, 
+                        conferente: d.conferente, 
+                        date: d.timestamp.toDate().toLocaleString('pt-BR'), 
+                        items: pendenciasReais 
+                    };
+                }
             }
         }
         
         renderCards(map); 
     } catch (e) { 
-        console.error("Erro ao carregar CAA Data:", e); 
-        container.innerHTML = 'Erro ao carregar.';
+        console.error("Erro ao carregar Dashboard:", e); 
+        container.innerHTML = '<div style="padding:20px;">Erro ao processar dashboard. Verifique o console.</div>';
     } finally { 
         if (loading) loading.style.display = 'none';
     }
-}
-        
+}       
        
         async function renderCards(map) {
     const container = document.getElementById('cards-container');
