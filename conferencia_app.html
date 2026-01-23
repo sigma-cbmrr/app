@@ -1981,9 +1981,9 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         nomeAssinatura = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     }
 
-    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA (FORMATO TÉCNICO)
+    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA
     const novoID = {
-        id: "TEMP-" + Date.now(), // ID temporário que será convertido em PEND- no salvamento final
+        id: "TEMP-" + Date.now(), 
         tipo: "PENDENCIA",
         data_criacao: new Date().toLocaleDateString('pt-BR'),
         autor_uid: String(userInfo.uid || "S_UID"),
@@ -1997,25 +1997,27 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     let elementoPaiAlvo = null;
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
-    // 3. BUSCA E INJEÇÃO NA MEMÓRIA VOLÁTIL
+    // 3. BUSCA EM PROFUNDIDADE (Orientada a Inventário)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ AJUSTE: Comparação de string forçada para evitar falhas de tipo (Single)
-            if (tipo === 'single' && String(item.id) === String(uid)) {
+            // ✅ CORREÇÃO CIRÚRGICA: Busca tanto por uid_global quanto por id
+            const idParaComparar = String(uid);
+            const isEsteItem = (String(item.uid_global) === idParaComparar || String(item.id) === idParaComparar);
+
+            if (tipo === 'single' && isEsteItem) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
             } 
-            // ✅ AJUSTE: Lógica Multi (Tombamentos)
             else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    const uidComposto = `${item.id}-${t.tomb}`;
-                    if (String(uidComposto) === String(uid)) {
+                    // No multi, o UID enviado pelo botão é "ID-TOMBAMENTO"
+                    const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
+                    if (String(uidComposto) === idParaComparar) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
-                        // Localiza o elemento visual para update de status
-                        elementoPaiAlvo = document.querySelector(`[data-id="${item.id}"]`);
+                        elementoPaiAlvo = document.querySelector(`[data-id="${item.uid_global || item.id}"]`);
                     }
                 });
             }
@@ -2023,12 +2025,12 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     });
 
     if (itemEncontrado) {
-        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO (Essencial para o motor de salvamento)
+        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO
         window.itemStatus[uid] = { 
             status: 'C/A', 
             interacao_humana: true,
             obs: obsDigitada,
-            uid_global_ref: String(uid).split('-')[0] // Vincula ao DNA do item
+            uid_global_ref: String(uid).split('-')[0]
         };
         
         // 5. ATUALIZAÇÃO DA INTERFACE
@@ -2038,19 +2040,19 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
             updateItemMainStatusDisplay(elementoPaiAlvo);
         }
 
-        // 6. FEEDBACK VISUAL (SCROLL E DESTAQUE)
+        // 6. FEEDBACK VISUAL
         setTimeout(() => {
             let el = document.querySelector(`[data-id="${uid}"]`) || 
                      document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 el.style.transition = "background-color 0.5s";
-                el.style.backgroundColor = "#fff9c4"; // Amarelo suave de "novo item"
+                el.style.backgroundColor = "#fff9c4";
                 setTimeout(() => { el.style.backgroundColor = ""; }, 1500);
             }
         }, 300);
     } else {
-        console.error("ERRO: Alvo da pendência não localizado na memória.", { uid, tipo });
+        console.error("ERRO CRÍTICO DE VÍNCULO:", { uid_enviado: uid, tipo: tipo });
         alert("Erro técnico: Não foi possível vincular a alteração ao item selecionado.");
     }
 }
