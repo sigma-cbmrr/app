@@ -2099,7 +2099,6 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     // 3. BUSCA EM PROFUNDIDADE (Orientada a Inventário)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ AJUSTE CIRÚRGICO: Normalização para comparação String
             const idParaComparar = String(uid);
             const matchesID = (String(item.uid_global) === idParaComparar || String(item.id) === idParaComparar);
 
@@ -2110,7 +2109,6 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
             } 
             else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    // ✅ AJUSTE CIRÚRGICO: Verificação dupla (UID Global ou ID de Arquitetura)
                     const uidCompostoGlobal = `${item.uid_global || item.id}-${t.tomb}`;
                     const uidCompostoLocal = `${item.id}-${t.tomb}`;
                     
@@ -2118,7 +2116,6 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
-                        // Define o elemento pai para atualizar o ícone [C/A] no cabeçalho do item
                         elementoPaiAlvo = document.querySelector(`[data-id="${item.uid_global || item.id}"]`);
                     }
                 });
@@ -2128,12 +2125,16 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
 
     if (itemEncontrado) {
         // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO
-        // ✅ ADICIONADO: uid_global_ref garante que o salvamento saiba qual documento do Inventário afetar
+        // ✅ AJUSTE CIRÚRGICO: Captura o UID Global completo (Ex: FAM-000005-MOD-3) 
+        // e não apenas o prefixo "FAM", para garantir o vínculo com o Inventário.
+        const uidStr = String(uid);
+        const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0,3).join('-') : uidStr.split('-')[0];
+
         window.itemStatus[uid] = { 
             status: 'C/A', 
             interacao_humana: true,
             obs: obsDigitada,
-            uid_global_ref: String(uid).split('-')[0]
+            uid_global_ref: uidGlobalFull
         };
         
         // 5. ATUALIZAÇÃO DA INTERFACE
@@ -2159,7 +2160,6 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         alert("Erro técnico: Não foi possível vincular a alteração ao material selecionado.");
     }
 }
-
 function manterID(pendenciaId, uid) {
     // 1. GARANTE A EXISTÊNCIA DO OBJETO DE STATUS
     if (!window.itemStatus[uid]) {
@@ -2184,11 +2184,13 @@ function manterID(pendenciaId, uid) {
     window.itemStatus[uid].status = 'C/A';
     window.itemStatus[uid].interacao_humana = true;
 
-    // ✅ AJUSTE CIRÚRGICO: VÍNCULO COM O UID GLOBAL
-    // Extraímos o UID Global garantindo que, se for Multi (ID-TOMB), pegamos apenas o ID base (DNA do material)
+    // ✅ AJUSTE CIRÚRGICO: VÍNCULO COM O UID GLOBAL COMPLETO
+    // Extraímos o UID Global garantindo que, se for Multi (ID-TOMB), pegamos o DNA completo (Ex: FAM-000005-MOD-3)
     if (!window.itemStatus[uid].uid_global_ref) {
-        const idBase = String(uid).split('-')[0];
-        window.itemStatus[uid].uid_global_ref = idBase;
+        const uidStr = String(uid);
+        // Captura os 3 blocos do FAM ou o primeiro bloco para IDs simples
+        const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 3).join('-') : uidStr.split('-')[0];
+        window.itemStatus[uid].uid_global_ref = uidGlobalFull;
     }
 
     // 4. ATUALIZAÇÃO DA INTERFACE VISUAL
@@ -2219,7 +2221,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const isResolvendoAvaria = String(pendenciaId).startsWith('AVARIA-');
 
     function executarBaixaNoObjeto(obj) {
-        // 1. TRATAMENTO PARA AVARIAS DE CAUTELA (LEGADO/FLUXO ESPECÍFICO)
         if (isResolvendoAvaria) {
             if (!obj.historico_vida) obj.historico_vida = [];
             obj.historico_vida.push({
@@ -2236,7 +2237,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             return true;
         }
 
-        // 2. TRATAMENTO PARA PENDÊNCIAS DE CONFERÊNCIA (CARIMBOS VERMELHOS)
         if (!obj.pendencias_ids) return false;
         const idProcurado = String(pendenciaId);
         const index = obj.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
@@ -2246,7 +2246,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         const pOriginal = obj.pendencias_ids[index];
         if (!obj.historico_vida) obj.historico_vida = [];
         
-        // ✅ REGISTRO NO PRONTUÁRIO: Criamos o registro de solução para o histórico de vida do item
         const registroHistorico = {
             id_referencia: pOriginal.id,
             evento: qtdResolvida >= pOriginal.quantidade ? "SOLUCAO_TOTAL" : "SOLUCAO_PARCIAL",
@@ -2256,7 +2255,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             detalhes: `Resolvido via Conferência. Justificativa: ${justificativa}. (Ref: ${pOriginal.descricao})`
         };
 
-        // Lógica de abatimento de quantidade
         if (qtdResolvida >= pOriginal.quantidade) {
             obj.pendencias_ids.splice(index, 1);
         } else {
@@ -2268,17 +2266,14 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         return true;
     }
 
-    // 3. BUSCA DO ALVO NA MEMÓRIA (SINGLE OU MULTI)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ AJUSTE CIRÚRGICO: Busca por id local OU uid_global
             const matchesSingle = String(item.id) === String(uid) || String(item.uid_global) === String(uid);
             
             if (matchesSingle) {
                 acaoConcluida = executarBaixaNoObjeto(item);
             } else if (item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    // ✅ AJUSTE CIRÚRGICO: Composição de ID multi blindada
                     const uidCompostoGlobal = `${item.uid_global || item.id}-${t.tomb}`;
                     const uidCompostoLocal = `${item.id}-${t.tomb}`;
                     
@@ -2294,27 +2289,29 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         
-        // Se não sobraram pendências, o item volta a ser Verde (ok)
+        // ✅ AJUSTE CIRÚRGICO: Vínculo com o UID Global Completo
+        // Garante que a resolução seja processada no documento correto do Inventário
+        const uidStr = String(uid);
+        const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 3).join('-') : uidStr.split('-')[0];
+        
         window.itemStatus[uid].status = (pendenciasRestantes > 0) ? 'C/A' : 'ok';
         window.itemStatus[uid].interacao_humana = true;
+        window.itemStatus[uid].uid_global_ref = uidGlobalFull; // Adicionado para integridade do Inventário
         
-        // Remove dos mantidos se estava lá
         if (window.itemStatus[uid].ids_mantidos) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== String(pendenciaId));
         }
 
-        // 5. ATUALIZAÇÃO DA UI
         renderizarConferencia();
         updateOverallStatus();
 
-        // 6. FEEDBACK VISUAL (PISCAR VERDE)
         setTimeout(() => {
             let elItem = document.querySelector(`[data-id="${uid}"]`) || 
                          document.querySelector(`.tombamento-container[data-id="${uid}"]`);
             if (elItem) {
                 elItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 elItem.style.transition = "background-color 0.5s";
-                elItem.style.backgroundColor = "#e8f5e9"; // Verde suave
+                elItem.style.backgroundColor = "#e8f5e9";
                 setTimeout(() => { elItem.style.backgroundColor = ""; }, 1500);
             }
         }, 300);
@@ -2322,21 +2319,25 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         alert("Erro: Não foi possível localizar a pendência para aplicar a solução.");
     }
 }
-function setItemStatusID(btn, status, uid) {
+    function setItemStatusID(btn, status, uid) {
     const container = btn.closest('.tombamento-container') || btn.closest('.item-conferencia');
     const setor = btn.closest('.setor');
     const itemPai = btn.closest('.item-conferencia');
 
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
+    // ✅ LÓGICA DE EXTRAÇÃO DO UID GLOBAL COMPLETO
+    const uidStr = String(uid);
+    const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 3).join('-') : uidStr.split('-')[0];
+
     if (status === 'ok') {
         // 🛑 MARCAÇÃO CIRÚRGICA: Registra interação no clique do S/A
-        // ✅ ADICIONADO: uid_global_ref para garantir que o salvamento saiba qual item do inventário atualizar
+        // ✅ AJUSTE: uid_global_ref agora captura o DNA completo do item
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'ok', 
             interacao_humana: true,
-            uid_global_ref: String(uid).split('-')[0] 
+            uid_global_ref: uidGlobalFull 
         };
 
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
@@ -2353,13 +2354,13 @@ function setItemStatusID(btn, status, uid) {
             }
         }
     } else if (status === 'cautela_ciente') {
-        // ✅ ADICIONADO: uid_global_ref para vínculo com o inventário em caso de ciência de cautela
+        // ✅ AJUSTE: uid_global_ref agora captura o DNA completo do item para ciência
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'cautela_ciente', 
             cautela_confirmada: true, 
             interacao_humana: true,
-            uid_global_ref: String(uid).split('-')[0]
+            uid_global_ref: uidGlobalFull
         };
         btn.innerHTML = '<i class="fas fa-check"></i> Ciente registrado';
         btn.disabled = true;
