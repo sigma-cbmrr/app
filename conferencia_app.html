@@ -953,7 +953,6 @@ async function carregarDadosRemotos() {
         }
     } else {
         if (tituloPrincipal) {
-            // ✅ AJUSTE CIRÚRGICO: Título amigável TR-AAAA apenas no Recebimento
             if (isRecebimentoCarga) {
                 const ano = new Date().getFullYear();
                 tituloPrincipal.innerText = `GUIA: TR-${ano}/${ID_ALVO.substring(0,5).toUpperCase()}`;
@@ -976,7 +975,6 @@ async function carregarDadosRemotos() {
 
     const elHeader = document.getElementById('militar-info');
     if (elHeader) {
-        // ✅ AJUSTE CIRÚRGICO: Ícones intuitivos mantendo toda a lógica original (KM/Combustível)
         let headerHTML = `<i class="fas fa-user-shield"></i> <strong>Conferente:</strong> ${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}<br><i class="fas fa-clock"></i> <strong>Data/Hora:</strong> ${new Date().toLocaleString('pt-BR')}`;
 
         if (window.isModoChecklist) {
@@ -1005,11 +1003,30 @@ async function carregarDadosRemotos() {
         const data = doc.data();
         const isDevolucaoFinal = modoUrl === 'devolucao_final';
 
-        // ✅ NOVO: Armazena os dados da transferência para o cabeçalho preto
         if (isRecebimentoCarga) {
             window.dadosTransferencia = data;
         }
         
+        // ✅ BUSCA REVERSA: Captura a última conferência realizada para herdar pendências
+        let pendenciasHerdadas = {};
+        if (!isCautelaLocal && !isRecebimentoCarga) {
+            const colecaoResultados = window.isModoChecklist ? 'resultados_checklist' : 'resultados_conferencias';
+            const ultimaConfQuery = await db.collection(colecaoResultados)
+                .where('lista_id', '==', ID_ALVO)
+                .orderBy('timestamp', 'desc')
+                .limit(1)
+                .get();
+
+            if (!ultimaConfQuery.empty) {
+                const ultimoResultado = ultimaConfQuery.docs[0].data();
+                (ultimoResultado.itensRelatorio || []).forEach(itemRel => {
+                    if (itemRel.status === 'C/A' && itemRel.pendencias_ids) {
+                        pendenciasHerdadas[itemRel.id] = itemRel.pendencias_ids;
+                    }
+                });
+            }
+        }
+
         if (isCautelaLocal || isRecebimentoCarga) {
             dadosConferencia = adaptarCautelaParaRender(data);
         } else {
@@ -1017,6 +1034,11 @@ async function carregarDadosRemotos() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
+                    // ✅ INJEÇÃO DE PENDÊNCIAS: Cruza arquitetura com o último resultado
+                    if (pendenciasHerdadas[item.uid_global || item.id]) {
+                        item.pendencias_ids = pendenciasHerdadas[item.uid_global || item.id];
+                    }
+                    
                     item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     item._ocultarCarimbo = isDevolucaoFinal;
                     return item;
@@ -1026,7 +1048,6 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        // ✅ AJUSTE CIRÚRGICO: Oculta infoLocal redundante apenas se for Recebimento
         const infoElement = document.getElementById('local-posto-info');
         if (infoElement) {
             if (isRecebimentoCarga) {
@@ -1034,7 +1055,7 @@ async function carregarDadosRemotos() {
             } else {
                 infoLocal = { 
                     nome: isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista"),
-                    posto: isCautelaLocal ? "" : (data.unidade_sigla || data.posto_nome || "Geral")
+                    posto: isCautelaLocal ? "" : (data.posto_nome || data.unidade_sigla || "Geral")
                 };
                 const separador = infoLocal.posto ? " - " : "";
                 const corDinamica = window.isModoChecklist ? "#2c3e50" : "#800020";
@@ -1060,48 +1081,62 @@ async function carregarDadosRemotos() {
         console.error("Erro no carregamento remoto:", e);
         if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro ao carregar dados: ${e.message}</span>`;
     }
-}
-    
+}    
     function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
     const modal = document.getElementById('modal-nova-pendencia');
     const inputQtd = document.getElementById('modal-input-qtd');
     const inputObs = document.getElementById('modal-input-obs');
     const btnConfirmar = document.getElementById('modal-btn-confirmar');
+    const tituloItem = document.getElementById('modal-titulo-item');
+    const subtituloDet = document.getElementById('modal-subtitulo-detalhe');
 
     // 1. Configura para Modo Edição
     document.getElementById('modal-acao-objetivo').value = "editar";
-    document.getElementById('modal-uid').value = uid;
+    
+    // ✅ AJUSTE TÉCNICO: Garante que o UID seja String para bater com a memória
+    document.getElementById('modal-uid').value = String(uid);
     document.getElementById('modal-tipo').value = pendenciaId; 
 
-    // 2. Preenche os dados
-    document.getElementById('modal-titulo-item').innerText = "Editar Relato";
-    document.getElementById('modal-subtitulo-detalhe').innerText = "Ajuste os detalhes da alteração selecionada.";
+    // 2. Preenche os dados com Alinhamento à Esquerda
+    if (tituloItem) {
+        tituloItem.innerText = "Editar Relato";
+        tituloItem.style.textAlign = "left"; // ✅ Padronização Visual
+    }
+    if (subtituloDet) {
+        subtituloDet.innerText = "Ajuste os detalhes da alteração selecionada.";
+        subtituloDet.style.textAlign = "left"; // ✅ Padronização Visual
+    }
+    
     document.getElementById('modal-label-obs').innerText = "Nova Descrição:";
     inputObs.value = descricaoAtual;
 
-    // 3. Força a exibição da quantidade (importante para mobile)
+    // 3. Força a exibição da quantidade
     const grupoQtd = document.getElementById('modal-grupo-qtd');
     if (grupoQtd) {
-        grupoQtd.style.display = 'block'; // Remove o 'important' via JS para evitar conflitos
+        grupoQtd.style.setProperty('display', 'block', 'important');
     }
     inputQtd.value = qtdAtual;
+    
+    // Esconde a info de saldo máximo na edição para não confundir
+    const infoMax = document.getElementById('modal-info-max');
+    if (infoMax) infoMax.style.display = 'none';
 
-    // 4. Ajuste Visual para Edição (Azul)
+    // 4. Ajuste Visual para Edição (Azul SIGMA)
     btnConfirmar.innerText = "SALVAR ALTERAÇÕES";
     btnConfirmar.style.backgroundColor = "#2196F3"; 
     document.querySelector('.modal-content').style.borderTopColor = "#2196F3";
 
-    // 5. ACIONAMENTO MOBILE (Garante que o modal suba acima de tudo)
+    // 5. Acionamento e Z-Index
     modal.style.zIndex = "99999";
     modal.style.display = 'flex';
 
-    // 6. Scroll para o topo (Evita que o modal abra "escondido" se a página estiver longa)
+    // 6. Scroll e Foco
     window.scrollTo(0, 0);
 
-    // Foco no input com delay maior para mobile (espera o teclado subir)
     setTimeout(() => {
         if (inputObs) {
             inputObs.focus();
+            // Coloca o cursor no final do texto
             inputObs.setSelectionRange(inputObs.value.length, inputObs.value.length);
         }
     }, 300);
@@ -1769,22 +1804,29 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     const subtitulo = document.getElementById('modal-subtitulo-detalhe');
     const btnConfirmar = document.getElementById('modal-btn-confirmar');
     
+    // ✅ AJUSTE TÉCNICO: Limpeza de campos e definição de alvos
     document.getElementById('modal-acao-objetivo').value = "incluir";
     inputObs.value = '';
-    document.getElementById('modal-uid').value = uid;
+    
+    // 🛡️ GARANTIA DE DNA: Registra o UID que veio do botão (deve ser o uid_global se disponível)
+    document.getElementById('modal-uid').value = String(uid);
     document.getElementById('modal-tipo').value = tipo;
     
     const nomeLimpo = nomeItem.replace(/\\'/g, "'");
     document.getElementById('modal-titulo-item').innerText = nomeLimpo;
+    document.getElementById('modal-titulo-item').style.textAlign = "left"; // ✅ Alinhamento à esquerda
+    
     document.getElementById('modal-label-obs').innerText = "Descrição do Problema:";
     document.getElementById('modal-label-qtd').innerText = "Quantidade Alterada:";
-    inputObs.placeholder = "Descreva o problema...";
+    inputObs.placeholder = "Descreva o problema encontrado...";
 
-    btnConfirmar.innerText = "INCLUIR";
+    btnConfirmar.innerText = "INCLUIR ALTERAÇÃO";
     btnConfirmar.style.backgroundColor = "#800020";
     document.querySelector('.modal-content').style.borderTopColor = "#d90f23";
 
     if (tipo === 'multi') {
+        // Alinhamento do subtitulo à esquerda para manter o padrão
+        subtitulo.style.textAlign = "left";
         subtitulo.innerHTML = `Referência Tomb.: <span style="color:#d90f23; font-weight:bold;">${tombReal}</span>`;
         grupoQtd.style.setProperty('display', 'none', 'important');
         inputQtd.value = 1;
@@ -1792,21 +1834,33 @@ function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
     } else {
         subtitulo.innerHTML = ""; 
         grupoQtd.style.setProperty('display', 'block', 'important');
+        
         const saldoReal = parseInt(saldo) || 0;
         inputQtd.max = saldoReal;
         inputQtd.value = 1;
-        infoMax.innerText = `Saldo total disponível: ${saldoReal}`;
+        
+        // ✅ ALINHAMENTO VISUAL: Saldo disponível alinhado à esquerda
+        infoMax.style.display = "block";
+        infoMax.style.textAlign = "left";
+        infoMax.innerText = `Saldo total disponível: ${saldoReal} un.`;
         
         if (saldoReal <= 0) {
-            alert("Este item não possui saldo disponível para alteração.");
+            alert("Atenção: Este item não possui saldo disponível para relatar nova alteração.");
             return;
         }
     }
 
+    // Exibe o modal e foca no campo de texto
     modal.style.display = 'flex';
-    setTimeout(() => { if(inputObs) inputObs.focus(); }, 150);
+    
+    // Ajuste para garantir que o teclado mobile não cubra o campo
+    setTimeout(() => { 
+        if(inputObs) {
+            inputObs.focus();
+            inputObs.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 200);
 }
-
 function fecharModalPendencia() {
     const modal = document.getElementById('modal-nova-pendencia');
     if (modal) {
@@ -1820,56 +1874,99 @@ function abrirModalResolver(pendenciaId, uid, qtdOriginal, descricaoOriginal) {
     const inputQtd = document.getElementById('modal-input-qtd');
     const inputObs = document.getElementById('modal-input-obs');
     const btnConfirmar = document.getElementById('modal-btn-confirmar');
+    const tituloItem = document.getElementById('modal-titulo-item');
+    const subtituloDet = document.getElementById('modal-subtitulo-detalhe');
+    const infoMax = document.getElementById('modal-info-max');
     
     if (!modal) return console.error("Modal não encontrado no DOM");
 
-    // Configuração de Identidade para RESOLUÇÃO
+    // 1. Configuração de Identidade para RESOLUÇÃO
     document.getElementById('modal-acao-objetivo').value = "resolver";
-    document.getElementById('modal-uid').value = uid;
+    
+    // ✅ AJUSTE TÉCNICO: Garante UID como String para busca precisa na memória
+    document.getElementById('modal-uid').value = String(uid);
     document.getElementById('modal-tipo').value = pendenciaId; 
 
-    // Ajuste de Textos
-    document.getElementById('modal-titulo-item').innerText = "Resolver Alteração";
-    document.getElementById('modal-subtitulo-detalhe').innerHTML = `Relato original: <b>"${descricaoOriginal}"</b>`;
+    // 2. Ajuste de Textos e Alinhamento à Esquerda
+    if (tituloItem) {
+        tituloItem.innerText = "Resolver Alteração";
+        tituloItem.style.textAlign = "left"; // ✅ Padrão Visual SIGMA
+    }
+    if (subtituloDet) {
+        subtituloDet.style.textAlign = "left"; // ✅ Padrão Visual SIGMA
+        subtituloDet.innerHTML = `Relato original: <b style="color: #333;">"${descricaoOriginal}"</b>`;
+    }
+
     document.getElementById('modal-label-obs').innerText = "Justificativa da Resolução:";
     document.getElementById('modal-label-qtd').innerText = "Unidades Resolvidas:";
-    inputObs.placeholder = "Diga como foi resolvido (ex: reposto, consertado)...";
+    inputObs.placeholder = "Diga como foi resolvido (ex: reposto, consertado, trocado)...";
     inputObs.value = '';
 
-    // Ajuste de Quantidade
-    document.getElementById('modal-grupo-qtd').style.setProperty('display', 'block', 'important');
+    // 3. Ajuste de Quantidade (Trava no valor original da pendência)
+    const grupoQtd = document.getElementById('modal-grupo-qtd');
+    if (grupoQtd) {
+        grupoQtd.style.setProperty('display', 'block', 'important');
+    }
+    
     inputQtd.max = qtdOriginal;
     inputQtd.value = qtdOriginal;
-    document.getElementById('modal-info-max').innerText = `Total que estava pendente: ${qtdOriginal} un.`;
+    
+    if (infoMax) {
+        infoMax.style.textAlign = "left";
+        infoMax.innerText = `Quantidade pendente no sistema: ${qtdOriginal} un.`;
+    }
 
-    // Estética Verde
+    // 4. Estética de Sucesso (Verde Logística)
     btnConfirmar.innerText = "CONFIRMAR SOLUÇÃO";
     btnConfirmar.style.backgroundColor = "#1b8a3e"; 
     document.querySelector('.modal-content').style.borderTopColor = "#1b8a3e";
 
+    // 5. Exibição e Foco
+    modal.style.zIndex = "99999";
     modal.style.display = 'flex';
-    setTimeout(() => { if(inputObs) inputObs.focus(); }, 150);
-}
+    
+    window.scrollTo(0, 0);
 
+    setTimeout(() => { 
+        if (inputObs) {
+            inputObs.focus();
+            inputObs.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 250);
+}
+    
 function processarAcaoFinalModal() {
     const objetivo = document.getElementById('modal-acao-objetivo').value;
-    const uid = document.getElementById('modal-uid').value;
+    const uid = document.getElementById('modal-uid').value; // Referência do Item/Tombamento
     const qtd = document.getElementById('modal-input-qtd').value;
     const obs = document.getElementById('modal-input-obs').value;
-    const tipoOuPendenciaId = document.getElementById('modal-tipo').value;
+    const tipoOuPendenciaId = document.getElementById('modal-tipo').value; // ID da Pendência ou 'single'/'multi'
 
+    // 1. Validação de Conteúdo (Integridade do Relato)
     if (obs.trim().length < 5) {
-        return alert("Descrição muito curta.");
+        return alert("Por favor, descreva o problema ou a solução com mais detalhes (mínimo 5 caracteres).");
     }
 
+    // 2. Normalização de Dados (Garante que números sejam números e IDs sejam Strings)
+    const qtdNumerica = parseInt(qtd) || 1;
+    const uidString = String(uid);
+    const refIdString = String(tipoOuPendenciaId);
+
+    // 3. Orquestração da Ação Logística
     if (objetivo === "editar") {
-        executarEdicaoRelato(tipoOuPendenciaId, uid, qtd, obs);
-    } else if (objetivo === "resolver") {
-        resolverID(tipoOuPendenciaId, uid, qtd, obs);
-    } else {
-        salvarNovoID(uid, qtd, tipoOuPendenciaId, obs);
+        // Altera uma pendência TEMP- que ainda não foi pro banco
+        executarEdicaoRelato(refIdString, uidString, qtdNumerica, obs);
+    } 
+    else if (objetivo === "resolver") {
+        // Encerra uma pendência PEND- (Gera evento de SOLUÇÃO no histórico)
+        resolverID(refIdString, uidString, qtdNumerica, obs);
+    } 
+    else {
+        // Cria uma nova pendência TEMP- (Será convertida em PEND- ao finalizar)
+        salvarNovoID(uidString, qtdNumerica, refIdString, obs);
     }
     
+    // 4. Fechamento e Limpeza
     fecharModalPendencia();
 }
     function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
@@ -1878,21 +1975,27 @@ function processarAcaoFinalModal() {
 
     // Garantimos que estamos comparando Strings para evitar erro de tipo
     const idProcurado = String(pendenciaId);
+    const uidAlvo = String(uid);
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // Criamos uma lista de alvos (o próprio item ou a lista de tombamentos dele)
+            // Verifica tanto o próprio item quanto seus tombamentos
             let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
             
             alvosParaVerificar.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
-                    // Tenta encontrar a pendência exata dentro do array do item/tombamento
+                    // Localiza a pendência específica pelo ID
                     const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
                     
                     if (p) {
                         p.descricao = novaObs;
                         p.quantidade = parseInt(novaQtd) || 0;
                         editado = true;
+                        
+                        // ✅ SINCRONISMO: Atualiza a observação no status global de interação
+                        if (window.itemStatus[uidAlvo]) {
+                            window.itemStatus[uidAlvo].obs = novaObs;
+                        }
                     }
                 }
             });
@@ -1900,50 +2003,50 @@ function processarAcaoFinalModal() {
     });
 
     if (editado) {
-        // ESSENCIAL: Redesenha a tela para refletir a mudança no "carimbo"
+        // Redesenha para refletir a mudança no carimbo/texto
         renderizarConferencia(); 
         
-        // Feedback visual para o usuário localizar onde editou
         setTimeout(() => {
             const el = document.getElementById(`card-${pendenciaId}`);
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.backgroundColor = "#e3f2fd"; // Pisca em azul claro
+                el.style.backgroundColor = "#e3f2fd"; // Pisca em azul (Edição)
                 setTimeout(() => { el.style.backgroundColor = "#fff"; }, 1000);
             }
         }, 300);
     } else {
-        console.error("Erro: Pendência " + idProcurado + " não encontrada nos dados.");
-        alert("Erro ao salvar: Não foi possível localizar o registro original para alteração.");
+        console.error("Erro: Pendência " + idProcurado + " não encontrada.");
+        alert("Erro ao salvar: Registro original não localizado.");
     }
 }
-    
-   function confirmarExclusaoRelato(pendenciaId, uid) {
+
+function confirmarExclusaoRelato(pendenciaId, uid) {
     if (!confirm("Deseja realmente apagar esta pendência?")) return;
 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let excluido = false;
-    
-    // Convertemos para String para garantir que "TEMP-123" seja comparado corretamente
     const idProcurado = String(pendenciaId);
+    const uidAlvo = String(uid);
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // Define os alvos (item ou lista de tombamentos)
             let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
             
             alvos.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
-                    // Buscamos o índice comparando as Strings brutas
                     const index = alvo.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
                     
                     if (index > -1) {
                         alvo.pendencias_ids.splice(index, 1);
                         excluido = true;
                         
-                        // Se não houver mais nada relatado, o item volta a ser "pendente" (cinza)
+                        // ✅ LÓGICA DE LIMPEZA CIRÚRGICA:
+                        // Se não houver mais nenhuma pendência (física ou herdada), limpa o status
                         if (alvo.pendencias_ids.length === 0) {
-                            delete window.itemStatus[uid]; 
+                            delete window.itemStatus[uidAlvo]; 
+                            // Tenta localizar o elemento visual para resetar a classe
+                            const elItem = document.querySelector(`[data-id="${uidAlvo}"]`);
+                            if (elItem) elItem.classList.remove('status-alert', 'status-ok');
                         }
                     }
                 }
@@ -1952,14 +2055,12 @@ function processarAcaoFinalModal() {
     });
 
     if (excluido) {
-        // ESSENCIAL: Redesenha a tela. Como o item sumiu do Array, 
-        // a renderização não vai mais criar o carimbo.
         renderizarConferencia(); 
         updateOverallStatus();
-        console.log("Sucesso: Relato temporário removido:", idProcurado);
+        console.log("Sucesso: Relato removido:", idProcurado);
     } else {
-        console.error("Não localizei o ID:", idProcurado);
-        alert("Erro: Não foi possível localizar este carimbo para exclusão.");
+        console.error("Não localizei o ID para exclusão:", idProcurado);
+        alert("Erro: Não foi possível localizar este registro.");
     }
 }
     
@@ -1994,23 +2095,26 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     // 3. BUSCA EM PROFUNDIDADE (Orientada a Inventário)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ CORREÇÃO CIRÚRGICA: Busca tanto por uid_global quanto por id
+            // ✅ AJUSTE CIRÚRGICO: Normalização para comparação String
             const idParaComparar = String(uid);
-            const isEsteItem = (String(item.uid_global) === idParaComparar || String(item.id) === idParaComparar);
+            const matchesID = (String(item.uid_global) === idParaComparar || String(item.id) === idParaComparar);
 
-            if (tipo === 'single' && isEsteItem) {
+            if (tipo === 'single' && matchesID) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
             } 
             else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    // No multi, o UID enviado pelo botão é "ID-TOMBAMENTO"
-                    const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
-                    if (String(uidComposto) === idParaComparar) {
+                    // ✅ AJUSTE CIRÚRGICO: Verificação dupla (UID Global ou ID de Arquitetura)
+                    const uidCompostoGlobal = `${item.uid_global || item.id}-${t.tomb}`;
+                    const uidCompostoLocal = `${item.id}-${t.tomb}`;
+                    
+                    if (idParaComparar === uidCompostoGlobal || idParaComparar === uidCompostoLocal) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
+                        // Define o elemento pai para atualizar o ícone [C/A] no cabeçalho do item
                         elementoPaiAlvo = document.querySelector(`[data-id="${item.uid_global || item.id}"]`);
                     }
                 });
@@ -2020,6 +2124,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
 
     if (itemEncontrado) {
         // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO
+        // ✅ ADICIONADO: uid_global_ref garante que o salvamento saiba qual documento do Inventário afetar
         window.itemStatus[uid] = { 
             status: 'C/A', 
             interacao_humana: true,
@@ -2047,7 +2152,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         }, 300);
     } else {
         console.error("ERRO CRÍTICO DE VÍNCULO:", { uid_enviado: uid, tipo: tipo });
-        alert("Erro técnico: Não foi possível vincular a alteração ao item selecionado.");
+        alert("Erro técnico: Não foi possível vincular a alteração ao material selecionado.");
     }
 }
 
@@ -2075,10 +2180,11 @@ function manterID(pendenciaId, uid) {
     window.itemStatus[uid].status = 'C/A';
     window.itemStatus[uid].interacao_humana = true;
 
-    // ✅ NOVO: VÍNCULO COM O UID GLOBAL (Para a função de finalização localizar no Inventário)
-    // Extraímos o UID Global do ID do item (remove o sufixo de tombamento se existir)
+    // ✅ AJUSTE CIRÚRGICO: VÍNCULO COM O UID GLOBAL
+    // Extraímos o UID Global garantindo que, se for Multi (ID-TOMB), pegamos apenas o ID base (DNA do material)
     if (!window.itemStatus[uid].uid_global_ref) {
-        window.itemStatus[uid].uid_global_ref = idStr.includes('-') ? idStr.split('-')[0] : uid;
+        const idBase = String(uid).split('-')[0];
+        window.itemStatus[uid].uid_global_ref = idBase;
     }
 
     // 4. ATUALIZAÇÃO DA INTERFACE VISUAL
@@ -2114,7 +2220,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             if (!obj.historico_vida) obj.historico_vida = [];
             obj.historico_vida.push({
                 evento: "RESOLUÇÃO_AVARIA_CAUTELA",
-                data: new Date().toLocaleDateString('pt-BR'),
+                data: new Date().toLocaleString('pt-BR'),
                 quem: nomeResolutor,
                 detalhes: `Avaria resolvida. Justificativa: ${justificativa}`,
                 cautela_origem: pendenciaId.replace('AVARIA-', '')
@@ -2136,12 +2242,12 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         const pOriginal = obj.pendencias_ids[index];
         if (!obj.historico_vida) obj.historico_vida = [];
         
-        // Criamos o registro de solução para o histórico de vida
+        // ✅ REGISTRO NO PRONTUÁRIO: Criamos o registro de solução para o histórico de vida do item
         const registroHistorico = {
             id_referencia: pOriginal.id,
             evento: qtdResolvida >= pOriginal.quantidade ? "SOLUCAO_TOTAL" : "SOLUCAO_PARCIAL",
             quantidade: qtdResolvida,
-            data: new Date().toLocaleDateString('pt-BR'),
+            data: new Date().toLocaleString('pt-BR'),
             quem: nomeResolutor,
             detalhes: `Resolvido via Conferência. Justificativa: ${justificativa}. (Ref: ${pOriginal.descricao})`
         };
@@ -2161,12 +2267,18 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     // 3. BUSCA DO ALVO NA MEMÓRIA (SINGLE OU MULTI)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            if (String(item.id) === String(uid)) {
+            // ✅ AJUSTE CIRÚRGICO: Busca por id local OU uid_global
+            const matchesSingle = String(item.id) === String(uid) || String(item.uid_global) === String(uid);
+            
+            if (matchesSingle) {
                 acaoConcluida = executarBaixaNoObjeto(item);
             } else if (item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    const uidComposto = `${item.id}-${t.tomb}`;
-                    if (String(uidComposto) === String(uid)) {
+                    // ✅ AJUSTE CIRÚRGICO: Composição de ID multi blindada
+                    const uidCompostoGlobal = `${item.uid_global || item.id}-${t.tomb}`;
+                    const uidCompostoLocal = `${item.id}-${t.tomb}`;
+                    
+                    if (String(uid) === uidCompostoGlobal || String(uid) === uidCompostoLocal) {
                         acaoConcluida = executarBaixaNoObjeto(t);
                     }
                 });
@@ -2215,7 +2327,13 @@ function setItemStatusID(btn, status, uid) {
 
     if (status === 'ok') {
         // 🛑 MARCAÇÃO CIRÚRGICA: Registra interação no clique do S/A
-        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'ok', interacao_humana: true };
+        // ✅ ADICIONADO: uid_global_ref para garantir que o salvamento saiba qual item do inventário atualizar
+        window.itemStatus[uid] = { 
+            ...window.itemStatus[uid], 
+            status: 'ok', 
+            interacao_humana: true,
+            uid_global_ref: String(uid).split('-')[0] 
+        };
 
         container.querySelectorAll('.action-button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -2231,7 +2349,14 @@ function setItemStatusID(btn, status, uid) {
             }
         }
     } else if (status === 'cautela_ciente') {
-        window.itemStatus[uid] = { ...window.itemStatus[uid], status: 'cautela_ciente', cautela_confirmada: true, interacao_humana: true };
+        // ✅ ADICIONADO: uid_global_ref para vínculo com o inventário em caso de ciência de cautela
+        window.itemStatus[uid] = { 
+            ...window.itemStatus[uid], 
+            status: 'cautela_ciente', 
+            cautela_confirmada: true, 
+            interacao_humana: true,
+            uid_global_ref: String(uid).split('-')[0]
+        };
         btn.innerHTML = '<i class="fas fa-check"></i> Ciente registrado';
         btn.disabled = true;
         btn.style.backgroundColor = "#1b8a3e";
