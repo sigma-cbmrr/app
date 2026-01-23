@@ -13142,13 +13142,30 @@ function buscarItemParaAdicionar(termo) {
     const t = termo.toLowerCase().trim();
     const suggestions = [];
 
-    // 1. Busca no estoque (Mantém lógica original para materiais)
     estoqueGestorLocal.forEach(item => {
         const nomeMatch = item.nome.toLowerCase().includes(t);
+        
+        // ✅ CÁLCULO CIRÚRGICO: Quanto deste item já foi adicionado aos setores no rascunho?
+        let qtdJaEscalada = 0;
+        let tombamentosEmUsoNoRascunho = [];
+
+        arquiteturaAtiva.forEach(setor => {
+            (setor.itens || []).forEach(it => {
+                if (it.uid_global === item.uid_global) {
+                    if (item.tipo === 'multi') {
+                        (it.tombamentos || []).forEach(tm => tombamentosEmUsoNoRascunho.push(tm.tomb));
+                    } else {
+                        qtdJaEscalada += Number(it.quantidadeEsperada || 0);
+                    }
+                }
+            });
+        });
+
         if (item.tipo === 'multi') {
             (item.tombamentos || []).forEach(tomb => {
                 const tombNum = String(tomb.tomb || "");
-                if (!tomb.viatura_id && (nomeMatch || tombNum.toLowerCase().includes(t))) {
+                // ✅ FILTRO: Só sugere se não estiver na VTR (DB) E nem no rascunho atual (tela)
+                if (!tomb.viatura_id && !tombamentosEmUsoNoRascunho.includes(tomb.tomb) && (nomeMatch || tombNum.toLowerCase().includes(t))) {
                     suggestions.push({ 
                         ...item, 
                         tombamentoExibicao: tomb.tomb, 
@@ -13157,8 +13174,15 @@ function buscarItemParaAdicionar(termo) {
                 }
             });
         } else {
-            if (nomeMatch && (item.disponivel > 0)) {
-                suggestions.push({ ...item, id_unico: item.id_almox });
+            // ✅ CÁLCULO: Saldo Real = Saldo do Almoxarifado - O que já está na tela
+            const saldoRealDisponivel = item.disponivel - qtdJaEscalada;
+
+            if (nomeMatch && saldoRealDisponivel > 0) {
+                suggestions.push({ 
+                    ...item, 
+                    id_unico: item.id_almox,
+                    disponivelReal: saldoRealDisponivel // Passamos o saldo abatido
+                });
             }
         }
     });
@@ -13166,10 +13190,8 @@ function buscarItemParaAdicionar(termo) {
     const matches = suggestions.slice(0, 10);
     window.tempSuggestionsSearch = matches; 
 
-    // 2. Lógica de Renderização Híbrida
     if (matches.length === 0) {
         if (isModoVistoria) {
-            // MODO VISTORIA: Permite criar item novo se não houver no estoque
             box.innerHTML = `
                 <div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" 
                      style="padding:15px; background:#f0f9ff; border:1px dashed #0369a1; border-radius:6px; cursor:pointer; text-align:center;">
@@ -13178,44 +13200,34 @@ function buscarItemParaAdicionar(termo) {
                     <small style="color:#64748b; font-size:0.75em;">Como item de vistoria técnica</small>
                 </div>`;
         } else {
-            box.innerHTML = '<div style="padding:15px; color:#94a3b8; text-align:center;">Nada disponível.</div>';
+            box.innerHTML = '<div style="padding:15px; color:#94a3b8; text-align:center;">Sem saldo disponível.</div>';
         }
     } else {
-        // Renderização normal das sugestões do estoque
         let htmlFinal = matches.map((i, index) => `
             <div class="suggestion-item" onclick="selecionarSugestaoPorIndex(${index})" 
                  style="display: flex !important; align-items: center !important; width: 100% !important; border-bottom: 1px solid #f1f5f9; padding: 10px 15px; cursor: pointer; background: white; gap: 12px; box-sizing: border-box;">
-                
                 <div style="flex-shrink: 0; width: 24px; display: flex; justify-content: center; align-items: center;">
                     <i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'}" 
                        style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1.1em; position: static !important; transform: none !important;"></i>
                 </div>
-
                 <div style="flex-grow: 1; display: flex; flex-direction: column; line-height: 1.2; overflow: hidden;">
                     <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                         ${i.nome}
                     </b>
                     <small style="color: #64748b; font-size: 0.72em; font-weight: 600;">
-                        ${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'SALDO DISPONÍVEL: ' + i.disponivel}
+                        ${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'SALDO RESTANTE: ' + i.disponivelReal}
                     </small>
                 </div>
-            </div>
-        `).join('');
+            </div>`).join('');
 
-        // Se estiver em modo vistoria, adiciona a opção de texto livre ao final da lista de sugestões
         if (isModoVistoria) {
-            htmlFinal += `
-                <div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" 
-                     style="padding:10px; background:#fff8e1; border-top:2px solid #ffb300; cursor:pointer; text-align:center; margin-top:5px;">
-                    <span style="font-size:0.8em; color:#856404; font-weight:bold;">+ ADICIONAR COMO TEXTO LIVRE</span>
-                </div>`;
+            htmlFinal += `<div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" style="padding:10px; background:#fff8e1; border-top:2px solid #ffb300; cursor:pointer; text-align:center; margin-top:5px;"><span style="font-size:0.8em; color:#856404; font-weight:bold;">+ ADICIONAR COMO TEXTO LIVRE</span></div>`;
         }
-        
         box.innerHTML = htmlFinal;
     }
     box.style.display = 'block';
 }
-	function prepararInclusaoTextoLivre(nomeDigitado) {
+		function prepararInclusaoTextoLivre(nomeDigitado) {
     const box = document.getElementById('sugestoes-estoque-editor');
     const inputBusca = document.getElementById('input-busca-estoque');
 
@@ -13257,38 +13269,33 @@ function selecionarItemParaAdicionar(item) {
     if (!item) return;
 
     itemSelecionadoTemp = item;
-    
-    const inputBusca = document.getElementById('input-busca-estoque');
     const boxSugestoes = document.getElementById('sugestoes-estoque-editor');
     const popover = document.getElementById('popover-qtd-editor');
-    const selectSetor = document.getElementById('select-setor-destino'); // Referência adicionada
+    const inputBusca = document.getElementById('input-busca-estoque');
+    const selectSetor = document.getElementById('select-setor-destino');
 
-    // 1. Limpa e esconde sugestões
     if (boxSugestoes) boxSugestoes.style.display = 'none';
 
     if (item.tipo === 'single') {
-        const inputBusca = document.getElementById('input-busca-estoque');
-        const boxSugestoes = document.getElementById('sugestoes-estoque-editor');
-        
-        // Pegamos as dimensões reais no momento do clique
-        const rectInput = inputBusca.getBoundingClientRect();
-        const rectSugestoes = boxSugestoes.getBoundingClientRect();
+        // ✅ CAPTURA: Usamos o saldo real (já abatido) calculado na busca
+        const saldoFinal = item.disponivelReal;
 
-        // O modal aparecerá logo abaixo da caixa de sugestões (que já está aberta)
-        // Somamos a posição do topo do input + altura do input + altura das sugestões
         popover.style.position = 'absolute';
-        popover.style.top = (inputBusca.offsetTop + inputBusca.offsetHeight + boxSugestoes.offsetHeight + 5) + 'px';
+        popover.style.top = (inputBusca.offsetTop + inputBusca.offsetHeight + 5) + 'px';
         popover.style.left = inputBusca.offsetLeft + 'px'; 
-        
         popover.style.display = 'block';
-        popover.style.zIndex = '1000'; // Garante que fique sobre tudo
+        popover.style.zIndex = '1000';
         
         const inputQtd = document.getElementById('input-qtd-popover');
         const infoMax = document.getElementById('info-max-popover');
 
-        inputQtd.max = item.disponivel;
+        // ✅ TRAVA: O máximo permitido agora é o saldo após as deduções do rascunho
+        inputQtd.max = saldoFinal;
         inputQtd.value = 1;
-        if (infoMax) infoMax.textContent = `Máximo: ${item.disponivel} un.`;
+        if (infoMax) infoMax.textContent = `Saldo livre na tela: ${saldoFinal} un.`;
+
+        // Atribuímos ao objeto temporário para validar no confirmarQtdPopover
+        itemSelecionadoTemp.disponivel = saldoFinal;
 
         setTimeout(() => {
             inputQtd.focus();
@@ -13296,17 +13303,11 @@ function selecionarItemParaAdicionar(item) {
         }, 50);
 
     } else {
-        // --- MUDANÇA CIRÚRGICA PARA ITEM MULTI ---
         if (popover) popover.style.display = 'none';
-        
         exibirDraftCard(`${item.nome} (TOMB: ${item.tombamentoExibicao})`);
-        
-        if (selectSetor) {
-            selectSetor.focus();
-        }
+        if (selectSetor) selectSetor.focus();
     }
 }
-
 // Função auxiliar cirúrgica para o visual moderno
 function exibirDraftCard(texto) {
     const card = document.getElementById('rascunho-item-novo'); // ID ÚNICO PARA A BUSCA
@@ -13323,15 +13324,24 @@ function exibirDraftCard(texto) {
     const input = document.getElementById('input-qtd-popover');
     const qtd = parseInt(input.value);
     
+    // ✅ SEGURANÇA: Captura o saldo real projetado (já abatido os itens da tela)
+    // Se por algum motivo 'disponivelReal' não existir, usamos o 'disponivel' padrão.
+    const saldoLimite = itemSelecionadoTemp.disponivelReal !== undefined ? 
+                        itemSelecionadoTemp.disponivelReal : 
+                        itemSelecionadoTemp.disponivel;
+
     if (isNaN(qtd) || qtd <= 0) {
         alert("Informe uma quantidade válida.");
         return;
     }
     
-    if (qtd > itemSelecionadoTemp.disponivel) {
-        alert(`Quantidade indisponível. Saldo atual: ${itemSelecionadoTemp.disponivel}`);
-        input.value = itemSelecionadoTemp.disponivel;
+    // ✅ VALIDAÇÃO CIRÚRGICA: Impede que o usuário digite um valor maior do que 
+    // o que sobrou no estoque físico após as alocações já feitas no editor.
+    if (qtd > saldoLimite) {
+        alert(`Quantidade indisponível para esta lista.\n\nSaldo Total: ${itemSelecionadoTemp.disponivel}\nJá alocado em outros setores: ${itemSelecionadoTemp.disponivel - saldoLimite}\nRestante disponível: ${saldoLimite}`);
+        input.value = saldoLimite;
         input.focus();
+        input.select();
         return;
     }
 
@@ -13341,15 +13351,14 @@ function exibirDraftCard(texto) {
     // 4. Fecha o popover
     document.getElementById('popover-qtd-editor').style.display = 'none';
 
-    // --- MUDANÇA CIRÚRGICA: UX MODERNA ---
-    // 5. Ativa o Card de Rascunho em vez de escrever no input
+    // 5. Ativa o Card de Rascunho com o feedback visual
     exibirDraftCard(`${qtd}un. x ${itemSelecionadoTemp.nome}`);
 
-    // 6. Foca no seletor de setor (Destaque visual discreto)
+    // 6. Foca no seletor de setor
     const selectSetor = document.getElementById('select-setor-destino');
     if (selectSetor) {
         selectSetor.focus();
-        selectSetor.style.border = "2px solid #2c7399"; // Borda de destaque suave
+        selectSetor.style.border = "2px solid #2c7399";
     }
 }		
 
