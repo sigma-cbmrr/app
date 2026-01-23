@@ -4195,12 +4195,13 @@ function renderAdminGestorCards(canViewDashboardCards) {
         await loadCautelaPendencies(); 
 
         const gestorUnidadeId = currentUserData.unidade_id;
-        // ✅ Blindagem Admin: Se a unidade for GERAL ou o cargo for admin/gestor_geral
-        const isAdmin = currentUserData.role === 'admin' || 
-                        currentUserData.role === 'gestor_geral' || 
-                        gestorUnidadeId === 'GERAL';
+        const gestorUnidadeSigla = currentUserData.unidade || "Unidade";
+        const isAdmin = currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral';
 
+        // 1. Busca os resultados (limitamos a 50 para performance)
         const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(50).get();
+        
+        // Objeto para garantir UNICIDADE (chave é o lista_id)
         const map = {}; 
         const cacheUnidadesLista = {};
 
@@ -4208,47 +4209,61 @@ function renderAdminGestorCards(canViewDashboardCards) {
             const d = doc.data();
             const listaId = d.lista_id;
 
-            let unidadeVinculada = d.unidade_id;
+            // Se já processamos o resultado mais RECENTE desta lista, ignoramos os anteriores (Evita duplicados)
+            if (map[listaId]) continue;
 
+            let unidadeVinculada = d.unidade_id;
+            let siglaVinculada = d.unidade_sigla;
+
+            // Inteligência para buscar unidade na lista mestra se faltar no resultado
             if (!unidadeVinculada && listaId) {
                 if (!cacheUnidadesLista[listaId]) {
                     const docLista = await db.collection('listas_conferencia').doc(listaId).get();
-                    cacheUnidadesLista[listaId] = docLista.exists ? docLista.data().unidade_id : null;
-                }
-                unidadeVinculada = cacheUnidadesLista[listaId];
-            }
-
-            if (isAdmin || unidadeVinculada === gestorUnidadeId) {
-                if (!map[listaId]) {
-                    let pendenciasReais = [];
-                    // ✅ AJUSTE CIRÚRGICO: Tenta ler itensRelatorio E itensCaa para garantir visibilidade
-                    const fonteItens = d.itensRelatorio || d.itensCaa || [];
-                    
-                    fonteItens.forEach(it => {
-                        if (it.status === 'C/A' && it.pendencias_ids) {
-                            it.pendencias_ids.forEach(p => {
-                                if (p.status_gestao !== 'RESOLVIDO') {
-                                    pendenciasReais.push({ 
-                                        ...p, 
-                                        itemNome: it.nomeCompleto || it.nome, 
-                                        itemId: it.id || it.uid_global, 
-                                        tipoRegistro: 'PENDENCIA' 
-                                    });
-                                }
-                            });
-                        }
-                    });
-
-                    if (pendenciasReais.length > 0) {
-                        map[listaId] = { 
-                            docId: doc.id, 
-                            lista_id: listaId, 
-                            local: d.local, 
-                            conferente: d.conferente, 
-                            date: d.timestamp.toDate().toLocaleString('pt-BR'), 
-                            items: pendenciasReais 
+                    if (docLista.exists) {
+                        const dataL = docLista.data();
+                        cacheUnidadesLista[listaId] = {
+                            id: dataL.unidade_id,
+                            sigla: dataL.unidade_sigla
                         };
                     }
+                }
+                if (cacheUnidadesLista[listaId]) {
+                    unidadeVinculada = cacheUnidadesLista[listaId].id;
+                    siglaVinculada = cacheUnidadesLista[listaId].sigla;
+                }
+            }
+
+            // ✅ FILTRO DE VISIBILIDADE
+            if (isAdmin || unidadeVinculada === gestorUnidadeId) {
+                let pendenciasReais = [];
+                const fonteItens = d.itensRelatorio || d.itensCaa || [];
+                
+                fonteItens.forEach(it => {
+                    if (it.status === 'C/A' && it.pendencias_ids) {
+                        it.pendencias_ids.forEach(p => {
+                            if (p.status_gestao !== 'RESOLVIDO') {
+                                pendenciasReais.push({ 
+                                    ...p, 
+                                    itemNome: it.nomeCompleto || it.nome, 
+                                    itemId: it.id || it.uid_global, 
+                                    tipoRegistro: 'PENDENCIA' 
+                                });
+                            }
+                        });
+                    }
+                });
+
+                if (pendenciasReais.length > 0) {
+                    map[listaId] = { 
+                        docId: doc.id, 
+                        lista_id: listaId, 
+                        local: d.local, 
+                        conferente: d.conferente, 
+                        date: d.timestamp.toDate().toLocaleString('pt-BR'), 
+                        // ✅ Define a sigla correta para o agrupamento (evita o "GERAL")
+                        unidade_sigla: siglaVinculada || gestorUnidadeSigla,
+                        items: pendenciasReais 
+                    };
                 }
             }
         }
@@ -4256,12 +4271,12 @@ function renderAdminGestorCards(canViewDashboardCards) {
         renderCards(map); 
 
     } catch (e) { 
-        console.error("Erro Dashboard Inteligente:", e); 
-        container.innerHTML = 'Erro ao processar dados da unidade.';
+        console.error("Erro Dashboard:", e); 
+        container.innerHTML = 'Erro ao processar dados.';
     } finally { 
         if (loading) loading.style.display = 'none';
     }
-}       
+}     
        
         async function renderCards(map) {
     const container = document.getElementById('cards-container');
