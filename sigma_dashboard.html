@@ -3115,37 +3115,38 @@ input:checked + .slider:before {
     <div id="app-runner-container"><iframe id="app-iframe" src=""></iframe></div>
 	
 	<div id="modal-gestao-ca" class="modal-overlay">
-        <div class="modal-content">
-            <button class="close-btn" onclick="document.getElementById('modal-gestao-ca').style.display='none'"><i class="fas fa-times"></i></button>
-            <h2>Gerenciar Pendência</h2>
-            <p id="gestao-item-nome" style="color:#800020; font-weight:bold; margin-bottom:5px; padding-bottom:0;"></p>
-            
-            <input type="hidden" id="gestao-doc-id">
-            <input type="hidden" id="gestao-item-id-lista">
-            <input type="hidden" id="gestao-pendencia-id"> <input type="hidden" id="gestao-item-max-qtd">
-            
-            <label>Ação do Gestor</label>
-            <select id="gestao-status">
-                <option value="Solucionado">Resolvido (Saneia este ID e move para histórico)</option>
-                <option value="Em solução">Em solução (Informa o status mas mantém o alerta)</option>
+    	<div class="modal-content">
+        	<button class="close-btn" onclick="document.getElementById('modal-gestao-ca').style.display='none'"><i class="fas fa-times"></i></button>
+        	<h2>Gerenciar Pendência</h2>
+        	<p id="gestao-item-nome" style="color:#800020; font-weight:bold; margin-bottom:5px; padding-bottom:0;"></p>
+        
+        	<input type="hidden" id="gestao-doc-id">
+        	<input type="hidden" id="gestao-item-id-lista">
+        	<input type="hidden" id="gestao-pendencia-id"> 
+        	<input type="hidden" id="gestao-item-max-qtd">
+        
+        	<label>Ação do Gestor</label>
+        	<select id="gestao-status" onchange="toggleGestaoQtd()">
+            	<option value="Solucionado">Resolver Pendência</option>
+            	<option value="Em solução">Em solução </option>
             	<option value="Cautelado">Passar para Cautela Administrativa</option>
-        	</select>
+        </select>
+    
+        <div id="div-gestao-qtd" style="display:none; margin-top: 10px;">
+            <label style="color:#d90f23;">Quantidade a Resolver/Tratar:</label>
+            <input type="number" id="gestao-qtd" min="1" value="1">
+            <small id="gestao-qtd-info" style="color:#666; font-size:0.85em; display: block; margin-top: 2px;"></small>
+        </div>
+    
+        <label style="margin-top: 15px;">Anotação Técnica / Despacho (Obrigatório)</label>
+        <textarea id="gestao-obs" style="min-height: 100px;" placeholder="Descreva a solução ou o andamento da manutenção deste item específico..."></textarea>
         
-        	<div id="div-gestao-qtd" style="display:none;">
-                <label style="color:#d90f23;">Quantidade Afetada:</label>
-            	<input type="number" id="gestao-qtd" min="1" value="1">
-            	<small id="gestao-qtd-info" style="color:#666; font-size:0.85em;"></small>
-        	</div>
-        
-            <label>Anotação Técnica / Despacho (Obrigatório)</label>
-            <textarea id="gestao-obs" style="min-height: 100px;" placeholder="Descreva a solução ou o andamento da manutenção deste item específico..."></textarea>
-            
-            <div class="modal-buttons">
-                <button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-gestao-ca').style.display='none'">Cancelar</button>
-                <button class="btn-modern-action btn-sync" onclick="salvarGestaoCa()">Salvar Ação</button>
-            </div>
+        <div class="modal-buttons">
+            <button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-gestao-ca').style.display='none'">Cancelar</button>
+            <button class="btn-modern-action btn-sync" onclick="salvarGestaoCa()">Salvar Ação</button>
         </div>
     </div>
+</div>
 		
 	<div id="modal-almox-transferencia" class="modal-overlay">
     	<div class="modal-content" style="max-width: 450px; border-top: 5px solid #1b8a3e;">
@@ -4183,27 +4184,27 @@ function renderAdminGestorCards(canViewDashboardCards) {
         
 
         // --- 3. DASHBOARD HIERÁRQUICO ---
-        async function loadCaaData() {
+   async function loadCaaData() {
     const container = document.getElementById('cards-container');
     if (!container) return;
     container.innerHTML = 'Carregando...';
     const loading = document.getElementById('loading-message-dashboard');
-    loading.style.display = 'block';
+    if (loading) loading.style.display = 'block';
     
     try {
+        // Mantém a chamada original das cautelas
         await loadCautelaPendencies(); 
 
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         const rotas = rotasDoc.data() || {};
         
-        const snap = await db.collection(COLECAO_RESULTADOS).limit(100).get();
+        // 1. Buscamos os resultados (onde as pendências PEND- agora residem)
+        const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(100).get();
         const map = {}; 
-        const docs = [];
-        snap.forEach(d => docs.push({id:d.id, ...d.data()}));
         
-        docs.sort((a,b) => b.timestamp.seconds - a.timestamp.seconds);
-
-        const filteredDocs = docs.filter(d => {
+        // 2. Filtro de permissão por unidade
+        const filteredDocs = snap.docs.filter(doc => {
+            const d = doc.data();
             const listaId = d.lista_id;
             if (!rotas[listaId]) return false;
             const listUnit = rotas[listaId].unidade || 'GERAL';
@@ -4211,88 +4212,71 @@ function renderAdminGestorCards(canViewDashboardCards) {
             return true;
         });
 
-        await Promise.all(filteredDocs.map(async (d) => {
+        // 3. Processamento Cirúrgico
+        for (const doc of filteredDocs) {
+            const d = doc.data();
             const listaId = d.lista_id;
+
             if (!map[listaId]) {
-                const docMestra = await db.collection(COLECAO_LISTAS).doc(listaId).get();
                 let pendenciasReais = [];
 
-                if (docMestra.exists) {
-                    const dataMestra = docMestra.data().list || [];
-                    
-                    // Loop assíncrono para buscar observações reais das cautelas
-                    for (const setor of dataMestra) {
-                        for (const it of (setor.itens || [])) {
-                            
-                            // 1. PENDÊNCIAS (Vermelhas)
-                            if (it.pendencias_ids && it.pendencias_ids.length > 0) {
-                                it.pendencias_ids.forEach(p => pendenciasReais.push({ 
-                                    ...p, itemNome: it.nome, itemId: it.id, tipoRegistro: 'PENDENCIA' 
-                                }));
+                // ✅ NOVO ALVO: Extraímos do itensRelatorio (que contém o que foi conferido)
+                const itensDoRelatorio = d.itensRelatorio || [];
+                
+                for (const it of itensDoRelatorio) {
+                    // PENDÊNCIAS (Vermelhas - vindas da conferência)
+                    if (it.status === 'C/A' && it.pendencias_ids) {
+                        it.pendencias_ids.forEach(p => {
+                            if (p.status_gestao !== 'RESOLVIDO') {
+                                pendenciasReais.push({ 
+                                    ...p, 
+                                    itemNome: it.nomeCompleto || it.nome, 
+                                    itemId: it.id, 
+                                    tipoRegistro: 'PENDENCIA' 
+                                });
                             }
+                        });
+                    }
+                }
 
-                            // 2. FUNÇÃO AUXILIAR PARA BUSCAR OBSERVAÇÃO REAL NA COLEÇÃO 'cautelas_abertas'
-                            const getObsReal = async (cautelaId) => {
-                                try {
-                                    const cDoc = await db.collection('cautelas_abertas').doc(String(cautelaId)).get();
-                                    return cDoc.exists ? cDoc.data().observacoes_emissao : "Material em carga individual.";
-                                } catch (err) { return "Material em carga individual."; }
-                            };
+                // ✅ BUSCA DE CAUTELAS (Mantendo sua lógica original de busca no banco)
+                const getObsReal = async (cautelaId) => {
+                    try {
+                        const cDoc = await db.collection('cautelas_abertas').doc(String(cautelaId)).get();
+                        return cDoc.exists ? cDoc.data().observacoes_emissao : "Material em carga individual.";
+                    } catch (err) { return "Material em carga individual."; }
+                };
 
-                            // CAUTELAS - Itens SINGLE
-                            if (it.tipo === 'single' && it.cautelas) {
-                                for (const c of it.cautelas) {
-                                    const obsReal = await getObsReal(c.id);
-                                    pendenciasReais.push({
-                                        id: c.id, itemNome: it.nome, itemId: it.id,
-                                        quantidade: c.quantidade,
-                                        autor_nome: c.emitente || "Sistema", 
-                                        destinatario: c.destinatario || "Militar",
-                                        descricao: obsReal, // <--- BUSCA CIRÚRGICA NO BANCO
-                                        status_gestao: 'CAUTELADO',
-                                        tipoRegistro: 'CAUTELA'
-                                    });
-                                }
-                            }
-
-                            // CAUTELAS - Itens MULTI (Tombamentos)
-                            if (it.tipo === 'multi' && it.tombamentos) {
-                                for (const t of it.tombamentos) {
-                                    if (t.pendencias_ids) {
-                                        t.pendencias_ids.forEach(p => pendenciasReais.push({ ...p, itemNome: it.nome, tombamento: t.tomb, itemId: it.id, tipoRegistro: 'PENDENCIA' }));
-                                    }
-                                    if (t.cautela) {
-                                        const obsReal = await getObsReal(t.cautela.id);
-                                        pendenciasReais.push({
-                                            id: t.cautela.id, itemNome: it.nome, tombamento: t.tomb, itemId: it.id,
-                                            quantidade: 1,
-                                            autor_nome: t.cautela.emitente || "Sistema",
-                                            destinatario: t.cautela.destinatario || "Militar",
-                                            descricao: obsReal, // <--- BUSCA CIRÚRGICA NO BANCO
-                                            status_gestao: 'CAUTELADO',
-                                            tipoRegistro: 'CAUTELA'
-                                        });
-                                    }
-                                }
+                // Aqui integramos a lógica de busca de cautelas baseada no estado atual
+                // Como a lista mestra está limpa, o itensRelatorio é nosso melhor mapa de cautelas ativas
+                for (const it of itensDoRelatorio) {
+                    if (it.pendencias_ids) {
+                        for (const p of it.pendencias_ids) {
+                            if (p.status_gestao === 'CAUTELADO') {
+                                const obsReal = await getObsReal(p.id);
+                                p.descricao = obsReal; // Atualiza com a obs real do banco
                             }
                         }
                     }
                 }
 
                 map[listaId] = { 
-                    docId: d.id, lista_id: listaId, local: d.local, 
-                    conferente: d.conferente, date: d.timestamp.toDate().toLocaleString(), 
+                    docId: doc.id, 
+                    lista_id: listaId, 
+                    local: d.local, 
+                    conferente: d.conferente, 
+                    date: d.timestamp.toDate().toLocaleString('pt-BR'), 
                     items: pendenciasReais 
                 };
             }
-        }));
+        }
         
         renderCards(map); 
     } catch (e) { 
         console.error("Erro ao carregar CAA Data:", e); 
         container.innerHTML = 'Erro ao carregar.';
     } finally { 
-        loading.style.display = 'none';
+        if (loading) loading.style.display = 'none';
     }
 }
         
@@ -4303,17 +4287,26 @@ function renderAdminGestorCards(canViewDashboardCards) {
     container.innerHTML = '';
     const keys = Object.keys(map);
     
-    const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-    const rotas = rotasDoc.data() || {};
+    // ✅ AJUSTE DE PERFORMANCE: Busca as rotas uma única vez para todos os cards
+    let rotas = {};
+    try {
+        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
+        rotas = rotasDoc.data() || {};
+    } catch (e) {
+        console.warn("Falha ao carregar rotas para o agrupamento:", e);
+    }
 
     if (keys.length === 0) { 
-        container.innerHTML = '<p style="padding:20px;">Nenhuma pendência encontrada.</p>';
+        container.innerHTML = '<div style="padding:40px; text-align:center; color:#666;">' +
+                              '<i class="fas fa-check-circle" style="font-size:3em; color:#1b8a3e; display:block; margin-bottom:10px;"></i>' +
+                              'Nenhuma pendência ativa nas viaturas da unidade.</div>';
         return;
     }
 
     const groupedCards = {};
     keys.forEach(listaId => {
         const d = map[listaId];
+        // ✅ Identifica a unidade para agrupamento visual
         const unit = rotas[listaId]?.unidade || 'GERAL'; 
         if (!groupedCards[unit]) groupedCards[unit] = [];
         groupedCards[unit].push(d);
@@ -4321,6 +4314,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
 
     const sortedUnits = Object.keys(groupedCards).sort();
     sortedUnits.forEach(unit => {
+        // Cabeçalho da Unidade (Ex: CCI, 1º Batalhão, etc)
         const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
         unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
@@ -4329,6 +4323,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
         
         const cardsList = groupedCards[unit];
         cardsList.forEach(d => {
+            // ✅ IMPORTANTE: allItems agora contém o que veio do itensRelatorio (PEND-)
             const allItems = d.items || [];
             const countTotal = allItems.length;
             const temAlteracao = countTotal > 0;
@@ -4336,6 +4331,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
             const div = document.createElement('div');
             div.className = `sector-card ${temAlteracao ? 'status-alert' : 'status-ok'}`;
             
+            // Layout do Card com as estatísticas em tempo real
             div.innerHTML = `
                 <h3>${d.local}</h3>
                 <div class="main-stat">
@@ -4346,9 +4342,12 @@ function renderAdminGestorCards(canViewDashboardCards) {
                        style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}; opacity:0.2; font-size: 1.5em;"></i>
                 </div>
                 <div class="card-footer">
-                    <strong>Última Conf.: ${d.conferente}</strong><br>${d.date}
+                    <strong>Última Conf.: ${d.conferente}</strong><br>
+                    <small><i class="far fa-calendar-alt"></i> ${d.date}</small>
                 </div>
             `;
+            
+            // O objeto 'd' aqui já contém o array 'items' preenchido pela loadCaaData nova
             div.onclick = () => mostrarTabela(d);
             container.appendChild(div);
         });
@@ -5760,15 +5759,17 @@ function reimprimirPDF(data) {
 
     if (pendenciasReais.length === 0) {
         wrapper.querySelector('table').style.display = 'none';
-        document.getElementById('no-issues-msg').style.display = 'block';
+        const msgNoIssues = document.getElementById('no-issues-msg');
+        if (msgNoIssues) msgNoIssues.style.display = 'block';
     } else {
         wrapper.querySelector('table').style.display = 'table';
-        document.getElementById('no-issues-msg').style.display = 'none';
+        const msgNoIssues = document.getElementById('no-issues-msg');
+        if (msgNoIssues) msgNoIssues.style.display = 'none';
 
         pendenciasReais.forEach(p => {
             const tr = tbody.insertRow();
             
-            // Ajuste de Identificação (Removido Ref: daqui)
+            // Ajuste de Identificação
             const identificadorFisico = p.tombamento 
                 ? `<br><small style="color:#800020">Tomb: ${p.tombamento}</small>` 
                 : `<br><small style="color:#d90f23; font-weight:bold;">Qtd em Alteração: ${p.quantidade} un.</small>`;
@@ -5778,7 +5779,6 @@ function reimprimirPDF(data) {
 
             let htmlAlteracao = '';
             if (p.tipoRegistro === 'CAUTELA') {
-                // Link clicável para Detalhes da Cautela
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b style="color:#f57c00;">Emitente:</b> ${p.autor_nome}<br>
@@ -5790,8 +5790,8 @@ function reimprimirPDF(data) {
                         </span>
                     </div>`;
             } else {
-                // Data do relato inserida diretamente no fluxo
-                const dataRelato = p.data_criacao || data.date.split(',')[0]; 
+                // ✅ AJUSTE CIRÚRGICO: Prioriza a data de criação da pendência para o histórico do Gestor
+                const dataRelato = p.data_criacao || (data.date ? data.date.split(',')[0] : ""); 
                 htmlAlteracao = `
                     <div style="font-size:0.9em;">
                         <b>Relatado por ${p.autor_nome} em ${dataRelato}:</b><br>
@@ -5799,7 +5799,6 @@ function reimprimirPDF(data) {
                     </div>`;
             }
 
-            // TABELA LIMPA: Apenas 4 colunas (Material, Status, Alteração, Ação)
             tr.innerHTML = `
                 <td><strong>${p.itemNome}</strong>${identificadorFisico}</td>
                 <td><span class="status-badge ${badgeClass}">${statusG}</span></td>
@@ -5818,7 +5817,11 @@ function reimprimirPDF(data) {
                     descricao: p.descricao,
                     qtd: p.quantidade
                 };
-                tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestaoID(${JSON.stringify(btnData)})'>Gerenciar</button>`;
+                
+                // ✅ AJUSTE CIRÚRGICO: Escapa aspas simples para evitar erro no onclick com descrições complexas
+                const btnJson = JSON.stringify(btnData).replace(/'/g, "\\'");
+                
+                tdAcao.innerHTML = `<button class="btn-modern-action btn-create" onclick='abrirModalGestaoID(${btnJson})'>Gerenciar</button>`;
             } else {
                 tdAcao.innerHTML = `<small style="color:#999; font-style:italic;">Posse Pessoal</small>`;
             }
@@ -5827,146 +5830,153 @@ function reimprimirPDF(data) {
     wrapper.style.display = 'block';
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
-		function abrirModalGestaoID(data) {
-    // Preenche campos ocultos para saber o que estamos editando
-    document.getElementById('gestao-item-nome').textContent = data.nome;
-    document.getElementById('gestao-doc-id').value = data.docId;         // Ref em resultados
-    document.getElementById('gestao-item-id-lista').value = data.itemId; // Ref na lista mestra
+function abrirModalGestaoID(data) {
+    // 1. Elementos de Interface
+    const elNome = document.getElementById('gestao-item-nome');
+    const elObs = document.getElementById('gestao-obs');
+    const modal = document.getElementById('modal-gestao-ca');
+
+    if (!modal) return console.error("Modal de gestão não encontrado no HTML.");
+
+    // 2. Preenchimento de Identidade do Material
+    elNome.textContent = data.nome || data.nomeCompleto || "Item não identificado";
     
-    // Novo campo oculto que você deve adicionar ao seu HTML: <input type="hidden" id="gestao-pendencia-id">
+    // 3. Mapeamento de IDs para o Processamento (Inputs Hidden)
+    // Certifique-se que esses IDs existem no seu HTML
+    document.getElementById('gestao-doc-id').value = data.docId || "";           // Resultado da Conf.
+    document.getElementById('gestao-item-id-lista').value = data.itemId || "";   // UID Global (Inventário)
+    
     const inputPendId = document.getElementById('gestao-pendencia-id');
-    if(inputPendId) inputPendId.value = data.pendenciaId;
+    if (inputPendId) {
+        inputPendId.value = data.pendenciaId || ""; // O ID da Pendência (PEND-...)
+    }
 
-    // Mostra a descrição para o Gestor saber o que está tratando
-    document.getElementById('gestao-obs').value = '';
-    document.getElementById('gestao-obs').placeholder = `Ação para: ${data.descricao}`;
+    // 4. Configuração do Campo de Texto
+    if (elObs) {
+        elObs.value = '';
+        const desc = data.descricao || "Sem descrição";
+        elObs.placeholder = `Descreva a solução para: ${desc}`;
+    }
 
-    document.getElementById('modal-gestao-ca').style.display = 'flex';
+    // 5. Reset de campos de quantidade (se houver)
+    const elQtd = document.getElementById('gestao-qtd');
+    if (elQtd) elQtd.value = data.qtd || data.quantidade || '1';
+
+    // 6. Exibição
+    modal.style.display = 'flex';
+    console.log("🛠️ Modal de Gestão aberto para a pendência:", data.pendenciaId);
 }
         function fecharTabela(){ 
             document.getElementById('ca-table-wrapper').style.display='none';
-        }
-        
-        function abrirModalGestao(i){
-            document.getElementById('gestao-item-nome').textContent = i.nomeCompleto;
-            document.getElementById('gestao-doc-id').value = i.docId; 
-            document.getElementById('gestao-item-index').value = i.originalIndex;
-            document.getElementById('gestao-item-id-lista').value = i.id; 
-            document.getElementById('gestao-item-max-qtd').value = i.quantidade || 1;
-            
-            document.getElementById('gestao-status').value = i.statusAdmin || 'Solucionado';
-            document.getElementById('gestao-obs').value = '';
-            document.getElementById('gestao-qtd').value = '1';
-            toggleGestaoQtd();
-
-            document.getElementById('modal-gestao-ca').style.display = 'flex';
         }
 
         function fecharModalGestao(){ 
             document.getElementById('modal-gestao-ca').style.display='none';
         }
 
-        function toggleGestaoQtd(){
-            const isRemover = document.getElementById('gestao-status').value === 'Remover';
-            document.getElementById('div-gestao-qtd').style.display = isRemover ? 'block' : 'none';
-            if(isRemover) {
-                const max = document.getElementById('gestao-item-max-qtd').value;
-                document.getElementById('gestao-qtd').max = max;
-                document.getElementById('gestao-qtd-info').textContent = `Estoque atual: ${max}`;
-            }
-        }
+        function toggleGestaoQtd() {
+    		const status = document.getElementById('gestao-status').value;
+    		const divQtd = document.getElementById('div-gestao-qtd');
+    		const max = document.getElementById('gestao-item-max-qtd').value;
+    		const inputQtd = document.getElementById('gestao-qtd');
+    		const infoQtd = document.getElementById('gestao-qtd-info');
+
+    		if (status === 'Solucionado') {
+        		divQtd.style.display = 'block';
+        		inputQtd.max = max; // Define o limite físico no input
+        		infoQtd.textContent = `Máximo disponível para solução: ${max} un.`;
+    		} else {
+        		divQtd.style.display = 'none';
+    		}
+		}
 
         document.getElementById('gestao-status').onchange = toggleGestaoQtd;
         
         async function salvarGestaoCa() {
     const docId = document.getElementById('gestao-doc-id').value;          // Doc em resultados_conferencias
-    const itemId = document.getElementById('gestao-item-id-lista').value;  // ID do item
-    const pendId = document.getElementById('gestao-pendencia-id').value;   // ID da pendência (NOVO)
+    const itemId = document.getElementById('gestao-item-id-lista').value;  // UID Global (DNA do material)
+    const pendId = document.getElementById('gestao-pendencia-id').value;   // ID da pendência (PEND-...)
     const statusAcao = document.getElementById('gestao-status').value;     // Solucionado, Em solução, etc.
     const obsGestor = document.getElementById('gestao-obs').value.trim();
+    const qtdInformada = parseInt(document.getElementById('gestao-qtd').value) || 1;
 
     if (!obsGestor) return alert("Descreva a ação tomada.");
+
+    const btnSalvar = document.querySelector('.btn-sync');
+    btnSalvar.disabled = true;
+    btnSalvar.textContent = "PROCESSANDO...";
 
     try {
         const nomeGestor = `${currentUserData.posto} ${currentUserData.nome_guerra}`;
         const dataHora = new Date().toLocaleString('pt-BR');
+        const batch = db.batch();
 
-        // 1. Atualizar no Documento de Resultados (O que aparece no Dashboard)
+        // 1. ATUALIZAR NO REGISTRO DE RESULTADOS (DASHBOARD)
         const resRef = db.collection('resultados_conferencias').doc(docId);
         const resSnap = await resRef.get();
         if (!resSnap.exists) throw new Error("Registro de conferência não encontrado.");
 
         let resData = resSnap.data();
-        let itensCaa = resData.itensCaa || [];
+        let itensRelatorio = resData.itensRelatorio || []; // Usamos itensRelatorio que é a fonte oficial do PDF
 
-        // Localiza o item e o ID da pendência dentro dele
-        const itemRes = itensCaa.find(i => i.id === itemId);
+        const itemRes = itensRelatorio.find(i => i.id === itemId || i.uid_global === itemId);
+        
         if (itemRes && itemRes.pendencias_ids) {
             const pIdx = itemRes.pendencias_ids.findIndex(p => p.id === pendId);
             if (pIdx > -1) {
                 if (statusAcao === 'Solucionado') {
-                    itemRes.pendencias_ids.splice(pIdx, 1); // Remove se resolvido
+                    itemRes.pendencias_ids.splice(pIdx, 1); // Remove do dashboard pois foi resolvido
+                    if (itemRes.pendencias_ids.length === 0) itemRes.status = 'S/A';
                 } else {
                     itemRes.pendencias_ids[pIdx].status_gestao = statusAcao.toUpperCase();
-                    itemRes.pendencias_ids[pIdx].descricao += `\n[GESTÃO ${dataHora}]: ${obsGestor}`;
+                    itemRes.pendencias_ids[pIdx].descricao += `\n[GESTÃO ${dataHora} - ${nomeGestor}]: ${obsGestor}`;
                 }
             }
         }
-        await resRef.update({ itensCaa });
+        batch.update(resRef, { itensRelatorio });
 
-        // 2. Atualizar na Lista Mestra (Persistência para a próxima conferência)
-        const listaId = resData.lista_id;
-        const listaRef = db.collection('listas_conferencia').doc(listaId);
-        const listaSnap = await listaRef.get();
-        
-        if (listaSnap.exists) {
-            let listaMestra = listaSnap.data().list;
+        // 2. SINCRONIZAÇÃO COM O INVENTÁRIO (DEVOLUÇÃO DE SALDO)
+        // ✅ AJUSTE CIRÚRGICO: Se resolvido, o saldo sai de PENDENTE e volta para DISPONÍVEL
+        if (statusAcao === 'Solucionado' && itemId) {
+            const unidadeId = currentUserData.unidade_id || "UNID-1767838511310";
+            const saldoRef = db.collection('inventario').doc(itemId).collection('saldos_unidades').doc(unidadeId);
             
-            listaMestra = listaMestra.map(setor => ({
-                ...setor,
-                itens: setor.itens.map(mItem => {
-                    const processar = (obj) => {
-                        if (obj.pendencias_ids) {
-                            const idx = obj.pendencias_ids.findIndex(p => p.id === pendId);
-                            if (idx > -1) {
-                                if (statusAcao === 'Solucionado') {
-                                    // Move para histórico antes de deletar
-                                    if(!obj.historico_vida) obj.historico_vida = [];
-                                    obj.historico_vida.push({
-                                        evento: "SOLUCAO_GESTOR",
-                                        quem: nomeGestor,
-                                        data: dataHora,
-                                        detalhes: `ID ${pendId} resolvido pelo Gestor. Obs: ${obsGestor}`
-                                    });
-                                    obj.pendencias_ids.splice(idx, 1);
-                                } else {
-                                    obj.pendencias_ids[idx].status_gestao = statusAcao.toUpperCase();
-                                }
-                            }
-                        }
-                        return obj;
-                    };
+            batch.update(saldoRef, {
+                qtd_disp: firebase.firestore.FieldValue.increment(qtdInformada),
+                qtd_pend: firebase.firestore.FieldValue.increment(-qtdInformada),
+                last_update: dataHora
+            });
 
-                    if (mItem.tipo === 'multi' && mItem.tombamentos) {
-                        mItem.tombamentos = mItem.tombamentos.map(t => processar(t));
-                    } else if (mItem.id === itemId) {
-                        mItem = processar(mItem);
-                    }
-                    return mItem;
-                })
-            }));
-
-            await listaRef.update({ list: listaMestra });
+            // Registro no Histórico de Vida do Material
+            const histRef = saldoRef.collection('historico_vida').doc("SOL-" + Date.now());
+            batch.set(histRef, {
+                data: dataHora,
+                evento: "SOLUCAO_GESTOR",
+                quem: nomeGestor,
+                detalhes: `✅ Pendência ${pendId} resolvida via Dashboard. Despacho: ${obsGestor}`,
+                quantidade: qtdInformada
+            });
         }
 
-        alert("Ação de gestão registrada com sucesso!");
-        fecharModalGestao();
-        fecharTabela();
-        loadCaaData(); // Recarrega os cards do dashboard
+        await batch.commit();
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Ação Registrada!',
+            text: statusAcao === 'Solucionado' ? 'O item retornou ao status DISPONÍVEL no inventário.' : 'Status de solução atualizado.',
+            confirmButtonColor: '#800020'
+        });
+
+        document.getElementById('modal-gestao-ca').style.display = 'none';
+        if (typeof loadCaaData === 'function') loadCaaData();
+        if (typeof fecharTabela === 'function') fecharTabela();
 
     } catch (e) {
-        console.error(e);
-        alert("Erro ao salvar ação do gestor: " + e.message);
+        console.error("Erro na gestão:", e);
+        alert("Erro ao processar ação: " + e.message);
+    } finally {
+        btnSalvar.disabled = false;
+        btnSalvar.textContent = "Salvar Ação";
     }
 }
 	function controlarToggleUsuario() {
