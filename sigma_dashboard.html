@@ -3040,7 +3040,7 @@ input:checked + .slider:before {
                 		<small id="edit-vtr-unidade">Unidade: CCI</small>
             		</div>
             		<div class="editor-actions">
-                		<button onclick="confirmarPublicacaoLista()" class="btn-publish">
+                		<button onclick="()" class="btn-publish">
                     		<i class="fas fa-cloud-upload-alt"></i> Publicar Alterações
                 		</button>
             		</div>
@@ -13711,14 +13711,13 @@ function cancelarEstorno(idx) {
 // 10. PUBLICAÇÃO FINAL (GRAVAÇÃO NO FIREBASE)
 // ================================================================
 async function confirmarPublicacaoLista() {
-    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque (se houver itens de materiais).")) return;
+    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque.")) return;
 
     const firestore = firebase.firestore();
     const nomeAmigavelVtr = document.getElementById('edit-vtr-nome').textContent;
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
     const unidadeGestoraId = currentUserData.unidade_id; 
 
-    // Filtra itens de estorno (reais)
     const estornosReais = itensParaEstorno.filter(i => i.uid_global !== "ITEM_VISTORIA_LIVRE");
 
     if (estornosReais.length > 0 && !justificativa) {
@@ -13729,7 +13728,7 @@ async function confirmarPublicacaoLista() {
 
     const btn = document.querySelector('.btn-publish');
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Publicando no Servidor...';
+    btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Publicando...';
 
     try {
         const batch = firestore.batch();
@@ -13737,7 +13736,7 @@ async function confirmarPublicacaoLista() {
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
         
-        // 1. MAPEIA ESTADO ANTERIOR (Para calcular diferença de inclusão)
+        // 1. MAPEIA ESTADO ANTERIOR
         const mapaAnterior = {};
         listaAnterior.forEach(setor => {
             (setor.itens || []).forEach(it => { 
@@ -13745,19 +13744,17 @@ async function confirmarPublicacaoLista() {
             });
         });
 
-        // 2. IDENTIFICA NOVAS INCLUSÕES
-        const itensNovosNaVtr = [];
+        // 2. IDENTIFICA MUDANÇAS LÍQUIDAS NA ARQUITETURA ATIVA
+        const mapaAtual = {};
         arquiteturaAtiva.forEach(setor => {
-            (setor.itens || []).forEach(item => {
-                const qtdAnterior = mapaAnterior[item.uid_global] || 0;
-                const qtdAtual = Number(item.quantidadeEsperada) || 0;
-                if (qtdAtual > qtdAnterior && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
-                    itensNovosNaVtr.push({ ...item, qtdParaSubtrair: qtdAtual - qtdAnterior, setorNome: setor.nome });
+            (setor.itens || []).forEach(it => {
+                if (it.uid_global !== "ITEM_VISTORIA_LIVRE") {
+                    mapaAtual[it.uid_global] = (mapaAtual[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
                 }
             });
         });
 
-        // --- A. ATUALIZA A ESTRUTURA DA LISTA NO FIREBASE ---
+        // --- A. ATUALIZA A ESTRUTURA DA LISTA ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
@@ -13767,43 +13764,58 @@ async function confirmarPublicacaoLista() {
         const idEvento = "EDT-" + Date.now();
         const dataReg = new Date().toLocaleString('pt-BR');
 
-        // --- B. PROCESSA LOGÍSTICA DE INVENTÁRIO (SUB-COLEÇÕES) ---
+        // --- B. PROCESSA LOGÍSTICA DE INVENTÁRIO ---
+
+        // B1. SAÍDAS E ENTRADAS PROPORCIONAIS (Itens Single)
+        // Comparamos o total que havia na lista vs o total que há agora
+        const todosUids = new Set([...Object.keys(mapaAnterior), ...Object.keys(mapaAtual)]);
         
-        // B1. PROCESSA SAÍDAS (Novos itens adicionados à VTR)
-        for (const item of itensNovosNaVtr) {
-            const itemRef = firestore.collection('inventario').doc(item.uid_global);
-            
-            if (item.tipo === 'multi') {
-                // Para cada tombamento novo no editor, atualiza seu prontuário
-                for (const t of (item.tombamentos || [])) {
-                    const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
-                    batch.update(tombRef, {
-                        situacao_atual: "EM CARGA",
-                        viatura_id: idListaSendoEditada,
-                        sub_local: item.setorNome
-                    });
-                    // Log no RG do ativo
-                    batch.set(tombRef.collection('historico_vida').doc(idEvento), {
-                        data: dataReg, evento: "SAIDA_EDITOR", quem: currentUserData.nome_militar_completo,
-                        detalhes: `Adicionado à lista ${nomeAmigavelVtr} via Editor.`
+        for (const uid of todosUids) {
+            const qtdAnt = mapaAnterior[uid] || 0;
+            const qtdAtu = mapaAtual[uid] || 0;
+            const diferenca = qtdAtu - qtdAnt; // Positivo = saiu do estoque | Negativo = voltou
+
+            if (diferenca !== 0) {
+                const itemDoc = estoqueGestorLocal.find(i => i.uid_global === uid);
+                if (itemDoc && itemDoc.tipo === 'single') {
+                    const saldoRef = firestore.collection('inventario').doc(uid).collection('saldos_unidades').doc(unidadeGestoraId);
+                    batch.update(saldoRef, {
+                        qtd_disp: firebase.firestore.FieldValue.increment(-diferenca),
+                        qtd_em_carga: firebase.firestore.FieldValue.increment(diferenca),
+                        last_update: dataReg
                     });
                 }
-            } else {
-                // Item Single: Ajusta saldo na sub-coleção da unidade
-                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeGestoraId);
-                batch.update(saldoRef, {
-                    qtd_disp: firebase.firestore.FieldValue.increment(-item.qtdParaSubtrair),
-                    qtd_em_carga: firebase.firestore.FieldValue.increment(item.qtdParaSubtrair),
-                    last_update: dataReg
-                });
             }
         }
 
-        // B2. PROCESSA ESTORNOS (Itens que foram para a Caixa de Saída)
+        // B2. PROCESSA ITENS MULTI (Tombamentos Novos)
+        arquiteturaAtiva.forEach(setor => {
+            (setor.itens || []).forEach(item => {
+                if (item.tipo === 'multi' && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
+                    // Verifica se este item/tombamento já existia na lista anterior
+                    // Se é novo (não estava no mapaAnterior), atualiza o prontuário
+                    (item.tombamentos || []).forEach(t => {
+                        const itemRef = firestore.collection('inventario').doc(item.uid_global);
+                        const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
+                        
+                        batch.update(tombRef, {
+                            situacao_atual: "EM CARGA",
+                            viatura_id: idListaSendoEditada,
+                            sub_local: setor.nome
+                        });
+                        batch.set(tombRef.collection('historico_vida').doc(idEvento), {
+                            data: dataReg, evento: "SAIDA_EDITOR", quem: currentUserData.nome_militar_completo,
+                            detalhes: `Alocado no setor ${setor.nome} da lista ${nomeAmigavelVtr}.`
+                        });
+                    });
+                }
+            });
+        });
+
+        // B3. PROCESSA ESTORNOS (Itens Multi que voltaram ao estoque)
         for (const item of estornosReais) {
-            const itemRef = firestore.collection('inventario').doc(item.uid_global);
-            
             if (item.tipo === 'multi') {
+                const itemRef = firestore.collection('inventario').doc(item.uid_global);
                 for (const t of (item.tombamentos || [])) {
                     const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
                     batch.update(tombRef, {
@@ -13811,29 +13823,17 @@ async function confirmarPublicacaoLista() {
                         viatura_id: null,
                         sub_local: "ALMOXARIFADO"
                     });
-                    // Log no RG do ativo
                     batch.set(tombRef.collection('historico_vida').doc(idEvento), {
                         data: dataReg, evento: "ESTORNO_EDITOR", quem: currentUserData.nome_militar_completo,
                         detalhes: `Removido da lista ${nomeAmigavelVtr}. Motivo: ${justificativa}`
                     });
                 }
-            } else {
-                // Item Single: Devolve saldo para disponível
-                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeGestoraId);
-                batch.update(saldoRef, {
-                    qtd_disp: firebase.firestore.FieldValue.increment(item.quantidadeEsperada),
-                    qtd_em_carga: firebase.firestore.FieldValue.increment(-item.quantidadeEsperada),
-                    last_update: dataReg
-                });
             }
+            // Nota: Itens Single removidos já são tratados pelo cálculo de diferença no passo B1
         }
 
-        // EXECUÇÃO ATÔMICA
         await batch.commit();
-        
-        await Swal.fire({ icon: 'success', title: 'Publicado!', text: 'Inventário e Prontuários atualizados.', timer: 2000, showConfirmButton: false });
-
-        window.isModoVistoria ? switchView('vtr-bases') : switchView('listas');
+        await Swal.fire({ icon: 'success', title: 'Publicado!', text: 'Inventário atualizado com sucesso.', timer: 2000, showConfirmButton: false });
         location.reload(); 
 
     } catch (e) {
@@ -13842,7 +13842,7 @@ async function confirmarPublicacaoLista() {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Tentar Novamente';
     }
-}
+}	
 		// Fecha as caixas de busca e popover ao clicar fora delas
 		document.addEventListener('keydown', function (event) {
     		// 1. Tratamento da tecla ESC
