@@ -4250,16 +4250,15 @@ function renderAdminGestorCards(canViewDashboardCards) {
                 });
 
                 if (pendenciasReais.length > 0) {
-                    map[listaId] = { 
-                        docId: doc.id, 
-                        lista_id: listaId, 
-                        local: d.local, 
-                        conferente: d.conferente, 
-                        date: d.timestamp.toDate().toLocaleString('pt-BR'), 
-                        // ✅ Define a sigla correta para o agrupamento (evita o "GERAL")
-                        unidade_sigla: siglaVinculada || gestorUnidadeSigla,
-                        items: pendenciasReais 
-                    };
+                   map[listaId] = { 
+    					docId: doc.id, 
+    					lista_id: listaId, 
+    					local: d.local, 
+    					conferente: d.conferente, 
+    					date: d.timestamp.toDate().toLocaleString('pt-BR'), 
+    					unidade_sigla: d.unidade_sigla || siglaVinculada || currentUserData.unidade || "Unidade", 
+    					items: pendenciasReais 
+					};
                 }
             }
         }
@@ -4307,45 +4306,47 @@ function renderAdminGestorCards(canViewDashboardCards) {
 
     const sortedUnits = Object.keys(groupedCards).sort();
     sortedUnits.forEach(unit => {
-        // Cabeçalho da Unidade (Ex: CCI, 1º Batalhão, etc)
-        const unitHeader = document.createElement('h3');
-        unitHeader.className = 'unit-header';
-        unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
-        unitHeader.innerHTML = `<div class="unit-flex-title"><i class="fas fa-building"></i> <span>${unit}</span></div>`;
-        container.appendChild(unitHeader); 
-        
-        const cardsList = groupedCards[unit];
-        cardsList.forEach(d => {
-            // ✅ IMPORTANTE: allItems agora contém o que veio do itensRelatorio (PEND-)
-            const allItems = d.items || [];
-            const countTotal = allItems.length;
-            const temAlteracao = countTotal > 0;
+            // ✅ CORREÇÃO CIRÚRGICA: Oculta o sub-título "GERAL" ou duplicado para Gestores
+            const isAdmin = currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral';
             
-            const div = document.createElement('div');
-            div.className = `sector-card ${temAlteracao ? 'status-alert' : 'status-ok'}`;
+            // Só adiciona o cabeçalho se houver mais de uma unidade (Admin) ou se for uma sigla real (Ex: CCI)
+            if (isAdmin || (unit !== "GERAL" && unit !== "Unidade")) {
+                const unitHeader = document.createElement('h3');
+                unitHeader.className = 'unit-header';
+                unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 15px; margin-bottom: 10px; box-sizing: border-box; font-size: 1.2em;'; 
+                unitHeader.innerHTML = `<div class="unit-flex-title"><i class="fas fa-building"></i> <span>${unit}</span></div>`;
+                container.appendChild(unitHeader); 
+            }
             
-            // Layout do Card com as estatísticas em tempo real
-            div.innerHTML = `
-                <h3>${d.local}</h3>
-                <div class="main-stat">
-                    <span class="count-value" style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}">
-                        ${countTotal === 0 ? 'OK' : countTotal}
-                    </span>
-                    <i class="fas ${temAlteracao ? 'fa-exclamation-triangle' : 'fa-check-circle'}" 
-                       style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}; opacity:0.2; font-size: 1.5em;"></i>
-                </div>
-                <div class="card-footer">
-                    <strong>Última Conf.: ${d.conferente}</strong><br>
-                    <small><i class="far fa-calendar-alt"></i> ${d.date}</small>
-                </div>
-            `;
-            
-            // O objeto 'd' aqui já contém o array 'items' preenchido pela loadCaaData nova
-            div.onclick = () => mostrarTabela(d);
-            container.appendChild(div);
+            const cardsList = groupedCards[unit];
+            cardsList.forEach(d => {
+                const allItems = d.items || [];
+                const countTotal = allItems.length;
+                const temAlteracao = countTotal > 0;
+                
+                const div = document.createElement('div');
+                div.className = `sector-card ${temAlteracao ? 'status-alert' : 'status-ok'}`;
+                
+                div.innerHTML = `
+                    <h3>${d.local}</h3>
+                    <div class="main-stat">
+                        <span class="count-value" style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}">
+                            ${countTotal === 0 ? 'OK' : countTotal}
+                        </span>
+                        <i class="fas ${temAlteracao ? 'fa-exclamation-triangle' : 'fa-check-circle'}" 
+                           style="color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}; opacity:0.2; font-size: 1.5em;"></i>
+                    </div>
+                    <div class="card-footer">
+                        <strong>Última Conf.: ${d.conferente}</strong><br>
+                        <small><i class="far fa-calendar-alt"></i> ${d.date}</small>
+                    </div>
+                `;
+                
+                div.onclick = () => mostrarTabela(d);
+                container.appendChild(div);
+            });
         });
-    });
-}
+	}
         // --- 4. NOVA CONFERÊNCIA ---
         async function carregarListasParaNovaConferencia() {
             try {
