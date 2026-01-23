@@ -736,7 +736,8 @@ function renderizarConferencia() {
         if (itemOuTomb.pendencias_ids && Array.isArray(itemOuTomb.pendencias_ids)) {
             itemOuTomb.pendencias_ids.forEach(p => {
                 const isTemp = String(p.id).startsWith('TEMP-');
-                const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.includes(String(p.id));
+                // ✅ CORREÇÃO: Comparação forçada de String para localizar IDs mantidos
+                const jaFoiMantido = statusLocal.ids_mantidos && statusLocal.ids_mantidos.map(String).includes(String(p.id));
                 const nomeExibicao = p.autor_nome || "Conferente";
                 let acoesHtml = '';
                 let botoesGestaoHtml = '';
@@ -749,8 +750,9 @@ function renderizarConferencia() {
                         </div>`;
                     acoesHtml = `<div style="color:#2196F3; font-size:0.75em; font-weight:bold; text-align:center; width:100%; border-top:1px solid #eee; padding-top:5px; font-style:italic;">Aguardando finalização...</div>`;
                 } else if (jaFoiMantido) {
-                    acoesHtml = `<div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;"><i class="fas fa-check-double"></i> MANTIDO</div>`;
+                    acoesHtml = `<div style="color: #1b8a3e; font-size: 0.75em; font-weight: bold; border-top: 1px solid #e0e0e0; padding-top: 8px; margin-top: 4px; font-style: italic;"><i class="fas fa-check-double"></i> MANTIDO NESTA CONFERÊNCIA</div>`;
                 } else {
+                    // ✅ CORREÇÃO: Força a exibição dos botões para pendências permanentes (PEND-)
                     acoesHtml = `
                         <div class="pendencia-actions" style="display: flex; gap: 8px; margin-top: 10px;">
                             <button type="button" class="btn-manter" style="flex:1; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="manterID('${p.id}', '${uid}')">
@@ -776,7 +778,7 @@ function renderizarConferencia() {
                             </div>
                         </div>
                         <div style="font-size: 0.85em; color: #333; margin-bottom: 4px;">
-                            <i class="fas fa-sort-amount-up" style="width: 18px; color: #666;"></i> Quantidade: <strong style="color: #d90f23;">${p.quantidade} un.</strong>
+                            <i class="fas fa-boxes" style="width: 18px; color: #666;"></i> Quantidade: <strong style="color: #d90f23;">${p.quantidade} un.</strong>
                         </div>
                         <div style="font-size: 0.85em; color: #333; margin-bottom: 8px;">
                             <i class="fas fa-comment-dots" style="width: 18px; color: #666;"></i> Descrição: <b>${p.descricao}</b>
@@ -836,7 +838,7 @@ function renderizarConferencia() {
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
                                     <span>Tomb.: <b>${t.tomb}</b></span>
                                     <div class="tombamento-options" style="display: flex; gap: 5px;">
-                                        ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" style="${statusU === 'ok' ? `background-color:${corTema}!important` : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">${isRecebimentoCarga ? 'CONFERIDO' : 'S/A'}</button>` : ''}
+                                        ${!ocultarSA ? `<button type="button" class="action-button sa-ok ${statusU === 'ok' ? 'active' : ''}" style="${statusU === 'ok' ? `background-color:${corTema}!important` : ''}" onclick="setItemStatusID(this, 'ok', '${uid}')">${isRecebimentoCarga ? 'ÍNTEGRO' : 'S/A'}</button>` : ''}
                                         <button type="button" class="action-button ca-alert ${hasPendenciaReal ? 'active' : ''}" onclick="abrirFormNovoID('${uid}', 'multi', '${nomeEscapado}', 1, '${t.tomb}')">${isRecebimentoCarga ? 'AVARIA' : '+ Alt'}</button>
                                     </div>
                                 </div>
@@ -896,7 +898,6 @@ function renderizarConferencia() {
             });
         }
 
-        // ✅ AGORA SIM: Monta o HTML do SETOR após processar todos os itens dele
         htmlSetores += `
             <div class="setor" data-total-items="${setor.itens.length}" data-id="${setor.id || setor.nome}">
                 <div class="setor-header" onclick="toggleSetor(this)" style="background-color: ${corTema} !important;">
@@ -910,7 +911,6 @@ function renderizarConferencia() {
             </div>`;
     });
 
-    // ✅ INJEÇÃO FINAL NA TELA
     const btnFin = document.getElementById('btn-finalizar');
     if (btnFin) {
         btnFin.insertAdjacentHTML('beforebegin', htmlSetores);
@@ -918,6 +918,7 @@ function renderizarConferencia() {
     }
     updateOverallStatus();
 }
+    
 async function carregarDadosRemotos() {
     // 1. CAPTURA IMEDIATA DOS PARÂMETROS
     const urlParamsLocal = new URLSearchParams(window.location.search);
@@ -1176,6 +1177,7 @@ async function carregarDadosRemotos() {
 
         const localNome = isChecklist ? `VISTORIA: ${infoLocal.nome}` : `${infoLocal.posto} - ${infoLocal.nome}`;
         const timestampAgora = firebase.firestore.Timestamp.now();
+        const dataAtualLog = new Date().toLocaleString('pt-BR'); // Para registros de data no histórico
         
         const urlParams = new URLSearchParams(window.location.search);
         const kmEntrada = urlParams.get('km') || "0";
@@ -1247,15 +1249,15 @@ async function carregarDadosRemotos() {
                             });
                         }
 
-                        // Conversão de IDs Temporários em Definitivos
+                        // ✅ AJUSTE CIRÚRGICO: Conversão de IDs Temporários em Definitivos (Metamorfose)
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id && String(p.id).startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
                                 entidade.historico_vida.push({
                                     evento: isChecklist ? "ALTERACAO_VISTORIA" : "NOVA_PENDENCIA", 
                                     id_pendencia: novoId, 
-                                    quem: String(p.autor_nome || ""),
-                                    data: String(p.data_criacao || ""), 
+                                    quem: String(p.autor_nome || conferenteCompleto),
+                                    data: String(p.data_criacao || dataAtualLog), 
                                     detalhes: `${p.quantidade}un - ${p.descricao || ""}`
                                 });
                                 return { ...p, id: novoId };
@@ -1288,6 +1290,7 @@ async function carregarDadosRemotos() {
                             });
                         }
 
+                        // ✅ AJUSTE CIRÚRGICO: Correção de status para o PDF
                         const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
@@ -1320,7 +1323,7 @@ async function carregarDadosRemotos() {
         });
 
         // ================================================================
-        // ✅ INÍCIO DA ATUALIZAÇÃO ATÔMICA (NOVA ARQUITETURA)
+        // ✅ ATUALIZAÇÃO ATÔMICA
         // ================================================================
         const batch = db.batch();
         
@@ -1373,61 +1376,52 @@ async function carregarDadosRemotos() {
                 const tombamentoAlvo = partesId[partesId.length - 1];
                 const tombRef = itemRef.collection('tombamentos').doc(tombamentoAlvo);
                 
-                // Converte as pendências da conferência para o histórico do ativo
                 const novosLogs = (itemAlterado.pendencias_ids || [])
-                    .filter(p => p.id && String(p.id).startsWith('PEND-'))
-                    .map(p => ({
-                        data: dataAtual,
+                    .filter(pend => pend.id && String(pend.id).startsWith('PEND-'))
+                    .map(pend => ({
+                        data: dataAtualLog,
                         evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
                         quem: conferenteCompleto,
-                        detalhes: `⚠️ Relatada alteração em ${localNome}: ${p.descricao}`,
-                        uid_pendencia: p.id
+                        detalhes: `⚠️ Relatada alteração em ${localNome}: ${pend.descricao}`,
+                        uid_pendencia: pend.id
                     }));
 
-                if (novosLogs.length > 0) {
-                    const idEvento = "EVT-" + Date.now();
-                    novosLogs.forEach((log, idx) => {
-                        batch.set(tombRef.collection('historico_vida').doc(idEvento + idx), log);
-                    });
-                    batch.update(tombRef, { situacao_atual: "PENDENTE" });
-                }
+                novosLogs.forEach((log, idx) => {
+                    batch.set(tombRef.collection('historico_vida').doc("EVT-P-" + Date.now() + idx), log);
+                });
+                batch.update(tombRef, { situacao_atual: "PENDENTE" });
             } 
             // LÓGICA SINGLE: Atualiza o Saldo da Unidade
             else {
-                const unidadeId = urlParams.get('unidade_id') || currentUserData.unidade_id;
-                if (unidadeId) {
-                    const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+                const unidadeId = urlParams.get('unidade_id') || "UNID-1767838511310"; // Pega o ID da unidade
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+                
+                const novasPendencias = (itemAlterado.pendencias_ids || [])
+                    .filter(pend => pend.id && String(pend.id).startsWith('PEND-'));
+                
+                if (novasPendencias.length > 0) {
+                    const qtdPendenteTotal = novasPendencias.reduce((sum, pend) => sum + (Number(pend.quantidade) || 0), 0);
                     
-                    // Captura as novas pendências para ajustar o saldo disponível vs pendente
-                    const novasPendencias = (itemAlterado.pendencias_ids || [])
-                        .filter(p => p.id && String(p.id).startsWith('PEND-'));
-                    
-                    if (novasPendencias.length > 0) {
-                        const qtdPendenteTotal = novasPendencias.reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-                        
-                        batch.update(saldoRef, {
-                            qtd_disp: firebase.firestore.FieldValue.increment(-qtdPendenteTotal),
-                            qtd_pend: firebase.firestore.FieldValue.increment(qtdPendenteTotal),
-                            last_update: dataAtual
-                        });
+                    batch.update(saldoRef, {
+                        qtd_disp: firebase.firestore.FieldValue.increment(-qtdPendenteTotal),
+                        qtd_pend: firebase.firestore.FieldValue.increment(qtdPendenteTotal),
+                        last_update: dataAtualLog
+                    });
 
-                        // Log na sub-coleção de histórico do saldo
-                        novasPendencias.forEach((p, idx) => {
-                            batch.set(saldoRef.collection('historico_vida').doc("EVT-S-" + Date.now() + idx), {
-                                data: dataAtual,
-                                evento: "PENDENCIA_RELATADA",
-                                quem: conferenteCompleto,
-                                detalhes: `⚠️ Alteração em ${localNome}: ${p.descricao}`,
-                                quantidade: p.quantidade,
-                                uid_pendencia: p.id
-                            });
+                    novasPendencias.forEach((pend, idx) => {
+                        batch.set(saldoRef.collection('historico_vida').doc("EVT-S-P-" + Date.now() + idx), {
+                            data: dataAtualLog,
+                            evento: "PENDENCIA_RELATADA",
+                            quem: conferenteCompleto,
+                            detalhes: `⚠️ Alteração em ${localNome}: ${pend.descricao}`,
+                            quantidade: pend.quantidade,
+                            uid_pendencia: pend.id
                         });
-                    }
+                    });
                 }
             }
         }
         
-        // Finalização
         await batch.commit();
         alert(isChecklist ? "✅ Vistoria Finalizada com Sucesso!" : "✅ Conferência Finalizada com Sucesso!");
         
