@@ -12279,17 +12279,10 @@ async function carregarCardsListasExistentes() {
             dadosLista.list = []; 
         }
 
+        // ✅ Gravação principal na coleção de listas
         batch.set(listaRef, dadosLista, { merge: true });
 
-        const rotaRef = db.collection('config_geral').doc('rotas');
-        batch.update(rotaRef, {
-            [listaUid]: {
-                nome: nomeAtivo,
-                posto: nomePosto,
-                unidade: unidadeSigla,
-                ativo: true
-            }
-        });
+        // 🗑️ REMOVIDO: Bloco que tentava atualizar config_geral/rotas (Causa do erro técnico)
 
         await batch.commit();
 
@@ -12455,14 +12448,11 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
     try {
         const batch = db.batch();
         
-        // 1. Remove a lista
+        // 1. Remove a lista (Operação principal)
         batch.delete(db.collection('listas_conferencia').doc(listaUid));
         
-        // 2. Remove da rota antiga (limpeza de legado)
-        const rotaRef = db.collection('config_geral').doc('rotas');
-        batch.update(rotaRef, {
-            [listaUid]: firebase.firestore.FieldValue.delete()
-        });
+        // 🗑️ REMOVIDO: Bloco que tentava atualizar config_geral/rotas
+        // A limpeza do legado agora é automática, pois não dependemos mais desse índice.
 
         await batch.commit();
         alert("Lista removida com sucesso.");
@@ -12479,12 +12469,16 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
     // 1. BLINDAGEM DE INSTÂNCIA
     const firestore = firebase.firestore(); 
 
-    // 2. NORMALIZAÇÃO RADICAL DE ID
+    // 2. NORMALIZAÇÃO RADICAL DE ID E RESET DE CONTROLE
     let idReal = (typeof uid === 'object' && uid !== null) ? (uid.id || uid.uid || uid.checklistId) : String(uid);
     idReal = idReal.trim();
     idListaSendoEditada = idReal;
     
-    // 3. DEFINIÇÃO ABSOLUTA DE ROTA E IDENTIDADE VISUAL
+    // Reset de arrays de movimentação para evitar contaminação
+    itensParaEstorno = []; 
+    if (typeof atualizarInterfaceEstorno === 'function') atualizarInterfaceEstorno();
+
+    // 3. DEFINIÇÃO DE CONTEXTO (VISTORIA VS CONFERÊNCIA)
     if (idReal.startsWith('CHECKLIST_VTR_')) {
         window.colecaoAtivaNoEditor = 'listas_checklist';
         window.isModoVistoria = true; 
@@ -12494,22 +12488,17 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         window.isModoVistoria = false;
         isModoVistoria = false;
     }
-	itensParaEstorno = []; 
-    atualizarInterfaceEstorno();
 
-    // --- CONFIGURAÇÃO UX HÍBRIDA (DEFINIDA APENAS UMA VEZ) ---
     const modoCor = isModoVistoria ? '#2c3e50' : '#800020';
     const modoTexto = isModoVistoria ? 'EDITOR DE CHECKLIST' : 'EDITOR DE LISTA';
     const modoIcone = isModoVistoria ? 'fa-car' : 'fa-clipboard-list';
 
-    // 4. INTERFACE (TRANSIÇÃO E ESTILIZAÇÃO)
+    // 4. INTERFACE E TRANSIÇÃO
     switchView('editor-arquitetura');
     
-    // Aplica a borda temática no topo fixo
     const headerSticky = document.querySelector('.editor-header-sticky');
     if (headerSticky) headerSticky.style.borderTop = `6px solid ${modoCor}`;
 
-    // Atualiza o Título sem destruir os IDs originais
     const elNome = document.getElementById('edit-vtr-nome');
     if (elNome) {
         elNome.innerHTML = `
@@ -12519,47 +12508,42 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
                     <span style="display: block; font-size: 0.5em; font-weight: 800; color: ${modoCor}; letter-spacing: 1px; text-transform: uppercase;">${modoTexto}</span>
                     <span style="font-size: 1em;">${nome}</span>
                 </div>
-            </div>
-        `;
+            </div>`;
     }
 
-    // Prepara o container de setores para o loading
     const containerDrag = document.getElementById('setores-drag-container');
     if (containerDrag) {
         containerDrag.innerHTML = `
             <div style="grid-column:1/-1; text-align:center; padding:50px;">
                 <i class="fas fa-sync fa-spin fa-2x" style="color: ${modoCor}"></i><br>
-                Sincronizando ${isModoVistoria ? 'Vistoria' : 'Materiais'}...
+                Sincronizando Dados...
             </div>`;
     }
 
     try {
-        // 5. BUSCA PERSISTENTE
+        // 5. BUSCA DIRETA NO DOCUMENTO (SEM DEPENDÊNCIA DE ROTAS)
         let doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         
         if (!doc.exists) {
-            console.warn(`⏳ [${idReal}] não localizado. Tentando re-sincronizar...`);
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 800)); // Pequeno delay para consistência do Firebase
             doc = await firestore.collection(window.colecaoAtivaNoEditor).doc(idReal).get();
         }
 
-        if (!doc.exists) throw new Error(`Lista não encontrada em ${window.colecaoAtivaNoEditor}.`);
+        if (!doc.exists) throw new Error("A arquitetura desta lista não foi localizada.");
 
         const dados = doc.data();
         arquiteturaAtiva = dados.list || []; 
         
-        // 6. ATUALIZAÇÃO DE RÓTULOS (SMALL)
+        // 6. SINCRONIZAÇÃO DE RÓTULOS E ESTOQUE
         const elUnidade = document.getElementById('edit-vtr-unidade');
-        if (elUnidade) {
-            elUnidade.textContent = `Unidade: ${dados.unidade_sigla || 'N/D'}`;
-        }
+        if (elUnidade) elUnidade.textContent = `Unidade: ${dados.unidade_sigla || 'N/D'}`;
         
         const inputBusca = document.getElementById('input-busca-estoque');
         if (inputBusca) {
             inputBusca.placeholder = isModoVistoria ? "Digitar item de vistoria..." : "Adicionar item do estoque...";
         }
 
-        // 7. CARGA DE ESTOQUE
+        // CARGA INTELIGENTE: Carrega o estoque baseado no unidade_id do próprio documento
         if (!isModoVistoria && dados.unidade_id) {
             await carregarEstoqueParaEditor(dados.unidade_id);
         } else {
@@ -12567,18 +12551,15 @@ async function abrirModalEditorItens(uid, nome, colecaoAlvo) {
         }
 
         renderizarArquiteturaEditor(); 
-        atualizarSelectSetores();
+        if (typeof atualizarSelectSetores === 'function') atualizarSelectSetores();
         
-        // Ajusta cor do botão de publicação
         const btnPub = document.querySelector('.btn-publish');
-        if (btnPub && !btnPub.classList.contains('modified')) {
-            btnPub.style.backgroundColor = isModoVistoria ? '#2c7399' : '#1b8a3e';
-        }
+        if (btnPub) btnPub.style.backgroundColor = isModoVistoria ? '#2c7399' : '#1b8a3e';
 
     } catch (e) {
-        console.error("❌ FALHA CRÍTICA NO EDITOR:", e);
-        alert("Erro ao carregar: " + e.message);
-        if (isModoVistoria) switchView('vtr-bases'); else switchView('listas');
+        console.error("❌ FALHA NO EDITOR:", e);
+        alert(e.message);
+        isModoVistoria ? switchView('vtr-bases') : switchView('listas');
     }
 }
 		async function verHistoricoVidaGlobal(uidGlobal, tombamento = null) {
@@ -13723,9 +13704,10 @@ async function confirmarPublicacaoLista() {
     if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque.")) return;
 
     const firestore = firebase.firestore();
-    const nomeAmigavelVtr = document.getElementById('edit-vtr-nome').textContent;
+	const elNome = document.getElementById('edit-vtr-nome');
+    const nomeAmigavelVtr = elNome ? (elNome.innerText || elNome.textContent).split('\n').pop().trim() : "Viatura";
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
-    const unidadeGestoraId = currentUserData.unidade_id; 
+    const unidadeGestoraId = currentUserData.unidade_id || (typeof dados !== 'undefined' ? dados.unidade_id : null);
 
     const estornosReais = itensParaEstorno.filter(i => i.uid_global !== "ITEM_VISTORIA_LIVRE");
 
