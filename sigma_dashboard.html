@@ -4714,12 +4714,11 @@ async function loadMyHistory() {
     
     if (!listContainer) return;
 
-    // ✅ Feedback visual moderno (Sigma V3 Style)
     listContainer.innerHTML = `
         <div style="text-align:center; padding:60px; color:#64748b;">
             <i class="fas fa-circle-notch fa-spin fa-2x"></i>
-            <p style="margin-top:15px; font-weight:700; letter-spacing:1px; text-transform:uppercase; font-size:0.8em;">
-                Processando base de dados da unidade...
+            <p style="margin-top:15px; font-weight:700; text-transform:uppercase; font-size:0.8em;">
+                Consultando registros da unidade ${currentUserData.unidade}...
             </p>
         </div>`;
     
@@ -4727,11 +4726,7 @@ async function loadMyHistory() {
     const dF = new Date(document.getElementById('glob-hist-end').value + 'T23:59:59');
     
     if (isNaN(dI.getTime()) || isNaN(dF.getTime())) {
-        listContainer.innerHTML = `
-            <div style="text-align:center; padding:40px; color:#d90f23; background: #fff1f2; border-radius:15px; margin-top:20px;">
-                <i class="fas fa-calendar-times fa-2x"></i>
-                <p style="margin-top:10px; font-weight:800;">Período inválido. Selecione as datas corretamente.</p>
-            </div>`;
+        listContainer.innerHTML = `<div class="status-error">Selecione o período corretamente.</div>`;
         return;
     }
 
@@ -4739,60 +4734,55 @@ async function loadMyHistory() {
     const endTS = firebase.firestore.Timestamp.fromDate(dF);
 
     try {
-        let refConf = db.collection('resultados_conferencias').where('timestamp', '>=', startTS).where('timestamp', '<=', endTS);
-        let refCheck = db.collection('resultados_checklist').where('timestamp', '>=', startTS).where('timestamp', '<=', endTS);
+        // ✅ 1. CONSULTA DIRECIONADA (Filtro por Unidade no Servidor)
+        let refConf = db.collection('resultados_conferencias')
+                        .where('timestamp', '>=', startTS)
+                        .where('timestamp', '<=', endTS);
+        
+        let refCheck = db.collection('resultados_checklist')
+                         .where('timestamp', '>=', startTS)
+                         .where('timestamp', '<=', endTS);
 
+        // Se for GESTOR, ele só pode ver a própria unidade (Filtro nativo do banco)
+        if (currentUserData.role === 'gestor') {
+            refConf = refConf.where('unidade', '==', currentUserData.unidade);
+            refCheck = refCheck.where('unidade', '==', currentUserData.unidade);
+        }
+
+        // Filtro opcional por nome do militar
         if (conferenteFilter) {
             refConf = refConf.where('conferente', '==', conferenteFilter);
             refCheck = refCheck.where('conferente', '==', conferenteFilter);
         }
 
+        // Executa busca
         const [snapConf, snapCheck] = await Promise.all([
-            refConf.orderBy('timestamp', 'desc').limit(100).get(),
-            refCheck.orderBy('timestamp', 'desc').limit(100).get()
+            refConf.orderBy('timestamp', 'desc').get(),
+            refCheck.orderBy('timestamp', 'desc').get()
         ]);
-
-        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-        const rotas = rotasDoc.data() || {};
-        const listToUnitMap = {};
-        Object.keys(rotas).forEach(key => {
-            const r = rotas[key];
-            listToUnitMap[r.nome] = r.unidade || 'GERAL';
-        });
 
         let docs = [];
         snapConf.forEach(d => docs.push({ ...d.data(), id_doc: d.id }));
         snapCheck.forEach(d => docs.push({ ...d.data(), id_doc: d.id }));
 
+        // Ordena tudo por tempo
         docs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
 
         let html = '';
         docs.forEach(d => {
+            // ✅ 2. FILTRO DE LOCAL (Filtro na memória apenas para o local específico)
             const localLimpo = d.local.includes(': ') ? d.local.split(': ')[1] : (d.local.split(' - ')[1] || d.local);
-            const unit = listToUnitMap[localLimpo] || 'GERAL';
-
-            // Regra de Negócio: Gestor de Unidade só audita a sua unidade
-            if(currentUserData.role === 'gestor' && unit !== currentUserData.unidade) return; 
             
             if(!localFilter || localLimpo === localFilter) {
                 html += criarItemHistoricoHTML(d);
             }
         });
 
-        // ✅ Renderização Final na Timeline Global
-        listContainer.innerHTML = html || `
-            <div style="text-align:center; padding:80px; color:#94a3b8;">
-                <i class="fas fa-binoculars fa-3x" style="opacity:0.2; margin-bottom:20px; display:block;"></i>
-                <p style="font-weight:600;">Nenhum registro encontrado para estes filtros.</p>
-            </div>`;
+        listContainer.innerHTML = html || `<div style="text-align:center; padding:80px; color:#94a3b8;"><p>Nenhum registro encontrado.</p></div>`;
 
     } catch(e){ 
         console.error("Erro no loadGlobalHistory:", e);
-        listContainer.innerHTML = `
-            <div style="text-align:center; padding:40px; color:#d90f23;">
-                <i class="fas fa-exclamation-triangle fa-2x"></i>
-                <p style="margin-top:10px; font-weight:800;">Erro na consulta global. Verifique sua conexão.</p>
-            </div>`;
+        listContainer.innerHTML = `<div style="text-align:center; padding:40px; color:#d90f23;"><p>Erro na consulta. Certifique-se de que os índices do Firestore foram criados.</p></div>`;
     }
 }
        function criarItemHistoricoHTML(data) {
