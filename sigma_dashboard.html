@@ -186,11 +186,11 @@
 		#main-sidebar a.active { background: #fff; color: #800020; border-left: 4px solid #800020; box-shadow: 2px 0 10px rgba(0,0,0,0.02); }
 		.menu-label { color: #94a3b8 !important; border-bottom: 1px solid #e2e8f0; margin: 10px 20px; padding: 10px 0 !important; }
 		.sigma-v3-dropdown-btn .arrow-icon { margin-left: auto; font-size: 0.8em; transition: 0.3s; }
-		.sigma-v3-dropdown-btn.open .arrow-icon { transform: rotate(180deg); color: #fff; }
-		.sigma-v3-submenu { background: #e8eff5; }
-		.sigma-v3-submenu a { color: #64748b !important; }
-		.sigma-v3-submenu a.active { color: #800020 !important; font-weight: 800; }
-		.sigma-v3-submenu a:hover { opacity: 1; background: transparent !important; color: #800020 !important; }
+		.sigma-v3-dropdown-btn.open .arrow-icon { transform: rotate(180deg); }
+		.sigma-v3-submenu { display: none; background: #e2e8f0; padding-left: 12px; border-radius: 0 0 10px 10px; }
+		.sigma-v3-submenu a { font-size: 0.82em !important; color: #475569 !important; border-left: none !important; }
+		.sigma-v3-submenu a:hover { color: #800020 !important; background: rgba(0,0,0,0.03); }
+		.sigma-v3-submenu a.active { color: #800020 !important; font-weight: 800; background: #fff !important; }
 		#sidebar-user-info span { color: #1e293b !important; }
 		@keyframes fadeInSub { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 		
@@ -2530,15 +2530,15 @@ input:checked + .slider:before {
         	<span>Gestão de Cautelas</span>
         	<i class="fas fa-chevron-down arrow-icon"></i>
     	</a>
-    	<div id="submenu-cautelas" class="sigma-v3-submenu">
+    	<div id="submenu-cautelas" class="sigma-v3-submenu" style="display: none;">
         	<a onclick="switchView('cautelas-nova')" id="link-cautelas-nova">
             	<i class="fas fa-plus-circle"></i> Nova Cautela
         	</a>
         	<a onclick="switchView('cautelas-ativas')" id="link-cautelas-ativas">
-            	<i class="fas fa-shield-check"></i> Cautelas Ativas
+            	<i class="fas fa-file-signature"></i> Cautelas Ativas
         	</a>
-        		<a onclick="switchView('cautelas-receber')" id="link-cautelas-receber">
-            	<i class="fas fa-inbox-in"></i> Cautelas a Receber
+        	<a onclick="switchView('cautelas-receber')" id="link-cautelas-receber">
+            	<i class="fas fa-file-import"></i> Cautelas a Receber
         	</a>
         	<a onclick="switchView('cautelas-historico')" id="link-cautelas-historico">
             	<i class="fas fa-history"></i> Histórico de Cautelas
@@ -4028,18 +4028,26 @@ function setupMasksForModal() {
     }
 }
 		function toggleSubMenu(id, btn) {
-    		const submenu = document.getElementById(id);
-    		const isOpen = submenu.style.display === 'block';
+    const submenu = document.getElementById(id);
+    const isVisible = submenu.style.display === 'block';
     
-    		// Fecha todos os outros submenus abertos (Opcional)
-    		document.querySelectorAll('.sigma-v3-submenu').forEach(el => el.style.display = 'none');
-    		document.querySelectorAll('.sigma-v3-dropdown-btn').forEach(el => el.classList.remove('open'));
+    // Oculta outros submenus abertos para manter a sidebar limpa
+    document.querySelectorAll('.sigma-v3-submenu').forEach(s => {
+        if (s.id !== id) s.style.display = 'none';
+    });
+    document.querySelectorAll('.sigma-v3-dropdown-btn').forEach(b => {
+        if (b !== btn) b.classList.remove('open');
+    });
 
-    		if (!isOpen) {
-        		submenu.style.display = 'block';
-        		btn.classList.add('open');
-    		}
-		}
+    // Alterna o estado atual
+    if (isVisible) {
+        submenu.style.display = 'none';
+        btn.classList.remove('open');
+    } else {
+        submenu.style.display = 'block';
+        btn.classList.add('open');
+    }
+}
             // --- NOVO: Cards Específicos para Operacional ---
 function renderOperacionalCards() {
     const container = document.getElementById('operacional-cards-container');
@@ -5834,6 +5842,7 @@ async function compartilharPdfInterno() {
         }
         
         function switchView(v) {
+    // 1. LIMPEZAS E PREPARAÇÕES INICIAIS
     const editorArq = document.getElementById('view-editor-arquitetura');
     if (editorArq) editorArq.style.display = 'none';
 
@@ -5845,21 +5854,47 @@ async function compartilharPdfInterno() {
     const appRunner = document.getElementById('app-runner-container');
     if (appRunner) { appRunner.style.display = 'none'; }
 
-    // ✅ CONTROLE DE ACESSO DINÂMICO (Sidebar)
+    // ✅ BLOCO INTERCEPTADOR DE CAUTELAS (POSIÇÃO CORRIGIDA)
+    // Este bloco precisa interceptar 'v' antes da lógica de 'targetId'
+    if (v && v.startsWith('cautelas')) {
+        // Mostra apenas a seção PAI (view-cautelas)
+        const viewCautelas = document.getElementById('view-cautelas');
+        if (viewCautelas) viewCautelas.style.display = 'block';
+
+        // Limpa o palco interno para novo conteúdo
+        const container = document.getElementById('cautelas-content');
+        if (container) container.innerHTML = '<div style="text-align:center; padding:50px;"><i class="fas fa-sync fa-spin"></i> Preparando tela...</div>';
+
+        // Dispara a função correspondente
+        if (v === 'cautelas-nova') loadNewCautelaForm();
+        else if (v === 'cautelas-ativas') showCautelasDashboard('Cautelas Ativas');
+        else if (v === 'cautelas-receber') showCautelasDashboard('Cautelas a Receber');
+        else if (v === 'cautelas-historico') showCautelasDashboard('Histórico');
+
+        // Marca o link ativo no submenu da Sidebar V3
+        document.querySelectorAll('.sigma-v3-submenu a').forEach(el => el.classList.remove('active'));
+        const subLink = document.getElementById(`link-${v}`);
+        if (subLink) subLink.classList.add('active');
+
+        // Retorna aqui para evitar o erro de "View não encontrada" abaixo
+        return; 
+    }
+
+    // 2. CONTROLE DE ACESSO DINÂMICO (Sidebar)
     if (currentUserData) {
         const role = currentUserData.role;
         const podeGerenciar = (role === 'admin' || role === 'gestor_geral' || role === 'gestor');
         
-        // Libera Listas e Postos para o Gestor
         const linkListas = document.getElementById('link-listas');
         const linkPostos = document.getElementById('link-postos');
         const linkGlobalHistory = document.getElementById('link-global-history');
-		
+        
         if (linkListas) linkListas.style.display = podeGerenciar ? 'block' : 'none';
         if (linkPostos) linkPostos.style.display = podeGerenciar ? 'block' : 'none';
-		if (linkGlobalHistory) linkGlobalHistory.style.display = podeGerenciar ? 'block' : 'none';
+        if (linkGlobalHistory) linkGlobalHistory.style.display = podeGerenciar ? 'block' : 'none';
     }
 
+    // 3. DEFINIÇÃO DINÂMICA DA VIEW (Lógica padrão)
     let targetId;
     if (v === 'listas') {
         targetId = 'menu-editor-listas';
@@ -5878,13 +5913,14 @@ async function compartilharPdfInterno() {
         return;
     }
     
+    // 4. ATIVAÇÃO VISUAL DO LINK NA SIDEBAR (Links de nível 1)
     document.querySelectorAll('#main-sidebar a').forEach(el => el.classList.remove('active'));
     const activeLink = document.getElementById(`link-${v}`);
     if (activeLink) {
         activeLink.classList.add('active');
     }
 
-    // 5. DISPARO DE CARREGAMENTO DE DADOS
+    // 5. DISPARO DE CARREGAMENTO DE DADOS ESPECÍFICOS
     if (v === 'dashboard') {
         const resCont = document.getElementById('resume-container');
         const adminCont = document.getElementById('admin-gestor-cards-container');
@@ -5896,7 +5932,6 @@ async function compartilharPdfInterno() {
             const role = currentUserData.role || 'operacional';
             const isAdmin = (role === 'admin');
             const isGestorGeral = (role === 'gestor_geral');
-            const p = currentUserData.permissoes || {};
             const canView = isAdmin || isGestorGeral || (role === 'gestor');
 
             if (role === 'operacional') {
@@ -5918,7 +5953,6 @@ async function compartilharPdfInterno() {
     }
     
     if (v === 'postos') {
-        // ✅ DISPARO: Carrega todos os postos (a lógica de permissão de edição fica dentro da função)
         carregarPostosVisuais();
     }
 
@@ -5931,34 +5965,6 @@ async function compartilharPdfInterno() {
         carregarUnidadesSelect();
         setupCadastroMilitarLogic();
     }
-    
-    // --- DENTRO DA FUNÇÃO switchView(v) ---
-
-if (v.startsWith('cautelas')) {
-    // 1. Esconde todas as outras seções
-    document.querySelectorAll('.view-section').forEach(el => el.style.display = 'none');
-    
-    // 2. Mostra apenas a seção PAI (view-cautelas)
-    const viewCautelas = document.getElementById('view-cautelas');
-    if (viewCautelas) viewCautelas.style.display = 'block';
-
-    // 3. Limpa o palco interno
-    const container = document.getElementById('cautelas-content');
-    if (container) container.innerHTML = '<div style="text-align:center; padding:50px;"><i class="fas fa-sync fa-spin"></i> Preparando tela...</div>';
-
-    // 4. Dispara a função correta
-    if (v === 'cautelas-nova') loadNewCautelaForm();
-    else if (v === 'cautelas-ativas') showCautelasDashboard('Cautelas Ativas');
-    else if (v === 'cautelas-receber') showCautelasDashboard('Cautelas a Receber');
-    else if (v === 'cautelas-historico') showCautelasDashboard('Histórico');
-
-    // 5. Marca o link ativo no submenu
-    document.querySelectorAll('.sigma-v3-submenu a').forEach(el => el.classList.remove('active'));
-    const subLink = document.getElementById(`link-${v}`);
-    if (subLink) subLink.classList.add('active');
-
-    return; 
-}
             
     if (v === 'listas') {
         carregarFiltrosParaNovoEditor(); 
@@ -5988,6 +5994,7 @@ if (v.startsWith('cautelas')) {
         loadMyHistory();
     }
 
+    // 6. TRATAMENTO MOBILE
     if (window.innerWidth <= 768) {
         history.pushState(null, null, location.href);
         if (typeof closeMenuMobile === "function") closeMenuMobile();
