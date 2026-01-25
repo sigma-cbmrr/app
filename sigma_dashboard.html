@@ -10251,11 +10251,14 @@ async function verDetalhesItemAlmox(docId) {
 
         let htmlPrioridade = ''; let htmlRestante = '';   
         let cDisp = 0, cUso = 0, cCaut = 0, cPend = 0;
+        
+        // Mapeamento de Pendências com DNA (Vínculo com Viaturas)
+        const pendenciasVtrMap = {}; 
 
         // --- 1. PROCESSAMENTO DE ESTOQUE (ALMOXARIFADO) ---
         if (ehMulti) {
             const snapTombs = await db.collection('inventario').doc(docId).collection('tombamentos').get();
-            snapTombs.forEach(tDoc => {
+            for (const tDoc of snapTombs.docs) {
                 const t = tDoc.data();
                 const ehDono = (t.local_id === currentUserData.unidade_id);
                 const podeEnviar = (souAdminGeral && t.local_id === "ADMIN") || (ehDono && !souAdminGeral);
@@ -10278,19 +10281,31 @@ async function verDetalhesItemAlmox(docId) {
                         </tr>`;
                     if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
                 }
-            });
+            }
         } else {
             const snapSaldos = await db.collection('inventario').doc(docId).collection('saldos_unidades').get();
-            snapSaldos.forEach(sDoc => {
+            for (const sDoc of snapSaldos.docs) {
                 const s = sDoc.data();
                 const ehDono = (sDoc.id === currentUserData.unidade_id);
                 const podeEnviar = (souAdminGeral && sDoc.id === "ADMIN") || (ehDono && !souAdminGeral);
                 
-                const saldoDisp = Number(s.qtd_disp) || 0;
-                const saldoPendAlmox = Number(s.qtd_pend) || 0;
-                const saldoTotalAlmox = saldoDisp + saldoPendAlmox;
+                // Busca o DNA das pendências neste saldo
+                const snapLogs = await sDoc.ref.collection('historico_vida').where('evento', '==', 'PENDENCIA_RELATADA').get();
+                let pendenciaVazanteParaVtr = 0;
+                
+                snapLogs.forEach(logDoc => {
+                    const log = logDoc.data();
+                    if (log.lista_origem_id) {
+                        pendenciasVtrMap[log.lista_origem_id] = (pendenciasVtrMap[log.lista_origem_id] || 0) + (log.quantidade || 0);
+                        pendenciaVazanteParaVtr += (log.quantidade || 0);
+                    }
+                });
 
-                if (ehDono || souAdminGeral) { cDisp += saldoDisp; cPend += saldoPendAlmox; }
+                const saldoDisp = Number(s.qtd_disp) || 0;
+                const saldoPendRealAlmox = (Number(s.qtd_pend) || 0) - pendenciaVazanteParaVtr;
+                const saldoTotalAlmox = saldoDisp + saldoPendRealAlmox;
+
+                if (ehDono || souAdminGeral) { cDisp += saldoDisp; cPend += (Number(s.qtd_pend) || 0); }
 
                 if (saldoTotalAlmox > 0) {
                     let bufferHtml = `
@@ -10301,8 +10316,8 @@ async function verDetalhesItemAlmox(docId) {
                                 <small style="color:#10b981; font-weight:700;">DISPONÍVEL</small>
                             </td>
                             <td style="text-align:center;">
-                                ${saldoPendAlmox > 0 
-                                    ? `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">${saldoPendAlmox} un. PENDENTE</span>` 
+                                ${saldoPendRealAlmox > 0 
+                                    ? `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">${saldoPendRealAlmox} un. PENDENTE</span>` 
                                     : `<span style="color:#cbd5e1;">---</span>`}
                             </td>
                             <td style="text-align:right;">
@@ -10311,7 +10326,7 @@ async function verDetalhesItemAlmox(docId) {
                         </tr>`;
                     if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
                 }
-            });
+            }
         }
 
         // --- 2. BUSCA EM VIATURAS ---
@@ -10345,11 +10360,12 @@ async function verDetalhesItemAlmox(docId) {
                     });
                 } else {
                     const qtdVtr = Number(itNaVtr.quantidadeEsperada) || 0;
-                    const qtdPendVtr = Number(itNaVtr.quantidadePendencia) || Number(itNaVtr.qtd_pend) || 0;
+                    // Tenta ler do DNA mapeado no almoxarifado, senão lê do objeto da vtr
+                    const qtdPendVtr = pendenciasVtrMap[docVtr.id] || Number(itNaVtr.quantidadePendencia) || 0;
                     
                     if (ehMinhaVtr || souAdminGeral) {
                         cUso += (qtdVtr - qtdPendVtr);
-                        cPend += qtdPendVtr;
+                        // cPend já foi incrementado no processamento do saldo para evitar duplicidade de soma
                     }
 
                     if (qtdVtr > 0) {
@@ -10375,6 +10391,7 @@ async function verDetalhesItemAlmox(docId) {
             });
         });
 
+        // Construção final do HTML e Resumo (Mantido Íntegro)
         let finalHtml = "";
         if (htmlPrioridade) {
             finalHtml += `<tr class="sigma-v3-table-group-header"><td colspan="4" style="background:#f0fdf4; color:#166534; font-weight:800; font-size:0.75em; padding:10px 15px; text-transform:uppercase; letter-spacing:1px; border-left:4px solid #10b981;"><i class="fas fa-shield-alt"></i> Custódia de Minha Unidade (Estoque Local)</td></tr>`;
@@ -10405,7 +10422,7 @@ async function verDetalhesItemAlmox(docId) {
                     <b style="font-size:1.6em; color:#b91c1c;">${cPend}</b>
                 </div>
                 <div style="background:#800020; padding:15px; border-radius:12px; text-align:center;">
-                    <small style="color:#fff; font-weight:800; display:block; font-size:0.7em; text-transform:uppercase;">Total ${souAdminGeral ? 'Geral' : 'Local'}</small>
+                    <small style="color:#fff; font-weight:800; display:block; font-size:0.7em; text-transform:uppercase;">Total Geral</small>
                     <b style="font-size:1.6em; color:#fff;">${totalG}</b>
                 </div>
             </div>`;
@@ -10413,7 +10430,6 @@ async function verDetalhesItemAlmox(docId) {
         const resOld = document.getElementById('almox-resumo-topo');
         if(resOld) resOld.remove();
         palcoRastreio.querySelector('#header-detalhe-item').insertAdjacentHTML('afterend', extratoHtml);
-        
         tbodyRastreio.innerHTML = finalHtml || `<tr><td colspan="4" style="text-align:center; padding:60px; color:#64748b;"><i class="fas fa-box-open fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>Nenhum registro localizado.</td></tr>`;
 
     } catch (e) {
