@@ -10253,7 +10253,7 @@ async function verDetalhesItemAlmox(docId) {
         let htmlPrioridade = ''; let htmlRestante = '';   
         let cDisp = 0, cUso = 0, cCaut = 0, cPend = 0;
 
-        // --- LÓGICA DE PROCESSAMENTO (ESTOQUE) ---
+        // --- 1. PROCESSAMENTO DE ESTOQUE (ALMOXARIFADO) ---
         if (ehMulti) {
             const snapTombs = await db.collection('inventario').doc(docId).collection('tombamentos').get();
             snapTombs.forEach(tDoc => {
@@ -10296,7 +10296,7 @@ async function verDetalhesItemAlmox(docId) {
                         <tr style="background:${ehDono ? 'rgba(16,185,129,0.03)' : '#fff'};">
                             <td><i class="fas fa-warehouse" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${s.unidade_sigla}</span></td>
                             <td style="text-align:center;"><span style="color:#15803d; font-weight:800;">${saldoDisp} un.</span></td>
-                            <td style="text-align:center;">${saldoPend > 0 ? `<span style="color:#b91c1c; font-weight:800;">${saldoPend} un.</span>` : '---'}</td>
+                            <td style="text-align:center;">${saldoPend > 0 ? `<span style="color:#b91c1c; font-weight:800;">${saldoPend} un.</span>` : '<span style="color:#15803d; font-weight:800;">DISPONÍVEL</span>'}</td>
                             <td style="text-align:right;">
                                 ${podeEnviar ? `<button onclick="prepararMovimentacao('${docId}','ENVIO')" title="Transferir saldo deste lote para outra unidade" class="sigma-v3-tab active" style="background:#800020;"><i class="fas fa-paper-plane"></i></button>` : ''}
                             </td>
@@ -10306,7 +10306,7 @@ async function verDetalhesItemAlmox(docId) {
             });
         }
 
-        // --- BUSCA EM VIATURAS ---
+        // --- 2. BUSCA EM VIATURAS (COM CORREÇÃO DE PENDÊNCIA LOCALIZADA) ---
         const snapListas = await db.collection('listas_conferencia').where('ativo', '==', true).get();
         snapListas.forEach(docVtr => {
             const vtrData = docVtr.data();
@@ -10317,13 +10317,16 @@ async function verDetalhesItemAlmox(docId) {
                 
                 if (ehMulti) {
                     (itNaVtr.tombamentos || []).forEach(t => {
-                        const temC = !!t.cautela; const temP = t.pendencias_ids?.length > 0;
+                        const temC = !!t.cautela; 
+                        const temP = t.pendencias_ids && t.pendencias_ids.length > 0; // PENDÊNCIA DA VIATURA
+                        
                         if (ehMinhaVtr || souAdminGeral) { if (temP) cPend++; else if (temC) cCaut++; else cUso++; }
+                        
                         const statusTxt = temP ? 'PENDENTE' : (temC ? 'CAUTELADO' : 'EM USO');
                         const badgeStyle = temP ? 'background:#fee2e2;color:#b91c1c;' : (temC ? 'background:#fff3cd;color:#856404;' : 'background:#f1f5f9;color:#475569;');
                         
                         let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
-                            <td><span style="font-weight:700;">${t.tomb}</span><br><small style="color:#64748b;"><i class="fas fa-truck"></i> ${vtrData.ativo_nome}</small></td>
+                            <td><span style="font-weight:700;">${t.tomb}</span><br><small style="color:#64748b;"><i class="fas fa-truck-container" style="margin-right:5px;"></i> ${vtrData.ativo_nome}</small></td>
                             <td style="text-align:center; font-size:0.9em; font-weight:600;"><i class="fas fa-truck-monster" style="margin-right:5px; opacity:0.5;"></i> Viatura</td>
                             <td style="text-align:center;"><span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; ${badgeStyle}">${statusTxt}</span></td>
                             <td style="text-align:right;">
@@ -10336,12 +10339,23 @@ async function verDetalhesItemAlmox(docId) {
                         if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
                     });
                 } else {
+                    // LÓGICA SINGLE: Se houver pendência registrada na viatura
                     const qtdVtr = Number(itNaVtr.quantidadeEsperada) || 0;
-                    if (ehMinhaVtr || souAdminGeral) cUso += qtdVtr;
+                    const qtdPendVtr = Number(itNaVtr.quantidadePendencia) || 0; // Assume campo de pendência na lista
+                    
+                    if (ehMinhaVtr || souAdminGeral) {
+                        cUso += (qtdVtr - qtdPendVtr);
+                        cPend += qtdPendVtr;
+                    }
+
                     let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
-                        <td><i class="fas fa-truck" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${vtrData.ativo_nome}</span></td>
+                        <td><i class="fas fa-truck-pickup" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${vtrData.ativo_nome}</span></td>
                         <td style="text-align:center;"><span style="color:#64748b; font-weight:800;">${qtdVtr} un.</span></td>
-                        <td style="text-align:center;"><span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#f1f5f9; color:#475569;">EM USO</span></td>
+                        <td style="text-align:center;">
+                            ${qtdPendVtr > 0 
+                                ? `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">${qtdPendVtr} PENDENTE</span>` 
+                                : `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#f1f5f9; color:#475569;">EM USO</span>`}
+                        </td>
                         <td style="text-align:right;">
                             ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO', null,'${docVtr.id}')" title="Recolher quantidade para o almoxarifado local" class="sigma-v3-tab" style="background:#f59e0b; color:white;"><i class="fas fa-arrow-down"></i></button>` : ''}
                         </td>
@@ -10353,12 +10367,10 @@ async function verDetalhesItemAlmox(docId) {
 
         // ✅ CONSTRUÇÃO DO CORPO FINAL COM SEPARADORES
         let finalHtml = "";
-        
         if (htmlPrioridade) {
             finalHtml += `<tr class="sigma-v3-table-group-header"><td colspan="4" style="background:#f0fdf4; color:#166534; font-weight:800; font-size:0.75em; padding:10px 15px; text-transform:uppercase; letter-spacing:1px; border-left:4px solid #10b981;"><i class="fas fa-shield-alt"></i> Custódia de Minha Unidade (Estoque Local)</td></tr>`;
             finalHtml += htmlPrioridade;
         }
-        
         if (htmlRestante) {
             finalHtml += `<tr class="sigma-v3-table-group-header"><td colspan="4" style="background:#f8fafc; color:#64748b; font-weight:800; font-size:0.75em; padding:25px 15px 10px 15px; text-transform:uppercase; letter-spacing:1px; border-left:4px solid #cbd5e1;"><i class="fas fa-globe-americas"></i> Disponibilidade em Outras Unidades (Consulta Global)</td></tr>`;
             finalHtml += htmlRestante;
