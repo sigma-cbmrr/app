@@ -220,6 +220,21 @@
 		.swal-v3-form-group { text-align: left; margin-bottom: 15px; }
 		.swal-v3-form-group label { display: block; font-weight: 800; font-size: 0.75em; color: #64748b; text-transform: uppercase; margin-bottom: 6px; }
 		.swal-v3-form-group input { width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.95em; box-sizing: border-box; }
+
+		/*CARDS DE POSTOS*/
+		.v3-posto-card { background: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0; position: relative; overflow: hidden; display: flex; flex-direction: column; min-height: 250px; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02), 0 2px 4px -1px rgba(0,0,0,0.01); }
+		.v3-posto-card:hover { transform: translateY(-10px); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05), 0 10px 10px -5px rgba(0,0,0,0.02); border-color: #8e44ad; }
+		.v3-posto-header { height: 80px; display: flex; align-items: center; justify-content: center; background: #f8fafc; position: relative; }
+		.v3-posto-icon-wrapper { width: 50px; height: 50px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.4em; }
+		.v3-posto-body { padding: 20px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between; text-align: center; }
+		.v3-posto-badge-dono { position: absolute; top: 15px; left: 15px; background: #1b8a3e; color: #fff; font-size: 0.6em; padding: 4px 10px; border-radius: 50px; font-weight: 900; letter-spacing: 0.5px; box-shadow: 0 4px 10px rgba(27, 138, 62, 0.3); z-index: 5; }
+		.v3-posto-actions { position: absolute; top: 15px; right: 15px; display: flex; gap: 8px; z-index: 5; }
+		.v3-btn-action { width: 32px; height: 32px; border-radius: 10px; border: none; background: rgba(255,255,255,0.9); color: #64748b; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+		.v3-btn-action:hover { transform: scale(1.1); color: #fff; }
+		.v3-btn-edit:hover { background: #2c7399; }
+		.v3-btn-delete:hover { background: #ef4444; }
+		.v3-posto-footer { border-top: 1px solid #f1f5f9; padding-top: 15px; margin-top: 15px; text-align: left; }
+		
 		/* ================================================================
    		BLOCO NOVO: VIATURAS & BASES (IDENTIDADE VISUAL SIGMA)
    		================================================================ */
@@ -5249,15 +5264,15 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
     const container = document.getElementById('postos-cards-container');
     if (!container) return;
 
-    // Loading Shimmer/Spinner V3
+    // Loading Shimmer/Spinner V3 (Padronizado)
     container.innerHTML = `
         <div style="grid-column: 1/-1; text-align:center; padding:60px; color:#64748b;">
-            <i class="fas fa-sync fa-spin fa-2x" style="opacity:0.3; margin-bottom:15px; display:block;"></i>
-            <span style="font-weight:600; letter-spacing:1px;">MAPEANDO TERRITÓRIOS...</span>
+            <i class="fas fa-radar fa-spin fa-3x" style="opacity:0.3; margin-bottom:15px; display:block;"></i>
+            <span style="font-weight:700; letter-spacing:1px; text-transform:uppercase; font-size:0.8em;">Sincronizando Territórios...</span>
         </div>`;
 
     try {
-        // 1. Busca dados em paralelo (Performance)
+        // 1. Busca dados em paralelo para máxima performance
         const [snapPostos, snapListas] = await Promise.all([
             db.collection('postos_estruturados').where('ativo', '==', true).orderBy('nome', 'asc').get(),
             db.collection('listas_conferencia').where('ativo', '==', true).get()
@@ -5284,61 +5299,65 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
             const ehDono = (posto.unidade_id === minhaUnidadeId);
             const podeGerenciar = isAdminGeral || ehDono;
 
-            // Filtro de ativos vinculados a este posto
+            // Filtro de ativos vinculados a este posto (Cruzamento de dados)
             const ativosNoPosto = todasListas.filter(l => l.posto_id === doc.id);
             const nomesAtivos = ativosNoPosto.map(l => l.ativo_nome);
             
-            // Configuração Visual
+            // Definição de Identidade Visual por Posse
             const corTema = ehDono ? '#1b8a3e' : '#8e44ad';
             const borderStyle = `border-top: 6px solid ${corTema} !important;`;
-            const badgeUnidade = ehDono ? 
-                `<span style="position:absolute; top:10px; left:10px; background:#1b8a3e; color:#fff; font-size:0.6em; padding:3px 8px; border-radius:4px; font-weight:800; z-index:10; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">SUA UNIDADE</span>` : '';
 
             html += `
-                <div class="unit-building-card" 
-                     onclick="abrirGestaoPosto('${doc.id}')" 
-                     style="cursor:pointer; background:#fff; border:1px solid #e2e8f0; ${borderStyle} border-radius:16px; position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:240px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); ${!podeGerenciar ? 'opacity: 0.9;' : ''}">
+                <div class="v3-posto-card" 
+                     onclick="abrirGestaoPosto('${doc.id}')"
+                     style="${borderStyle} ${!podeGerenciar ? 'opacity: 0.9;' : ''}">
                     
-                    ${badgeUnidade}
+                    ${ehDono ? `<span class="v3-posto-badge-dono">MINHA UNIDADE</span>` : ''}
 
-                    <div class="card-actions-container">
+                    <div class="v3-posto-actions">
                         ${podeGerenciar ? `
-                            <button class="btn-edit-unit-card" title="Editar" 
+                            <button class="v3-btn-action v3-btn-edit" title="Editar" 
                                     onclick="event.stopPropagation(); abrirFormularioPosto({ uid: '${doc.id}', nome: '${posto.nome}', endereco: '${posto.endereco}' })">
-                                <i class="fas fa-pencil-alt" style="color:#64748b;"></i>
+                                <i class="fas fa-pencil-alt"></i>
                             </button>
-                            <button class="btn-delete-unit-card" title="Excluir" 
+                            <button class="v3-btn-action v3-btn-delete" title="Excluir" 
                                     onclick="event.stopPropagation(); deletarPostoSistema('${doc.id}', '${posto.nome}')">
                                 <i class="fas fa-trash-alt"></i>
                             </button>
-                        ` : '<i class="fas fa-lock" style="margin:12px; color:#cbd5e1;" title="Somente Leitura"></i>'}
+                        ` : `
+                            <div class="v3-btn-action" title="Apenas Leitura">
+                                <i class="fas fa-lock" style="font-size:0.8em; opacity:0.5;"></i>
+                            </div>
+                        `}
                     </div>
                     
-                    <div style="width: 100%; height: 75px; display: flex; align-items: center; justify-content: center; background: #f8fafc;">
-                        <div style="width: 45px; height: 45px; background: ${corTema}15; color: ${corTema}; border-radius: 12px; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-flag" style="font-size: 1.5em;"></i>
+                    <div class="v3-posto-header">
+                        <div class="v3-posto-icon-wrapper" style="background: ${corTema}15; color: ${corTema};">
+                            <i class="fas fa-flag"></i>
                         </div>
                     </div>
 
-                    <div style="padding: 15px 20px; flex-grow: 1; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div style="text-align: center;">
-                            <span style="display:block; font-weight:900; font-size:1.15em; color:#1e293b; margin-bottom: 6px; letter-spacing:-0.3px;">${posto.nome}</span>
-                            
-                            <div style="display: flex; align-items: center; justify-content: center; gap: 6px; color: #64748b; font-size: 0.8em; font-weight: 600;">
+                    <div class="v3-posto-body">
+                        <div>
+                            <span style="display:block; font-weight:900; font-size:1.25em; color:#1e293b; letter-spacing:-0.5px; margin-bottom:5px;">
+                                ${posto.nome}
+                            </span>
+                            <div style="display: flex; align-items: center; justify-content: center; gap: 6px; color: #64748b; font-size: 0.85em; font-weight: 600;">
                                 <i class="fas fa-map-marker-alt" style="color: #ef4444; font-size: 0.9em;"></i>
-                                <span style="line-height: 1.2;">${posto.endereco || 'Endereço N/D'}</span>
+                                <span style="line-height: 1.2;">${posto.endereco || 'Endereço não informado'}</span>
                             </div>
+                            <small style="color:#cbd5e1; font-weight:800; font-size:0.7em; text-transform:uppercase; margin-top:10px; display:block; letter-spacing:1px;">
+                                ${posto.unidade_sigla || 'UNIDADE NÃO VINCULADA'}
+                            </small>
                         </div>
                         
-                        <div style="border-top: 1px solid #f1f5f9; padding-top:12px; margin-top: 15px;">
-                            <span style="font-weight:800; color:${corTema}; text-transform:uppercase; font-size:0.65em; display:block; letter-spacing:0.5px; margin-bottom:6px;">
-                                <i class="fas fa-link"></i> Ativos Vinculados:
+                        <div class="v3-posto-footer">
+                            <span style="font-weight:800; color:${corTema}; text-transform:uppercase; font-size:0.65em; display:block; letter-spacing:1px; margin-bottom:8px;">
+                                <i class="fas fa-link"></i> Ativos em Prontidão:
                             </span>
-                            <div style="display:flex; align-items:center; gap:8px;">
-                                <span style="color:${ativosNoPosto.length > 0 ? '#475569' : '#94a3b8'}; font-weight:700; font-size:0.8em; line-height:1.3;">
-                                    ${nomesAtivos.length > 0 ? nomesAtivos.join(', ') : 'Nenhum ativo alocado'}
-                                </span>
-                            </div>
+                            <span style="color:${ativosNoPosto.length > 0 ? '#475569' : '#94a3b8'}; font-weight:700; font-size:0.85em; line-height:1.4;">
+                                ${nomesAtivos.length > 0 ? nomesAtivos.join(' • ') : 'Nenhum ativo alocado'}
+                            </span>
                         </div>
                     </div>
                 </div>`;
@@ -5347,7 +5366,7 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
         container.innerHTML = html;
 
     } catch (e) {
-        console.error("Erro ao carregar postos:", e);
+        console.error("Erro fatal ao carregar postos:", e);
         container.innerHTML = `
             <div style="grid-column: 1/-1; text-align:center; padding:40px; color:#e11d48;">
                 <i class="fas fa-exclamation-circle fa-2x"></i><br>
