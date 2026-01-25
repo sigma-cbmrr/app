@@ -10493,7 +10493,7 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
                     </label>
                     <select id="swal-mov-destino" class="swal2-select" style="width: 100%; margin: 10px 0;">
                         <option value="" disabled selected>Selecione o destino...</option>
-                        </select>
+                    </select>
                 </div>
 
                 ${!souAdmin && operacao === 'ENVIO' ? `
@@ -10515,7 +10515,9 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
                             <i class="fas fa-spinner fa-spin"></i> Carregando materiais...
                         </div>
                     ` : `
-                        <input type="number" id="swal-mov-qtd" class="swal2-input" style="width:80%; margin:10px 0;" placeholder="0">
+                        <input type="number" id="swal-mov-qtd" class="swal2-input" 
+                            style="width:80%; margin:10px 0;" placeholder="0" min="1" max="0"
+                            oninput="if(parseInt(this.value) > parseInt(this.max)) { this.value = this.max; Swal.showValidationMessage('Saldo insuficiente! Máximo: ' + this.max); } else { Swal.resetValidationMessage(); }">
                     `}
                 </div>
             </div>
@@ -10525,30 +10527,67 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
         confirmButtonColor: config.cor,
         cancelButtonText: 'Cancelar',
         didOpen: async () => {
-            // Lógica para preencher os selects dinamicamente ao abrir
             await popularDestinosMovimentacao(souAdmin, operacao, viaturaId);
             
             if (ehMulti) {
                 await popularTombamentosMovimentacao(docId, operacao, tombamento, viaturaId, config.cor);
-            } else if (operacao === 'RECOLHIMENTO') {
-                // Se for single e recolhimento, já temos a qtd da vtr
-                // (Lógica para buscar qtd atual na viatura idêntica à sua função anterior)
+            } else {
+                // ✅ BUSCA DE SALDO PARA TRAVA DE QUANTIDADE
+                try {
+                    const minhaUnidadeId = currentUserData.unidade_id;
+                    const snapSaldo = await db.collection('inventario').doc(docId)
+                                              .collection('saldos_unidades').doc(minhaUnidadeId).get();
+                    
+                    const saldoDisp = snapSaldo.exists ? (snapSaldo.data().qtd_disp || 0) : 0;
+                    const inputQtd = document.getElementById('swal-mov-qtd');
+                    const labelQtd = document.getElementById('label-qtd-swal');
+
+                    if (inputQtd) {
+                        inputQtd.max = saldoDisp; // Define o teto matemático no atributo max
+                        if (labelQtd) {
+                            labelQtd.innerHTML = `QUANTIDADE PARA MOVIMENTAR: <span style="float:right; color:#1b8a3e;">(Saldo Disponível: ${saldoDisp})</span>`;
+                        }
+                        if (saldoDisp <= 0 && operacao === 'ENVIO') {
+                            inputQtd.disabled = true;
+                            Swal.showValidationMessage('Atenção: Esta unidade não possui saldo disponível para envio.');
+                        }
+                    }
+                } catch (e) { console.error("Erro ao carregar saldo:", e); }
             }
         },
         preConfirm: () => {
-            // Validações antes de fechar e processar
             const destino = document.getElementById('swal-mov-destino').value;
+            const inputQtd = document.getElementById('swal-mov-qtd');
+
             if (!destino) return Swal.showValidationMessage('Por favor, selecione o destino');
+            
+            if (inputQtd) {
+                const qtdValor = parseInt(inputQtd.value);
+                const qtdMax = parseInt(inputQtd.max);
+
+                if (!qtdValor || qtdValor <= 0) return Swal.showValidationMessage('Informe uma quantidade válida');
+                // ✅ VALIDAÇÃO FINAL DE SEGURANÇA
+                if (qtdValor > qtdMax && operacao === 'ENVIO') {
+                    return Swal.showValidationMessage(`Saldo insuficiente! Você só possui ${qtdMax} unidades.`);
+                }
+                
+                return { 
+                    destinoId: destino, 
+                    quantidade: qtdValor, 
+                    tombamentos: null,
+                    setorId: document.getElementById('swal-mov-setor')?.value || 'CABINE'
+                };
+            }
             
             return {
                 destinoId: destino,
-                quantidade: !ehMulti ? document.getElementById('swal-mov-qtd').value : null,
-                tombamentos: ehMulti ? capturarTombamentosSelecionados() : null
+                quantidade: null,
+                tombamentos: ehMulti ? Array.from(document.querySelectorAll('.swal-tomb-check:checked')).map(cb => cb.value) : null,
+                setorId: document.getElementById('swal-mov-setor')?.value || 'CABINE'
             }
         }
     }).then((result) => {
         if (result.isConfirmed) {
-            // Chama a função final que grava no banco (que já temos ou vamos ajustar)
             executarMovimentacaoReal(docId, operacao, result.value);
         }
     });
@@ -10561,16 +10600,24 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
         let htmlOptions = `<option value="" disabled selected>Selecione o destino...</option>`;
 
         if (souAdmin) {
-            // ADMIN: Busca todas as unidades do Estado
-            const snapUnidades = await db.collection('unidades').orderBy('sigla').get();
-            snapUnidades.forEach(doc => {
-                htmlOptions += `<option value="${doc.id}">${doc.data().sigla} - ${doc.data().nome}</option>`;
+            // ✅ CORREÇÃO V3: Busca na coleção estruturada e ordenada por sigla
+            const snapUnidades = await db.collection('unidades_estruturadas')
+                                         .where('ativo', '==', true)
+                                         .get();
+            
+            // Ordenação manual para garantir estética
+            const unidades = snapUnidades.docs.map(d => ({ id: d.id, ...d.data() }))
+                                              .sort((a, b) => a.sigla.localeCompare(b.sigla));
+
+            unidades.forEach(u => {
+                htmlOptions += `<option value="${u.id}">${u.sigla} - ${u.nome_completo}</option>`;
             });
         } else {
-            // GESTOR LOCAL: Busca apenas as viaturas da unidade dele
+            // GESTOR LOCAL: Busca as listas de conferência (Viaturas/Bases) da unidade dele
             const snapVtrs = await db.collection('listas_conferencia')
                                      .where('unidade_id', '==', currentUserData.unidade_id)
-                                     .where('ativo', '==', true).get();
+                                     .where('ativo', '==', true)
+                                     .get();
             
             snapVtrs.forEach(doc => {
                 const data = doc.data();
@@ -10578,15 +10625,18 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
                 htmlOptions += `<option value="${doc.id}" ${isSelected}>${data.ativo_nome} (${data.posto_nome})</option>`;
             });
 
-            // Se for recolhimento vindo da lupa, já deixa travado
+            // Se for recolhimento vindo do rastreio, trava o destino para evitar erro
             if (operacao === 'RECOLHIMENTO' && viaturaIdPreSeleccionada) {
                 selectDestino.disabled = true;
+                selectDestino.style.backgroundColor = "#f1f5f9";
             }
         }
 
         selectDestino.innerHTML = htmlOptions;
+
     } catch (e) {
         console.error("Erro ao popular destinos:", e);
+        selectDestino.innerHTML = `<option value="">Erro ao carregar dados</option>`;
     }
 }
 		async function popularTombamentosMovimentacao(docId, operacao, tombamentoFoco, viaturaId, corTema) {
