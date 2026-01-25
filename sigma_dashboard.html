@@ -3871,6 +3871,12 @@ input:checked + .slider:before {
     document.querySelectorAll('.restricted-admin-only').forEach(el => {
         if (el) el.style.display = isGestorOuAdmin ? 'block' : 'none';
     });
+	const btnNovoPosto = document.getElementById('btn-toggle-posto');
+    if (btnNovoPosto) {
+        // Apenas Admin e Gestor Geral podem ver o botão de criar novo posto
+        const podeCriarPosto = isAdmin || isGestorGeral; 
+        btnNovoPosto.style.display = podeCriarPosto ? 'inline-flex' : 'none';
+    }
 
     const linkUnidades = document.getElementById('link-unidades');
     if (linkUnidades) linkUnidades.style.display = canManageUnits ? 'block' : 'none';
@@ -5319,7 +5325,11 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
         </div>`;
 
     try {
-        // 1. Busca dados em paralelo (Performance)
+        // 1. Definição Cirúrgica de Permissão (Fácil manutenção posterior)
+        const perfisAutorizadosAcoes = ['admin', 'gestor_geral']; 
+        const podeEditarOuExcluir = perfisAutorizadosAcoes.includes(currentUserData?.role);
+
+        // 2. Busca dados em paralelo (Performance)
         const [snapPostos, snapListas] = await Promise.all([
             db.collection('postos_estruturados').where('ativo', '==', true).get(),
             db.collection('listas_conferencia').where('ativo', '==', true).get()
@@ -5332,8 +5342,6 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
 
         const todasListas = snapListas.docs.map(d => d.data());
         const postos = snapPostos.docs.map(d => ({ id: d.id, ...d.data() }));
-        const role = currentUserData?.role;
-        const isAdminGeral = (role === 'admin' || role === 'gestor_geral');
 
         // --- DIVISÃO POR GRUPOS (OPERACIONAL VS MISSÃO) ---
         const operacionais = postos.filter(p => p.natureza === 'SERVIÇO OPERACIONAL' || !p.natureza);
@@ -5351,7 +5359,6 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
                 const ativosNoPosto = todasListas.filter(l => l.posto_id === posto.id);
                 const nomesAtivos = ativosNoPosto.map(l => l.ativo_nome);
                 
-                // Definição de Identidade Visual por Natureza
                 const isMissao = posto.natureza === 'MISSÃO';
                 const corTema = isMissao ? '#2c3e50' : '#800020';
                 const borderStyle = `border-left: 6px solid ${corTema} !important;`;
@@ -5362,7 +5369,7 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
                          style="${borderStyle} padding: 0; background: #fff; border-radius: 20px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; height: 100%; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; cursor: pointer; box-sizing: border-box;">
                         
                         <div class="v3-posto-actions" style="position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; z-index: 5;">
-                            ${isAdminGeral ? `
+                            ${podeEditarOuExcluir ? `
                                 <button class="v3-btn-action" style="background:none; border:none; color:#cbd5e1; cursor:pointer;" 
                                         onclick="event.stopPropagation(); abrirFormularioPosto({ uid: '${posto.id}', nome: '${posto.nome}', endereco: '${posto.endereco}', natureza: '${posto.natureza || 'SERVIÇO OPERACIONAL'}' })">
                                     <i class="fas fa-pencil-alt"></i>
@@ -5371,7 +5378,7 @@ async function vincularListaAoPosto(listaUid, postoUid, associar) {
                                         onclick="event.stopPropagation(); deletarPostoSistema('${posto.id}', '${posto.nome}')">
                                     <i class="fas fa-trash-alt"></i>
                                 </button>
-                            ` : `<i class="fas fa-lock" style="color:#cbd5e1; font-size: 0.8em;" title="Apenas Leitura"></i>`}
+                            ` : `<i class="fas fa-lock" style="color:#cbd5e1; font-size: 0.8em; margin: 4px;" title="Somente Leitura"></i>`}
                         </div>
                         
                         <div style="padding: 20px; flex-grow: 1; display: flex; flex-direction: column; align-items: center; text-align: center;">
