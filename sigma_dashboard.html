@@ -10283,28 +10283,38 @@ async function verDetalhesItemAlmox(docId) {
                 }
             });
         } else {
-            const snapSaldos = await db.collection('inventario').doc(docId).collection('saldos_unidades').get();
-            snapSaldos.forEach(sDoc => {
-                const s = sDoc.data();
-                const ehDono = (sDoc.id === currentUserData.unidade_id);
-                const podeEnviar = (souAdminGeral && sDoc.id === "ADMIN") || (ehDono && !souAdminGeral);
-                const saldoDisp = Number(s.qtd_disp) || 0;
-                const saldoPend = (Number(s.qtd_pend) || 0) + (Number(s.qtd_transito) || 0);
-                if (ehDono || souAdminGeral) { cDisp += saldoDisp; cPend += saldoPend; }
-                if (saldoDisp > 0 || saldoPend > 0) {
-                    let bufferHtml = `
-                        <tr style="background:${ehDono ? 'rgba(16,185,129,0.03)' : '#fff'};">
-                            <td><i class="fas fa-warehouse" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${s.unidade_sigla}</span></td>
-                            <td style="text-align:center;"><span style="color:#15803d; font-weight:800;">${saldoDisp} un.</span></td>
-                            <td style="text-align:center;">${saldoPend > 0 ? `<span style="color:#b91c1c; font-weight:800;">${saldoPend} un.</span>` : '<span style="color:#15803d; font-weight:800;">DISPONÍVEL</span>'}</td>
-                            <td style="text-align:right;">
-                                ${podeEnviar ? `<button onclick="prepararMovimentacao('${docId}','ENVIO')" title="Transferir saldo deste lote para outra unidade" class="sigma-v3-tab active" style="background:#800020;"><i class="fas fa-paper-plane"></i></button>` : ''}
-                            </td>
-                        </tr>`;
-                    if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
-                }
-            });
-        }
+        const snapSaldos = await db.collection('inventario').doc(docId).collection('saldos_unidades').get();
+        snapSaldos.forEach(sDoc => {
+            const s = sDoc.data();
+            const ehDono = (sDoc.id === currentUserData.unidade_id);
+            const podeEnviar = (souAdminGeral && sDoc.id === "ADMIN") || (ehDono && !souAdminGeral);
+            
+            // CORREÇÃO AQUI: Saldo total no local é a soma do disponível + pendente
+            const saldoDisp = Number(s.qtd_disp) || 0;
+            const saldoPend = (Number(s.qtd_pend) || 0) + (Number(s.qtd_transito) || 0);
+            const saldoTotalLocal = saldoDisp + saldoPend;
+
+            if (ehDono || souAdminGeral) { cDisp += saldoDisp; cPend += saldoPend; }
+
+            if (saldoTotalLocal > 0) {
+                // CORREÇÃO VISUAL: Saldo total em uma coluna, Status textual na outra
+                let bufferHtml = `
+                    <tr style="background:${ehDono ? 'rgba(16,185,129,0.03)' : '#fff'};">
+                        <td><i class="fas fa-warehouse" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${s.unidade_sigla}</span></td>
+                        <td style="text-align:center;"><span style="color:#1e293b; font-weight:800;">${saldoTotalLocal} un.</span></td>
+                        <td style="text-align:center;">
+                            ${saldoPend > 0 
+                                ? `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">PENDÊNCIA REGISTRADA</span>` 
+                                : `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#dcfce7; color:#15803d;">DISPONÍVEL</span>`}
+                        </td>
+                        <td style="text-align:right;">
+                            ${podeEnviar ? `<button onclick="prepararMovimentacao('${docId}','ENVIO')" title="Transferir saldo" class="sigma-v3-tab active" style="background:#800020;"><i class="fas fa-paper-plane"></i></button>` : ''}
+                        </td>
+                    </tr>`;
+                if (ehDono) htmlPrioridade += bufferHtml; else htmlRestante += bufferHtml;
+            }
+        });
+    }
 
         // --- 2. BUSCA EM VIATURAS (COM CORREÇÃO DE PENDÊNCIA LOCALIZADA) ---
         const snapListas = await db.collection('listas_conferencia').where('ativo', '==', true).get();
@@ -10339,27 +10349,39 @@ async function verDetalhesItemAlmox(docId) {
                         if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
                     });
                 } else {
-                    // LÓGICA SINGLE: Se houver pendência registrada na viatura
+                    // LÓGICA SINGLE: Processamento de itens de volume na viatura (ex: Lanternas)
                     const qtdVtr = Number(itNaVtr.quantidadeEsperada) || 0;
-                    const qtdPendVtr = Number(itNaVtr.quantidadePendencia) || 0; // Assume campo de pendência na lista
+                    const qtdPendVtr = Number(itNaVtr.quantidadePendencia) || 0;
                     
                     if (ehMinhaVtr || souAdminGeral) {
+                        // O que não está pendente, está em uso normal
                         cUso += (qtdVtr - qtdPendVtr);
                         cPend += qtdPendVtr;
                     }
 
                     let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
-                        <td><i class="fas fa-truck-pickup" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${vtrData.ativo_nome}</span></td>
-                        <td style="text-align:center;"><span style="color:#64748b; font-weight:800;">${qtdVtr} un.</span></td>
+                        <td>
+                            <i class="fas fa-truck-pickup" style="margin-right:8px; color:#64748b;"></i>
+                            <span style="font-weight:700;">${vtrData.ativo_nome}</span>
+                        </td>
+                        <td style="text-align:center;">
+                            <span style="color:#1e293b; font-weight:800;">${qtdVtr} un.</span>
+                        </td>
                         <td style="text-align:center;">
                             ${qtdPendVtr > 0 
-                                ? `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">${qtdPendVtr} PENDENTE</span>` 
-                                : `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#f1f5f9; color:#475569;">EM USO</span>`}
+                                ? `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">COM PENDÊNCIA</span>` 
+                                : `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#f1f5f9; color:#475569;">OPERACIONAL</span>`}
                         </td>
                         <td style="text-align:right;">
-                            ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO', null,'${docVtr.id}')" title="Recolher quantidade para o almoxarifado local" class="sigma-v3-tab" style="background:#f59e0b; color:white;"><i class="fas fa-arrow-down"></i></button>` : ''}
+                            ${ehMinhaVtr || role === 'admin' ? 
+                                `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO', null,'${docVtr.id}')" 
+                                         title="Recolher material da viatura para o estoque local" 
+                                         class="sigma-v3-tab" style="background:#f59e0b; color:white;">
+                                    <i class="fas fa-arrow-down"></i>
+                                </button>` : ''}
                         </td>
                     </tr>`;
+
                     if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
                 }
             });
