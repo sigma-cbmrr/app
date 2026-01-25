@@ -3298,62 +3298,6 @@ input:checked + .slider:before {
     </div>
 </div>
 		
-	<div id="modal-almox-transferencia" class="modal-overlay">
-    	<div class="modal-content" style="max-width: 450px; border-top: 5px solid #1b8a3e;">
-       		<button class="close-btn" onclick="document.getElementById('modal-almox-transferencia').style.display='none'"><i class="fas fa-times"></i></button>
-       		<h2 id="almox-transf-titulo">Gerenciar Material</h2>
-       		<p id="almox-transf-item-nome" style="font-weight: bold; color: #800020; margin-bottom: 20px;" data-docid="" data-tipo=""></p>
-
-       		<div class="form-group">
-           		<label>Tipo de Operação</label>
-           		<select id="almox-operacao-tipo" onchange="configurarInterfaceMovimentacao()">
-               		<option value="ENVIO">Enviar do Almoxarifado para Viatura</option>
-               		<option value="RECOLHIMENTO">Recolher da Viatura para Almoxarifado</option>
-               		<option value="BAIXA">Baixa Definitiva (Inservível/Perda)</option>
-           		</select>
-       		</div>
-
-        	<div id="div-almox-viatura" class="form-group" style="display:none;">
-        		<label>Viatura / Local Alvo</label>
-        		<select id="almox-viatura-alvo" class="filter-input" onchange="if(currentUserData.role !== 'admin') { carregarSetoresDestino(this.value); configurarInterfaceMovimentacao(); }"></select>
-    		</div>
-
-        	<div id="div-almox-setor" class="form-group" style="display:none;">
-            	<label>Setor de Destino na Viatura</label>
-            	<select id="almox-setor-alvo" class="filter-input">
-               		<option value="" disabled selected>Selecione a viatura primeiro...</option>
-            	</select>
-        	</div>
-
-        	<div class="form-group">
-            	<label id="label-qtd-movimentacao">Quantidade</label>
-            	<input type="number" id="almox-transf-qtd" min="1" value="1" class="filter-input">
-        	</div>
-
-        	<div id="div-aporte-multi" style="display:none; margin-top: 15px; padding: 10px; background: #f0f0f0; border-radius: 8px; border: 1px dashed #800020;">
-            	<label style="font-weight: bold; color: #800020; font-size: 0.85em;">Identificação dos Novos Itens (Tomb/Série):</label>
-            	<div id="lista-inputs-tombamento" style="max-height: 200px; overflow-y: auto; margin-top: 10px;"></div>
-        	</div>
-
-        	<div id="div-selecao-envio-multi" style="display:none; margin-top: 15px; padding: 10px; background: #e0f2fe; border-radius: 8px; border: 1px solid #0369a1;">
-            	<label style="font-weight: bold; color: #0369a1; font-size: 0.85em;">Selecione os itens para enviar:</label>
-            	<div id="lista-checks-tombamento" style="max-height: 200px; overflow-y: auto; margin-top: 10px; background: white; border-radius: 4px;"></div>
-        	</div>
-
-        	<div class="form-group">
-            	<label>Justificativa / Nota Fiscal / Ofício</label>
-            	<textarea id="almox-transf-obs" placeholder="Ex: NF 123, Recebido do almoxarifado central, etc." style="height: 80px;"></textarea>
-        	</div>
-
-        	<div class="modal-buttons">
-            	<button class="btn-modern-action btn-backup" onclick="document.getElementById('modal-almox-transferencia').style.display='none'">Cancelar</button>
-            	<button id="btn-confirmar-movimentacao" class="btn-modern-action btn-sync btn-executar-mov" onclick="rotearSalvamentoAlmox()">
-    				<i class="fas fa-check"></i> Confirmar
-				</button>
-        	</div>
-    	</div>
-	</div>
-		
 	<div id="modal-gestao-vincos-posto" class="modal" style="display:none; z-index: 2000;">
     	<div class="modal-content" style="max-width: 600px; border-top: 8px solid #8e44ad; border-radius: 12px;">
         	<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
@@ -10508,93 +10452,361 @@ function filtrarRastreioMulti() {
  * Função de ponte que prepara o modal de transferência com os dados clicados na lupa
  */
 async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaId = null) {
-    // 1. Abre o modal base buscando no novo inventário
-    // Importante: o docId aqui deve ser o UID_GLOBAL (ex: FAM-000001-MOD-1)
-    await abrirModalTransferencia(docId);
+    // 1. Busca os dados do item no Inventário V3 antes de abrir o modal
+    const docAlvo = await db.collection('inventario').doc(docId).get();
+    if (!docAlvo.exists) return alert("Erro ao localizar item no inventário.");
     
-    // 2. Aguarda o carregamento para manipular os elementos específicos do seu HTML
-    setTimeout(() => {
-        const selectTipo = document.getElementById('almox-operacao-tipo');
-        const tituloModal = document.getElementById('almox-transf-titulo'); // ID do seu H2
-        const modalContent = document.querySelector('#modal-almox-transferencia .modal-content');
-        const btnConfirmar = document.getElementById('btn-confirmar-movimentacao');
-        const inputQtd = document.getElementById('almox-transf-qtd'); // Campo de quantidade
+    const itemData = docAlvo.data();
+    const ehMulti = itemData.tipo === 'multi';
+    const role = currentUserData.role;
+    const souAdmin = (role === 'admin' || role === 'gestor_geral');
 
-        if (selectTipo) {
-            // Define a operação e esconde o grupo de seleção para "desmembrar" o modal
-            selectTipo.value = operacao;
-            const containerTipo = selectTipo.closest('.form-group');
-            if (containerTipo) containerTipo.style.display = 'none';
+    // 2. Define Identidade Visual (Cores e Títulos)
+    const config = {
+        ENVIO: {
+            titulo: souAdmin ? "Transferência de Unidade" : "Enviar para Viatura",
+            cor: "#2c7399",
+            icone: "fa-paper-plane",
+            btnTexto: souAdmin ? "CONFIRMAR TRANSFERÊNCIA" : "CONFIRMAR ENVIO"
+        },
+        RECOLHIMENTO: {
+            titulo: "Recolher para Almoxarifado",
+            cor: "#f57c00",
+            icone: "fa-arrow-down",
+            btnTexto: "CONFIRMAR RECOLHIMENTO"
+        }
+    }[operacao];
+
+    // 3. Monta o Modal SweetAlert2 Moderno
+    Swal.fire({
+        title: `<i class="fas ${config.icone}"></i> ${config.titulo}`,
+        html: `
+            <div style="text-align: left; padding: 5px;">
+                <div class="summary-item-modal" style="background:#f8fafc; padding:10px; border-radius:8px; margin-bottom:15px; border-left:4px solid ${config.cor};">
+                    <small style="color:#64748b; font-weight:700; text-transform:uppercase; font-size:0.7em;">Item Selecionado</small>
+                    <div style="font-weight:800; color:#1e293b; font-size:1.1em;">${itemData.nome}</div>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-size: 0.85em; font-weight:bold; color:#800020;">
+                        ${souAdmin ? '1. UNIDADE DE DESTINO:' : '1. VIATURA / LOCAL ALVO:'}
+                    </label>
+                    <select id="swal-mov-destino" class="swal2-select" style="width: 100%; margin: 10px 0;">
+                        <option value="" disabled selected>Selecione o destino...</option>
+                        </select>
+                </div>
+
+                ${!souAdmin && operacao === 'ENVIO' ? `
+                <div class="form-group" style="margin-top:15px;">
+                    <label style="font-size: 0.85em; font-weight:bold; color:#800020;">2. SETOR DE CARGA:</label>
+                    <select id="swal-mov-setor" class="swal2-select" style="width: 100%; margin: 10px 0;">
+                        <option value="CABINE">CABINE</option>
+                        <option value="CARROCERIA">CARROCERIA</option>
+                    </select>
+                </div>` : ''}
+
+                <div class="form-group" style="margin-top:15px;">
+                    <label id="label-qtd-swal" style="font-size: 0.85em; font-weight:bold; color:#800020;">
+                        ${ehMulti ? 'PATRIMÔNIO / TOMBAMENTO:' : 'QUANTIDADE PARA MOVIMENTAR:'}
+                    </label>
+                    
+                    ${ehMulti ? `
+                        <div id="lista-tomb-swal" style="max-height:150px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:10px; margin-top:5px; background:#fff;">
+                            <i class="fas fa-spinner fa-spin"></i> Carregando materiais...
+                        </div>
+                    ` : `
+                        <input type="number" id="swal-mov-qtd" class="swal2-input" style="width:80%; margin:10px 0;" placeholder="0">
+                    `}
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: config.btnTexto,
+        confirmButtonColor: config.cor,
+        cancelButtonText: 'Cancelar',
+        didOpen: async () => {
+            // Lógica para preencher os selects dinamicamente ao abrir
+            await popularDestinosMovimentacao(souAdmin, operacao, viaturaId);
             
-            // Dispara a lógica de interface (exibe campos de viatura/setor)
-            if (typeof configurarInterfaceMovimentacao === "function") {
-                configurarInterfaceMovimentacao();
+            if (ehMulti) {
+                await popularTombamentosMovimentacao(docId, operacao, tombamento, viaturaId, config.cor);
+            } else if (operacao === 'RECOLHIMENTO') {
+                // Se for single e recolhimento, já temos a qtd da vtr
+                // (Lógica para buscar qtd atual na viatura idêntica à sua função anterior)
+            }
+        },
+        preConfirm: () => {
+            // Validações antes de fechar e processar
+            const destino = document.getElementById('swal-mov-destino').value;
+            if (!destino) return Swal.showValidationMessage('Por favor, selecione o destino');
+            
+            return {
+                destinoId: destino,
+                quantidade: !ehMulti ? document.getElementById('swal-mov-qtd').value : null,
+                tombamentos: ehMulti ? capturarTombamentosSelecionados() : null
+            }
+        }
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Chama a função final que grava no banco (que já temos ou vamos ajustar)
+            executarMovimentacaoReal(docId, operacao, result.value);
+        }
+    });
+}
+		async function popularDestinosMovimentacao(souAdmin, operacao, viaturaIdPreSeleccionada = null) {
+    const selectDestino = document.getElementById('swal-mov-destino');
+    if (!selectDestino) return;
+
+    try {
+        let htmlOptions = `<option value="" disabled selected>Selecione o destino...</option>`;
+
+        if (souAdmin) {
+            // ADMIN: Busca todas as unidades do Estado
+            const snapUnidades = await db.collection('unidades').orderBy('sigla').get();
+            snapUnidades.forEach(doc => {
+                htmlOptions += `<option value="${doc.id}">${doc.data().sigla} - ${doc.data().nome}</option>`;
+            });
+        } else {
+            // GESTOR LOCAL: Busca apenas as viaturas da unidade dele
+            const snapVtrs = await db.collection('listas_conferencia')
+                                     .where('unidade_id', '==', currentUserData.unidade_id)
+                                     .where('ativo', '==', true).get();
+            
+            snapVtrs.forEach(doc => {
+                const data = doc.data();
+                const isSelected = (viaturaIdPreSeleccionada === doc.id) ? 'selected' : '';
+                htmlOptions += `<option value="${doc.id}" ${isSelected}>${data.ativo_nome} (${data.posto_nome})</option>`;
+            });
+
+            // Se for recolhimento vindo da lupa, já deixa travado
+            if (operacao === 'RECOLHIMENTO' && viaturaIdPreSeleccionada) {
+                selectDestino.disabled = true;
             }
         }
 
-        // --- 3. CUSTOMIZAÇÃO CIRÚRGICA DE TÍTULO E CORES POR OPERAÇÃO ---
-        const role = currentUserData ? currentUserData.role : 'user';
-        const isCentralLogistics = (role === 'admin' || role === 'gestor_geral');
+        selectDestino.innerHTML = htmlOptions;
+    } catch (e) {
+        console.error("Erro ao popular destinos:", e);
+    }
+}
+		async function popularTombamentosMovimentacao(docId, operacao, tombamentoFoco, viaturaId, corTema) {
+    const containerTomb = document.getElementById('lista-tomb-swal');
+    if (!containerTomb) return;
+
+    try {
+        let listaTombs = [];
 
         if (operacao === 'ENVIO') {
-            let textoTitulo = isCentralLogistics 
-                ? "Transferência de Carga" 
-                : "Enviar para Viatura";
+            // Busca tombamentos que estão no estoque central da unidade (viatura_id == null)
+            const snap = await db.collection('inventario').doc(docId)
+                                  .collection('tombamentos')
+                                  .where('local_id', '==', currentUserData.unidade_id)
+                                  .where('viatura_id', '==', null).get();
+            snap.forEach(d => listaTombs.push(d.data()));
+        } else {
+            // RECOLHIMENTO: Busca tombamentos que estão especificamente naquela viatura
+            const snap = await db.collection('inventario').doc(docId)
+                                  .collection('tombamentos')
+                                  .where('viatura_id', '==', viaturaId).get();
+            snap.forEach(d => listaTombs.push(d.data()));
+        }
 
-            if (tituloModal) {
-                tituloModal.innerHTML = `<i class="fas fa-paper-plane"></i> ${textoTitulo}`;
-            }
-            
-            if (modalContent) modalContent.style.borderTop = "5px solid #2c7399";
-            if (btnConfirmar) {
-                btnConfirmar.style.backgroundColor = "#2c7399";
-                btnConfirmar.innerText = isCentralLogistics ? "CONFIRMAR TRANSFERÊNCIA" : "CONFIRMAR ENVIO";
-            }
-        } 
-        else if (operacao === 'RECOLHIMENTO') {
-            if (tituloModal) tituloModal.innerHTML = `<i class="fas fa-arrow-down"></i> Recolher para Almoxarifado`;
-            if (modalContent) modalContent.style.borderTop = "5px solid #f57c00";
-            if (btnConfirmar) {
-                btnConfirmar.style.backgroundColor = "#f57c00";
-                btnConfirmar.innerText = "CONFIRMAR RECOLHIMENTO";
-            }
-            
-            // Trava a viatura de origem se vinda do rastreio
-            if (viaturaId) {
-                const selectVtr = document.getElementById('almox-viatura-alvo');
-                if (selectVtr) {
-                    selectVtr.value = viaturaId;
-                    selectVtr.disabled = true;
-                    if (typeof carregarSetoresDestino === "function") {
-                        carregarSetoresDestino(viaturaId);
-                    }
+        if (listaTombs.length === 0) {
+            containerTomb.innerHTML = `<span style="color:#64748b; font-size:0.85em;">Nenhum material disponível para esta operação.</span>`;
+            return;
+        }
+
+        // Gera o HTML dos checkboxes com o estilo Sigma V3
+        let htmlChecks = "";
+        listaTombs.forEach(t => {
+            const isFoco = (t.tomb === tombamentoFoco) ? 'checked' : '';
+            htmlChecks += `
+                <div style="margin-bottom:8px; display:flex; align-items:center;">
+                    <input type="checkbox" class="swal-tomb-check" id="chk-${t.tomb}" value="${t.tomb}" ${isFoco} style="width:18px; height:18px; accent-color:${corTema};">
+                    <label for="chk-${t.tomb}" style="margin-left:10px; font-weight:700; color:#1e293b; cursor:pointer;">
+                        ${t.tomb} <small style="color:#64748b; font-weight:400;">(${t.situacao_atual || 'DISPONÍVEL'})</small>
+                    </label>
+                </div>`;
+        });
+
+        containerTomb.innerHTML = htmlChecks;
+    } catch (e) {
+        containerTomb.innerHTML = "Erro ao carregar tombamentos.";
+    }
+}
+	async function executarMovimentacaoReal(docId, operacao, dados) {
+    const { destinoId, quantidade, tombamentos } = dados;
+    const minhaUnidadeId = currentUserData.unidade_id;
+    const dataHora = new Date().toLocaleString('pt-BR');
+    
+    // Mostra o loading do Sigma V3
+    Swal.fire({
+        title: 'Processando Movimentação...',
+        html: 'Sincronizando inventário estadual.',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+    });
+
+    const batch = db.batch();
+
+    try {
+        const itemRef = db.collection('inventario').doc(docId);
+        const itemSnap = await itemRef.get();
+        const itemData = itemSnap.data();
+        const ehMulti = itemData.tipo === 'multi';
+
+        // --- LÓGICA PARA ITENS MULTI (TOMBAMENTOS) ---
+        if (ehMulti && tombamentos && tombamentos.length > 0) {
+            for (const tomb of tombamentos) {
+                const tombRef = itemRef.collection('tombamentos').doc(tomb);
+                
+                if (operacao === 'ENVIO') {
+                    // SAINDO DO ALMOX -> PARA VIATURA
+                    batch.update(tombRef, {
+                        viatura_id: destinoId,
+                        data_ultima_movimentacao: dataHora,
+                        movimentado_por: currentUserData.nomeGuerra
+                    });
+                    // Registra no histórico do tombamento
+                    const histRef = tombRef.collection('historico_vida').doc();
+                    batch.set(histRef, {
+                        evento: "ENVIO_PARA_VIATURA",
+                        destino: destinoId,
+                        data: dataHora,
+                        quem: currentUserData.nomeGuerra
+                    });
+                } else {
+                    // SAINDO DA VIATURA -> PARA ALMOX
+                    batch.update(tombRef, {
+                        viatura_id: null,
+                        data_ultima_movimentacao: dataHora,
+                        movimentado_por: currentUserData.nomeGuerra
+                    });
+                    // Registra no histórico do tombamento
+                    const histRef = tombRef.collection('historico_vida').doc();
+                    batch.set(histRef, {
+                        evento: "RECOLHIMENTO_ALMOXARIFADO",
+                        data: dataHora,
+                        quem: currentUserData.nomeGuerra
+                    });
                 }
             }
+        } 
+
+        // --- LÓGICA PARA ITENS SINGLE (VOLUME/LOTE) ---
+        else if (!ehMulti) {
+            const qtdNum = Number(quantidade);
+            const saldoRef = itemRef.collection('saldos_unidades').doc(minhaUnidadeId);
+
+            if (operacao === 'ENVIO') {
+                batch.update(saldoRef, {
+                    qtd_disp: firebase.firestore.FieldValue.increment(-qtdNum),
+                    qtd_em_carga: firebase.firestore.FieldValue.increment(qtdNum),
+                    last_update: dataHora
+                });
+            } else {
+                batch.update(saldoRef, {
+                    qtd_disp: firebase.firestore.FieldValue.increment(qtdNum),
+                    qtd_em_carga: firebase.firestore.FieldValue.increment(-qtdNum),
+                    last_update: dataHora
+                });
+            }
         }
 
-        // --- 4. GESTÃO DE TIPO (SINGLE vs MULTI) ---
-        // ✅ AJUSTE CIRÚRGICO: Se não houver tombamento, assume-se que é um item SINGLE (Lote)
-        // Precisamos habilitar o campo de quantidade para o usuário digitar quanto quer movimentar.
-        if (tombamento) {
-            localStorage.setItem('sigma_tomb_foco', tombamento);
-            if (inputQtd) {
-                inputQtd.value = 1;
-                inputQtd.readOnly = true; // Patrimônio é sempre 1 por 1
-                inputQtd.style.backgroundColor = "#f9f9f9";
-            }
-        } else {
-            localStorage.removeItem('sigma_tomb_foco');
-            if (inputQtd) {
-                inputQtd.value = ""; 
-                inputQtd.readOnly = false; // Lote permite digitar a quantidade (ex: 05 mochilas)
-                inputQtd.placeholder = "Qtd de itens...";
-                inputQtd.style.backgroundColor = "#fff";
-                inputQtd.focus();
-            }
-        }
+        // --- ATUALIZAÇÃO DA LISTA DE CONFERÊNCIA (O ALVO) ---
+        // Aqui o sistema entra na viatura alvo e insere/remove o item da lista física
+        await atualizarArquiteturaViatura(destinoId, itemData, operacao, dados);
 
-    }, 250); 
+        await batch.commit();
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Movimentação Concluída!',
+            text: `${itemData.nome} movimentado com sucesso.`,
+            timer: 2000,
+            showConfirmButton: false
+        }).then(() => {
+            // Recarrega a lupa/rastreio para mostrar a nova realidade
+            if (typeof verDetalhesItemAlmox === 'function') verDetalhesItemAlmox(docId);
+        });
+
+    } catch (e) {
+        console.error(e);
+        Swal.fire('Erro Fatal', 'Não foi possível processar a movimentação no banco.', 'error');
+    }
 }
+	async function atualizarArquiteturaViatura(viaturaId, itemData, operacao, dados) {
+    const vtrRef = db.collection('listas_conferencia').doc(viaturaId);
+    const vtrSnap = await vtrRef.get();
+
+    if (!vtrSnap.exists) {
+        console.error("Viatura não encontrada para sincronização de arquitetura.");
+        return;
+    }
+
+    const vtrData = vtrSnap.data();
+    let listaAtualizada = [...vtrData.list]; // A estrutura principal 'list' que contém os setores
+    const setorAlvo = dados.setorId || 'CABINE'; // Default para Cabine se não especificado
+    const ehMulti = itemData.tipo === 'multi';
+
+    // 1. Localiza o setor e o item dentro da lista da viatura
+    let setorEncontrado = listaAtualizada.find(s => s.nome === setorAlvo);
+    
+    // Se o setor não existir na vtr (ex: Carroceria), nós o criamos ou usamos o primeiro disponível
+    if (!setorEncontrado) setorEncontrado = listaAtualizada[0];
+
+    let itemNaVtr = setorEncontrado.itens.find(it => it.uid_global === itemData.uid_global);
+
+    if (operacao === 'ENVIO') {
+        if (!itemNaVtr) {
+            // ITEM NOVO NA VIATURA: Se não existia, adicionamos a estrutura base
+            itemNaVtr = {
+                uid_global: itemData.uid_global,
+                nome: itemData.nome,
+                quantidadeEsperada: 0,
+                tombamentos: [],
+                tipo: itemData.tipo
+            };
+            setorEncontrado.itens.push(itemNaVtr);
+        }
+
+        if (ehMulti) {
+            // Adiciona apenas os tombamentos que ainda não estão lá
+            dados.tombamentos.forEach(t => {
+                if (!itemNaVtr.tombamentos.includes(t)) {
+                    itemNaVtr.tombamentos.push(t);
+                }
+            });
+            itemNaVtr.quantidadeEsperada = itemNaVtr.tombamentos.length;
+        } else {
+            // Soma a quantidade ao que já existia
+            itemNaVtr.quantidadeEsperada += Number(dados.quantidade);
+        }
+    } 
+    else if (operacao === 'RECOLHIMENTO') {
+        if (itemNaVtr) {
+            if (ehMulti) {
+                // Remove os tombamentos específicos recolhidos
+                itemNaVtr.tombamentos = itemNaVtr.tombamentos.filter(t => !dados.tombamentos.includes(t));
+                itemNaVtr.quantidadeEsperada = itemNaVtr.tombamentos.length;
+            } else {
+                // Subtrai a quantidade
+                itemNaVtr.quantidadeEsperada -= Number(dados.quantidade);
+            }
+
+            // Se a quantidade zerar, removemos o item da viatura para não poluir a lista
+            if (itemNaVtr.quantidadeEsperada <= 0) {
+                setorEncontrado.itens = setorEncontrado.itens.filter(it => it.uid_global !== itemData.uid_global);
+            }
+        }
+    }
+
+    // 2. Grava a nova arquitetura de volta na viatura
+    await vtrRef.update({
+        list: listaAtualizada,
+        ultima_atualizacao_inventario: new Date().toISOString()
+    });
+}	
 /**
  * Função que renderiza os carimbos originais do Conferencia App dentro do modal
  */
@@ -11053,174 +11265,7 @@ async function salvarCadastroGlobalHierarquico() {
         btn.innerHTML = originalText;
     }
 }
-	/**
- * Monitora a quantidade no aporte para gerar campos de tombamento se o item for MULTI
- */
-document.getElementById('almox-transf-qtd').addEventListener('input', (e) => {
-    const operacao = document.getElementById('almox-operacao-tipo').value;
-    const itemNomeEl = document.getElementById('almox-transf-item-nome');
-    const ehMulti = itemNomeEl.getAttribute('data-tipo') === 'multi';
-
-    // ✅ Verifica se a operação exige entrada de tombamentos (Aporte/Entrada)
-    if ((operacao === 'ENTRADA' || operacao === 'ENVIO' || operacao === 'APORTE') && ehMulti) {
-        const qtd = parseInt(e.target.value) || 0;
-        
-        // ✅ CHAMA A FUNÇÃO CORRETA EM VEZ DE REESCREVER O HTML AQUI
-        if (typeof gerarInputsTombamentoAporte === "function") {
-            gerarInputsTombamentoAporte(qtd);
-        } else {
-            console.error("Erro: A função gerarInputsTombamentoAporte não foi encontrada.");
-        }
-    }
-});
 		
-async function configurarInterfaceMovimentacao() {
-    const tipo = document.getElementById('almox-operacao-tipo').value;
-    const infoItem = document.getElementById('almox-transf-item-nome');
-    const ehMulti = infoItem.getAttribute('data-tipo') === 'multi';
-    const docIdAlmox = infoItem.getAttribute('data-docid');
-    const viaturaId = document.getElementById('almox-viatura-alvo').value;
-    const tombFoco = localStorage.getItem('sigma_tomb_foco');
-    
-    // Captura o perfil para decidir o que mostrar
-    const role = currentUserData.role;
-
-    resetarVisibilidadeModal();
-
-    const docAlmox = await db.collection('almoxarifado_central').doc(docIdAlmox).get();
-    const dAlmox = docAlmox.data() || {};
-
-    // --- AJUSTE DE RÓTULOS E VISIBILIDADE POR PERFIL ---
-    const labelDestino = document.querySelector('#div-almox-viatura label');
-    const divSetor = document.getElementById('div-almox-setor');
-
-    if (role === 'admin') {
-        if (labelDestino) labelDestino.textContent = "Unidade de Destino";
-        if (divSetor) divSetor.style.display = 'none'; // Admin não escolhe setor
-    } else {
-        if (labelDestino) labelDestino.textContent = "Viatura / Local Alvo";
-        // O setor só aparece se for ENVIO (Gestor enviando para Vtr)
-        if (divSetor) divSetor.style.display = (tipo === 'ENVIO') ? 'block' : 'none';
-    }
-        
-        // Lógica de Tombamentos
-        if (tipo === 'ENVIO') {
-        	document.getElementById('div-almox-viatura').style.display = 'block';
-        
-        	if (ehMulti) {
-            	document.getElementById('almox-transf-qtd').closest('.form-group').style.display = 'none';
-            	document.getElementById('div-selecao-envio-multi').style.display = 'block';
-            
-            	// SÓ RECONSTRÓI A LISTA SE ELA ESTIVER VAZIA (Evita o "pisca" e a desmarcação)
-            	const listaChecks = document.getElementById('lista-checks-tombamento');
-            	if (listaChecks.innerHTML === "" || listaChecks.innerHTML.includes('Carregando')) {
-                	const disponiveis = (dAlmox.tombamentos || []).filter(t => !t.viatura_id);
-                	listaChecks.innerHTML = gerarHtmlChecks(disponiveis, 'azul');
-            	}
-            
-            	if(tombFoco) {
-                	const chk = document.querySelector(`.check-envio-tomb[value="${tombFoco}"]`);
-                	if(chk) { chk.checked = true; atualizarQtdEnvio(); }
-                	localStorage.removeItem('sigma_tomb_foco');
-            	}
-        	}
-    }
-
-    if (tipo === 'RECOLHIMENTO' && viaturaId) {
-        document.getElementById('div-almox-viatura').style.display = 'block';
-        
-        // No recolhimento, o setor nunca é exibido
-        if (divSetor) divSetor.style.display = 'none';
-
-        const vtrSnap = await db.collection('listas_conferencia').doc(viaturaId).get();
-        if (!vtrSnap.exists) return;
-
-        let itemNaVtr = null;
-        vtrSnap.data().list.forEach(s => {
-            const achado = s.itens.find(it => it.uid_global === dAlmox.uid_global || it.nome === infoItem.textContent);
-            if(achado) itemNaVtr = achado;
-        });
-
-        if (itemNaVtr) {
-            if (ehMulti) {
-                document.getElementById('almox-transf-qtd').closest('.form-group').style.display = 'none';
-                document.getElementById('div-selecao-envio-multi').style.display = 'block';
-                document.getElementById('lista-checks-tombamento').innerHTML = gerarHtmlChecks(itemNaVtr.tombamentos || [], 'laranja');
-                
-                if(tombFoco) {
-                    const chk = document.querySelector(`.check-envio-tomb[value="${tombFoco}"]`);
-                    if(chk) { chk.checked = true; atualizarQtdEnvio(); }
-                    localStorage.removeItem('sigma_tomb_foco');
-                }
-            } else {
-                const inputQtd = document.getElementById('almox-transf-qtd');
-                inputQtd.value = itemNaVtr.quantidadeEsperada;
-                document.getElementById('label-qtd-movimentacao').innerHTML = `Qtd <span style="float:right; color:#f57c00;">Na Vtr: ${itemNaVtr.quantidadeEsperada}</span>`;
-            }
-        }
-    }
-}
-// Função auxiliar para manter o código limpo
-function gerarHtmlChecks(lista, tema) {
-    const corRef = tema === 'azul' ? '#2c7399' : '#f57c00';
-    const bgRef = tema === 'azul' ? 'white' : '#fffaf0';
-    const icon = tema === 'azul' ? 'fa-barcode' : 'fa-undo';
-
-    return lista.map(t => `
-        <label style="display: flex; align-items: center; gap: 10px; padding: 10px; border-bottom: 1px solid #eee; cursor:pointer; background: ${bgRef};">
-            <input type="checkbox" class="check-envio-tomb" value="${t.tomb}" onchange="atualizarQtdEnvio()">
-            <span style="font-size:0.9em; color:#333;">
-                <i class="fas ${icon}" style="color:${corRef}"></i> <b>${t.tomb}</b> 
-                <br><small style="color:#666">S/N: ${t.serie || 'N/A'}</small>
-            </span>
-        </label>
-    `).join('') || '<p style="padding:15px; font-size:0.85em; color:#d90f23; font-weight:bold;">Nenhum item localizado.</p>';
-}
-/**
- * Carrega os setores da viatura de destino
- */
-function carregarSetoresDestino(listaId) {
-    db.collection('listas_conferencia').doc(listaId).get().then(doc => {
-        if (doc.exists) {
-            const setores = doc.data().list || [];
-            document.getElementById('almox-setor-alvo').innerHTML = setores.map(s => `<option value="${s.nome}">${s.nome}</option>`).join('');
-        }
-    });
-}
-
-function atualizarQtdEnvio() {
-    // Conta quantos checkboxes de tombamento estão marcados
-    const selecionados = document.querySelectorAll('.check-envio-tomb:checked').length;
-    
-    // Atualiza o input de quantidade que a função de salvar utiliza
-    const inputQtd = document.getElementById('almox-transf-qtd');
-    if (inputQtd) {
-        inputQtd.value = selecionados;
-    }
-}
-		function resetarVisibilidadeModal() {
-    // Reseta visibilidade dos blocos
-    document.getElementById('div-almox-viatura').style.display = 'none';
-    document.getElementById('div-almox-setor').style.display = 'none';
-    document.getElementById('div-aporte-multi').style.display = 'none';
-    document.getElementById('div-selecao-envio-multi').style.display = 'none';
-    
-    const inputQtd = document.getElementById('almox-transf-qtd');
-    if(inputQtd) inputQtd.closest('.form-group').style.display = 'block';
-
-    // 🛑 ADIÇÃO CIRÚRGICA: Destrava os selects para a próxima operação
-    const selectTipo = document.getElementById('almox-operacao-tipo');
-    const selectVtr = document.getElementById('almox-viatura-alvo');
-    
-    if (selectTipo) {
-        selectTipo.disabled = false;
-        selectTipo.style.backgroundColor = '';
-    }
-    if (selectVtr) {
-        selectVtr.disabled = false;
-        selectVtr.style.backgroundColor = '';
-    }
-}
 		async function prepararAporte(docId) {
     // docId aqui será o UID_GLOBAL (ex: FAM-000001-MOD-1)
     try {
@@ -11394,312 +11439,6 @@ async function executarAporteEstoque() {
     }
 }
 		
-	async function abrirModalTransferencia(docId) {
-    // 1. PROTEÇÃO E LIMPEZA IMEDIATA
-    if (!docId || docId === "" || docId === "undefined") {
-        console.error("ERRO: abrirModalTransferencia recebeu um ID inválido.");
-        return; 
-    }
-
-    const modal = document.getElementById('modal-almox-transferencia');
-    const tituloNome = document.getElementById('almox-transf-item-nome');
-    const selectViatura = document.getElementById('almox-viatura-alvo');
-    const opTipo = document.getElementById('almox-operacao-tipo');
-
-    // Reset visual instantâneo para evitar "rastro" do item anterior
-    if (tituloNome) {
-        tituloNome.textContent = "Carregando...";
-        tituloNome.setAttribute('data-docid', docId);
-    }
-    
-    // Garante que o tipo de operação volte ao padrão ao abrir
-    if (opTipo) {
-        opTipo.value = "ENVIO"; 
-        const containerTipo = opTipo.closest('.form-group');
-        if (containerTipo) containerTipo.style.display = 'block'; // Garante que reapareça se foi escondido antes
-    }
-    
-    // Esconde as divs de Multi/Setor antes de carregar o novo item
-    resetarVisibilidadeModal();
-
-    try {
-        // 2. BUSCA DE DADOS NA NOVA COLEÇÃO 'inventario'
-        // ✅ CORREÇÃO: Removido 'almoxarifado_central'
-        const doc = await db.collection('inventario').doc(docId).get();
-        
-        if (!doc.exists) {
-            console.error("UID não encontrado no inventário:", docId);
-            alert("Erro: Material não localizado no prontuário global.");
-            return;
-        }
-        
-        const item = doc.data();
-
-        // 3. INJEÇÃO DE DADOS
-        tituloNome.textContent = item.nome;
-        tituloNome.setAttribute('data-tipo', item.tipo); // 'single' ou 'multi'
-
-        // 4. POPULAR DESTINOS (Lógica Admin vs Gestor)
-        const role = currentUserData.role;
-        if (selectViatura) {
-            selectViatura.disabled = false; // Garante que esteja habilitado
-            selectViatura.innerHTML = '<option value="" disabled selected>Selecione o destino...</option>';
-            
-            if (role === 'admin') {
-                // Admin envia para UNIDADES
-                const snapU = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
-                snapU.forEach(uDoc => {
-                    const u = uDoc.data();
-                    const opt = document.createElement('option');
-                    opt.value = uDoc.id; 
-                    opt.textContent = u.sigla;
-                    selectViatura.appendChild(opt);
-                });
-            } else {
-                // Gestor envia para VIATURAS da sua unidade
-                const unitListIds = await getUnitListIds();
-                const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-                const rotas = rotasDoc.data() || {};
-                unitListIds.forEach(id => {
-                    if (rotas[id]) {
-                        const opt = document.createElement('option');
-                        opt.value = id;
-                        opt.textContent = rotas[id].nome;
-                        selectViatura.appendChild(opt);
-                    }
-                });
-            }
-        }
-
-        // 5. CONFIGURAÇÃO FINAL DA INTERFACE
-        configurarInterfaceMovimentacao();
-
-        // 6. EXIBIÇÃO
-        modal.style.display = 'flex';
-
-    } catch (e) {
-        console.error("Erro ao abrir transferência:", e);
-        alert("Erro técnico ao carregar dados do material.");
-    }
-}
-		
-		
-		async function executarEnvio(docIdAlmox) {
-    const viaturaId = document.getElementById('almox-viatura-alvo').value;
-    const setorAlvo = document.getElementById('almox-setor-alvo').value;
-    const obs = document.getElementById('almox-transf-obs').value.trim();
-    const tombFocado = localStorage.getItem('sigma_tomb_foco'); 
-    const dataRegistro = new Date().toLocaleString('pt-BR');
-    const autorNome = currentUserData.nome_militar_completo;
-    
-    let qtd = parseInt(document.getElementById('almox-transf-qtd').value);
-
-    if (!viaturaId || !setorAlvo) return alert("Selecione o destino completo (Viatura e Setor).");
-    if (!qtd || qtd < 1) return alert("Informe uma quantidade válida.");
-
-    try {
-        // ✅ NORMALIZAÇÃO DE IDS PARA A NOVA ARQUITETURA
-        // O docIdAlmox vinha como "CCI_item_0001", agora extraímos apenas o UID Global
-        const uidGlobal = docIdAlmox.includes('_') ? docIdAlmox.split('_').slice(1).join('_') : docIdAlmox;
-        const unidadeDonaId = currentUserData.unidade_id;
-
-        const itemRef = db.collection('inventario').doc(uidGlobal);
-        const vtrRef = db.collection('listas_conferencia').doc(viaturaId);
-        const idEvento = "ENV-" + Date.now();
-
-        await db.runTransaction(async (transaction) => {
-            const snapItem = await transaction.get(itemRef);
-            if (!snapItem.exists) throw new Error("Item não localizado no inventário global.");
-            const dItem = snapItem.data();
-            const ehMulti = dItem.tipo === 'multi';
-
-            const snapVtr = await transaction.get(vtrRef);
-            if (!snapVtr.exists) throw new Error("Viatura/Lista não encontrada.");
-            let listVtr = snapVtr.data().list || [];
-
-            // --- 1. LÓGICA MULTI: ATUALIZA PRONTUÁRIOS INDIVIDUAIS ---
-            let itensParaVtr = [];
-            if (ehMulti) {
-                const selecionados = Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value);
-                
-                for (let t of selecionados) {
-                    const tombRef = itemRef.collection('tombamentos').doc(t);
-                    transaction.update(tombRef, {
-                        situacao_atual: "EM CARGA",
-                        viatura_id: viaturaId,
-                        sub_local: setorAlvo
-                    });
-
-                    // Registra no histórico do ativo
-                    transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
-                        data: dataRegistro,
-                        evento: "SAIDA_PARA_VTR",
-                        quem: autorNome,
-                        detalhes: `Enviado para ${viaturaId} (Setor: ${setorAlvo}). Obs: ${obs}`
-                    });
-
-                    itensParaVtr.push({ tomb: t, situacao: "EM CARGA" });
-                }
-            } else {
-                // --- 2. LÓGICA SINGLE: ATUALIZA SALDO DA UNIDADE ---
-                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeDonaId);
-                const snapSaldo = await transaction.get(saldoRef);
-                
-                if (!snapSaldo.exists || snapSaldo.data().qtd_disp < qtd) {
-                    throw new Error("Saldo disponível insuficiente na unidade.");
-                }
-
-                transaction.update(saldoRef, {
-                    qtd_disp: snapSaldo.data().qtd_disp - qtd,
-                    qtd_em_carga: (snapSaldo.data().qtd_em_carga || 0) + qtd,
-                    last_update: dataRegistro
-                });
-
-                // Registra histórico no saldo da unidade
-                transaction.set(saldoRef.collection('historico_vida').doc(idEvento), {
-                    data: dataRegistro,
-                    evento: "ENVIO_PARA_VTR",
-                    quem: autorNome,
-                    quantidade: qtd,
-                    detalhes: `Enviado para ${viaturaId} (Setor: ${setorAlvo}). Obs: ${obs}`
-                });
-            }
-
-            // --- 3. INJEÇÃO NA LISTA DA VIATURA (IGUAL À ANTERIOR, MAS COM IDS LIMPOS) ---
-            let itemJaNaVtr = false;
-            listVtr = listVtr.map(setor => {
-                if (setor.nome === setorAlvo) {
-                    if (!setor.itens) setor.itens = [];
-                    setor.itens = setor.itens.map(it => {
-                        if (it.uid_global === uidGlobal) {
-                            itemJaNaVtr = true;
-                            if (ehMulti) {
-                                it.tombamentos = [...(it.tombamentos || []), ...itensParaVtr];
-                                it.quantidadeEsperada = it.tombamentos.length;
-                            } else {
-                                it.quantidadeEsperada = (Number(it.quantidadeEsperada) || 0) + qtd;
-                            }
-                        }
-                        return it;
-                    });
-                    if (!itemJaNaVtr) {
-                        setor.itens.push({
-                            id: uidGlobal + "_" + Date.now(),
-                            uid_global: uidGlobal,
-                            nome: dItem.nome,
-                            tipo: dItem.tipo,
-                            quantidadeEsperada: qtd,
-                            tombamentos: ehMulti ? itensParaVtr : []
-                        });
-                    }
-                }
-                return setor;
-            });
-
-            transaction.update(vtrRef, { list: listVtr });
-        });
-
-        alert("✅ Material enviado para a viatura com sucesso!");
-        localStorage.removeItem('sigma_tomb_foco');
-        document.getElementById('modal-almox-transferencia').style.display = 'none';
-        carregarAlmoxarifadoUI();
-
-    } catch (e) {
-        console.error("Erro no envio:", e);
-        alert("❌ Erro no envio: " + e.message);
-    }
-}
-		async function executarRecolhimento(docIdAlmox) {
-    const viaturaId = document.getElementById('almox-viatura-alvo').value; // Estará disabled mas o valor existe
-    const tombFocado = document.getElementById('almox-tombamento-focado')?.value;
-    const dataRegistro = new Date().toLocaleString('pt-BR');
-    let qtd = parseInt(document.getElementById('almox-transf-qtd').value);
-
-    try {
-        const almoxRef = db.collection('almoxarifado_central').doc(docIdAlmox);
-        const vtrRef = db.collection('listas_conferencia').doc(viaturaId);
-
-        await db.runTransaction(async (transaction) => {
-            const snapAlmox = await transaction.get(almoxRef);
-            const dAlmox = snapAlmox.data();
-            const ehMulti = dAlmox.tipo === 'multi';
-
-            const snapVtr = await transaction.get(vtrRef);
-            let listVtr = snapVtr.data().list || [];
-            
-            const selecionados = ehMulti ? (tombFocado ? [tombFocado] : Array.from(document.querySelectorAll('.check-envio-tomb:checked')).map(c => c.value)) : [];
-
-            // Remove da Viatura
-            listVtr = listVtr.map(setor => {
-                setor.itens = (setor.itens || []).map(it => {
-                    if (it.uid_global === dAlmox.uid_global || it.nome === dAlmox.nome) {
-                        if (ehMulti) { 
-                            it.tombamentos = (it.tombamentos || []).filter(t => !selecionados.includes(t.tomb)); 
-                            it.quantidadeEsperada = it.tombamentos.length; 
-                        } else { 
-                            it.quantidadeEsperada = Math.max(0, it.quantidadeEsperada - qtd); 
-                        }
-                    }
-                    return it;
-                }).filter(it => it.quantidadeEsperada > 0 || (it.tombamentos && it.tombamentos.length > 0));
-                return setor;
-            });
-
-            // Devolve ao Almoxarifado
-            let arrayTombAlmox = dAlmox.tombamentos || [];
-            if (ehMulti) {
-                arrayTombAlmox = arrayTombAlmox.map(t => {
-                    if (selecionados.includes(t.tomb)) {
-                        return { ...t, viatura_id: null, situacao: "DISPONÍVEL", historico_vida: [...(t.historico_vida || []), { data: dataRegistro, evento: "RECOLHIMENTO", detalhes: `Recolhido da vtr ${viaturaId}`, quem: conferente }] };
-                    }
-                    return t;
-                });
-            }
-
-            transaction.update(almoxRef, { 
-                disponivel: (dAlmox.disponivel || 0) + qtd, 
-                emCarga: Math.max(0, (dAlmox.emCarga || 0) - qtd), 
-                tombamentos: ehMulti ? arrayTombAlmox : dAlmox.tombamentos 
-            });
-            transaction.update(vtrRef, { list: listVtr });
-        });
-
-        alert("✅ Material recolhido para o estoque!");
-        document.getElementById('modal-almox-transferencia').style.display = 'none';
-        carregarAlmoxarifadoUI();
-    } catch (e) { alert("❌ Erro no recolhimento: " + e.message); }
-}
-		function rotearSalvamentoAlmox() {
-    const tipo = document.getElementById('almox-operacao-tipo').value;
-    const docId = document.getElementById('almox-transf-item-nome').getAttribute('data-docid');
-    const role = currentUserData.role; // Captura o perfil para decidir o destino
-    
-    // Bloqueia o botão para evitar cliques duplos durante o processamento
-    const btn = document.getElementById('btn-confirmar-movimentacao');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processando...';
-    }
-
-    if (tipo === 'ENVIO') {
-        // LÓGICA DE DESTINO INTELIGENTE
-        if (role === 'admin') {
-            // Admin envia do Administrativo para outra Unidade (CCI, 1º BBM, etc)
-            executarEnvioUnidade(); 
-        } else {
-            // Gestor envia da Unidade dele para uma Viatura/Lista específica
-            executarEnvio(docId); 
-        }
-    } else if (tipo === 'RECOLHIMENTO') {
-        executarRecolhimento(docId);
-    } else if (tipo === 'BAIXA') {
-        alert("A função de Baixa Definitiva está sendo implementada.");
-        if (btn) { 
-            btn.disabled = false; 
-            btn.innerHTML = '<i class="fas fa-check"></i> Confirmar'; 
-        }
-    }
-}
 		async function configurarBuscaComandanteUnidade() {
     const input = document.getElementById('new-unit-commander-search');
     const suggestionsBox = document.getElementById('unit-commander-suggestions');
