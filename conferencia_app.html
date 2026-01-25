@@ -1190,7 +1190,7 @@ async function carregarDadosRemotos() {
     return [setorCautela];
 }
         
-       async function finalizarConferencia() {
+async function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled && btn.textContent.includes("SALVANDO")) return;
 
@@ -1237,7 +1237,6 @@ async function carregarDadosRemotos() {
         let totalCaa = 0;
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
-        // --- PROCESSAMENTO DA LISTA MESTRA ---
         const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
@@ -1247,14 +1246,12 @@ async function carregarDadosRemotos() {
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // Limpeza de situação ao resolver avaria
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
-                        // Registro de itens S/A sem interação humana
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
@@ -1270,7 +1267,6 @@ async function carregarDadosRemotos() {
                             return entidade;
                         }
 
-                        // Processamento de Resoluções
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(p => p.id === res.id);
@@ -1297,7 +1293,6 @@ async function carregarDadosRemotos() {
                             });
                         }
 
-                        // Metamorfose TEMP -> PEND (Garantia de conversão)
                         entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
                             if (p.id && String(p.id).startsWith('TEMP-')) {
                                 const novoId = p.id.replace('TEMP-', 'PEND-');
@@ -1315,7 +1310,6 @@ async function carregarDadosRemotos() {
 
                         let pendenciasParaRelatorio = [...entidade.pendencias_ids];
                         
-                        // Captura de Cautelas para o Relatório
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
                             entidade.cautelas.forEach(c => {
                                 pendenciasParaRelatorio.push({
@@ -1328,7 +1322,6 @@ async function carregarDadosRemotos() {
                             });
                         }
 
-                        // ✅ AJUSTE DE SEGURANÇA: Garantia de Status C/A no PDF
                         const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente' || statusLocal.status === 'C/A';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
@@ -1360,10 +1353,8 @@ async function carregarDadosRemotos() {
             };
         });
 
-        // --- PREPARAÇÃO PARA O SALVAMENTO ---
         const batch = db.batch();
         
-        // Geração da versão LIMPA para a arquitetura
         const listaLimpaParaArquitetura = novaListaMestra.map(setor => ({
             ...setor,
             itens: setor.itens.map(item => {
@@ -1385,10 +1376,8 @@ async function carregarDadosRemotos() {
         const colecaoListaOrigem = isChecklist ? 'listas_checklist' : (typeof COLECAO_LISTAS !== 'undefined' ? COLECAO_LISTAS : 'listas_conferencia');
         const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
 
-        // 1. Atualiza a Arquitetura (Lista Mestra)
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: listaLimpaParaArquitetura });
 
-        // 2. Registra o Resultado Oficial (Relatório)
         const resRef = db.collection(colecaoResultadosDestino).doc();
         batch.set(resRef, {
             local: String(localNome || ""),
@@ -1408,7 +1397,6 @@ async function carregarDadosRemotos() {
             obs_gerais_vistoria: String(obsGeraisTexto || "")
         });
 
-        // 3. Atualiza Custódia Atual
         batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
             lista_id: String(LISTA_ID || ""), 
             local_nome: String(localNome || ""), 
@@ -1417,7 +1405,7 @@ async function carregarDadosRemotos() {
             tipo_operacao: isChecklist ? 'VISTORIA_VIATURA' : 'CONFERENCIA_ESTOQUE'
         }, { merge: true });
 
-        // 4. ✅ SINCRONIZAÇÃO COM O INVENTÁRIO
+        // 4. ✅ SINCRONIZAÇÃO COM O INVENTÁRIO (DNA DA PENDÊNCIA INJETADO)
         for (const itemAlterado of itensCaa) {
             const uidGlobal = itemAlterado.uid_global;
             if (!uidGlobal) continue;
@@ -1436,7 +1424,8 @@ async function carregarDadosRemotos() {
                         evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
                         quem: conferenteCompleto,
                         detalhes: `⚠️ Alteração em ${localNome}: ${pend.descricao}`,
-                        uid_pendencia: pend.id
+                        uid_pendencia: pend.id,
+                        lista_origem_id: LISTA_ID // ✅ DNA DA PENDÊNCIA
                     }));
 
                 novosLogs.forEach((log, idx) => {
@@ -1444,8 +1433,8 @@ async function carregarDadosRemotos() {
                 });
                 batch.update(tombRef, { situacao_atual: "PENDENTE" });
             } else {
-                const unidadeId = urlParams.get('unidade_id') || "UNID-1767838511310";
-                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+                const unidadeIdFinal = urlParams.get('unidade_id') || "UNID-1767838511310";
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeIdFinal);
                 const novasPendencias = (itemAlterado.pendencias_ids || []).filter(pend => pend.id && String(pend.id).startsWith('PEND-'));
                 
                 if (novasPendencias.length > 0) {
@@ -1462,7 +1451,9 @@ async function carregarDadosRemotos() {
                             quem: conferenteCompleto,
                             detalhes: `⚠️ Alteração em ${localNome}: ${pend.descricao}`,
                             quantidade: pend.quantidade,
-                            uid_pendencia: pend.id
+                            uid_pendencia: pend.id,
+                            lista_origem_id: LISTA_ID, // ✅ DNA DA PENDÊNCIA
+                            local_sigla: infoLocal.nome || "N/D" // ✅ AJUDA NO RASTREIO
                         });
                     });
                 }
