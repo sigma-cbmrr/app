@@ -3626,51 +3626,6 @@ input:checked + .slider:before {
     		</div>
 		</div>
 		
-		<div id="modal-almox-aporte" class="modal-overlay" style="display:none; z-index: 31001;">
-    		<div class="modal-content" style="max-width: 500px; border-top: 5px solid #166534;">
-        		<button class="close-btn" onclick="document.getElementById('modal-almox-aporte').style.display='none'"><i class="fas fa-times"></i></button>
-        
-        		<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px;">
-            		<i class="fas fa-plus-circle" style="font-size: 2em; color: #166534;"></i>
-            		<div>
-                		<h2 style="margin:0; color: #166534;">Aporte de Material</h2>
-                		<small style="color: #666;">Registrar entrada física no Almoxarifado Central</small>
-            		</div>
-        		</div>
-
-        		<div style="background: #f0fdf4; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bbf7d0;">
-            		<span style="font-size: 0.85em; color: #166534; font-weight: bold; text-transform: uppercase;">Material Selecionado:</span>
-            		<div id="almox-aporte-item-nome" style="font-size: 1.2em; font-weight: 800; color: #14532d; margin-top: 5px;" data-docid="" data-tipo="">---</div>
-        		</div>
-
-        		<div class="form-group">
-            		<label>Quantidade de Entrada</label>
-            		<input type="number" id="almox-aporte-qtd" class="g-cat-input" min="1" value="1" 
-                   	oninput="const itemNomeEl = document.getElementById('almox-aporte-item-nome'); if(itemNomeEl.getAttribute('data-tipo') === 'multi') gerarInputsTombamentoAporte(this.value)">
-        		</div>
-
-        		<div id="div-aporte-multi-exclusivo" style="display:none; margin-top: 15px; padding: 15px; background: #f8fafc; border-radius: 8px; border: 1px dashed #2c7399;">
-            		<label style="font-weight: bold; color: #2c7399; font-size: 0.85em; display: block; margin-bottom: 10px;">
-                		<i class="fas fa-barcode"></i> Identificação dos Itens (Tombamento / Série):
-            		</label>
-            		<div id="lista-inputs-tombamento-exclusivo" style="max-height: 250px; overflow-y: auto;">
-                	</div>
-        		</div>
-
-        		<div class="form-group" style="margin-top: 15px;">
-            		<label>Justificativa / Documento de Origem (Obrigatório)</label>
-            		<textarea id="almox-aporte-obs" class="g-cat-input" style="height: 80px;" placeholder="Ex: NF 455 - Compra Direta / Doação via Ofício 123..."></textarea>
-        		</div>
-
-        		<div class="modal-buttons" style="margin-top: 25px;">
-            		<button class="btn-modern-action btn-secondary" onclick="document.getElementById('modal-almox-aporte').style.display='none'">Cancelar</button>
-            		<button class="btn-modern-action btn-sync" style="background-color: #166534;" onclick="executarAporteEstoque()">
-                		<i class="fas fa-check"></i> Confirmar Entrada
-            		</button>
-        		</div>
-    		</div>
-		</div>
-		
 		<div id="modal-timeline-global" class="modal-overlay" style="display:none; z-index: 31005;">
     		<div class="modal-content" style="max-width: 550px; border-top: 5px solid #fef3c7; background: #fdfdfd;">
         		<button class="close-btn" onclick="document.getElementById('modal-timeline-global').style.display='none'"><i class="fas fa-times"></i></button>
@@ -11317,175 +11272,218 @@ async function salvarCadastroGlobalHierarquico() {
 }
 		
 		async function prepararAporte(docId) {
-    // docId aqui será o UID_GLOBAL (ex: FAM-000001-MOD-1)
-    try {
-        // ✅ MUDANÇA CIRÚRGICA: Busca na coleção 'inventario'
-        const doc = await db.collection('inventario').doc(docId).get();
-        
-        if (!doc.exists) {
-            console.error("Item não encontrado no inventário:", docId);
-            return;
+    // 1. Busca os dados do item no Inventário V3
+    const docAlvo = await db.collection('inventario').doc(docId).get();
+    if (!docAlvo.exists) return alert("Erro ao localizar material.");
+    
+    const item = docAlvo.data();
+    const ehMulti = item.tipo === 'multi';
+
+    // 2. Lança o Modal Elegante
+    Swal.fire({
+        title: `<i class="fas fa-plus-circle"></i> Aporte de Material`,
+        html: `
+            <div style="text-align: left; padding: 5px;">
+                <div style="background: #f0fdf4; padding: 12px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #bbf7d0;">
+                    <small style="color: #166534; font-weight: 800; text-transform: uppercase; font-size: 0.7em;">Material Selecionado</small>
+                    <div style="font-weight: 800; color: #14532d; font-size: 1.1em;">${item.nome}</div>
+                    <small style="color: #166534; font-size: 0.75em;">DNA: ${item.tipo.toUpperCase()} • ${item.categoria}</small>
+                </div>
+
+                <div class="form-group">
+                    <label style="font-size: 0.85em; font-weight:bold; color:#800020;">QUANTIDADE DE ENTRADA:</label>
+                    <input type="number" id="swal-aporte-qtd" class="swal2-input" value="1" min="1" 
+                           style="width: 100%; margin: 10px 0;"
+                           oninput="gerarInputsTombamentoDinamico(this.value, '${item.tipo}')">
+                </div>
+
+                <div id="div-tombamentos-dinamicos" style="display: ${ehMulti ? 'block' : 'none'}; margin-top: 15px; padding: 15px; background: #f8fafc; border-radius: 8px; border: 1px dashed #2c7399;">
+                    <label style="font-weight: bold; color: #2c7399; font-size: 0.85em; display: block; margin-bottom: 10px;">
+                        <i class="fas fa-barcode"></i> Identificação dos Itens (Tomb / Série):
+                    </label>
+                    <div id="container-inputs-tomb" style="max-height: 200px; overflow-y: auto;">
+                        </div>
+                </div>
+
+                <div class="form-group" style="margin-top:15px;">
+                    <label style="font-size: 0.85em; font-weight:bold; color:#800020;">JUSTIFICATIVA / NOTA FISCAL:</label>
+                    <textarea id="swal-aporte-obs" class="swal2-textarea" style="width: 100%; margin: 10px 0; height: 80px;" placeholder="Ex: NF 455 - Compra Direta..."></textarea>
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: '<i class="fas fa-check"></i> CONFIRMAR ENTRADA',
+        confirmButtonColor: '#166534',
+        cancelButtonText: 'Cancelar',
+        didOpen: () => {
+            // Inicializa os inputs se for multi
+            if (ehMulti) gerarInputsTombamentoDinamico(1, 'multi');
+        },
+        preConfirm: () => {
+            const qtd = document.getElementById('swal-aporte-qtd').value;
+            const obs = document.getElementById('swal-aporte-obs').value.trim();
+            
+            if (!qtd || qtd < 1) return Swal.showValidationMessage('Informe uma quantidade válida');
+            if (!obs) return Swal.showValidationMessage('A justificativa é obrigatória');
+
+            let tombamentos = [];
+            if (ehMulti) {
+                const linhas = document.querySelectorAll('.linha-tomb-input');
+                for (let linha of linhas) {
+                    const t = linha.querySelector('.val-tomb').value.trim().toUpperCase();
+                    const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
+                    if (!t) return Swal.showValidationMessage('Preencha todos os tombamentos');
+                    tombamentos.push({ tomb: t, serie: s });
+                }
+            }
+
+            return {
+                quantidade: parseInt(qtd),
+                observacao: obs,
+                tombamentos: ehMulti ? tombamentos : null
+            };
         }
-        
-        const item = doc.data();
-
-        const elNome = document.getElementById('almox-aporte-item-nome');
-        elNome.textContent = item.nome;
-        elNome.setAttribute('data-docid', docId);
-        elNome.setAttribute('data-tipo', item.tipo);
-
-        // Reset campos do formulário
-        document.getElementById('almox-aporte-qtd').value = 1;
-        document.getElementById('almox-aporte-obs').value = '';
-        
-        const containerLista = document.getElementById('lista-inputs-tombamento-exclusivo');
-        const containerDiv = document.getElementById('div-aporte-multi-exclusivo');
-        
-        containerLista.innerHTML = '';
-
-        // Lógica de interface baseada no DNA do item
-        if (item.tipo === 'multi') {
-            // Se for patrimônio, gera campo para o primeiro tombamento
-            gerarInputsTombamentoAporte(1);
-            containerDiv.style.display = 'block';
-        } else {
-            // Se for consumo, apenas quantidade
-            containerDiv.style.display = 'none';
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Chama a função que já temos de gravar no banco, passando os novos dados
+            processarAporteNoBanco(docId, result.value);
         }
-
-        document.getElementById('modal-almox-aporte').style.display = 'flex';
-    } catch (e) {
-        console.error("Erro ao preparar aporte:", e);
-        alert("Erro ao carregar dados do item para entrada.");
-    }
+    });
 }
-function gerarInputsTombamentoAporte(qtd) {
-    const lista = document.getElementById('lista-inputs-tombamento-exclusivo');
+	function gerarInputsTombamentoDinamico(qtd, tipo) {
+    const containerDiv = document.getElementById('div-tombamentos-dinamicos');
+    const lista = document.getElementById('container-inputs-tomb');
+    
+    if (tipo !== 'multi') {
+        if(containerDiv) containerDiv.style.display = 'none';
+        return;
+    }
+
+    containerDiv.style.display = 'block';
     lista.innerHTML = '';
-    if (qtd > 0) document.getElementById('div-aporte-multi-exclusivo').style.display = 'block';
+    
     for (let i = 1; i <= qtd; i++) {
         lista.innerHTML += `
-            <div class="linha-aporte-tomb" style="display: grid; grid-template-columns: 35px 1fr 1fr; gap: 8px; margin-bottom: 10px;">
-                <div style="background: #800020; color: white; text-align: center; line-height: 35px; border-radius: 4px;">${i}</div>
-                <input type="text" class="g-cat-input val-tomb" placeholder="Tombamento" required>
-                <input type="text" class="g-cat-input val-sn" placeholder="Série">
+            <div class="linha-tomb-input" style="display: grid; grid-template-columns: 30px 1fr 1fr; gap: 8px; margin-bottom: 8px; align-items: center;">
+                <div style="background: #166534; color: white; text-align: center; border-radius: 4px; font-size: 0.8em; height: 30px; line-height: 30px;">${i}</div>
+                <input type="text" class="swal2-input val-tomb" placeholder="Tombamento" style="margin:0; height: 35px; font-size: 0.9em;">
+                <input type="text" class="swal2-input val-sn" placeholder="Nº Série" style="margin:0; height: 35px; font-size: 0.9em;">
             </div>`;
     }
-}
+}	
 
-async function executarAporteEstoque() {
-    const docElement = document.getElementById('almox-aporte-item-nome');
-    // ✅ Remove o prefixo legado se existir, garantindo o UID_GLOBAL limpo
-    const uidGlobal = docElement.getAttribute('data-docid').replace('ADMIN_', ''); 
-    const ehMulti = docElement.getAttribute('data-tipo') === 'multi';
-    const qtdInput = parseInt(document.getElementById('almox-aporte-qtd').value);
-    const obs = document.getElementById('almox-aporte-obs').value.trim();
-    const dataReg = new Date().toLocaleString('pt-BR');
-
-    // ✅ Unidade dinâmica baseada no militar logado
+async function processarAporteNoBanco(uidGlobal, dados) {
+    const { quantidade, observacao, tombamentos } = dados;
+    const ehMulti = tombamentos !== null;
+    
     const minhaUnidadeId = currentUserData.unidade_id || "ADMIN";
     const minhaUnidadeSigla = currentUserData.unidade || "ADMINISTRATIVO";
+    const dataReg = new Date().toLocaleString('pt-BR');
+    const autorNome = currentUserData.nome_militar_completo;
 
-    if (!qtdInput || qtdInput < 1) return alert("Informe uma quantidade válida.");
-    if (!obs) return alert("A justificativa (ex: NF ou Origem) é obrigatória para o histórico.");
-
-    const btn = document.querySelector('#modal-almox-aporte .btn-sync');
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Registrando...';
+    // Feedback visual Sigma V3
+    Swal.fire({
+        title: 'Registrando Entrada...',
+        html: 'Atualizando prontuários e saldos globais.',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+    });
 
     try {
         const itemRef = db.collection('inventario').doc(uidGlobal);
-        const autorNome = currentUserData.nome_militar_completo;
         
         await db.runTransaction(async (transaction) => {
             const snapItem = await transaction.get(itemRef);
             if (!snapItem.exists) throw new Error("DNA do material não encontrado.");
             
             const d = snapItem.data();
-            const idEvento = "EVT-" + Date.now();
+            const idEvento = "EVT-APORTE-" + Date.now();
             let qtdEfetiva = 0;
 
             if (ehMulti) {
-                const linhas = document.querySelectorAll('#lista-inputs-tombamento-exclusivo .linha-aporte-tomb');
+                let listaTombsTxt = [];
                 
-                // Array para coletar os tombamentos deste aporte e gerar um log único no "Pai"
-                let listaTombsAportados = [];
-
-                linhas.forEach(linha => {
-                    const t = linha.querySelector('.val-tomb').value.trim().toUpperCase();
-                    const s = linha.querySelector('.val-sn').value.trim().toUpperCase();
+                for (let tInfo of tombamentos) {
+                    qtdEfetiva++;
+                    listaTombsTxt.push(tInfo.tomb);
+                    const tombRef = itemRef.collection('tombamentos').doc(tInfo.tomb);
                     
-                    if (t) {
-                        qtdEfetiva++;
-                        listaTombsAportados.push(t);
-                        const tombRef = itemRef.collection('tombamentos').doc(t);
-                        
-                        // Registro no Prontuário Individual (RG do Ativo)
-                        transaction.set(tombRef, {
-                            tomb: t, serie: s || "N/A", situacao_atual: "DISPONÍVEL",
-                            local_id: minhaUnidadeId, unidade_sigla: minhaUnidadeSigla,
-                            sub_local: "ALMOXARIFADO CENTRAL", data_entrada: dataReg, criado_por: autorNome
-                        });
+                    // Registro no Prontuário Individual (RG do Ativo)
+                    transaction.set(tombRef, {
+                        tomb: tInfo.tomb, 
+                        serie: tInfo.serie || "N/A", 
+                        situacao_atual: "DISPONÍVEL",
+                        local_id: minhaUnidadeId, 
+                        unidade_sigla: minhaUnidadeSigla,
+                        sub_local: "ALMOXARIFADO CENTRAL", 
+                        data_entrada: dataReg, 
+                        criado_por: autorNome
+                    });
 
-                        // Log específico no prontuário daquela unidade física
-                        transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
-                            data: dataReg, evento: "APORTE_ESTOQUE", quem: autorNome,
-                            detalhes: `Incorporado via Aporte. Justificativa: ${obs}`
-                        });
-                    }
-                });
+                    // Log individual do item
+                    transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
+                        data: dataReg, 
+                        evento: "APORTE_ESTOQUE", 
+                        quem: autorNome,
+                        detalhes: `Incorporado via Aporte. Justificativa: ${observacao}`
+                    });
+                }
 
-                // ✅ REGISTRO NO "PAI" PARA APARECER NO HISTÓRICO GLOBAL
-                // Isso resolve o problema de não aparecer nada na timeline geral
+                // Log no Documento Pai (Linha do tempo global)
                 transaction.update(itemRef, {
                     historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
                         data: dataReg,
-                        evento: "APORTE_LOTE_MULTI",
+                        evento: "APORTE_LOTE_PATRIMONIO",
                         quem: autorNome,
-                        detalhes: `Aporte de ${qtdEfetiva} unidades na unidade ${minhaUnidadeSigla}. Tombamentos: ${listaTombsAportados.join(', ')}. Obs: ${obs}`
+                        detalhes: `Aporte de ${qtdEfetiva} unidades em ${minhaUnidadeSigla}. Itens: ${listaTombsTxt.join(', ')}. Obs: ${observacao}`
                     })
                 });
+
             } else {
-                qtdEfetiva = qtdInput;
-                // ✅ Busca saldo na unidade do militar logado
+                // LÓGICA SINGLE: Atualiza saldo da unidade
+                qtdEfetiva = quantidade;
                 const saldoUnidadeRef = itemRef.collection('saldos_unidades').doc(minhaUnidadeId);
                 const snapSaldo = await transaction.get(saldoUnidadeRef);
-                const dadosSaldo = snapSaldo.exists ? snapSaldo.data() : { qtd_total: 0, qtd_disp: 0, qtd_em_carga: 0, qtd_pend: 0, qtd_caut: 0 };
+                const dSaldo = snapSaldo.exists ? snapSaldo.data() : { qtd_total: 0, qtd_disp: 0 };
 
                 transaction.set(saldoUnidadeRef, {
                     unidade_sigla: minhaUnidadeSigla,
-                    qtd_total: (dadosSaldo.qtd_total || 0) + qtdEfetiva,
-                    qtd_disp: (dadosSaldo.qtd_disp || 0) + qtdEfetiva,
+                    qtd_total: (dSaldo.qtd_total || 0) + qtdEfetiva,
+                    qtd_disp: (dSaldo.qtd_disp || 0) + qtdEfetiva,
                     last_update: dataReg
                 }, { merge: true });
 
-                const histSingleRef = saldoUnidadeRef.collection('historico_vida').doc(idEvento);
-                transaction.set(histSingleRef, {
-                    data: dataReg,
-                    evento: "APORTE_ESTOQUE",
+                // Log no histórico de saldo da unidade
+                transaction.set(saldoUnidadeRef.collection('historico_vida').doc(idEvento), {
+                    data: dataReg, 
+                    evento: "APORTE_ESTOQUE", 
                     quem: autorNome,
                     quantidade: qtdEfetiva,
-                    detalhes: `Entrada física. Justificativa: ${obs}`
+                    detalhes: `Entrada física de material de consumo. Obs: ${observacao}`
                 });
             }
 
-            // 3. Atualiza o consolidado corporativo
+            // Atualiza o consolidado corporativo (Total de todas as unidades)
             transaction.update(itemRef, {
                 qtd_corporativa_total: (d.qtd_corporativa_total || 0) + qtdEfetiva,
                 ultima_movimentacao: dataReg
             });
         });
 
-        alert("✅ Aporte realizado com sucesso!");
-        document.getElementById('modal-almox-aporte').style.display = 'none';
-        
-        if (typeof carregarAlmoxarifadoUI === 'function') await carregarAlmoxarifadoUI();
+        // Sucesso
+        await Swal.fire({
+            icon: 'success',
+            title: 'Aporte Concluído!',
+            text: `${qtdEfetiva} unidade(s) adicionada(s) ao estoque de ${minhaUnidadeSigla}.`,
+            timer: 2500,
+            showConfirmButton: false
+        });
+
+        if (typeof carregarAlmoxarifadoUI === 'function') carregarAlmoxarifadoUI();
 
     } catch (e) {
-        console.error(e);
-        alert("❌ Erro no aporte: " + e.message);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-check"></i> Confirmar Entrada';
+        console.error("Erro no aporte:", e);
+        Swal.fire('Erro no Processamento', e.message, 'error');
     }
 }
 		
