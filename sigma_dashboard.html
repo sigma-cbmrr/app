@@ -2853,22 +2853,37 @@ input:checked + .slider:before {
 		</div>
 		
   		<div id="view-unidades" class="view-section">
-    		<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
-        		<div>
-            		<h1 style="margin:0;">Gestão de Unidades</h1>
-            		<p style="color: #64748b; font-size: 0.85em; font-weight: 600;">Estrutura Organizacional e Comando</p>
-        		</div>
-        		<button class="sigma-v3-tab active" onclick="abrirFormularioUnidade()" style="background: #800020; color: white; border: none; height: 42px; padding: 0 20px;">
-            		<i class="fas fa-plus-circle"></i> Nova Unidade
-        		</button>
+    		<div class="sigma-v3-title-label" style="margin-bottom: 20px;">
+        		<i class="fas fa-sitemap" style="color: #800020;"></i>
+        		<span>GESTÃO DE UNIDADES</span>
     		</div>
 
-    		<div class="sigma-v3-clean-card" style="margin-bottom: 25px; padding: 15px 20px;">
-        		<div style="position: relative; max-width: 400px;">
-            		<i class="fas fa-search" style="position: absolute; left: 15px; top: 12px; color: #94a3b8;"></i>
-            		<input type="text" id="input-busca-unidade" onkeyup="filtrarUnidadesCards()" 
-                   	placeholder="Buscar sigla, nome ou comandante..." 
-                   	style="width: 100%; padding: 10px 10px 10px 40px; border-radius: 10px; border: 1px solid #e2e8f0; background: #f8fafc; outline: none;">
+    		<div class="header-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+        		<div>
+            		<p style="color: #64748b; font-size: 0.85em; font-weight: 600; margin: 0;">
+                		Unidades <i class="fas fa-chevron-right" style="font-size: 0.7em; margin: 0 5px;"></i> Estrutura Organizacional e Comando
+            		</p>
+        		</div>
+        		<div class="global-actions">
+            		<button class="sigma-v3-tab active" onclick="abrirFormularioUnidade()" style="background: #800020; color: white; border: none; height: 42px; padding: 0 20px;">
+                		<i class="fas fa-plus-circle"></i> NOVA UNIDADE
+            		</button>
+        		</div>
+    		</div>
+
+    		<div class="sigma-v3-clean-card" style="margin-bottom: 25px; padding: 20px;">
+        		<div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end;">
+            		<div class="filter-item" style="flex: 1; min-width: 280px;">
+                		<label style="display: block; font-weight: 800; font-size: 0.7em; color: #64748b; text-transform: uppercase; margin-bottom: 8px;">
+                    		<i class="fas fa-search"></i> Localizar Sigla, Nome ou Comandante
+                		</label>
+                		<div style="position: relative;">
+                    		<i class="fas fa-search" style="position: absolute; left: 15px; top: 12px; color: #94a3b8;"></i>
+                    		<input type="text" id="input-busca-unidade" onkeyup="filtrarUnidadesCards()" 
+                           	placeholder="Ex: 1º BBM, CCI, COMANDO..." 
+                           	style="width: 100%; padding: 10px 10px 10px 40px; border-radius: 10px; border: 1px solid #e2e8f0; background: #f8fafc; outline: none; box-sizing: border-box; font-size: 0.9em;">
+                		</div>
+            		</div>
         		</div>
     		</div>
 
@@ -4719,54 +4734,89 @@ async function loadMyHistory() {
     const container = document.getElementById('units-cards-container');
     if (!container) return;
 
-    container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#64748b;"><i class="fas fa-sync fa-spin fa-2x"></i><br>Atualizando Estrutura...</div>`;
+    // Loading Shimmer V3
+    container.innerHTML = `
+        <div style="grid-column: 1/-1; text-align:center; padding:60px; color:#64748b;">
+            <i class="fas fa-sync fa-spin fa-3x" style="opacity:0.3; margin-bottom:15px; display:block;"></i>
+            <span style="font-weight:700; letter-spacing:1px; text-transform:uppercase; font-size:0.8em;">Sincronizando Estrutura Organizacional...</span>
+        </div>`;
 
     try {
         const snap = await db.collection('unidades_estruturadas').where('ativo', '==', true).get();
+        
+        if (snap.empty) {
+            container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">Nenhuma unidade cadastrada.</div>`;
+            return;
+        }
+
+        const unidades = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        // Separação por Natureza para criar os Headers de Grupo
+        const adm = unidades.filter(u => u.tipo === 'administrativo');
+        const ope = unidades.filter(u => u.tipo === 'operacional');
+
         let html = '';
 
-        snap.forEach(doc => {
-            const u = doc.data();
-            const icon = u.tipo === 'administrativo' ? 'fa-landmark' : 'fa-building-shield';
-            const corTipo = u.tipo === 'administrativo' ? '#475569' : '#800020';
-
-            html += `
-                <div class="v3-posto-card" style="border-top: 6px solid ${corTipo}; min-height: 200px;">
-                    <div class="v3-posto-actions">
-                        <button class="v3-btn-action" onclick="abrirFormularioUnidade({ uid: '${doc.id}', ...JSON.parse(decodeURIComponent('${encodeURIComponent(JSON.stringify(u))}')) })">
-                            <i class="fas fa-pencil-alt"></i>
-                        </button>
-                        <button class="v3-btn-action" onclick="deletarUnidadeSistema('${doc.id}', '${u.sigla}')">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
-                    </div>
-
-                    <div style="padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center;">
-                        <div class="v3-icon-box" style="background: ${corTipo}10; color: ${corTipo};">
-                            <i class="fas ${icon} fa-xl"></i>
-                        </div>
-
-                        <div style="margin-bottom: 15px;">
-                            <span style="display:block; font-weight:900; font-size:1.4em; color:#1e293b; letter-spacing:-0.5px;">${u.sigla}</span>
-                            <span style="display:block; font-size: 0.7em; font-weight: 700; color: #64748b; text-transform: uppercase;">${u.nome_completo}</span>
-                        </div>
-
-                        <div style="width: 100%; border-top: 1px solid #f1f5f9; padding-top: 12px; margin-top: auto;">
-                            <small style="display:block; font-size:0.6em; color:#94a3b8; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Comando / Direção</small>
-                            <span style="font-size:0.85em; font-weight:700; color:#1e293b;">
-                                <i class="fas fa-user-tie" style="margin-right:5px; opacity:0.5;"></i> ${u.comandante_nome_estatico || 'Não definido'}
-                            </span>
-                        </div>
-                    </div>
+        const renderGrupo = (lista, titulo, icone, cor) => {
+            if (lista.length === 0) return '';
+            
+            let grupoHtml = `
+                <div class="unit-header" style="grid-column: 1/-1; display: flex; align-items: center; gap: 12px; margin: 30px 0 15px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; color: #1e293b; font-weight: 800; text-transform: uppercase; font-size: 0.9em; letter-spacing: 1px;">
+                    <i class="fas ${icone}" style="color:${cor}"></i> ${titulo} (${lista.length})
                 </div>`;
-        });
+
+            lista.forEach(u => {
+                const corTipo = u.tipo === 'administrativo' ? '#475569' : '#800020';
+                const icon = u.tipo === 'administrativo' ? 'fa-landmark' : 'fa-building-shield';
+                
+                // Sanitização para o objeto de edição
+                const uJson = JSON.stringify(u).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+
+                grupoHtml += `
+                    <div class="v3-posto-card" style="border-top: 6px solid ${corTipo}; min-height: 200px;">
+                        <div class="v3-posto-actions">
+                            <button class="v3-btn-action" title="Editar Unidade" onclick="abrirFormularioUnidade(JSON.parse('${uJson}'))">
+                                <i class="fas fa-pencil-alt"></i>
+                            </button>
+                            <button class="v3-btn-action" title="Excluir Unidade" onclick="deletarUnidadeSistema('${u.id}', '${u.sigla}')">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+
+                        <div style="padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center;">
+                            <div class="v3-icon-box" style="background: ${corTipo}15; color: ${corTipo}; width: 60px; height: 60px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.5em; margin-bottom: 15px;">
+                                <i class="fas ${icon}"></i>
+                            </div>
+
+                            <div style="margin-bottom: 15px;">
+                                <span style="display:block; font-weight:900; font-size:1.4em; color:#1e293b; letter-spacing:-0.5px;">${u.sigla}</span>
+                                <span style="display:block; font-size: 0.7em; font-weight: 700; color: #64748b; text-transform: uppercase;">${u.nome_completo}</span>
+                            </div>
+
+                            <div style="width: 100%; border-top: 1px solid #f1f5f9; padding-top: 12px; margin-top: auto;">
+                                <small style="display:block; font-size:0.6em; color:#94a3b8; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Comando / Direção</small>
+                                <span style="font-size:0.85em; font-weight:700; color:#1e293b;">
+                                    <i class="fas fa-user-tie" style="margin-right:5px; opacity:0.5; color:${corTipo}"></i> ${u.comandante_nome_estatico || 'Não definido'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+            return grupoHtml;
+        };
+
+        // Renderiza primeiro os Comandos (ADM) e depois as Unidades Operacionais
+        html += renderGrupo(adm, 'Comandos e Diretorias', 'fa-crown', '#475569');
+        html += renderGrupo(ope, 'Unidades Operacionais', 'fa-shield-halved', '#800020');
 
         container.innerHTML = html;
+
+        // Gatilho de ícones FontAwesome
         if (window.FontAwesome) FontAwesome.dom.i2svg();
 
     } catch (e) {
-        console.error(e);
-        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao carregar unidades.</p>`;
+        console.error("Erro ao renderizar unidades:", e);
+        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao carregar mapa de unidades.</p>`;
     }
 }
       async function abrirFormularioUnidade(dadosEdicao = null) {
