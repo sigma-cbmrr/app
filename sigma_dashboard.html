@@ -11918,7 +11918,16 @@ async function deletarAtivoGlobal(ativoUid, nomeIdentificador) {
 }
 		
 		function fecharModalVtr() {
-    document.getElementById('modal-detalhes-vtr').style.display = 'none';
+    // 1. Comando oficial para fechar modais do SweetAlert2
+    if (typeof Swal !== 'undefined' && Swal.isVisible()) {
+        Swal.close();
+    }
+    
+    // 2. Segurança: Tenta fechar o elemento antigo apenas se ele ainda existir no DOM
+    const modalLegado = document.getElementById('modal-detalhes-vtr');
+    if (modalLegado) {
+        modalLegado.style.display = 'none';
+    }
 }
 
 async function abrirModalDetalhesVtr(unidadeUid, ativoUid) {
@@ -14474,26 +14483,30 @@ function finalizarPreCheckEIrProApp() {
     const checklistId = `CHECKLIST_VTR_${vtrId}`;
     const colecaoAlvo = 'listas_checklist';
     
-    // ✅ GARANTIA DE INSTÂNCIA: Usa a mesma conexão global do console
+    // ✅ GARANTIA DE INSTÂNCIA
     const firestore = window.db || db; 
     
-    console.log("Iniciando gestão para:", checklistId);
+    console.log("🚀 Iniciando gestão de checklist para:", checklistId);
     
     try {
+        // 1. Validação da Viatura no cadastro global
         const vtrDoc = await firestore.collection('viaturas').doc(vtrId).get();
         if (!vtrDoc.exists) return alert("Erro: Viatura não localizada no cadastro global.");
         const vtrData = vtrDoc.data();
 
+        // 2. Verificação de existência da lista de checklist
         const docRef = firestore.collection(colecaoAlvo).doc(checklistId);
         const snapChecklist = await docRef.get();
 
         if (!snapChecklist.exists) {
-            console.log("Criando novo checklist na coleção:", colecaoAlvo);
+            console.log("📋 Criando novo checklist baseado no template padrão...");
             
+            // Busca o template definido pela administração
             const templateDoc = await firestore.collection('config_checklists').doc('vtr_padrao').get();
-            if (!templateDoc.exists) throw new Error("Template 'vtr_padrao' não encontrado.");
+            if (!templateDoc.exists) throw new Error("Template 'vtr_padrao' não encontrado no banco.");
             const template = templateDoc.data();
 
+            // Mapeia os setores e itens do template para a nova lista da viatura
             const novaListaFormatada = template.setores.map(setor => ({
                 id: "setor_" + Date.now() + Math.random().toString(36).substr(2, 5),
                 nome: setor.nome,
@@ -14516,12 +14529,13 @@ function finalizarPreCheckEIrProApp() {
                 })
             }));
 
+            // Grava a estrutura inicial
             await docRef.set({
                 uid: checklistId,
                 ativo_id: vtrId,
                 ativo_nome: prefixo,
-                unidade_id: vtrData.unidade_atual_id || "", 
-                unidade_sigla: vtrData.unidade_atual_nome || "N/D",
+                unidade_id: vtrData.unidade_atual_id || vtrData.unidade_id || "", 
+                unidade_sigla: vtrData.unidade_atual_nome || vtrData.unidade_sigla || "N/D",
                 posto_nome: "PÁTIO / MANUTENÇÃO",
                 ativo: true,
                 tipo: 'checklist_viatura',
@@ -14529,28 +14543,39 @@ function finalizarPreCheckEIrProApp() {
                 criado_em: firebase.firestore.FieldValue.serverTimestamp(),
                 criado_por: currentUserData.nome_militar_completo
             });
-            console.log("✅ Checklist gravado no Firebase.");
         }
 
-        // ✅ CONFIGURAÇÃO DE ESTADO GLOBAL
+        // 3. TRANSIÇÃO PARA O EDITOR SIGMA V3
+        
+        // Define estados globais para o comportamento do editor
         window.isModoVistoria = true; 
         window.colecaoAtivaNoEditor = colecaoAlvo;
 
-        fecharModalVtr();
+        // Fecha o modal de detalhes do SweetAlert antes de mudar a tela
+        if (Swal.isVisible()) Swal.close(); 
+
+        // Muda a visualização para o editor
         switchView('editor-arquitetura'); 
 
+        // Ajuste de layout: remove padding lateral para foco total no editor
         const contentPrincipal = document.querySelector('.content');
         if (contentPrincipal) contentPrincipal.style.padding = '0px';
 
-        // ✅ TIMEOUT COM AWAIT PARA GARANTIR CONSISTÊNCIA
+        // 4. ABERTURA DO EDITOR DE ITENS
+        // Timeout para garantir que o DOM da view 'editor-arquitetura' esteja pronto
         setTimeout(async () => {
-            console.log("🚀 Disparando abertura do editor...");
+            console.log("🛠️ Abrindo interface do editor...");
             await abrirModalEditorItens(checklistId, prefixo, colecaoAlvo);
-        }, 500);
+        }, 400);
 
     } catch (error) {
-        console.error("Erro crítico no gerenciarChecklistVtr:", error);
-        alert("Falha no processo: " + error.message);
+        console.error("❌ Erro crítico no gerenciarChecklistVtr:", error);
+        Swal.fire({
+            icon: 'error',
+            title: 'Falha no Processo',
+            text: error.message,
+            confirmButtonColor: '#800020'
+        });
     }
 }
 async function carregarAlertasTransferencia() {
