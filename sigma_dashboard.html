@@ -2747,13 +2747,13 @@ input:checked + .slider:before {
     	<div id="view-usuarios" class="view-section">
     		<div class="sigma-v3-title-label" style="margin-bottom: 20px;">
         		<i class="fas fa-users-cog" style="color: #800020;"></i>
-        		<span>GESTÃO DE USUÁRIOS E MILITARES</span>
+        		<span>GESTÃO DE USUÁRIOS</span>
     		</div>
 
     		<div class="header-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
         		<div>
             		<p style="color: #64748b; font-size: 0.85em; font-weight: 600; margin: 0;">
-                		Administração <i class="fas fa-chevron-right" style="font-size: 0.7em; margin: 0 5px;"></i> Efetivo e Permissões
+                		Uusários <i class="fas fa-chevron-right" style="font-size: 0.7em; margin: 0 5px;"></i> Gestão de Usuários
             		</p>
         		</div>
         		<div class="global-actions">
@@ -6241,14 +6241,12 @@ function abrirModalGestaoID(data) {
             const iniciais = u.nome_guerra ? u.nome_guerra.substring(0, 2).toUpperCase() : '??';
             const corPerfil = u.role === 'admin' ? '#800020' : (u.role === 'gestor' ? '#2c7399' : '#64748b');
 
-            html += `
-                <div class="v3-posto-card" style="border-top: 6px solid ${corPerfil};">
-                    <div class="v3-posto-actions">
-                        <button class="v3-btn-action" onclick="abrirFormularioUsuario({uid: '${doc.id}', ...${JSON.stringify(u).replace(/"/g, '&quot;')}})">
-                            <i class="fas fa-pencil-alt"></i>
-                        </button>
-                    </div>
+            // Formatação segura do Telefone e Unidade
+            const telefoneExibicao = u.telefone_contato || 'Sem fone';
+            const unidadeExibicao = u.unidade || 'S/U';
 
+            html += `
+                <div class="v3-posto-card" style="border-top: 6px solid ${corPerfil}; cursor:pointer;" onclick="verDetalhesMilitar('${doc.id}')">
                     <div style="padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center;">
                         <div style="width: 65px; height: 65px; background: ${corPerfil}15; color: ${corPerfil}; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2em; border: 2px solid ${corPerfil}30; margin-bottom: 15px;">
                             ${iniciais}
@@ -6262,21 +6260,89 @@ function abrirModalGestaoID(data) {
                         <div style="width: 100%; border-top: 1px solid #f1f5f9; padding-top: 12px; margin-top: auto;">
                             <div style="display:flex; justify-content: space-between; align-items: center;">
                                 <span style="font-size: 0.7em; font-weight: 800; color: ${corPerfil}; text-transform: uppercase;">${u.role}</span>
-                                <span style="font-size: 0.7em; font-weight: 800; color: #475569;">${u.unidade_sigla || 'S/U'}</span>
+                                <span style="font-size: 0.7em; font-weight: 800; color: #475569;">${unidadeExibicao}</span>
                             </div>
                             <div style="margin-top: 8px; text-align: left;">
-                                <a href="https://wa.me/55${u.telefone?.replace(/\D/g,'')}" target="_blank" style="text-decoration:none; font-size:0.75em; color:#166534; font-weight:700;">
-                                    <i class="fab fa-whatsapp"></i> ${u.telefone || 'Sem fone'}
-                                </a>
+                                <span style="font-size:0.75em; color:#166534; font-weight:700;">
+                                    <i class="fab fa-whatsapp"></i> ${telefoneExibicao}
+                                </span>
                             </div>
                         </div>
                     </div>
                 </div>`;
         });
         container.innerHTML = html;
-        if (window.FontAwesome) FontAwesome.dom.i2svg();
     } catch (e) {
+        console.error("Erro ao carregar usuários:", e);
         container.innerHTML = 'Erro ao carregar efetivo.';
+    }
+}
+	async function verDetalhesMilitar(uid) {
+    Swal.fire({ title: 'Carregando prontuário...', didOpen: () => Swal.showLoading() });
+
+    try {
+        const doc = await db.collection('usuarios').doc(uid).get();
+        if (!doc.exists) return Swal.fire('Erro', 'Militar não encontrado', 'error');
+        
+        const u = doc.data();
+        const corPerfil = u.role === 'admin' ? '#800020' : (u.role === 'gestor' ? '#2c7399' : '#64748b');
+
+        Swal.fire({
+            title: `<span style="color:${corPerfil}">${u.posto} ${u.nome_guerra}</span>`,
+            width: '600px',
+            showConfirmButton: false,
+            html: `
+                <div style="text-align: left; padding: 10px; font-family: sans-serif;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: #f8fafc; padding: 15px; border-radius: 10px; border-left: 5px solid ${corPerfil};">
+                        <div>
+                            <small style="font-weight:800; color:#64748b;">NOME COMPLETO</small>
+                            <div style="font-weight:700; font-size:0.9em;">${u.nome_completo}</div>
+                        </div>
+                        <div>
+                            <small style="font-weight:800; color:#64748b;">MATRÍCULA</small>
+                            <div style="font-weight:700;">${u.matricula || '---'}</div>
+                        </div>
+                        <div>
+                            <small style="font-weight:800; color:#64748b;">CPF / LOGIN</small>
+                            <div style="font-weight:700;">${u.cpf || '---'}</div>
+                        </div>
+                        <div>
+                            <small style="font-weight:800; color:#64748b;">QUADRO</small>
+                            <div style="font-weight:700;">${u.quadro || '---'}</div>
+                        </div>
+                        <div>
+                            <small style="font-weight:800; color:#64748b;">UNIDADE</small>
+                            <div style="font-weight:700;">${u.unidade || '---'}</div>
+                        </div>
+                        <div>
+                            <small style="font-weight:800; color:#64748b;">PERFIL</small>
+                            <div style="font-weight:700; text-transform:uppercase;">${u.role}</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 15px; padding: 5px;">
+                        <small style="font-weight:800; color:#64748b;">CONTATOS</small>
+                        <div style="display:flex; gap:20px; margin-top:5px;">
+                            <span><i class="fab fa-whatsapp" style="color:#166534"></i> ${u.telefone_contato}</span>
+                            <span><i class="far fa-envelope" style="color:#2c7399"></i> ${u.email_contato}</span>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 25px;">
+                        <button onclick="abrirFormularioUsuario(${JSON.stringify(u).replace(/"/g, '&quot;')})" 
+                                style="padding:12px; border-radius:8px; border:none; background:#2c7399; color:white; font-weight:700; cursor:pointer;">
+                            <i class="fas fa-edit"></i> EDITAR DADOS
+                        </button>
+                        <button onclick="excluirUsuarioV3('${u.uid}', '${u.nome_guerra}')" 
+                                style="padding:12px; border-radius:8px; border:none; background:#800020; color:white; font-weight:700; cursor:pointer;">
+                            <i class="fas fa-trash-alt"></i> EXCLUIR MILITAR
+                        </button>
+                    </div>
+                </div>
+            `
+        });
+    } catch (e) {
+        Swal.fire('Erro', 'Falha ao carregar detalhes', 'error');
     }
 }	
 	async function salvarMilitarV3(uidExistente, dados) {
