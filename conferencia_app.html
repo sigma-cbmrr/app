@@ -276,42 +276,53 @@ function navegarParaSetores() {
 // --- REDIRECIONAMENTO DE DADOS PARA O HUD ---
 
 function updateHeaderInfo() {
-    const elNome = document.getElementById('militar-nome-hud');
-    const elLocal = document.getElementById('local-titulo-hud');
+    const elListaNome = document.getElementById('militar-nome-hud'); // Reutilizando o ID para o destaque
+    const elApoioInfo = document.getElementById('local-titulo-hud'); // Reutilizando o ID para data/hora
     const elAvatar = document.getElementById('militar-avatar');
     
-    if (!elNome || !elLocal) return;
+    if (!elListaNome || !elApoioInfo) return;
 
-    // Recupera dados
-    const p = (userInfo && userInfo.nomeGuerra !== "ND") ? userInfo : {
-        postoGraduacao: getUrlParameter('posto_grad') || "POSTO",
-        nomeGuerra: getUrlParameter('nome_guerra') || "MILITAR"
-    };
-
-    // Atualiza Textos
-    elNome.textContent = `${p.postoGraduacao} ${p.nomeGuerra}`;
-    
-    // Define cor e título por modo
+    // 1. DEFINIÇÃO DE CORES E ÍCONE POR MODO
     const isChecklist = window.isModoChecklist;
     const isCarga = (new URLSearchParams(window.location.search)).get('modo') === 'recebimento_carga';
     
-    let corHUD = "#800020"; // Bordô
-    let tituloHUD = infoLocal.nome || "Conferência";
+    let corHUD = "#800020"; // Bordô (Padrão)
+    let iconeHUD = "fa-clipboard-list";
 
     if (isChecklist) {
-        corHUD = "#2c3e50"; // Azul Petróleo
+        corHUD = "#2c3e50"; // Azul Petróleo (Vistoria)
+        iconeHUD = "fa-truck-moving";
     } else if (isCarga) {
-        corHUD = "#000000"; // Preto
+        corHUD = "#000000"; // Preto (Carga)
+        iconeHUD = "fa-exchange-alt";
     }
 
-    elLocal.textContent = tituloHUD;
-    if (elAvatar) elAvatar.style.background = corHUD;
+    // 2. FORMATAÇÃO DOS DADOS DE EXIBIÇÃO
+    // Destaque: ABT-18 | BRAVO
+    const nomeLista = infoLocal.nome || "LISTA";
+    const nomePosto = infoLocal.posto ? ` | ${infoLocal.posto}` : "";
+    const destaquePrincipal = `${nomeLista}${nomePosto}`;
 
-    // Aplica a cor na barra neon de progresso
+    // Apoio: Data e Hora atual da sessão
+    const agora = new Date();
+    const dataFormatada = agora.toLocaleDateString('pt-BR');
+    const horaFormatada = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const apoioTexto = `${dataFormatada} às ${horaFormatada}`;
+
+    // 3. ATUALIZAÇÃO DA INTERFACE (HUD)
+    elListaNome.textContent = destaquePrincipal; // Ex: ABT-18 | BRAVO
+    elApoioInfo.textContent = apoioTexto;       // Ex: 27/03/2025 às 14:30
+    
+    // Atualiza ícone e cores institucionais
+    if (elAvatar) {
+        elAvatar.style.background = corHUD;
+        elAvatar.innerHTML = `<i class="fas ${iconeHUD}"></i>`;
+    }
+
+    // Mantém a barra neon sincronizada com o modo
     const progressFill = document.getElementById('overall-progress-bar');
     if (progressFill) progressFill.style.background = corHUD;
 }
-
 // --- VERIFICADOR MÁGICO DE FLUXO (AUTO-NEXT) ---
 
 function verificarFluxoSetor(uidAtual) {
@@ -1335,12 +1346,13 @@ async function finalizarConferencia() {
     
     const isChecklist = window.isModoChecklist || false;
     
-    // ✅ UX V3: Feedback visual imediato no botão
+    // ✅ UX V3: Feedback visual imediato
     btn.innerHTML = `<i class="fas fa-sync fa-spin"></i> ${isChecklist ? "SALVANDO VISTORIA..." : "SALVANDO CONFERÊNCIA..."}`; 
     btn.disabled = true;
     btn.style.opacity = "0.7";
 
     try {
+        // ✅ AJUSTE CIRÚRGICO: Assinatura extraída da global userInfo (independente do HUD)
         const p = {
             uid: userInfo?.uid || "S_UID",
             postoGraduacao: userInfo?.postoGraduacao || "ND",
@@ -1348,10 +1360,7 @@ async function finalizarConferencia() {
             nomeGuerra: userInfo?.nomeGuerra || "ND"
         };
 
-        const militarInfoEl = document.getElementById('militar-info');
-        const conferenteCompleto = militarInfoEl ? 
-            militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : 
-            `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
+        const conferenteCompleto = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
      
         const localNome = isChecklist ? `VISTORIA: ${infoLocal.nome}` : `${infoLocal.posto} - ${infoLocal.nome}`;
         const timestampAgora = firebase.firestore.Timestamp.now();
@@ -1362,6 +1371,8 @@ async function finalizarConferencia() {
         const unidadeNome = urlParams.get('unidade_nome') || userInfo?.unidade || "GERAL";
         const kmEntrada = urlParams.get('km') || "0";
         const combustivelEntrada = urlParams.get('combustivel') || "N/D";
+        
+        // Em vistorias, as observações podem vir de um campo específico se houver
         const obsGeraisEl = document.getElementById('obs-geral-vistoria');
         const obsGeraisTexto = obsGeraisEl ? obsGeraisEl.value.trim() : "";
 
@@ -1370,7 +1381,7 @@ async function finalizarConferencia() {
         let totalCaa = 0;
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
-        // --- PROCESSAMENTO DA ÁRVORE DE DADOS (Preservação Total) ---
+        // --- PROCESSAMENTO DA ÁRVORE DE DADOS (Mantendo suas regras de saldo/histórico) ---
         const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
@@ -1386,6 +1397,7 @@ async function finalizarConferencia() {
                             delete entidade.motivo_avaria;
                         }
 
+                        // Se não houve interação, assume o estado atual (visto como OK se não houver pendência)
                         if (!statusLocal || statusLocal.status === 'pending') {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
                             itensRelatorio.push({
@@ -1404,15 +1416,15 @@ async function finalizarConferencia() {
                         // Lógica de Resolução de Pendências
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
-                                const idx = entidade.pendencias_ids.findIndex(pnd => pnd.id === res.id);
+                                const idx = entidade.pendencias_ids.findIndex(pnd => String(pnd.id) === String(res.id));
                                 if (idx > -1) {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
                                     entidade.historico_vida.push({
                                         evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
                                         id_pendencia_origem: String(pendenciaMorta.id || ""), 
-                                        quem: String(res.resolvido_por || ""),
-                                        data: String(res.data_solucao || ""), 
-                                        detalhes: `Resolvido ${res.qtd_resolvida}. Desc: ${pendenciaMorta.descricao}`
+                                        quem: conferenteCompleto,
+                                        data: dataAtualLog, 
+                                        detalhes: `Resolvido ${res.qtd_resolvida}. Justificativa: ${res.obs}`
                                     });
                                     entidade.pendencias_ids.splice(idx, 1);
                                     if (res.qtd_remanescente > 0) {
@@ -1435,8 +1447,8 @@ async function finalizarConferencia() {
                                 entidade.historico_vida.push({
                                     evento: isChecklist ? "ALTERACAO_VISTORIA" : "NOVA_PENDENCIA", 
                                     id_pendencia: novoId, 
-                                    quem: String(p.autor_nome || conferenteCompleto),
-                                    data: String(p.data_criacao || dataAtualLog), 
+                                    quem: conferenteCompleto,
+                                    data: dataAtualLog, 
                                     detalhes: `${p.quantidade}un - ${p.descricao || ""}`
                                 });
                                 return { ...p, id: novoId };
@@ -1444,6 +1456,7 @@ async function finalizarConferencia() {
                             return p;
                         });
 
+                        // Consolida alertas para o Relatório Final
                         let pendenciasParaRelatorio = [...entidade.pendencias_ids];
                         
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
@@ -1458,7 +1471,7 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'cautela_ciente' || statusLocal.status === 'C/A';
+                        const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'C/A';
                         const statusFinal = temAlteracao ? 'C/A' : 'S/A';
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
@@ -1489,9 +1502,10 @@ async function finalizarConferencia() {
             };
         });
 
-        // ✅ INICIO DO BATCH (OPERAÇÃO ATÔMICA)
+        // ✅ INICIO DO BATCH (OPERAÇÃO ATÔMICA NO FIREBASE)
         const batch = db.batch();
         
+        // Limpeza de campos temporários para salvar na lista mestra
         const listaLimpaParaArquitetura = novaListaMestra.map(setor => ({
             ...setor,
             itens: setor.itens.map(item => {
@@ -1510,7 +1524,7 @@ async function finalizarConferencia() {
             })
         }));
 
-        const colecaoListaOrigem = isChecklist ? 'listas_checklist' : (typeof COLECAO_LISTAS !== 'undefined' ? COLECAO_LISTAS : 'listas_conferencia');
+        const colecaoListaOrigem = isChecklist ? 'listas_checklist' : COLECAO_LISTAS;
         const colecaoResultadosDestino = isChecklist ? 'resultados_checklist' : 'resultados_conferencias';
 
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: listaLimpaParaArquitetura });
@@ -1534,7 +1548,7 @@ async function finalizarConferencia() {
             obs_gerais_vistoria: String(obsGeraisTexto || "")
         });
 
-        // ✅ ATUALIZAÇÃO DE SALDOS E INVENTÁRIO (SENSÍVEL)
+        // ✅ ATUALIZAÇÃO DE INVENTÁRIO (Saldos e Históricos)
         for (const itemAlterado of itensCaa) {
             const uidGlobal = itemAlterado.uid_global;
             if (!uidGlobal) continue;
@@ -1563,14 +1577,13 @@ async function finalizarConferencia() {
                 });
                 batch.update(tombRef, { situacao_atual: "PENDENTE" });
             } else {
-                const unidadeIdFinal = urlParams.get('unidade_id') || "UNID-GERAL";
-                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeIdFinal);
+                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
                 const novasPendencias = (itemAlterado.pendencias_ids || []).filter(pend => pend.id && String(pend.id).startsWith('PEND-'));
                 
                 if (novasPendencias.length > 0) {
                     const qtdPendenteTotal = novasPendencias.reduce((sum, pend) => sum + (Number(pend.quantidade) || 0), 0);
                     
-                    // ✅ INTELIGÊNCIA CIRÚRGICA V3: Blindagem de Saldo Físico
+                    // Blindagem de Saldo Físico: Se não for checklist, move de DISP para PEND
                     if (!isChecklist) {
                         batch.update(saldoRef, {
                             qtd_disp: firebase.firestore.FieldValue.increment(-qtdPendenteTotal),
@@ -1602,7 +1615,6 @@ async function finalizarConferencia() {
         
         await batch.commit();
         
-        // ✅ UX V3: Sucesso com redirecionamento limpo
         alert(isChecklist ? "✅ Vistoria Finalizada com Sucesso!" : "✅ Conferência Finalizada com Sucesso!");
         window.top.location.href = "sigma_dashboard.html";
 
