@@ -12248,7 +12248,7 @@ async function carregarCardsListasExistentes() {
     const container = document.getElementById('container-cards-listas');
     if (!container) return;
 
-    // Padronização do Grid e Loading V3
+    // Grid V3 Layout
     container.innerHTML = `
         <div style="grid-column: 1/-1; text-align:center; padding:60px; color:#64748b;">
             <i class="fas fa-sync fa-spin fa-3x" style="opacity:0.3; margin-bottom:15px; display:block;"></i>
@@ -12264,30 +12264,25 @@ async function carregarCardsListasExistentes() {
             .where('ativo', '==', true)
             .where('tipo', '==', 'conferencia_materiais');
 
-        // Filtro de Segurança por Unidade (Isolamento Cirúrgico)
         if (!isAdminGeral) {
-            if (!minhaUnidadeId) throw new Error("Acesso restrito: Unidade não vinculada ao perfil.");
             query = query.where('unidade_id', '==', minhaUnidadeId);
         }
 
         const snap = await query.get();
 
         if (snap.empty) {
-            container.innerHTML = `
-                <div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">
-                    <i class="fas fa-clipboard-check fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
-                    Nenhuma lista de conferência localizada para esta unidade.
-                </div>`;
+            container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">Nenhuma lista localizada.</div>`;
             return;
         }
 
         let html = '';
         snap.forEach(doc => {
             const lista = doc.data();
-            // Cálculo de itens otimizado
             const qtdItens = (lista.list || []).reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0);
+            
+            // Sanitização para o botão de edição (Lápis)
+            const listaJson = JSON.stringify({ uid: doc.id, ...lista }).replace(/"/g, '&quot;');
 
-            // Gestão de botões de ação com stopPropagation para não disparar o card
             const btnDelete = isAdminGeral ? `
                 <button class="v3-btn-action" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
                     <i class="fas fa-trash-alt"></i>
@@ -12298,7 +12293,7 @@ async function carregarCardsListasExistentes() {
                      onclick="abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
                     
                     <div class="v3-posto-actions">
-                        <button class="v3-btn-action" title="Configurar Itens" onclick="event.stopPropagation(); abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
+                        <button class="v3-btn-action" title="Editar Informações" onclick="event.stopPropagation(); abrirFormularioLista(JSON.parse('${listaJson}'))">
                             <i class="fas fa-pencil-alt"></i>
                         </button>
                         ${btnDelete}
@@ -12311,13 +12306,13 @@ async function carregarCardsListasExistentes() {
 
                         <div style="margin-bottom: 10px;">
                             <span style="display:block; font-weight:900; font-size:1.2em; color:#1e293b; letter-spacing:-0.5px;">${lista.ativo_nome}</span>
-                            <span class="v3-vtr-badge v3-status-pronto" style="margin-top: 5px; display: inline-block;">
-                                ${qtdItens} ITENS MESTRA
+                            <span class="v3-vtr-badge v3-status-pronto" style="margin-top: 5px; display: inline-block; background: #e0f2fe; color: #0369a1;">
+                                ${qtdItens} ITENS NO INVENTÁRIO
                             </span>
                         </div>
 
                         <div style="width: 100%; border-top: 1px solid #f1f5f9; padding-top: 12px; margin-top: auto; text-align: left;">
-                            <small style="display:block; font-size:0.6em; color:#94a3b8; font-weight:800; text-transform:uppercase; margin-bottom:4px;">Localização & Gestão</small>
+                            <small style="display:block; font-size:0.6em; font-weight:800; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">Localização & Gestão</small>
                             <div style="display:flex; align-items:center; gap:6px;">
                                 <i class="fas fa-map-marker-alt" style="color:#2c7399; font-size:0.75em;"></i>
                                 <span style="font-size:0.8em; font-weight:700; color:#475569;">${lista.posto_nome} | ${lista.unidade_sigla}</span>
@@ -12331,8 +12326,8 @@ async function carregarCardsListasExistentes() {
         if (window.FontAwesome) FontAwesome.dom.i2svg();
 
     } catch (e) {
-        console.error("Erro Crítico:", e);
-        container.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:40px; color:#ef4444;">Falha ao carregar inventários: ${e.message}</div>`;
+        console.error("Erro V3 Listas:", e);
+        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao carregar inventários.</p>`;
     }
 }
 		
