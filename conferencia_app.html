@@ -2009,6 +2009,7 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let pendenciaExistente = null;
     
+    // Localiza a pendência na árvore
     fonteDados.forEach(setor => {
         setor.itens.forEach(it => {
             const match = (it.uid_global === uid || it.id === uid);
@@ -2023,28 +2024,43 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     });
 
     if (pendenciaExistente) {
-        // ✅ AJUSTE AQUI: Captura os dados do carimbo
         const autor = pendenciaExistente.autor_nome || "SISTEMA";
         const data = pendenciaExistente.data_criacao || "";
+        const qtdAvariada = pendenciaExistente.quantidade || 1;
 
         return Swal.fire({
             title: `<span style="color:${corPrimaria}; font-size:0.8em;">GERENCIAR ALTERAÇÃO</span>`,
             html: `
                 <div style="text-align:left; font-size:0.9em;">
                     <div style="background:#fff5f5; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid #ffcccc;">
-                        <small style="color:#64748b; font-weight:800; text-transform:uppercase; display:block; margin-bottom:5px;">Relato Anterior:</small>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                            <small style="color:#64748b; font-weight:800; text-transform:uppercase;">Relato Anterior:</small>
+                            <span style="background:#d90f23; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
+                                ${qtdAvariada} UN
+                            </span>
+                        </div>
                         <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b;">"${pendenciaExistente.descricao}"</span>
                         
-                        <div style="border-top:1px solid #ffcccc; pt:5px; margin-top:5px;">
-                            <small style="color:#d90f23; font-weight:700;">por: ${autor} ${data}</small>
+                        <div style="border-top:1px solid #ffcccc; padding-top:5px; margin-top:5px;">
+                            <small style="color:#d90f23; font-weight:700;">por: ${autor} em ${data}</small>
                         </div>
                     </div>
-                    <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#5d6d7e;">
-                        <i class="fas fa-shield-alt"></i> MANTER ALTERAÇÃO (S/ SOLUÇÃO)
+
+                    <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e; color:white; width:100%; padding:12px; border-radius:8px; border:none; margin-bottom:8px; font-weight:bold; cursor:pointer;">
+                        <i class="fas fa-check"></i> RESOLVER ESTA AVARIA
                     </button>
-                    <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e;">
-                        <i class="fas fa-check"></i> RESOLVER AGORA
+
+                    <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#f1f5f9; color:#475569; width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:20px; font-weight:bold; cursor:pointer;">
+                        <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
                     </button>
+
+                    ${(tipo === 'single' && saldoDisponivel > 0) ? `
+                        <div style="border-top: 1px dashed #cbd5e1; padding-top: 15px; text-align:center;">
+                            <button id="btn-v3-nova-alt" style="background:none; border:none; color:${corPrimaria}; font-weight:bold; text-decoration:underline; cursor:pointer; font-size:0.9em;">
+                                <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO NO SALDO (${saldoDisponivel} un.)
+                            </button>
+                        </div>
+                    ` : ''}
                 </div>`,
             showConfirmButton: false,
             showCancelButton: true,
@@ -2058,18 +2074,34 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
                     Swal.close();
                     abrirFormularioResolucaoV3(pendenciaExistente, uid);
                 };
+                // Gatilho para nova alteração
+                const btnNova = document.getElementById('btn-v3-nova-alt');
+                if(btnNova) {
+                    btnNova.onclick = () => {
+                        Swal.close();
+                        setTimeout(() => { 
+                            // Reabre o modal em modo de inserção limpa
+                            exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria);
+                        }, 300);
+                    };
+                }
             }
         });
     }
 
-    // TELA B: Relato NOVO (Igual ao seu)
+    // Se NÃO existe pendência, abre direto a inserção
+    exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria);
+}
+
+// Função auxiliar para isolar a lógica de inserção limpa
+async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria) {
     const { value: formValues } = await Swal.fire({
         title: `<span style="color:${corPrimaria}; font-size:0.8em;">RELATAR ALTERAÇÃO</span>`,
         html: `
             <div style="text-align:left;">
                 <p style="font-size:0.8em; color:#64748b; margin-bottom:10px;">Item: <b>${nomeItem}</b></p>
                 ${tipo === 'single' ? `
-                    <label style="font-size:0.75em; font-weight:800; color:#666;">QUANTIDADE AFETADA:</label>
+                    <label style="font-size:0.75em; font-weight:800; color:#666;">QUANTIDADE AFETADA (Máx: ${saldoDisponivel}):</label>
                     <input id="swal-qtd" type="number" class="swal2-input" value="1" max="${saldoDisponivel}" min="1">
                 ` : ''}
                 <label style="font-size:0.75em; font-weight:800; color:#666;">DESCRIÇÃO DO PROBLEMA:</label>
@@ -2080,8 +2112,9 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
         confirmButtonColor: corPrimaria,
         preConfirm: () => {
             const obs = document.getElementById('swal-obs').value.trim();
-            const qtd = tipo === 'single' ? document.getElementById('swal-qtd').value : 1;
+            const qtd = tipo === 'single' ? parseInt(document.getElementById('swal-qtd').value) : 1;
             if (obs.length < 5) return Swal.showValidationMessage("Descreva o problema (mín. 5 letras)");
+            if (tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) return Swal.showValidationMessage("Quantidade inválida");
             return { qtd, obs };
         }
     });
