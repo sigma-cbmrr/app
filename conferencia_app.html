@@ -1083,83 +1083,62 @@ function atualizarContadorSetorInterno(itens) {
 }
     
 async function carregarDadosRemotos() {
-    // 1. CAPTURA IMEDIATA DOS PARÂMETROS
+    // 1. CAPTURA IMEDIATA E HIGIENIZAÇÃO DE PARÂMETROS
     const urlParamsLocal = new URLSearchParams(window.location.search);
     const idUrl = urlParamsLocal.get('id');
     const cautelaIdUrl = urlParamsLocal.get('cautelaId');
     const modoUrl = urlParamsLocal.get('modo');
     const transferenciaIdUrl = urlParamsLocal.get('transferenciaId'); 
 
-    // 2. DEFINIÇÃO DO MODO (Garante identidade visual correta)
+    // 2. DEFINIÇÃO DO MODO E ID ALVO
     let ID_ALVO = transferenciaIdUrl || cautelaIdUrl || idUrl; 
-    const isCautelaLocal = !!cautelaIdUrl;
-    const isRecebimentoCarga = modoUrl === 'recebimento_carga'; 
     
     if (modoUrl === 'checklist_vtr' && ID_ALVO && !ID_ALVO.startsWith('CHECKLIST_VTR_')) {
         ID_ALVO = 'CHECKLIST_VTR_' + ID_ALVO;
     }
 
-    window.isModoChecklist = (modoUrl === 'checklist_vtr') || (ID_ALVO && ID_ALVO.startsWith('CHECKLIST_VTR_'));
-    
-    // 3. CONFIGURAÇÃO VISUAL (Títulos e Botão Finalizar)
-    const tituloPrincipal = document.getElementById('titulo-conferencia');
-    const btnFinalizar = document.getElementById('btn-finalizar');
-    
-    // Define a cor institucional base para o HUD
-    const corV3 = window.isModoChecklist ? "#2c3e50" : (isRecebimentoCarga ? "#000000" : "#800020");
-
-    if (window.isModoChecklist) {
-        if (tituloPrincipal) tituloPrincipal.innerText = "Vistoria de Viatura";
-        if (btnFinalizar) {
-            btnFinalizar.innerText = "FINALIZAR VISTORIA";
-            btnFinalizar.style.backgroundColor = "#2c3e50";
-        }
-    } else {
-        if (tituloPrincipal) {
-            if (isRecebimentoCarga) {
-                const ano = new Date().getFullYear();
-                tituloPrincipal.innerText = `GUIA: TR-${ano}/${ID_ALVO.substring(0,5).toUpperCase()}`;
-            } else {
-                tituloPrincipal.innerText = isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais";
-            }
-            tituloPrincipal.style.color = isRecebimentoCarga ? "#000000" : "#800020";
-        }
-        if (btnFinalizar) {
-            btnFinalizar.innerText = isRecebimentoCarga ? "CONFIRMAR RECEBIMENTO" : "FINALIZAR CONFERÊNCIA";
-            btnFinalizar.style.backgroundColor = isRecebimentoCarga ? "#000000" : "#800020";
-        }
+    if (!ID_ALVO || ID_ALVO === "null") {
+        console.error("SIGMA: ID_ALVO inválido.");
+        return;
     }
-
-    // 4. IDENTIDADE DO CONFERENTE
-    userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
-    userInfo.quadro = urlParamsLocal.get('quadro') || "ND";
-    userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
-    userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
-
-    // ✅ CORREÇÃO CIRÚRGICA 1: Alimenta o novo Header HUD
-    if (typeof updateHeaderInfo === "function") {
-        updateHeaderInfo(); 
-    }
-
-    if (!ID_ALVO || ID_ALVO === "null") return;
-
-    let COLECAO_ALVO = isCautelaLocal ? 'cautelas_abertas' : 'listas_conferencia';
-    if (window.isModoChecklist) COLECAO_ALVO = 'listas_checklist';
-    if (isRecebimentoCarga) COLECAO_ALVO = 'transferencias_pendentes';
 
     const loadingMsg = document.getElementById('loading-message');
+    const btnFinalizar = document.getElementById('btn-finalizar');
+
     try {
-        const doc = await db.collection(COLECAO_ALVO).doc(ID_ALVO).get();
-        if (!doc.exists) throw new Error(`Documento não encontrado na coleção ${COLECAO_ALVO}`);
+        let docData = null;
+        let colecaoEncontrada = "";
+
+        // --- 3. MOTOR DE BUSCA AUTÔNOMO (DNA V3) ---
+        // Resolve o erro de 'modo null' procurando o ID em todas as gavetas possíveis
+        const colecoesParaTestar = ['listas_checklist', 'listas_conferencia', 'cautelas_abertas', 'transferencias_pendentes'];
         
-        const data = doc.data();
+        for (const colecao of colecoesParaTestar) {
+            const doc = await db.collection(colecao).doc(ID_ALVO).get();
+            if (doc.exists) {
+                docData = doc.data();
+                colecaoEncontrada = colecao;
+                break; 
+            }
+        }
+
+        if (!docData) throw new Error(`Documento ${ID_ALVO} não localizado no banco.`);
+
+        // --- 4. IDENTIFICAÇÃO AUTOMÁTICA DE MODO ---
+        window.isModoChecklist = (colecaoEncontrada === 'listas_checklist' || docData.tipo === 'checklist_viatura');
+        const isRecebimentoCarga = (colecaoEncontrada === 'transferencias_pendentes');
+        const isCautelaLocal = (colecaoEncontrada === 'cautelas_abertas');
         const isDevolucaoFinal = modoUrl === 'devolucao_final';
 
-        if (isRecebimentoCarga) {
-            window.dadosTransferencia = data;
-        }
-        
-        // ✅ BUSCA REVERSA: Herança de pendências preservada
+        if (isRecebimentoCarga) window.dadosTransferencia = docData;
+
+        // --- 5. IDENTIDADE DO CONFERENTE (BACK-END) ---
+        userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
+        userInfo.quadro = urlParamsLocal.get('quadro') || "ND";
+        userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
+        userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
+
+        // --- 6. BUSCA REVERSA: HERANÇA DE PENDÊNCIAS (CRÍTICO) ---
         let pendenciasHerdadas = {};
         if (!isCautelaLocal && !isRecebimentoCarga) {
             const colecaoResultados = window.isModoChecklist ? 'resultados_checklist' : 'resultados_conferencias';
@@ -1180,18 +1159,16 @@ async function carregarDadosRemotos() {
             }
         }
 
+        // --- 7. PROCESSAMENTO E MAPEAMENTO DA ÁRVORE DE DADOS ---
         if (isCautelaLocal || isRecebimentoCarga) {
-            dadosConferencia = adaptarCautelaParaRender(data);
+            dadosConferencia = adaptarCautelaParaRender(docData);
         } else {
-            const listaBruta = data.list || [];
+            const listaBruta = docData.list || [];
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
                     if (!item.id) item.id = item.uid_global;
-                    item.pendencias_ids = []; 
-                    if (pendenciasHerdadas[item.id]) {
-                        item.pendencias_ids = pendenciasHerdadas[item.id];
-                    }
+                    item.pendencias_ids = pendenciasHerdadas[item.id] || [];
                     item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     item._ocultarCarimbo = isDevolucaoFinal;
                     return item;
@@ -1201,40 +1178,64 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        // ✅ CORREÇÃO CIRÚRGICA 2: Define dados do Ativo e chama o HUD Profissional
-        const localNome = isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (data.ativo_nome || data.nome_local || "Lista");
-        const postoNome = isCautelaLocal ? "" : (data.posto_nome || data.unidade_sigla || "Geral");
+        // --- 8. CONFIGURAÇÃO DO HUD PROFISSIONAL (FOCO NO ATIVO) ---
+        const localNome = isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (docData.ativo_nome || docData.nome_local || "Lista");
+        const postoNome = isCautelaLocal ? "" : (docData.posto_nome || docData.unidade_sigla || "Geral");
         
-        // Alimenta o objeto global que a updateHeaderInfo vai ler
+        // Alimenta a global para a updateHeaderInfo formatar com Data/Hora
         infoLocal = { nome: localNome, posto: postoNome };
         
-        // Dispara a atualização do HUD (Inverte Viatura e insere Data/Hora automaticamente)
-        if (typeof updateHeaderInfo === "function") {
-            updateHeaderInfo();
+        if (typeof updateHeaderInfo === "function") updateHeaderInfo();
+
+        // --- 9. CONFIGURAÇÃO VISUAL DO TÍTULO E BOTÃO FINALIZAR ---
+        const tituloPrincipal = document.getElementById('titulo-conferencia');
+        if (tituloPrincipal) {
+            if (window.isModoChecklist) {
+                tituloPrincipal.innerText = "Vistoria de Viatura";
+                tituloPrincipal.style.color = "#2c3e50";
+            } else if (isRecebimentoCarga) {
+                const ano = new Date().getFullYear();
+                tituloPrincipal.innerText = `GUIA: TR-${ano}/${ID_ALVO.substring(0,5).toUpperCase()}`;
+                tituloPrincipal.style.color = "#000000";
+            } else {
+                tituloPrincipal.innerText = isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais";
+                tituloPrincipal.style.color = "#800020";
+            }
         }
 
-        // ✅ LÓGICA DE BOTÃO FINALIZAR (Preservada conforme o modo)
         if (btnFinalizar) {
             btnFinalizar.disabled = false;
-            if (isDevolucaoFinal) btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(data);
-            else if (isRecebimentoCarga) btnFinalizar.onclick = () => finalizarRecebimentoCarga(data); 
-            else if (isCautelaLocal) btnFinalizar.onclick = () => finalizarRecebimentoCautela(data);
-            else btnFinalizar.onclick = () => finalizarConferencia();
+            const corBotao = window.isModoChecklist ? "#2c3e50" : (isRecebimentoCarga ? "#000000" : "#800020");
+            btnFinalizar.style.backgroundColor = corBotao;
+
+            if (isDevolucaoFinal) {
+                btnFinalizar.innerText = "FINALIZAR DEVOLUÇÃO";
+                btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(docData);
+            } else if (isRecebimentoCarga) {
+                btnFinalizar.innerText = "CONFIRMAR RECEBIMENTO";
+                btnFinalizar.onclick = () => finalizarRecebimentoCarga(docData);
+            } else if (isCautelaLocal) {
+                btnFinalizar.innerText = "CONFIRMAR RECEBIMENTO";
+                btnFinalizar.onclick = () => finalizarRecebimentoCautela(docData);
+            } else {
+                btnFinalizar.innerText = window.isModoChecklist ? "FINALIZAR VISTORIA" : "FINALIZAR CONFERÊNCIA";
+                btnFinalizar.onclick = () => finalizarConferencia();
+            }
         }
 
+        // --- 10. ATIVAÇÃO DA INTERFACE V3 ---
         renderizarConferencia(); 
         if (typeof updateOverallStatus === "function") updateOverallStatus();
         
         if (loadingMsg) loadingMsg.style.display = 'none'; 
         
-        // ✅ CORREÇÃO CIRÚRGICA 3: Ativa o Viewport de Slider (Máquina de Estados)
         const mainViewport = document.getElementById('main-viewport');
         if (mainViewport) {
             mainViewport.style.display = 'flex';
         }
 
     } catch (e) { 
-        console.error("Erro no carregamento remoto:", e);
+        console.error("V3 Critical Error:", e);
         if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro ao carregar dados: ${e.message}</span>`;
     }
 }
