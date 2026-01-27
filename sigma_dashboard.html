@@ -4528,19 +4528,21 @@ function confirmarInicioMaterial() {
     const { id, nome, posto } = materialSelecionadoNoModal;
     const userUid = firebase.auth()?.currentUser?.uid || 'SISTEMA';
     
-    // Preparação do nome de guerra
+    // Preparação dos dados do militar
     const userForDraft = (currentUserData?.nome_guerra || 'ND').toUpperCase();
     const postoGrad = (currentUserData?.posto || 'MILITAR').toUpperCase();
 
-    // ✅ MUDANÇA CIRÚRGICA: A URL agora leva o ID real da 'listas_conferencia'
-    // Isso garante que o app-conferência.html carregue os itens reais vinculados.
+    // ✅ CORREÇÃO V3: Inclusão do parâmetro &modo para evitar o 'null' no Iframe
+    // Além disso, mantemos a estrutura para os demais dados de sessão.
     const url = `conferencia_app.html?id=${id}` +
-            `&posto_grad=${encodeURIComponent(currentUserData.posto || '')}` +
-            `&quadro=${encodeURIComponent(currentUserData.quadro || '')}` + // ✅ Ajustado para .quadro
-            `&nome_guerra=${encodeURIComponent(userForDraft)}` +
-            `&user_uid=${userUid}` +
-			`&unidade_id=${encodeURIComponent(currentUserData.unidade_id || '')}` +
-            `&unidade_nome=${encodeURIComponent(currentUserData.unidade || '')}`;
+                `&modo=conferencia_materiais` + // 🚀 A peça que faltava
+                `&posto_grad=${encodeURIComponent(currentUserData.posto || '')}` +
+                `&quadro=${encodeURIComponent(currentUserData.quadro || '')}` +
+                `&nome_guerra=${encodeURIComponent(userForDraft)}` +
+                `&user_uid=${userUid}` +
+                `&unidade_id=${encodeURIComponent(currentUserData.unidade_id || '')}` +
+                `&unidade_nome=${encodeURIComponent(currentUserData.unidade || '')}`;
+
     Swal.close();
 
     // Disparo do Iframe
@@ -4548,11 +4550,13 @@ function confirmarInicioMaterial() {
     const iframe = document.getElementById('app-iframe');
     
     if (iframe && container) {
+        // Define a URL completa e exibe o container
         iframe.src = url;
         container.style.display = 'block';
-        console.log(`🚀 Iniciando Conferência: ${nome} no posto ${posto}`);
+        console.log(`🚀 Iniciando Conferência: ${nome} no posto ${posto} | Modo: conferencia_materiais`);
     } else {
         console.error("Erro: Container do App não localizado no DOM.");
+        Swal.fire('Erro', 'O executor de aplicativos não foi encontrado na página.', 'error');
     }
 }      
         // --- 5. HISTÓRICOS ---
@@ -14171,7 +14175,7 @@ function finalizarPreCheckEIrProApp() {
         return;
     }
 
-    // ✅ CORREÇÃO CIRÚRGICA: Montagem do ID Completo (Prefixo + ID)
+    // ✅ CAPTURA DE DADOS DA VTR
     const { id, prefixo } = dadosChecklistTemp.vtr;
     const idCompletoChecklist = `CHECKLIST_VTR_${id}`;
     
@@ -14180,16 +14184,19 @@ function finalizarPreCheckEIrProApp() {
     const posto = (currentUserData.posto || 'ND');
     const quadro = (currentUserData.quadro || 'ND');
 
-    // ✅ URL PADRONIZADA (Mesmos nomes de parâmetros da função de Material)
+    // ✅ URL PADRONIZADA (Unificada com a lógica de Materiais)
+    // Alterado &quadro_mil para &quadro para manter consistência no App
     const url = `conferencia_app.html?id=${idCompletoChecklist}` +
+                `&modo=checklist_vtr` + // Modo explícito para o App carregar Azul Petróleo
                 `&prefixo=${encodeURIComponent(prefixo)}` +
                 `&km=${kmDigitado}` +
                 `&combustivel=${encodeURIComponent(combustivel)}` +
-                `&modo=checklist_vtr` +
                 `&posto_grad=${encodeURIComponent(posto)}` +
-                `&quadro_mil=${encodeURIComponent(quadro)}` +
+                `&quadro=${encodeURIComponent(quadro)}` + 
                 `&nome_guerra=${encodeURIComponent(guerra)}` +
-                `&user_uid=${userUid}`;
+                `&user_uid=${userUid}` +
+                `&unidade_id=${encodeURIComponent(currentUserData.unidade_id || '')}` +
+                `&unidade_nome=${encodeURIComponent(currentUserData.unidade || '')}`;
 
     Swal.close();
     const container = document.getElementById('app-runner-container');
@@ -14200,9 +14207,8 @@ function finalizarPreCheckEIrProApp() {
         container.style.display = 'block';
     }
 
-    console.log("Vistoria Iniciada com Sucesso:", { prefixo, idCompletoChecklist });
-}
-		
+    console.log("🚀 Vistoria Iniciada:", { prefixo, mode: "checklist_vtr" });
+}		
 		async function filtrarVtrsGlobais(termo) {
     const container = document.getElementById('resultados-busca-vtr');
     const busca = termo.replace(/[^A-Z0-9]/gi, '').toLowerCase();
