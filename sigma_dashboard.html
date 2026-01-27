@@ -249,6 +249,25 @@
 		.v3-status-pronto { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
 		.v3-status-manutencao { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 		.v3-vtr-km-info { background: #f8fafc; border-radius: 12px; padding: 10px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+
+		/* Seletor Grid/Lista */
+		.btn-toggle-v3 { border: none; background: transparent; color: #64748b; padding: 8px 12px; border-radius: 8px; cursor: pointer; transition: all 0.3s; }
+
+		.btn-toggle-v3.active { background: white; color: #800020; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+		/* Letras do Alfabeto */
+		.alpha-btn { border: none; background: #f1f5f9; color: #64748b; font-weight: 800; font-size: 0.7em; width: 28px; height: 28px; border-radius: 6px; cursor: pointer; margin: 2px; }
+
+		.alpha-btn:hover, 
+		.alpha-btn.active { background: #800020; color: white; }
+
+		/* Linha da Tabela Premium (Modo Lista) */
+		.v3-list-row { display: grid; grid-template-columns: 50px 2fr 1fr 1fr 120px; align-items: center; background: white; padding: 12px 20px; border-radius: 10px; margin-bottom: 8px; border: 1px solid #e2e8f0; transition: all 0.2s; cursor: pointer; }
+
+		.v3-list-row:hover { border-color: #800020; transform: translateX(5px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);}
+
+		/* Container para empilhamento no modo lista */
+		.v3-list-stack {display: flex; flex-direction: column; width: 100%; }
 		
 		/* ================================================================
    		BLOCO NOVO: VIATURAS & BASES (IDENTIDADE VISUAL SIGMA)
@@ -2747,21 +2766,34 @@ input:checked + .slider:before {
     	<div id="view-usuarios" class="view-section">
     		<div class="sigma-v3-title-label" style="margin-bottom: 20px;">
         		<i class="fas fa-users-cog" style="color: #800020;"></i>
-        		<span>GESTÃO DE USUÁRIOS</span>
+        		<span>GESTÃO DE USUÁRIOS E MILITARES</span>
     		</div>
 
     		<div class="header-container" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
         		<div>
             		<p style="color: #64748b; font-size: 0.85em; font-weight: 600; margin: 0;">
-                		Uusários <i class="fas fa-chevron-right" style="font-size: 0.7em; margin: 0 5px;"></i> Gestão de Usuários
+                		Usuários <i class="fas fa-chevron-right" style="font-size: 0.7em; margin: 0 5px;"></i> Gestão de Efetivo
             		</p>
         		</div>
-        		<div class="global-actions">
-            		<button class="sigma-v3-tab active" onclick="abrirFormularioUsuario()" style="background: #800020; color: white; border: none; height: 42px; padding: 0 20px;">
+        
+        		<div style="display: flex; gap: 12px; align-items: center;">
+            		<div style="background: #f1f5f9; padding: 4px; border-radius: 10px; display: flex; gap: 4px; border: 1px solid #e2e8f0;">
+                		<button onclick="mudarModoVisao('grid')" id="btn-visao-grid" class="btn-toggle-v3 active" title="Ver em Cards">
+                    		<i class="fas fa-th-large"></i>
+                		</button>
+                		<button onclick="mudarModoVisao('lista')" id="btn-visao-lista" class="btn-toggle-v3" title="Ver em Lista">
+                    		<i class="fas fa-list"></i>
+                		</button>
+            		</div>
+
+            		<button class="sigma-v3-tab active" onclick="abrirFormularioUsuario()" style="background: #800020; color: white; border: none; height: 42px; padding: 0 20px; border-radius: 10px;">
                 		<i class="fas fa-user-plus"></i> NOVO MILITAR
             		</button>
         		</div>
     		</div>
+
+    		<div class="alphabet-filter" style="display: flex; justify-content: center; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; padding: 0 10px;">
+        		</div>
 
     		<div class="sigma-v3-clean-card" style="margin-bottom: 25px; padding: 20px;">
         		<div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end;">
@@ -2779,7 +2811,7 @@ input:checked + .slider:before {
         		</div>
     		</div>
 
-    		<div id="users-cards-container" class="v3-vtr-grid">
+    		<div id="users-render-container" class="v3-vtr-grid">
         	</div>
 		</div>
 		
@@ -3624,6 +3656,8 @@ input:checked + .slider:before {
 		let isModoVistoria = false;
 		let houveAlteracaoNoPosto = false; // Controle de sincronização visual
 		window.colecaoAtivaNoEditor = 'listas_conferencia';
+		let visaoAtual = 'grid'; // Padrão
+		let letraAtiva = 'TODOS';
 		
         // --- 1. AUTH & PERMISSÕES ---
         auth.onAuthStateChanged(async (user) => {
@@ -6226,6 +6260,35 @@ function abrirModalGestaoID(data) {
         Swal.fire('Erro', 'Falha ao carregar formulário', 'error');
     }
 }
+	function mudarModoVisao(modo) {
+    visaoAtual = modo;
+    document.getElementById('btn-visao-grid').classList.toggle('active', modo === 'grid');
+    document.getElementById('btn-visao-lista').classList.toggle('active', modo === 'lista');
+    
+    // Ajusta a classe do container para mudar o layout
+    const container = document.getElementById('users-render-container');
+    container.className = (modo === 'grid') ? 'v3-vtr-grid' : 'v3-list-stack';
+    
+    carregarUsuariosVisuais();
+}
+
+// Gera o alfabeto no topo
+function renderizarAlfabeto() {
+    const container = document.querySelector('.alphabet-filter');
+    const letras = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    let html = `<button class="alpha-btn ${letraAtiva === 'TODOS' ? 'active' : ''}" onclick="filtrarPorLetra('TODOS')">TDS</button>`;
+    
+    letras.forEach(l => {
+        html += `<button class="alpha-btn ${letraAtiva === l ? 'active' : ''}" onclick="filtrarPorLetra('${l}')">${l}</button>`;
+    });
+    container.innerHTML = html;
+}
+
+function filtrarPorLetra(letra) {
+    letraAtiva = letra;
+    renderizarAlfabeto();
+    carregarUsuariosVisuais();
+}	
 		function filtrarUsuariosCards() {
     // 1. Captura o termo digitado e normaliza (remove acentos e espaços extras)
     const input = document.getElementById('user-search-input');
@@ -6257,56 +6320,54 @@ function abrirModalGestaoID(data) {
     console.log(`Filtragem concluída: ${totalVisiveis} militares visíveis.`);
 }
 	async function carregarUsuariosVisuais() {
-    const container = document.getElementById('users-cards-container');
+    const container = document.getElementById('users-render-container');
     if (!container) return;
-
+    
+    renderizarAlfabeto();
     container.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:50px;"><i class="fas fa-sync fa-spin fa-2x" style="color:#800020"></i></div>';
 
     try {
-        const snap = await db.collection('usuarios').orderBy('nome_guerra').get();
+        let query = db.collection('usuarios').orderBy('nome_guerra');
+        const snap = await query.get();
         let html = '';
 
         snap.forEach(doc => {
             const u = doc.data();
             const iniciais = u.nome_guerra ? u.nome_guerra.substring(0, 2).toUpperCase() : '??';
+            const primeiraLetra = u.nome_guerra ? u.nome_guerra[0].toUpperCase() : '';
+            
+            // Filtro de Letra
+            if (letraAtiva !== 'TODOS' && primeiraLetra !== letraAtiva) return;
+
             const corPerfil = u.role === 'admin' ? '#800020' : (u.role === 'gestor' ? '#2c7399' : '#64748b');
 
-            // Formatação segura do Telefone e Unidade
-            const telefoneExibicao = u.telefone_contato || 'Sem fone';
-            const unidadeExibicao = u.unidade || 'S/U';
-
-            html += `
-                <div class="v3-posto-card" style="border-top: 6px solid ${corPerfil}; cursor:pointer;" onclick="verDetalhesMilitar('${doc.id}')">
-                    <div style="padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center;">
-                        <div style="width: 65px; height: 65px; background: ${corPerfil}15; color: ${corPerfil}; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2em; border: 2px solid ${corPerfil}30; margin-bottom: 15px;">
-                            ${iniciais}
+            if (visaoAtual === 'grid') {
+                // RENDERIZAÇÃO EM CARDS (Já temos)
+                html += `
+                    <div class="v3-posto-card" style="border-top: 6px solid ${corPerfil};" onclick="verDetalhesMilitar('${doc.id}')">
+                        <div style="padding: 20px; display: flex; flex-direction: column; align-items: center;">
+                            <div style="width: 50px; height: 50px; background: ${corPerfil}15; color: ${corPerfil}; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; margin-bottom: 15px;">${iniciais}</div>
+                            <span style="font-weight:900; color:#1e293b;">${u.posto} ${u.nome_guerra}</span>
+                            <span style="font-size: 0.7em; color: #475569;">${u.unidade || '---'}</span>
                         </div>
-
-                        <div style="margin-bottom: 10px;">
-                            <span style="display:block; font-weight:900; font-size:1.1em; color:#1e293b;">${u.posto} ${u.nome_guerra}</span>
-                            <span style="display:block; font-size: 0.65em; font-weight: 700; color: #94a3b8; text-transform: uppercase;">${u.nome_completo}</span>
-                        </div>
-
-                        <div style="width: 100%; border-top: 1px solid #f1f5f9; padding-top: 12px; margin-top: auto;">
-                            <div style="display:flex; justify-content: space-between; align-items: center;">
-                                <span style="font-size: 0.7em; font-weight: 800; color: ${corPerfil}; text-transform: uppercase;">${u.role}</span>
-                                <span style="font-size: 0.7em; font-weight: 800; color: #475569;">${unidadeExibicao}</span>
-                            </div>
-                            <div style="margin-top: 8px; text-align: left;">
-                                <span style="font-size:0.75em; color:#166534; font-weight:700;">
-                                    <i class="fab fa-whatsapp"></i> ${telefoneExibicao}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>`;
+                    </div>`;
+            } else {
+                // RENDERIZAÇÃO EM LISTA (Tabela Premium)
+                html += `
+                    <div class="v3-list-row" onclick="verDetalhesMilitar('${doc.id}')">
+                        <div style="width: 35px; height: 35px; background: ${corPerfil}15; color: ${corPerfil}; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 0.8em;">${iniciais}</div>
+                        <div style="font-weight: 700; color: #1e293b;">${u.posto} ${u.nome_guerra} <small style="display:block; font-weight:400; color:#64748b;">${u.nome_completo}</small></div>
+                        <div style="font-size: 0.85em; color: #475569; font-weight:600;">${u.unidade || '---'}</div>
+                        <div style="font-size: 0.8em; text-transform:uppercase; color:${corPerfil}; font-weight:800;">${u.role}</div>
+                        <div style="text-align: right;"><i class="fas fa-chevron-right" style="color:#e2e8f0;"></i></div>
+                    </div>`;
+            }
         });
-        container.innerHTML = html;
-    } catch (e) {
-        console.error("Erro ao carregar usuários:", e);
-        container.innerHTML = 'Erro ao carregar efetivo.';
-    }
+        
+        container.innerHTML = html || '<div style="grid-column:1/-1; text-align:center; padding:50px;">Nenhum militar encontrado nesta inicial.</div>';
+    } catch (e) { console.error(e); }
 }
+		
 	async function verDetalhesMilitar(uid) {
     Swal.fire({ title: 'Carregando prontuário...', didOpen: () => Swal.showLoading() });
 
