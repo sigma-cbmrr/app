@@ -178,7 +178,7 @@
         </div>
         <div class="v3-hud-data">
             <strong id="militar-nome-hud">Carregando...</strong>
-            <small id="local-titulo-hud">Sincronizando local...</small>
+            <small id="local-titulo-hud">Sincronizando Data/Hora...</small>
         </div>
     </div>
     <div class="v3-hud-progress-container">
@@ -387,19 +387,21 @@ function getUrlParameter(n) {
 }
 
     function updateOverallStatus() {
-    // 1. MAPEAMENTO DE DADOS (INDESPENDENTE DA TELA ATIVA)
+    // 1. MAPEAMENTO DE DADOS (INDEPENDENTE DA TELA ATIVA)
     const fonteDados = window.dadosConferencia || [];
+    const isChecklist = window.isModoChecklist; // Identifica o modo
     let totalItensGeral = 0;
     let concluidosGeral = 0;
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            const uid = item.uid_global || item.id;
+            // ✅ CORREÇÃO CHAVE: Usa o ID único no checklist para não somar itens repetidos
+            const uid = isChecklist ? item.id : (item.uid_global || item.id);
             const status = window.itemStatus[uid];
             
             totalItensGeral++;
             
-            // Considera concluído se houve interação ou se já tem pendência herdada
+            // Considera concluído se houve interação real ou status definido para ESTE id específico
             if (status && (status.status === 'ok' || status.status === 'C/A' || status.cautela_confirmada)) {
                 concluidosGeral++;
             }
@@ -414,17 +416,21 @@ function getUrlParameter(n) {
         const percentual = totalItensGeral > 0 ? (concluidosGeral / totalItensGeral) * 100 : 0;
         progBar.style.width = `${percentual}%`;
         
-        // Verde se 100%, senão segue a cor do modo (Bordô/Azul)
+        // Se estiver 100%, força a cor de sucesso (Verde)
         if (percentual === 100) {
             progBar.style.background = "#1b8a3e";
             progBar.style.boxShadow = "0 0 10px #1b8a3e";
+        } else {
+            // Caso contrário, mantém a cor do modo (Azul Petróleo ou Vinho)
+            const corModo = isChecklist ? "#2c3e50" : "#800020";
+            progBar.style.background = corModo;
+            progBar.style.boxShadow = `0 0 10px ${corModo}`;
         }
     }
 
     // 3. ATUALIZAÇÃO DO BOTÃO FINALIZAR (TELA 1)
     const btn = document.getElementById('btn-finalizar');
     if (btn) {
-        const isChecklist = window.isModoChecklist;
         const corV3 = isChecklist ? '#2c3e50' : '#800020';
         const buttonPrefix = isChecklist ? 'FINALIZAR VISTORIA' : 'FINALIZAR CONFERÊNCIA';
         
@@ -440,13 +446,11 @@ function getUrlParameter(n) {
             btn.innerHTML = `<i class="fas fa-paper-plane"></i> ${buttonPrefix}`;
             btn.style.background = corV3;
             btn.style.boxShadow = `0 10px 20px rgba(0,0,0,0.2)`;
-            // Efeito de pulso para indicar que a missão pode ser enviada
             btn.style.animation = "v3-pulse 2s infinite";
         }
     }
 
     // 4. ATUALIZAÇÃO DAS LINHAS DE SETOR (TELA 1)
-    // Isso garante que os badges (0/X) das linhas de setores se atualizem em tempo real
     document.querySelectorAll('.v3-setor-row').forEach((row, index) => {
         const setor = fonteDados[index];
         if (!setor) return;
@@ -456,19 +460,18 @@ function getUrlParameter(n) {
         let alertasSetor = 0;
 
         setor.itens.forEach(it => {
-            const uid = it.uid_global || it.id;
-            const st = window.itemStatus[uid];
+            // ✅ CORREÇÃO CHAVE: Mesma lógica de ID único para os badges dos setores
+            const uidSetor = isChecklist ? it.id : (it.uid_global || it.id);
+            const st = window.itemStatus[uidSetor];
             if (st && (st.status === 'ok' || st.status === 'C/A')) {
                 concluidosSetor++;
                 if (st.status === 'C/A') alertasSetor++;
             }
         });
 
-        // Atualiza os badges de texto dentro da linha do setor
         const badgeTotal = row.querySelector('.badge-total');
         if (badgeTotal) badgeTotal.innerText = `${concluidosSetor}/${totalSetor} CONFERIDOS`;
 
-        // Gerencia badge de alertas
         let badgeAlt = row.querySelector('.badge-alerta');
         if (alertasSetor > 0) {
             if (!badgeAlt) {
@@ -482,7 +485,6 @@ function getUrlParameter(n) {
             badgeAlt.remove();
         }
 
-        // Aplica classe de concluído na linha (Setor fica verde na Tela 1)
         if (concluidosSetor === totalSetor && totalSetor > 0) {
             row.classList.add('concluido');
             const icon = row.querySelector('i.fas');
@@ -958,10 +960,14 @@ function renderizarConferencia() {
     // 4. RENDERIZAÇÃO DA TELA 2: LINHAS ELEGANTES DE ITENS (Visão Micro)
     function renderizarLinhasItens(itens, setorIndex) {
         const container = document.getElementById('lista-itens-container');
+        const isChecklist = window.isModoChecklist; // Garante a leitura da global
         let htmlItens = '';
 
         itens.forEach((item) => {
-            const uid = item.uid_global || item.id;
+            // ✅ CORREÇÃO CHAVE: Se for checklist, usa o id único (ex: item_4e6o69tjz)
+            // Se for conferência, mantém a lógica de uid_global para bater com inventário.
+            const uid = isChecklist ? item.id : (item.uid_global || item.id);
+            
             const statusLocal = window.itemStatus[uid] || {};
             const st = statusLocal.status;
 
@@ -2379,7 +2385,12 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     // 3. BUSCA E INSERÇÃO NO DATASET
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            const matchesID = (String(item.uid_global) === String(uid) || String(item.id) === String(uid));
+            const isChecklist = window.isModoChecklist;
+            
+            // ✅ CORREÇÃO CHAVE: Define qual é o ID de comparação real para este item
+            // Se for checklist, o alvo é o item.id. Se for material, o alvo é o uid_global.
+            const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
+            const matchesID = (String(idRealDoItem) === String(uid));
 
             if (tipo === 'single' && matchesID) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
@@ -2388,6 +2399,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
             } 
             else if (tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
+                    // Mantém a lógica de ID Composto para itens tombados (Patrimônio)
                     const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
                     if (String(uid) === uidComposto) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
@@ -2648,12 +2660,20 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     // 1. GARANTIA DE OBJETO DE MEMÓRIA
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
+    const isChecklist = window.isModoChecklist;
     const uidStr = String(uid);
-    const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
+    
+    // ✅ AJUSTE V3: Definição inteligente da referência global
+    // Se for checklist, a referência global é o ID genérico. Se não, extrai o ID do inventário.
+    let uidGlobalFull = "";
+    if (isChecklist) {
+        uidGlobalFull = "ITEM_VISTORIA_LIVRE";
+    } else {
+        uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
+    }
 
     // 2. LÓGICA DE ATUALIZAÇÃO POR STATUS
     if (status === 'ok') {
-        // Registro de Conformidade (S/A)
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'ok', 
@@ -2661,24 +2681,23 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             uid_global_ref: uidGlobalFull 
         };
 
-        // Feedback Visual na Linha Elegante V3
         const row = document.getElementById(`item-row-${uid}`);
         if (row) {
             row.classList.remove('status-alert');
             row.classList.add('status-ok');
             
-            // Ativa o botão de check circular
             const btnCheck = row.querySelector('.btn-check');
             const btnAlert = row.querySelector('.btn-alert');
             if (btnCheck) btnCheck.classList.add('active');
             if (btnAlert) btnAlert.classList.remove('active');
+            
+            // Remove o fundo de alerta caso existisse
+            row.style.backgroundColor = "";
         }
 
-        // ✅ GATILHO MÁGICO V3: Verifica se rola pro próximo ou fecha o setor
         verificarFluxoSetor(uid);
 
     } else if (status === 'cautela_ciente') {
-        // Registro de Ciência de Cautela
         window.itemStatus[uid] = { 
             ...window.itemStatus[uid], 
             status: 'cautela_ciente', 
@@ -2687,12 +2706,10 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             uid_global_ref: uidGlobalFull
         };
 
-        // Feedback no botão do Action Sheet
         btn.innerHTML = '<i class="fas fa-check-double"></i> Ciente registrado';
         btn.disabled = true;
         btn.style.opacity = "0.8";
 
-        // Redesenha para aplicar os carimbos e segue fluxo
         setTimeout(() => {
             renderizarConferencia();
             updateOverallStatus();
