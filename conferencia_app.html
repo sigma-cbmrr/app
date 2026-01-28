@@ -941,18 +941,23 @@ function renderizarConferencia() {
 
     containerSetores.innerHTML = htmlSetores;
 
-    // 3. FUNÇÃO DE NAVEGAÇÃO (Push para a Direita)
+    // 3. FUNÇÃO DE NAVEGAÇÃO (Com Desvio Inteligente para Fotos)
     window.entrarNoSetor = function(index) {
         const setor = fonteDados[index];
+        const containerItens = document.getElementById('lista-itens-container');
         
         // Atualiza cabeçalho da Tela 2
         document.getElementById('nome-setor-atual').innerText = setor.nome;
         document.getElementById('nome-setor-atual').style.color = corTema;
+
+        // ✅ DESVIO PARA MÓDULO FOTOGRÁFICO
+        if (setor.nome.toUpperCase().includes("FOTOGRÁFICO")) {
+            renderizarPainelFotos(containerItens);
+        } else {
+            // Renderização padrão de itens
+            renderizarLinhasItens(setor.itens, index);
+        }
         
-        // Renderiza os itens do setor selecionado
-        renderizarLinhasItens(setor.itens, index);
-        
-        // Ativa o slide de tela
         document.body.classList.add('modo-inspecao');
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -1039,6 +1044,39 @@ function atualizarContadorSetorInterno(itens) {
     });
     document.getElementById('progresso-setor-atual').innerText = `${feitos}/${itens.length}`;
 }
+   function renderizarPainelFotos(container) {
+        container.innerHTML = `
+            <div class="v3-foto-panel" style="text-align: center; padding: 10px;">
+                <div style="background: #fff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px; text-align: left;">
+                    <strong style="color: var(--petroleo); font-size: 0.85em; display: block; margin-bottom: 10px;">
+                        <i class="fas fa-lightbulb"></i> SUGESTÕES DE REGISTRO:
+                    </strong>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 0.8em; color: #64748b; line-height: 1.6;">
+                        <li>Frente e Traseira (Placa visível)</li>
+                        <li>Laterais (Direita e Esquerda)</li>
+                        <li>Painel (Hodômetro e Combustível)</li>
+                        <li style="color: var(--vinho); font-weight: bold; margin-top: 5px;">
+                            <i class="fas fa-mobile-alt" style="transform: rotate(90deg);"></i> PREFIRA FOTOS NA HORIZONTAL
+                        </li>
+                    </ul>
+                </div>
+
+                <div id="container-camera-v3">
+                    <button class="v3-btn-main" style="background: #64748b; width: 100%; height: 80px; border-radius: 15px; font-size: 1em;" 
+                            onclick="Swal.fire('Em breve', 'O módulo de upload para o Firebase Storage está sendo preparado.', 'info')">
+                        <i class="fas fa-camera" style="font-size: 1.5em; display: block; margin-bottom: 5px;"></i>
+                        ANEXAR FOTOS (EM BREVE)
+                    </button>
+                    <small style="color: #94a3b8; display: block; margin-top: 10px; font-weight: 600;">
+                        MÁXIMO: 5 FOTOS | ATÉ 10MB CADA
+                    </small>
+                </div>
+
+                <div id="galeria-miniaturas" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 25px;">
+                    </div>
+            </div>
+        `;
+    }
     
 async function carregarDadosRemotos() {
     // 1. CAPTURA IMEDIATA E HIGIENIZAÇÃO DE PARÂMETROS
@@ -2382,24 +2420,25 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     let itemEncontrado = false;
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
-    // 3. BUSCA E INSERÇÃO NO DATASET
+    // 3. BUSCA E INSERÇÃO NO DATASET (MODO V3 PROTEGIDO - AMPLIADO)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             const isChecklist = window.isModoChecklist;
-            
-            // ✅ CORREÇÃO CHAVE: Define qual é o ID de comparação real para este item
-            // Se for checklist, o alvo é o item.id. Se for material, o alvo é o uid_global.
             const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
+            
+            // Verifica se o ID enviado pelo modal bate com este item da lista
             const matchesID = (String(idRealDoItem) === String(uid));
 
-            if (tipo === 'single' && matchesID) {
+            // ✅ CORREÇÃO: Aceita 'single', 'texto_livre' (Observações) e 'upload_foto' (Fotos)
+            const tiposAceitos = ['single', 'texto_livre', 'upload_foto'];
+
+            if (tiposAceitos.includes(item.tipo) && matchesID) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
             } 
-            else if (tipo === 'multi' && item.tombamentos) {
+            else if (item.tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    // Mantém a lógica de ID Composto para itens tombados (Patrimônio)
                     const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
                     if (String(uid) === uidComposto) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
