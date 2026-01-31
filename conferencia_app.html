@@ -389,39 +389,38 @@ function getUrlParameter(n) {
     function updateOverallStatus() {
     // 1. MAPEAMENTO DE DADOS (INDEPENDENTE DA TELA ATIVA)
     const fonteDados = window.dadosConferencia || [];
-    const isChecklist = window.isModoChecklist; // Identifica o modo
-    let totalItensGeral = 0;
+    const isChecklist = window.isModoChecklist; 
+    let totalItensObrigatorios = 0; // Itens que PRECISAM de conferência
     let concluidosGeral = 0;
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ CORREÇÃO CHAVE: Usa o ID único no checklist para não somar itens repetidos
+            // ✅ EXCEÇÃO: Ignora o item de foto na contagem de obrigatoriedade global
+            if (item.tipo === 'upload_foto') return;
+
             const uid = isChecklist ? item.id : (item.uid_global || item.id);
             const status = window.itemStatus[uid];
             
-            totalItensGeral++;
+            totalItensObrigatorios++;
             
-            // Considera concluído se houve interação real ou status definido para ESTE id específico
             if (status && (status.status === 'ok' || status.status === 'C/A' || status.cautela_confirmada)) {
                 concluidosGeral++;
             }
         });
     });
 
-    const todosConcluidos = totalItensGeral > 0 && concluidosGeral === totalItensGeral;
+    const todosConcluidos = totalItensObrigatorios > 0 && concluidosGeral === totalItensObrigatorios;
 
     // 2. ATUALIZAÇÃO DA BARRA NEON (HEADER HUD)
     const progBar = document.getElementById('overall-progress-bar');
     if (progBar) {
-        const percentual = totalItensGeral > 0 ? (concluidosGeral / totalItensGeral) * 100 : 0;
+        const percentual = totalItensObrigatorios > 0 ? (concluidosGeral / totalItensObrigatorios) * 100 : 0;
         progBar.style.width = `${percentual}%`;
         
-        // Se estiver 100%, força a cor de sucesso (Verde)
         if (percentual === 100) {
             progBar.style.background = "#1b8a3e";
             progBar.style.boxShadow = "0 0 10px #1b8a3e";
         } else {
-            // Caso contrário, mantém a cor do modo (Azul Petróleo ou Vinho)
             const corModo = isChecklist ? "#2c3e50" : "#800020";
             progBar.style.background = corModo;
             progBar.style.boxShadow = `0 0 10px ${corModo}`;
@@ -438,7 +437,7 @@ function getUrlParameter(n) {
         btn.style.transition = "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)";
 
         if (btn.disabled) {
-            btn.innerHTML = `<i class="fas fa-tasks"></i> PENDENTE (${concluidosGeral}/${totalItensGeral})`;
+            btn.innerHTML = `<i class="fas fa-tasks"></i> PENDENTE (${concluidosGeral}/${totalItensObrigatorios})`;
             btn.style.background = '#94a3b8';
             btn.style.transform = 'scale(1)';
             btn.style.animation = 'none';
@@ -455,12 +454,15 @@ function getUrlParameter(n) {
         const setor = fonteDados[index];
         if (!setor) return;
 
-        const totalSetor = setor.itens.length;
+        let totalSetorObrigatorio = 0;
         let concluidosSetor = 0;
         let alertasSetor = 0;
 
         setor.itens.forEach(it => {
-            // ✅ CORREÇÃO CHAVE: Mesma lógica de ID único para os badges dos setores
+            // ✅ EXCEÇÃO: Ignora fotos no cálculo do badge do setor
+            if (it.tipo === 'upload_foto') return;
+
+            totalSetorObrigatorio++;
             const uidSetor = isChecklist ? it.id : (it.uid_global || it.id);
             const st = window.itemStatus[uidSetor];
             if (st && (st.status === 'ok' || st.status === 'C/A')) {
@@ -469,9 +471,18 @@ function getUrlParameter(n) {
             }
         });
 
+        // Atualiza os badges de texto dentro da linha do setor
         const badgeTotal = row.querySelector('.badge-total');
-        if (badgeTotal) badgeTotal.innerText = `${concluidosSetor}/${totalSetor} CONFERIDOS`;
+        if (badgeTotal) {
+            if (totalSetorObrigatorio === 0) {
+                // Se for um setor puramente de fotos
+                badgeTotal.innerText = "REGISTRO OPCIONAL";
+            } else {
+                badgeTotal.innerText = `${concluidosSetor}/${totalSetorObrigatorio} CONFERIDOS`;
+            }
+        }
 
+        // Gerencia badge de alertas
         let badgeAlt = row.querySelector('.badge-alerta');
         if (alertasSetor > 0) {
             if (!badgeAlt) {
@@ -485,10 +496,16 @@ function getUrlParameter(n) {
             badgeAlt.remove();
         }
 
-        if (concluidosSetor === totalSetor && totalSetor > 0) {
+        // Status de Concluído (Fica verde se os itens OBRIGATÓRIOS estiverem OK)
+        if (concluidosSetor === totalSetorObrigatorio && totalSetorObrigatorio > 0) {
             row.classList.add('concluido');
             const icon = row.querySelector('i.fas');
             if (icon) icon.className = 'fas fa-check-circle';
+        } else if (totalSetorObrigatorio === 0) {
+            // Setor de fotos nunca fica "verde" automaticamente, mas não impede o final
+            row.classList.remove('concluido');
+            const icon = row.querySelector('i.fas');
+            if (icon) icon.className = 'fas fa-camera';
         } else {
             row.classList.remove('concluido');
             const icon = row.querySelector('i.fas');
@@ -496,7 +513,6 @@ function getUrlParameter(n) {
         }
     });
 }
-
 function updateSetorStatus(setorEl) { 
     if (!setorEl) return;
 
