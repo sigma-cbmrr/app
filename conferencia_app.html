@@ -2095,9 +2095,10 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
                     <div style="background:#fff5f5; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid #ffcccc;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                             <small style="color:#64748b; font-weight:800; text-transform:uppercase;">Relato Anterior:</small>
+                            ${!isChecklist ? `
                             <span style="background:#d90f23; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
                                 ${qtdAvariada} UN
-                            </span>
+                            </span>` : ''}
                         </div>
                         <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b;">"${pendenciaExistente.descricao}"</span>
                         
@@ -2114,10 +2115,10 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
                         <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
                     </button>
 
-                    ${(tipo === 'single' && saldoDisponivel > 0) ? `
+                    ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
                         <div style="border-top: 1px dashed #cbd5e1; padding-top: 15px; text-align:center;">
                             <button id="btn-v3-nova-alt" style="background:none; border:none; color:${corPrimaria}; font-weight:bold; text-decoration:underline; cursor:pointer; font-size:0.9em;">
-                                <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO NO SALDO (${saldoDisponivel} un.)
+                                <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO ${!isChecklist ? `NO SALDO (${saldoDisponivel} un.)` : ''}
                             </button>
                         </div>
                     ` : ''}
@@ -2155,12 +2156,14 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
 
 // Função auxiliar para isolar a lógica de inserção limpa
 async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria) {
+    const isChecklist = window.isModoChecklist;
+
     const { value: formValues } = await Swal.fire({
         title: `<span style="color:${corPrimaria}; font-size:0.8em;">RELATAR ALTERAÇÃO</span>`,
         html: `
             <div style="text-align:left;">
                 <p style="font-size:0.8em; color:#64748b; margin-bottom:10px;">Item: <b>${nomeItem}</b></p>
-                ${tipo === 'single' ? `
+                ${(tipo === 'single' && !isChecklist) ? `
                     <label style="font-size:0.75em; font-weight:800; color:#666;">QUANTIDADE AFETADA (Máx: ${saldoDisponivel}):</label>
                     <input id="swal-qtd" type="number" class="swal2-input" value="1" max="${saldoDisponivel}" min="1">
                 ` : ''}
@@ -2172,9 +2175,12 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
         confirmButtonColor: corPrimaria,
         preConfirm: () => {
             const obs = document.getElementById('swal-obs').value.trim();
-            const qtd = tipo === 'single' ? parseInt(document.getElementById('swal-qtd').value) : 1;
+            // Se for checklist, a quantidade é sempre 1. Se não, busca o valor do input.
+            const qtd = isChecklist ? 1 : (document.getElementById('swal-qtd') ? parseInt(document.getElementById('swal-qtd').value) : 1);
+            
             if (obs.length < 5) return Swal.showValidationMessage("Descreva o problema (mín. 5 letras)");
-            if (tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) return Swal.showValidationMessage("Quantidade inválida");
+            if (!isChecklist && tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) return Swal.showValidationMessage("Quantidade inválida");
+            
             return { qtd, obs };
         }
     });
