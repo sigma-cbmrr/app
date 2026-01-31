@@ -13943,9 +13943,19 @@ document.addEventListener('change', function(e) {
     badgeWrapper.innerHTML = `<div class="user-level-badge ${classeBadge}">${nomeRole}</div>`;
 }
 		async function prepararChecklistVtr() {
-			if (window.innerWidth <= 768) toggleFabMenu();
-    dadosChecklistTemp.vtr = null; // Reseta seleção ao abrir
-    const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${currentUserData.uid}`)) || [];
+		// ✅ TRAVA 1: Verifica se o Firebase já carregou o usuário
+    const user = firebase.auth().currentUser;
+    if (!user) {
+        Swal.fire('Aguarde', 'Sincronizando credenciais...', 'info');
+        return;
+    }
+
+    if (window.innerWidth <= 768) toggleFabMenu();
+    dadosChecklistTemp.vtr = null; 
+
+    // ✅ TRAVA 2: Usa o user.uid do Firebase caso o currentUserData falhe
+    const myUid = user.uid;
+    const recentes = JSON.parse(localStorage.getItem(`sigma_vtr_recentes_${myUid}`)) || [];
     
     let htmlRecentes = recentes.map(v => `
         <span class="badge-vtr-recente" onclick="recuperarDadosVtrESelecionar('${v.id}')">
@@ -14157,37 +14167,47 @@ function voltarParaEtapa1() {
 		
 		// 2. FUNÇÃO QUE VALIDA E LANÇA O APP DE CONFERÊNCIA
 function finalizarPreCheckEIrProApp() {
+    // ✅ SEGURANÇA: Captura o usuário do Firebase e os dados globais de forma protegida
+    const userAuth = firebase.auth().currentUser;
+    const userData = window.currentUserData || {}; 
+
+    // ✅ TRAVA DE SEGURANÇA: Se não houver usuário, impede o erro 'reading uid of null'
+    if (!userAuth) {
+        Swal.showValidationMessage("Erro: Sessão não identificada. Tente novamente.");
+        return;
+    }
+
     const kmInput = document.getElementById('vtr-km-check');
     const kmDigitado = parseInt(kmInput.value.replace(/\D/g, '')) || 0;
-    const kmAnterior = dadosChecklistTemp.vtr.km_atual || 0;
+    const kmAnterior = (dadosChecklistTemp.vtr && dadosChecklistTemp.vtr.km_atual) ? dadosChecklistTemp.vtr.km_atual : 0;
     const combustivel = document.getElementById('vtr-combustivel-check').value;
 
     if (kmDigitado === 0) {
         Swal.showValidationMessage("Por favor, informe a quilometragem atual.");
-        kmInput.style.borderColor = "red";
+        if(kmInput) kmInput.style.borderColor = "red";
         return;
     }
 
     if (kmDigitado < kmAnterior) {
         const kmAnteriorFmt = kmAnterior.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
         Swal.showValidationMessage(`Erro: O KM não pode ser menor que o atual (${kmAnteriorFmt} km)`);
-        kmInput.style.borderColor = "red";
+        if(kmInput) kmInput.style.borderColor = "red";
         return;
     }
 
-    // ✅ CAPTURA DE DADOS DA VTR
+    // ✅ CAPTURA DE DADOS DA VTR E MILITAR
     const { id, prefixo } = dadosChecklistTemp.vtr;
     const idCompletoChecklist = `CHECKLIST_VTR_${id}`;
     
-    const userUid = firebase.auth().currentUser.uid;
-    const guerra = (currentUserData.nome_guerra || 'ND').toUpperCase();
-    const posto = (currentUserData.posto || 'ND');
-    const quadro = (currentUserData.quadro || 'ND');
+    const userUid = userAuth.uid;
+    // Usamos as chaves exatas do seu objeto global, com fallbacks para evitar 'undefined'
+    const guerra = (userData.nome_guerra || userData.nomeGuerra || 'ND').toUpperCase();
+    const posto = (userData.posto || userData.postoGraduacao || 'ND');
+    const quadro = (userData.quadro || 'ND');
 
-    // ✅ URL PADRONIZADA (Unificada com a lógica de Materiais)
-    // Alterado &quadro_mil para &quadro para manter consistência no App
-    const url = `conferencia_app.html?id=${idCompletoChecklist}` +
-                `&modo=checklist_vtr` + // Modo explícito para o App carregar Azul Petróleo
+    // ✅ URL PADRONIZADA (Enviando parâmetros exatos para a lógica do Carimbo V3)
+    const url = `sigma_conferencia_v3.html?id=${idCompletoChecklist}` +
+                `&modo=checklist_vtr` + 
                 `&prefixo=${encodeURIComponent(prefixo)}` +
                 `&km=${kmDigitado}` +
                 `&combustivel=${encodeURIComponent(combustivel)}` +
@@ -14195,20 +14215,25 @@ function finalizarPreCheckEIrProApp() {
                 `&quadro=${encodeURIComponent(quadro)}` + 
                 `&nome_guerra=${encodeURIComponent(guerra)}` +
                 `&user_uid=${userUid}` +
-                `&unidade_id=${encodeURIComponent(currentUserData.unidade_id || '')}` +
-                `&unidade_nome=${encodeURIComponent(currentUserData.unidade || '')}`;
+                `&unidade_id=${encodeURIComponent(userData.unidade_id || userData.unidadeId || '')}` +
+                `&unidade_nome=${encodeURIComponent(userData.unidade || '')}`;
 
     Swal.close();
+
+    // ✅ REDIRECIONAMENTO OU IFRAME
     const container = document.getElementById('app-runner-container');
     const iframe = document.getElementById('app-iframe');
     
     if (container && iframe) {
         iframe.src = url;
         container.style.display = 'block';
+    } else {
+        // Fallback: se não estiver usando iframe no dashboard, redireciona a página
+        window.location.href = url;
     }
 
-    console.log("🚀 Vistoria Iniciada:", { prefixo, mode: "checklist_vtr" });
-}		
+    console.log("🚀 Vistoria Iniciada com Identidade V3:", { prefixo, guerra });
+}	
 		async function filtrarVtrsGlobais(termo) {
     const container = document.getElementById('resultados-busca-vtr');
     const busca = termo.replace(/[^A-Z0-9]/gi, '').toLowerCase();
