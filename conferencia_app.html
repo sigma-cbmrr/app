@@ -2073,14 +2073,15 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let pendenciaExistente = null;
     
-    // Localiza a pendência na árvore
+    // Localiza a pendência na árvore de dados
     fonteDados.forEach(setor => {
         setor.itens.forEach(it => {
             const match = (it.uid_global === uid || it.id === uid);
             if (match && it.pendencias_ids?.length > 0) pendenciaExistente = it.pendencias_ids[0];
             if (it.tombamentos) {
                 it.tombamentos.forEach(t => {
-                    if (`${it.uid_global}-${t.tomb}` === uid && t.pendencias_ids?.length > 0) 
+                    const uidComposto = `${it.uid_global || it.id}-${t.tomb}`;
+                    if (uidComposto === uid && t.pendencias_ids?.length > 0) 
                         pendenciaExistente = t.pendencias_ids[0];
                 });
             }
@@ -2088,7 +2089,7 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     });
 
     if (pendenciaExistente) {
-        // ✅ Identifica se é um rascunho da sessão atual
+        // ✅ Identifica se é um rascunho da sessão atual para definir o layout
         const isTemp = String(pendenciaExistente.id).startsWith('TEMP-');
         const autor = pendenciaExistente.autor_nome || "SISTEMA";
         const data = pendenciaExistente.data_criacao || "";
@@ -2096,65 +2097,62 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
 
         return Swal.fire({
             title: `<span style="color:${corPrimaria}; font-size:0.8em;">GERENCIAR ALTERAÇÃO</span>`,
-            // ... dentro da função abrirModalPendenciaV3, no bloco do HTML:
-
             html: `
                 <div style="text-align:left; font-size:0.9em;">
                     <div style="background:${isTemp ? '#f0f9ff' : '#fff5f5'}; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'};">
-            
+                        
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap: 10px;">
                             <small style="color:#64748b; font-weight:800; text-transform:uppercase; flex: 1;">
                                 ${isTemp ? '✨ Registro na Sessão' : '📜 Relato de Auditoria'}
                             </small>
-                
+                            
                             ${isTemp ? `
-                            <div style="display: flex; gap: 15px; white-space: nowrap;">
-                                <button onclick="Swal.close(); abrirModalEditar('${pendenciaExistente.id}', '${uid}', ${qtdAvariada}, '${pendenciaExistente.descricao.replace(/'/g, "\\'")}')" 
-                                    style="background:none; border:none; color:#0369a1; cursor:pointer; font-size:1.1em; padding: 0 5px;">
-                                    <i class="fas fa-pen"></i>
-                                </button>
-                                <button onclick="Swal.close(); confirmarExclusaoRelato('${pendenciaExistente.id}', '${uid}')" 
-                                     style="background:none; border:none; color:#b91c1c; cursor:pointer; font-size:1.1em; padding: 0 5px;">
-                                    <i class="fas fa-trash"></i>
-                               </button>
-                            </div>
-                         ` : `
-                ${!isChecklist ? `
-                    <span style="background:#d90f23; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
-                        ${qtdAvariada} UN
-                    </span>` : ''}
-                `}
-            </div>
-            
-            <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b; line-height: 1.4;">
-                "${pendenciaExistente.descricao}"
-            </span>
-            
-            <div style="border-top:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'}; padding-top:5px; margin-top:5px;">
-                <small style="color:${isTemp ? '#0369a1' : '#d90f23'}; font-weight:700;">
-                    ${isTemp ? '<i class="fas fa-clock"></i> Aguardando finalizar conferência' : `por: ${autor} em ${data}`}
-                </small>
-            </div>
-        </div>
+                                <div style="display: flex; gap: 15px; white-space: nowrap;">
+                                    <button onclick="Swal.close(); abrirModalEditar('${pendenciaExistente.id}', '${uid}', ${qtdAvariada}, '${pendenciaExistente.descricao.replace(/'/g, "\\'")}')" 
+                                            style="background:none; border:none; color:#0369a1; cursor:pointer; font-size:1.1em; padding: 0 5px;">
+                                        <i class="fas fa-pen"></i>
+                                    </button>
+                                    <button onclick="Swal.close(); confirmarExclusaoRelato('${pendenciaExistente.id}', '${uid}')" 
+                                            style="background:none; border:none; color:#b91c1c; cursor:pointer; font-size:1.1em; padding: 0 5px;">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            ` : `
+                                ${!isChecklist ? `
+                                    <span style="background:#d90f23; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
+                                        ${qtdAvariada} UN
+                                    </span>` : ''}
+                            `}
+                        </div>
+                        
+                        <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b; line-height: 1.4;">
+                            "${pendenciaExistente.descricao}"
+                        </span>
+                        
+                        <div style="border-top:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'}; padding-top:5px; margin-top:5px;">
+                            <small style="color:${isTemp ? '#0369a1' : '#d90f23'}; font-weight:700;">
+                                ${isTemp ? '<i class="fas fa-clock"></i> Aguardando finalizar conferência' : `por: ${autor} em ${data}`}
+                            </small>
+                        </div>
+                    </div>
 
-        ${!isTemp ? `
-            <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e; color:white; width:100%; padding:14px; border-radius:8px; border:none; margin-bottom:8px; font-weight:bold; cursor:pointer;">
-                <i class="fas fa-check"></i> RESOLVER ESTA AVARIA
-            </button>
-            <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#f1f5f9; color:#475569; width:100%; padding:14px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:20px; font-weight:bold; cursor:pointer;">
-                <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
-            </button>
-        ` : ''}
+                    ${!isTemp ? `
+                        <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e; color:white; width:100%; padding:14px; border-radius:8px; border:none; margin-bottom:8px; font-weight:bold; cursor:pointer;">
+                            <i class="fas fa-check"></i> RESOLVER ESTA AVARIA
+                        </button>
+                        <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#f1f5f9; color:#475569; width:100%; padding:14px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:20px; font-weight:bold; cursor:pointer;">
+                            <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
+                        </button>
+                    ` : ''}
 
-        ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
-            <div style="border-top: 1px dashed #cbd5e1; padding-top: 15px; text-align:center;">
-                <button id="btn-v3-nova-alt" style="background:none; border:none; color:${corPrimaria}; font-weight:bold; text-decoration:underline; cursor:pointer; font-size:0.9em;">
-                    <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO ${!isChecklist ? `(${saldoDisponivel} un.)` : ''}
-                </button>
-            </div>
-        ` : ''}
-    </div>
-`
+                    ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
+                        <div style="border-top: 1px dashed #cbd5e1; padding-top: 15px; text-align:center;">
+                            <button id="btn-v3-nova-alt" style="background:none; border:none; color:${corPrimaria}; font-weight:bold; text-decoration:underline; cursor:pointer; font-size:0.9em;">
+                                <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO ${!isChecklist ? `NO SALDO (${saldoDisponivel} un.)` : ''}
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>`,
             showConfirmButton: false,
             showCancelButton: true,
             cancelButtonText: 'FECHAR',
@@ -2174,10 +2172,10 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
         });
     }
 
-    // Se NÃO existe pendência, abre direto a inserção
+    // Se NÃO existe pendência, abre direto a inserção limpa
     exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria);
 }
-
+   
 // Função auxiliar para isolar a lógica de inserção limpa
 async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria) {
     const isChecklist = window.isModoChecklist;
@@ -2213,7 +2211,7 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
         salvarNovoID(uid, formValues.qtd, tipo, formValues.obs);
     }
 }
-   async function abrirFormularioResolucaoV3(pendencia, uid) {
+  async function abrirFormularioResolucaoV3(pendencia, uid) {
     const isChecklist = window.isModoChecklist;
     const corSucesso = "#1b8a3e"; // Verde Sucesso
     const nomeItem = pendencia.itemNome || "Material";
@@ -2224,10 +2222,12 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
             <div style="text-align:left; font-family:sans-serif;">
                 <p style="font-size:0.85em; color:#64748b; margin-bottom:15px;">Item: <b>${nomeItem}</b></p>
                 
+                ${!isChecklist ? `
                 <div style="margin-bottom:15px;">
                     <label style="font-weight:800; font-size:0.7em; color:#666; text-transform:uppercase;">Unidades Resolvidas:</label>
                     <input id="swal-res-qtd" type="number" class="swal2-input" value="${pendencia.quantidade}" max="${pendencia.quantidade}" min="1" style="width:100%; margin:5px 0 0 0;">
                 </div>
+                ` : ''}
 
                 <label style="font-weight:800; font-size:0.7em; color:#666; text-transform:uppercase;">Justificativa da Solução:</label>
                 <textarea id="swal-res-obs" class="swal2-textarea" placeholder="Descreva como o problema foi sanado..." style="height:100px; text-transform:uppercase; margin:5px 0 0 0; font-size:0.9em;"></textarea>
@@ -2239,9 +2239,16 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
         reverseButtons: true,
         preConfirm: () => {
             const obs = document.getElementById('swal-res-obs').value.trim();
-            const qtd = document.getElementById('swal-res-qtd').value;
+            // ✅ Se for checklist, assume a quantidade total da pendência automaticamente
+            const qtdInput = document.getElementById('swal-res-qtd');
+            const qtd = isChecklist ? pendencia.quantidade : (qtdInput ? qtdInput.value : pendencia.quantidade);
+
             if (obs.length < 5) return Swal.showValidationMessage("Descreva a solução (mín. 5 letras)");
-            return { qtd: parseInt(qtd), obs: obs.toUpperCase() };
+            
+            return { 
+                qtd: parseInt(qtd), 
+                obs: obs.toUpperCase() 
+            };
         }
     });
 
@@ -2249,7 +2256,7 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
         // ✅ GATILHO DE SANEAMENTO: Chama a lógica de banco e navegação
         resolverID(pendencia.id, uid, resolucao.qtd, resolucao.obs);
     } else {
-        // Se cancelar, volta para o menu de opção (Manter/Resolver)
+        // Se cancelar, volta para o menu de opção (Manter/Resolver) com os parâmetros corretos
         abrirModalPendenciaV3(uid, 'single', nomeItem); 
     }
 }
@@ -2606,7 +2613,8 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const qtdResolvida = parseInt(qtdResolvidaModal) || 1;
     const justificativa = justificativaModal ? justificativaModal.trim().toUpperCase() : "";
     const nomeResolutor = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-    const fonteDados = window.dadosConferencia || dadosConferencia;
+    const fonteDados = window.dadosConferencia || [];
+    const isChecklist = window.isModoChecklist; // ✅ Contexto Checklist
     let acaoConcluida = false;
     let pendenciasRestantes = 0;
 
@@ -2662,7 +2670,8 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     // --- BUSCA E APLICAÇÃO ---
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            const matchesSingle = String(item.id) === String(uid) || String(item.uid_global) === String(uid);
+            // ✅ AJUSTE: No checklist comparamos apenas o ID único
+            const matchesSingle = isChecklist ? (String(item.id) === String(uid)) : (String(item.id) === String(uid) || String(item.uid_global) === String(uid));
             
             if (matchesSingle) {
                 acaoConcluida = executarBaixaNoObjeto(item);
@@ -2679,13 +2688,18 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     });
 
     if (acaoConcluida) {
-        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO (DNA V3)
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         
         const uidStr = String(uid);
-        const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
+
+        // ✅ AJUSTE DNA V3: Define a referência global de forma protegida para Checklist
+        let uidGlobalFull = "";
+        if (isChecklist) {
+            uidGlobalFull = "ITEM_VISTORIA_LIVRE";
+        } else {
+            uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
+        }
         
-        // Status vira 'ok' apenas se não restarem pendências de outros tipos
         window.itemStatus[uid].status = (pendenciasRestantes > 0) ? 'C/A' : 'ok';
         window.itemStatus[uid].interacao_humana = true;
         window.itemStatus[uid].uid_global_ref = uidGlobalFull;
@@ -2694,7 +2708,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== idProcurado);
         }
 
-        // 5. ATUALIZAÇÃO VISUAL CIRÚRGICA (Sem reconstruir a lista toda)
         const row = document.getElementById(`item-row-${uid}`);
         if (row) {
             if (pendenciasRestantes === 0) {
@@ -2706,19 +2719,16 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
                 if (btnAlert) btnAlert.classList.remove('active');
             }
             
-            // Efeito visual de sucesso
             row.style.transition = "all 0.5s ease";
             row.style.backgroundColor = "#e8f5e9";
             setTimeout(() => row.style.backgroundColor = "", 1500);
         }
 
         updateOverallStatus();
-
-        // ✅ GATILHO MÁGICO V3: Pula para o próximo ou volta para setores
         verificarFluxoSetor(uid);
 
     } else {
-        Swal.fire('Erro', 'Não foi possível localizar o registro para aplicar a solução.', 'error');
+        Swal.fire('Erro', 'Não foi possível localizar o registro.', 'error');
     }
 }
     function setItemStatusID(btn, status, uid) {
