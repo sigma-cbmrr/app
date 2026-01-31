@@ -1172,7 +1172,6 @@ async function carregarDadosRemotos() {
         let colecaoEncontrada = "";
 
         // --- 3. MOTOR DE BUSCA AUTÔNOMO (DNA V3) ---
-        // Resolve o erro de 'modo null' procurando o ID em todas as gavetas possíveis
         const colecoesParaTestar = ['listas_checklist', 'listas_conferencia', 'cautelas_abertas', 'transferencias_pendentes'];
         
         for (const colecao of colecoesParaTestar) {
@@ -1195,6 +1194,7 @@ async function carregarDadosRemotos() {
         if (isRecebimentoCarga) window.dadosTransferencia = docData;
 
         // --- 5. IDENTIDADE DO CONFERENTE (BACK-END) ---
+        // ✅ AJUSTE: Mapeia corretamente independente do formato da URL
         userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
         userInfo.quadro = urlParamsLocal.get('quadro') || "ND";
         userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
@@ -1229,8 +1229,23 @@ async function carregarDadosRemotos() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
+                    // ✅ AJUSTE V3: Mantém a regra de UID para Checklist vs Materiais
                     if (!item.id) item.id = item.uid_global;
-                    item.pendencias_ids = pendenciasHerdadas[item.id] || [];
+                    const uidBase = window.isModoChecklist ? item.id : (item.uid_global || item.id);
+                    
+                    // Injeta pendências do banco no item pai
+                    item.pendencias_ids = pendenciasHerdadas[uidBase] || [];
+
+                    // ✅ AJUSTE CRÍTICO: Herança para sub-itens (Tombamentos)
+                    if (item.tipo === 'multi' && item.tombamentos) {
+                        item.tombamentos.forEach(t => {
+                            const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
+                            if (pendenciasHerdadas[uidComposto]) {
+                                t.pendencias_ids = pendenciasHerdadas[uidComposto];
+                            }
+                        });
+                    }
+
                     item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     item._ocultarCarimbo = isDevolucaoFinal;
                     return item;
@@ -1240,11 +1255,9 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        // --- 8. CONFIGURAÇÃO DO HUD PROFISSIONAL (FOCO NO ATIVO) ---
+        // --- 8. CONFIGURAÇÃO DO HUD PROFISSIONAL ---
         const localNome = isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (docData.ativo_nome || docData.nome_local || "Lista");
         const postoNome = isCautelaLocal ? "" : (docData.posto_nome || docData.unidade_sigla || "Geral");
-        
-        // Alimenta a global para a updateHeaderInfo formatar com Data/Hora
         infoLocal = { nome: localNome, posto: postoNome };
         
         if (typeof updateHeaderInfo === "function") updateHeaderInfo();
@@ -1256,8 +1269,7 @@ async function carregarDadosRemotos() {
                 tituloPrincipal.innerText = "Vistoria de Viatura";
                 tituloPrincipal.style.color = "#2c3e50";
             } else if (isRecebimentoCarga) {
-                const ano = new Date().getFullYear();
-                tituloPrincipal.innerText = `GUIA: TR-${ano}/${ID_ALVO.substring(0,5).toUpperCase()}`;
+                tituloPrincipal.innerText = "Recebimento de Carga";
                 tituloPrincipal.style.color = "#000000";
             } else {
                 tituloPrincipal.innerText = isCautelaLocal ? "Recebimento de Cautela" : "Conferência de Materiais";
@@ -1290,11 +1302,8 @@ async function carregarDadosRemotos() {
         if (typeof updateOverallStatus === "function") updateOverallStatus();
         
         if (loadingMsg) loadingMsg.style.display = 'none'; 
-        
         const mainViewport = document.getElementById('main-viewport');
-        if (mainViewport) {
-            mainViewport.style.display = 'flex';
-        }
+        if (mainViewport) mainViewport.style.display = 'flex';
 
     } catch (e) { 
         console.error("V3 Critical Error:", e);
@@ -1363,21 +1372,33 @@ async function carregarDadosRemotos() {
 
     const setorCautela = {
         id: cautelaData.cautela_id,
-        nome: "ITENS PARA RECEBIMENTO",
+        nome: "ITENS PARA CONFERÊNCIA",
         itens: cautelaData.itens.map(cItem => {
             
-            // 🛑 AQUI ESTÁ O SEGREDO: Captura as 4 unidades de qualquer lugar que elas estejam
             const qtdReal = Number(cItem.quantidade || cItem.quantidadeEsperada || 1);
 
-            // Verifica se é erro de cadastro (Pé de Cabra com tombamento = nome)
+            // Verifica se é erro de cadastro ou item sem tombamento
             const tombInvalido = (cItem.tombamento === cItem.nome || cItem.tombamento === "S/T" || !cItem.tombamento);
             let tipo = tombInvalido ? 'single' : 'multi';
             
+            // ✅ AJUSTE CIRÚRGICO: Se o item veio com avaria na cautela, transforma em pendência visual
+            let pendenciasIniciais = [];
+            if (cItem.status_emissao === 'C/A' || cItem.obs_emissao) {
+                pendenciasIniciais.push({
+                    id: "HIST-EMISSAO-" + Date.now(),
+                    autor_nome: cautelaData.emitente || "EMITENTE",
+                    descricao: cItem.obs_emissao || "AVARIA REGISTRADA NA EMISSÃO",
+                    quantidade: qtdReal,
+                    data_criacao: cautelaData.data_emissao || new Date().toLocaleDateString('pt-BR')
+                });
+            }
+
             let tombamentos = null;
             if (tipo === 'multi') {
                 tombamentos = [{
                     tomb: cItem.tombamento,
                     id_completo: `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
+                    pendencias_ids: pendenciasIniciais, // Injeta avaria no tombamento
                     cautela: { id: cautelaData.cautela_id, destinatario: cautelaData.destinatario || "N/D" }
                 }];
             }
@@ -1385,11 +1406,12 @@ async function carregarDadosRemotos() {
             return {
                 id: cItem.id_base || cItem.id,
                 nome: cItem.nome,
-                quantidadeEsperada: qtdReal, // Define 4 unidades aqui!
+                quantidadeEsperada: qtdReal,
                 tipo: tipo,
                 tombamentos: tombamentos,
-                cautelas: [], // Esconde carimbo laranja
-                situacao: "DISPONÍVEL"
+                pendencias_ids: tipo === 'single' ? pendenciasIniciais : [], // Injeta avaria se for item single
+                cautelas: [], 
+                situacao: cItem.status_emissao === 'C/A' ? "AVARIADO" : "DISPONÍVEL"
             };
         })
     };
