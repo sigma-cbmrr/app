@@ -1251,10 +1251,11 @@ async function carregarDadosRemotos() {
         if (loadingMsg) loadingMsg.innerHTML = `<span style='color:red'>Erro ao carregar dados: ${e.message}</span>`;
     }
 }
-    async function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
+   async function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
     // ✅ IDENTIDADE VISUAL DE EDIÇÃO (Azul SIGMA)
     const corEdicao = "#2196F3";
     const uidString = String(uid);
+    const isChecklist = window.isModoChecklist; // ✅ Identifica o contexto
 
     // ✅ DISPARO DO MODAL ELEGANTE
     const { value: formValues } = await Swal.fire({
@@ -1263,10 +1264,12 @@ async function carregarDadosRemotos() {
             <div style="text-align: left; font-family: sans-serif;">
                 <p style="margin-bottom: 15px; font-size: 0.85em; color: #666;">Ajuste os detalhes da alteração selecionada abaixo.</p>
                 
+                ${!isChecklist ? `
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Quantidade:</label>
                     <input id="swal-input-qtd" type="number" class="swal2-input" value="${qtdAtual}" min="1" style="width: 100%; margin: 5px 0 0 0; height: 40px;">
                 </div>
+                ` : ''}
 
                 <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Nova Descrição:</label>
                 <textarea id="swal-input-obs" class="swal2-textarea" placeholder="Descreva a alteração..." style="width: 100%; margin: 5px 0 0 0; min-height: 100px; text-transform: uppercase; font-size: 0.9em;">${descricaoAtual}</textarea>
@@ -1277,24 +1280,25 @@ async function carregarDadosRemotos() {
         cancelButtonText: 'CANCELAR',
         confirmButtonColor: corEdicao,
         reverseButtons: true,
-        backdrop: `rgba(33, 150, 243, 0.1)`, // Backdrop azulado sutil
+        backdrop: `rgba(33, 150, 243, 0.1)`, 
         didOpen: () => {
             const input = document.getElementById('swal-input-obs');
             if (input) {
                 input.focus();
-                // Coloca o cursor no final do texto (mesmo comportamento do seu código original)
                 input.setSelectionRange(input.value.length, input.value.length);
             }
         },
         preConfirm: () => {
             const obs = document.getElementById('swal-input-obs').value;
-            const qtd = document.getElementById('swal-input-qtd').value;
+            // ✅ Captura 1 se for checklist, ou o valor do input se for conferência
+            const qtdInput = document.getElementById('swal-input-qtd');
+            const qtd = isChecklist ? 1 : (qtdInput ? qtdInput.value : 1);
 
             if (!obs || obs.trim().length < 5) {
                 Swal.showValidationMessage('A descrição deve ter pelo menos 5 caracteres');
                 return false;
             }
-            if (parseInt(qtd) < 1) {
+            if (!isChecklist && parseInt(qtd) < 1) {
                 Swal.showValidationMessage('A quantidade mínima é 1');
                 return false;
             }
@@ -2084,6 +2088,8 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     });
 
     if (pendenciaExistente) {
+        // ✅ Identifica se é um rascunho da sessão atual
+        const isTemp = String(pendenciaExistente.id).startsWith('TEMP-');
         const autor = pendenciaExistente.autor_nome || "SISTEMA";
         const data = pendenciaExistente.data_criacao || "";
         const qtdAvariada = pendenciaExistente.quantidade || 1;
@@ -2092,28 +2098,42 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
             title: `<span style="color:${corPrimaria}; font-size:0.8em;">GERENCIAR ALTERAÇÃO</span>`,
             html: `
                 <div style="text-align:left; font-size:0.9em;">
-                    <div style="background:#fff5f5; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid #ffcccc;">
+                    <div style="background:${isTemp ? '#f0f9ff' : '#fff5f5'}; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'}; position: relative;">
+                        
+                        ${isTemp ? `
+                        <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 10px;">
+                            <button onclick="Swal.close(); abrirModalEditar('${pendenciaExistente.id}', '${uid}', ${qtdAvariada}, '${pendenciaExistente.descricao.replace(/'/g, "\\'")}')" style="background:none; border:none; color:#0369a1; cursor:pointer; font-size:1.1em;"><i class="fas fa-pen"></i></button>
+                            <button onclick="Swal.close(); confirmarExclusaoRelato('${pendenciaExistente.id}', '${uid}')" style="background:none; border:none; color:#b91c1c; cursor:pointer; font-size:1.1em;"><i class="fas fa-trash"></i></button>
+                        </div>
+                        ` : ''}
+
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                            <small style="color:#64748b; font-weight:800; text-transform:uppercase;">Relato Anterior:</small>
+                            <small style="color:#64748b; font-weight:800; text-transform:uppercase;">
+                                ${isTemp ? '✨ Registro na Sessão' : '📜 Relato de Auditoria'}
+                            </small>
                             ${!isChecklist ? `
-                            <span style="background:#d90f23; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
+                            <span style="background:${isTemp ? '#0369a1' : '#d90f23'}; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
                                 ${qtdAvariada} UN
                             </span>` : ''}
                         </div>
-                        <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b;">"${pendenciaExistente.descricao}"</span>
+                        <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b; padding-right: 45px;">"${pendenciaExistente.descricao}"</span>
                         
-                        <div style="border-top:1px solid #ffcccc; padding-top:5px; margin-top:5px;">
-                            <small style="color:#d90f23; font-weight:700;">por: ${autor} em ${data}</small>
+                        <div style="border-top:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'}; padding-top:5px; margin-top:5px;">
+                            <small style="color:${isTemp ? '#0369a1' : '#d90f23'}; font-weight:700;">
+                                ${isTemp ? 'Aguardando finalizar conferência' : `por: ${autor} em ${data}`}
+                            </small>
                         </div>
                     </div>
 
-                    <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e; color:white; width:100%; padding:12px; border-radius:8px; border:none; margin-bottom:8px; font-weight:bold; cursor:pointer;">
-                        <i class="fas fa-check"></i> RESOLVER ESTA AVARIA
-                    </button>
+                    ${!isTemp ? `
+                        <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e; color:white; width:100%; padding:12px; border-radius:8px; border:none; margin-bottom:8px; font-weight:bold; cursor:pointer;">
+                            <i class="fas fa-check"></i> RESOLVER ESTA AVARIA
+                        </button>
 
-                    <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#f1f5f9; color:#475569; width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:20px; font-weight:bold; cursor:pointer;">
-                        <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
-                    </button>
+                        <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#f1f5f9; color:#475569; width:100%; padding:12px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:20px; font-weight:bold; cursor:pointer;">
+                            <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
+                        </button>
+                    ` : ''}
 
                     ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
                         <div style="border-top: 1px dashed #cbd5e1; padding-top: 15px; text-align:center;">
@@ -2127,25 +2147,17 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
             showCancelButton: true,
             cancelButtonText: 'FECHAR',
             didOpen: () => {
-                document.getElementById('btn-v3-manter').onclick = () => {
-                    manterID(pendenciaExistente.id, uid);
-                    Swal.close();
-                };
-                document.getElementById('btn-v3-resolver').onclick = () => {
-                    Swal.close();
-                    abrirFormularioResolucaoV3(pendenciaExistente, uid);
-                };
-                // Gatilho para nova alteração
+                const btnManter = document.getElementById('btn-v3-manter');
+                if(btnManter) btnManter.onclick = () => { manterID(pendenciaExistente.id, uid); Swal.close(); };
+                
+                const btnResolver = document.getElementById('btn-v3-resolver');
+                if(btnResolver) btnResolver.onclick = () => { Swal.close(); abrirFormularioResolucaoV3(pendenciaExistente, uid); };
+                
                 const btnNova = document.getElementById('btn-v3-nova-alt');
-                if(btnNova) {
-                    btnNova.onclick = () => {
-                        Swal.close();
-                        setTimeout(() => { 
-                            // Reabre o modal em modo de inserção limpa
-                            exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria);
-                        }, 300);
-                    };
-                }
+                if(btnNova) btnNova.onclick = () => {
+                    Swal.close();
+                    setTimeout(() => { exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria); }, 300);
+                };
             }
         });
     }
@@ -2283,28 +2295,23 @@ function processarAcaoFinalModal() {
         alert("❌ Ocorreu um erro ao salvar esta alteração. Verifique o console.");
     }
 }
-    function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
+   function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let editado = false;
-
     const idProcurado = String(pendenciaId);
     const uidAlvo = String(uid);
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ AJUSTE V3: Busca inteligente em itens simples ou grupos de tombamento
             let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
-            
             alvosParaVerificar.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
                     const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
-                    
                     if (p) {
-                        p.descricao = novaObs.trim().toUpperCase(); // Padronização SIGMA
+                        p.descricao = novaObs.trim().toUpperCase();
                         p.quantidade = parseInt(novaQtd) || 0;
                         editado = true;
                         
-                        // ✅ SINCRONISMO: Mantém o status global atualizado para o relatório final
                         if (window.itemStatus[uidAlvo]) {
                             window.itemStatus[uidAlvo].obs = p.descricao;
                             window.itemStatus[uidAlvo].quantidade = p.quantidade;
@@ -2317,38 +2324,35 @@ function processarAcaoFinalModal() {
     });
 
     if (editado) {
-        // Redesenha a interface para mostrar os novos textos nos cards
         renderizarConferencia(); 
         
-        // ✅ UX V3: Feedback de localização pós-edição
+        // ✅ AJUSTE CIRÚRGICO: O ID da linha no DOM é "item-row-" e não "card-"
         setTimeout(() => {
-            const el = document.getElementById(`card-${idProcurado}`);
+            const el = document.getElementById(`item-row-${uidAlvo}`);
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 el.style.transition = "all 0.5s ease";
-                el.style.backgroundColor = "#e3f2fd"; // Azul claro de edição
-                el.style.borderLeftWidth = "10px";    // Destaque lateral temporário
+                el.style.backgroundColor = "#e3f2fd"; 
+                el.style.borderLeft = "8px solid #2196F3"; 
                 
                 setTimeout(() => { 
-                    el.style.backgroundColor = "#fff"; 
-                    el.style.borderLeftWidth = "1px"; // Retorna ao padrão do card
+                    el.style.backgroundColor = ""; 
+                    el.style.borderLeft = ""; 
                 }, 1200);
             }
         }, 300);
     } else {
-        console.error("V3 Error: Pendência " + idProcurado + " não encontrada na árvore de dados.");
-        alert("❌ Erro ao salvar: O registro original sumiu da memória. Reinicie a conferência.");
+        console.error("V3 Error: Pendência " + idProcurado + " não encontrada.");
+        alert("❌ Erro ao salvar: O registro original sumiu da memória.");
     }
 }
 async function confirmarExclusaoRelato(pendenciaId, uid) {
-    // ✅ UX V3: Confirmação Destrutiva com SweetAlert2
     const result = await Swal.fire({
         title: 'Apagar Alteração?',
-        text: "Esta ação removerá o relato temporário e não poderá ser desfeita.",
+        text: "Esta ação removerá o relato temporário.",
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonColor: '#d33', // Vermelho Alerta
-        cancelButtonColor: '#3085d6',
+        confirmButtonColor: '#d33',
         confirmButtonText: '<i class="fas fa-trash-alt"></i> SIM, APAGAR',
         cancelButtonText: 'CANCELAR',
         reverseButtons: true
@@ -2364,27 +2368,23 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
-            
             alvos.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
                     const index = alvo.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
-                    
                     if (index > -1) {
                         alvo.pendencias_ids.splice(index, 1);
                         excluido = true;
                         
-                        // ✅ LÓGICA DE LIMPEZA CIRÚRGICA V3:
-                        // Se era a última pendência, removemos o estado de interação para obrigar nova conferência
                         if (alvo.pendencias_ids.length === 0) {
                             delete window.itemStatus[uidAlvo]; 
                             
-                            const elItem = document.querySelector(`[data-id="${uidAlvo}"]`);
+                            // ✅ AJUSTE CIRÚRGICO: Busca pelo ID da linha v3
+                            const elItem = document.getElementById(`item-row-${uidAlvo}`);
                             if (elItem) {
-                                elItem.classList.remove('status-alert', 'status-ok');
-                                // Reset sutil de animação
-                                elItem.style.transition = "all 0.3s";
-                                elItem.style.transform = "scale(0.98)";
-                                setTimeout(() => elItem.style.transform = "scale(1)", 300);
+                                elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
+                                // Remove os estilos das bordas e botões ativos
+                                const btnAlert = elItem.querySelector('.btn-alert');
+                                if(btnAlert) btnAlert.classList.remove('active');
                             }
                         }
                     }
@@ -2394,7 +2394,6 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
     });
 
     if (excluido) {
-        // ✅ FEEDBACK V3: Notificação Toast (não intrusiva)
         const Toast = Swal.mixin({
             toast: true,
             position: 'top-end',
@@ -2403,16 +2402,9 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
             timerProgressBar: true
         });
         
-        Toast.fire({
-            icon: 'success',
-            title: 'Relato removido com sucesso'
-        });
-
+        Toast.fire({ icon: 'success', title: 'Relato removido' });
         renderizarConferencia(); 
         updateOverallStatus();
-    } else {
-        console.error("V3 Error: ID não localizado para exclusão:", idProcurado);
-        Swal.fire('Erro', 'Não foi possível localizar este registro na memória.', 'error');
     }
 }
     
