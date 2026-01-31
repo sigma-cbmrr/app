@@ -172,6 +172,13 @@
    body.swal2-shown {
       overflow: hidden !important;
    }
+   /*Botões e efeitos no modal de gerenciar alteração*/
+   .v3-mini-btn { background: white; border: 1px solid #e2e8f0; color: #64748b; width: 28px; height: 28px; border-radius: 6px; cursor: pointer; }
+   .v3-mini-btn.delete:hover { color: var(--alerta); border-color: var(--alerta); }
+   .v3-action-icon { width: 32px; height: 32px; border-radius: 8px; border: none; background: #fff; color: #94a3b8; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+   .v3-action-icon.active { color: white; background: var(--sucesso); }
+   .v3-action-icon.resolver { color: #f59e0b; }
+   @keyframes bounceIn { 0% { transform: scale(0.3); opacity: 0; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); } }
    
    /* 4. MODAIS E ANIMAÇÕES */
     @keyframes pulse-red {
@@ -2077,112 +2084,126 @@ function fecharModalPendencia() {
 async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     const isChecklist = window.isModoChecklist;
     const corPrimaria = isChecklist ? "#2c3e50" : "#800020";
-    
+    const nomeLimpo = nomeItem.replace(/\\'/g, "'");
+
     const fonteDados = window.dadosConferencia || dadosConferencia;
-    let pendenciaExistente = null;
-    
-    // Localiza a pendência na árvore de dados
+    let pendencias = [];
+
+    // 1. LOCALIZA TODAS AS PENDÊNCIAS DO ITEM (Suporte a múltiplos carimbos)
     fonteDados.forEach(setor => {
         setor.itens.forEach(it => {
-            const match = (it.uid_global === uid || it.id === uid);
-            if (match && it.pendencias_ids?.length > 0) pendenciaExistente = it.pendencias_ids[0];
+            const isMatch = (it.uid_global === uid || it.id === uid);
+            if (isMatch && it.pendencias_ids) pendencias = [...it.pendencias_ids];
+            
             if (it.tombamentos) {
                 it.tombamentos.forEach(t => {
-                    const uidComposto = `${it.uid_global || it.id}-${t.tomb}`;
-                    if (uidComposto === uid && t.pendencias_ids?.length > 0) 
-                        pendenciaExistente = t.pendencias_ids[0];
+                    const uidComp = `${it.uid_global || it.id}-${t.tomb}`;
+                    if (uidComp === uid && t.pendencias_ids) pendencias = [...t.pendencias_ids];
                 });
             }
         });
     });
 
-    if (pendenciaExistente) {
-        // ✅ Identifica se é um rascunho da sessão atual para definir o layout
-        const isTemp = String(pendenciaExistente.id).startsWith('TEMP-');
-        const autor = pendenciaExistente.autor_nome || "SISTEMA";
-        const data = pendenciaExistente.data_criacao || "";
-        const qtdAvariada = pendenciaExistente.quantidade || 1;
-
-        return Swal.fire({
-            title: `<span style="color:${corPrimaria}; font-size:0.8em;">GERENCIAR ALTERAÇÃO</span>`,
-            html: `
-                <div style="text-align:left; font-size:0.9em;">
-                    <div style="background:${isTemp ? '#f0f9ff' : '#fff5f5'}; padding:12px; border-radius:8px; margin-bottom:15px; border:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'};">
-                        
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; gap: 10px;">
-                            <small style="color:#64748b; font-weight:800; text-transform:uppercase; flex: 1;">
-                                ${isTemp ? '✨ Registro na Sessão' : '📜 Descrição'}
-                            </small>
-                            
-                            ${isTemp ? `
-                                <div style="display: flex; gap: 15px; white-space: nowrap;">
-                                    <button onclick="Swal.close(); abrirModalEditar('${pendenciaExistente.id}', '${uid}', ${qtdAvariada}, '${pendenciaExistente.descricao.replace(/'/g, "\\'")}')" 
-                                            style="background:none; border:none; color:#0369a1; cursor:pointer; font-size:1.1em; padding: 0 5px;">
-                                        <i class="fas fa-pen"></i>
-                                    </button>
-                                    <button onclick="Swal.close(); confirmarExclusaoRelato('${pendenciaExistente.id}', '${uid}')" 
-                                            style="background:none; border:none; color:#b91c1c; cursor:pointer; font-size:1.1em; padding: 0 5px;">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </div>
-                            ` : `
-                                ${!isChecklist ? `
-                                    <span style="background:#d90f23; color:white; padding:2px 8px; border-radius:10px; font-size:0.75em; font-weight:bold;">
-                                        ${qtdAvariada} UN
-                                    </span>` : ''}
-                            `}
-                        </div>
-                        
-                        <span style="display:block; margin-bottom:8px; font-weight:bold; color:#1e293b; line-height: 1.4;">
-                            "${pendenciaExistente.descricao}"
-                        </span>
-                        
-                        <div style="border-top:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'}; padding-top:5px; margin-top:5px;">
-                            <small style="color:${isTemp ? '#0369a1' : '#d90f23'}; font-weight:700;">
-                                ${isTemp ? '<i class="fas fa-clock"></i> Aguardando finalizar conferência' : `por: ${autor} em ${data}`}
-                            </small>
-                        </div>
-                    </div>
-
-                    ${!isTemp ? `
-                        <button id="btn-v3-resolver" class="v3-btn-sheet" style="background:#1b8a3e; color:white; width:100%; padding:14px; border-radius:8px; border:none; margin-bottom:8px; font-weight:bold; cursor:pointer;">
-                            <i class="fas fa-check"></i> RESOLVER ESTA AVARIA
-                        </button>
-                        <button id="btn-v3-manter" class="v3-btn-sheet" style="background:#f1f5f9; color:#475569; width:100%; padding:14px; border-radius:8px; border:1px solid #cbd5e1; margin-bottom:20px; font-weight:bold; cursor:pointer;">
-                            <i class="fas fa-shield-alt"></i> MANTER COMO ESTÁ
-                        </button>
-                    ` : ''}
-
-                    ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
-                        <div style="border-top: 1px dashed #cbd5e1; padding-top: 15px; text-align:center;">
-                            <button id="btn-v3-nova-alt" style="background:none; border:none; color:${corPrimaria}; font-weight:bold; text-decoration:underline; cursor:pointer; font-size:0.9em;">
-                                <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO ${!isChecklist ? `NO SALDO (${saldoDisponivel} un.)` : ''}
+    // 2. CONSTRUÇÃO DINÂMICA DOS CARDS DE PENDÊNCIA
+    let htmlPendencias = "";
+    pendencias.forEach((p, index) => {
+        const isTemp = String(p.id).startsWith('TEMP-');
+        const isMantido = window.itemStatus[uid]?.ids_mantidos?.includes(String(p.id));
+        
+        htmlPendencias += `
+            <div class="v3-manage-card" style="background:${isTemp ? '#f0f9ff' : '#fff5f5'}; border:1px solid ${isTemp ? '#bae6fd' : '#ffcccc'}; padding:12px; border-radius:12px; margin-bottom:10px; position:relative; transition: 0.3s;">
+                
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                    <small style="color:#64748b; font-weight:800; font-size:0.65em; text-transform:uppercase;">
+                        ${isTemp ? '✨ Relato Atual' : '📜 Histórico'}
+                    </small>
+                    <div style="display:flex; gap:8px;">
+                        ${isTemp ? `
+                            <button onclick="Swal.close(); abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" class="v3-mini-btn" title="Editar"><i class="fas fa-pen"></i></button>
+                            <button onclick="Swal.close(); confirmarExclusaoRelato('${p.id}', '${uid}')" class="v3-mini-btn delete" title="Excluir"><i class="fas fa-trash"></i></button>
+                        ` : `
+                            <button id="btn-manter-${index}" onclick="manterRelatoV3('${p.id}', '${uid}', ${index})" class="v3-action-icon ${isMantido ? 'active' : ''}" title="Manter Alteração">
+                                <i class="fas ${isMantido ? 'fa-check-double' : 'fa-thumbtack'}"></i>
                             </button>
-                        </div>
-                    ` : ''}
-                </div>`,
-            showConfirmButton: false,
-            showCancelButton: true,
-            cancelButtonText: 'FECHAR',
-            didOpen: () => {
-                const btnManter = document.getElementById('btn-v3-manter');
-                if(btnManter) btnManter.onclick = () => { manterID(pendenciaExistente.id, uid); Swal.close(); };
+                            <button onclick="Swal.close(); abrirFormularioResolucaoV3(${JSON.stringify(p).replace(/"/g, '&quot;')}, '${uid}')" class="v3-action-icon resolver" title="Resolver">
+                                <i class="fas fa-wrench"></i>
+                            </button>
+                        `}
+                    </div>
+                </div>
+
+                <div style="font-weight:bold; color:#1e293b; font-size:0.9em; line-height:1.3; margin-bottom:8px;">"${p.descricao}"</div>
                 
-                const btnResolver = document.getElementById('btn-v3-resolver');
-                if(btnResolver) btnResolver.onclick = () => { Swal.close(); abrirFormularioResolucaoV3(pendenciaExistente, uid); };
+                <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(0,0,0,0.05); padding-top:6px;">
+                    <span style="font-size:0.7em; color:#94a3b8; font-weight:600;">${p.autor_nome} • ${p.data_criacao}</span>
+                    <span style="background:${corPrimaria}15; color:${corPrimaria}; padding:2px 8px; border-radius:6px; font-size:0.7em; font-weight:800;">${p.quantidade} UN</span>
+                </div>
                 
-                const btnNova = document.getElementById('btn-v3-nova-alt');
-                if(btnNova) btnNova.onclick = () => {
-                    Swal.close();
-                    setTimeout(() => { exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria); }, 300);
-                };
-            }
-        });
+                <div id="check-confirm-${index}" style="display:${isMantido ? 'block' : 'none'}; position:absolute; bottom:8px; right:45px; color:#1b8a3e; font-size:0.8em; animation: bounceIn 0.5s;">
+                   <i class="fas fa-check-double"></i> MANTIDO
+                </div>
+            </div>
+        `;
+    });
+
+    // 3. DISPARO DO MODAL ÚNICO
+    return Swal.fire({
+        title: `<span style="color:${corPrimaria}; font-size:0.8em; font-weight:900;">GERENCIAR: ${nomeLimpo}</span>`,
+        width: '95%',
+        padding: '1em',
+        html: `
+            <div id="v3-modal-scroll" style="text-align:left; max-height:60vh; overflow-y:auto; padding-right:5px;">
+                ${htmlPendencias || '<p style="text-align:center; color:#94a3b8; padding:20px;">Nenhum relato encontrado.</p>'}
+            </div>
+            
+            ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
+                <div style="margin-top:15px; border-top:1px dashed #cbd5e1; padding-top:15px; text-align:center;">
+                    <button onclick="Swal.close(); setTimeout(() => { exibirModalInsercaoNovoRelato('${uid}', '${tipo}', '${nomeItem}', ${saldoDisponivel}, '${corPrimaria}'); }, 200);" 
+                            style="background:none; border:none; color:${corPrimaria}; font-weight:800; text-decoration:underline; cursor:pointer; font-size:0.85em;">
+                        <i class="fas fa-plus-circle"></i> RELATAR NOVA ALTERAÇÃO ${!isChecklist ? `(${saldoDisponivel} un. disponível)` : ''}
+                    </button>
+                </div>
+            ` : ''}
+        `,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'FECHAR TELA',
+        customClass: { container: 'sigma-v3-modal' }
+    });
+}
+
+// ✅ NOVA FUNÇÃO: LÓGICA DE MANTER SEM FECHAR O MODAL
+window.manterRelatoV3 = function(pendenciaId, uid, index) {
+    const pId = String(pendenciaId);
+    
+    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'C/A', ids_mantidos: [], interacao_humana: true };
+    if (!window.itemStatus[uid].ids_mantidos) window.itemStatus[uid].ids_mantidos = [];
+
+    const indexId = window.itemStatus[uid].ids_mantidos.indexOf(pId);
+    const jaMantido = indexId > -1;
+
+    if (jaMantido) {
+        window.itemStatus[uid].ids_mantidos.splice(indexId, 1);
+    } else {
+        window.itemStatus[uid].ids_mantidos.push(pId);
     }
 
-    // Se NÃO existe pendência, abre direto a inserção limpa
-    exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria);
-}
+    window.itemStatus[uid].interacao_humana = true;
+    window.itemStatus[uid].status = 'C/A';
+
+    // Feedback Visual Instantâneo no botão dentro do modal
+    const btn = document.getElementById(`btn-manter-${index}`);
+    const check = document.getElementById(`check-confirm-${index}`);
+    
+    if (btn) {
+        btn.classList.toggle('active');
+        btn.innerHTML = `<i class="fas ${!jaMantido ? 'fa-check-double' : 'fa-thumbtack'}"></i>`;
+    }
+    if (check) check.style.display = !jaMantido ? 'block' : 'none';
+
+    // Atualiza a tela de fundo (Tela 2) sem que o usuário perceba
+    updateOverallStatus();
+};
    
 // Função auxiliar para isolar a lógica de inserção limpa
 async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria) {
