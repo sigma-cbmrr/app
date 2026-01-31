@@ -2242,30 +2242,61 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
     const isChecklist = window.isModoChecklist;
 
     const { value: formValues } = await Swal.fire({
-        title: `<span style="color:${corPrimaria}; font-size:0.8em;">RELATAR ALTERAÇÃO</span>`,
-        width: '95%', // ✅ Ocupa quase toda a largura no mobile
-        padding: '1em',
+        title: `<span style="color:${corPrimaria}; font-weight:900; letter-spacing:-0.5px;">RELATAR ALTERAÇÃO</span>`,
+        width: '95%',
+        padding: '1.5em 1em',
         html: `
-            <div style="text-align:left; width: 100%; box-sizing: border-box;">
-                <p style="font-size:0.8em; color:#64748b; margin-bottom:10px;">Item: <b>${nomeItem}</b></p>
+            <div style="text-align:left; width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif;">
+                
+                <div style="margin-bottom: 20px; text-align: center;">
+                    <b style="color: #475569; font-size: 0.9em; text-transform: uppercase;">${nomeItem}</b>
+                </div>
+
                 ${(tipo === 'single' && !isChecklist) ? `
-                    <label style="font-size:0.75em; font-weight:800; color:#666;">QUANTIDADE AFETADA (Máx: ${saldoDisponivel}):</label>
-                    <input id="swal-qtd" type="number" class="swal2-input" value="1" max="${saldoDisponivel}" min="1" style="width: 100%; box-sizing: border-box;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 10px 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+                        <label style="font-size:0.8em; font-weight:800; color:#64748b; text-transform:uppercase;">Quantidade:</label>
+                        <input id="swal-qtd" type="number" value="1" max="${saldoDisponivel}" min="1" 
+                               style="width: 70px; height: 35px; border-radius: 8px; border: 2px solid ${corPrimaria}; text-align: center; font-weight: 900; color: ${corPrimaria}; margin: 0;">
+                    </div>
                 ` : ''}
-                <label style="font-size:0.75em; font-weight:800; color:#666;">DESCRIÇÃO DO PROBLEMA:</label>
-                <textarea id="swal-obs" class="swal2-textarea" placeholder="Descreva o problema encontrado..." 
-                          style="height:120px; text-transform:uppercase; width: 100%; box-sizing: border-box; font-size: 0.9em;"></textarea>
+
+                <label style="font-size:0.75em; font-weight:800; color:#64748b; text-transform:uppercase; margin-left: 5px; display: block; margin-bottom: 8px;">
+                    Descrição do Problema:
+                </label>
+                <textarea id="swal-obs" class="swal2-textarea" placeholder="DETALHE A ALTERAÇÃO ENCONTRADA..." 
+                          style="height:140px; text-transform:uppercase; width: 100%; box-sizing: border-box; font-size: 0.95em; border-radius: 12px; margin: 0; padding: 15px; border: 1px solid #e2e8f0; background: #fff;"></textarea>
             </div>`,
         showCancelButton: true,
         confirmButtonText: 'SALVAR RELATO',
         confirmButtonColor: corPrimaria,
-        backdrop: `rgba(0,0,0,0.6)`, // ✅ Escurece mais o fundo para destacar o modal
+        cancelButtonText: 'CANCELAR',
+        reverseButtons: true,
+        backdrop: `rgba(15, 23, 42, 0.5)`,
+        customClass: {
+            popup: 'v3-popup-radius',
+            confirmButton: 'v3-confirm-btn'
+        },
+        didOpen: () => {
+            const inputObs = document.getElementById('swal-obs');
+            if (inputObs) inputObs.focus();
+            
+            // ✅ TRAVA FÍSICA: Impede digitar mais que o saldo disponível
+            const inputQtd = document.getElementById('swal-qtd');
+            if (inputQtd) {
+                inputQtd.addEventListener('input', (e) => {
+                    if (parseInt(e.target.value) > saldoDisponivel) e.target.value = saldoDisponivel;
+                });
+            }
+        },
         preConfirm: () => {
             const obs = document.getElementById('swal-obs').value.trim();
-            const qtd = isChecklist ? 1 : (document.getElementById('swal-qtd') ? parseInt(document.getElementById('swal-qtd').value) : 1);
+            const qtdInput = document.getElementById('swal-qtd');
+            const qtd = isChecklist ? 1 : (qtdInput ? parseInt(qtdInput.value) : 1);
             
-            if (obs.length < 5) return Swal.showValidationMessage("Descreva o problema (mín. 5 letras)");
-            if (!isChecklist && tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) return Swal.showValidationMessage("Quantidade inválida");
+            if (obs.length < 5) return Swal.showValidationMessage("A descrição deve ser mais detalhada.");
+            if (!isChecklist && tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) {
+                return Swal.showValidationMessage(`Saldo insuficiente (Máx: ${saldoDisponivel})`);
+            }
             
             return { qtd, obs };
         }
