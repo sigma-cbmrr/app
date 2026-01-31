@@ -2418,9 +2418,15 @@ function processarAcaoFinalModal() {
     const idProcurado = String(pendenciaId);
     const uidAlvo = String(uid);
 
+    // Variáveis para garantir a reabertura correta do modal
+    let nomeParaModal = "";
+    let tipoParaModal = "single";
+    let saldoParaModal = 0;
+
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
+            
             alvosParaVerificar.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
                     const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
@@ -2429,6 +2435,13 @@ function processarAcaoFinalModal() {
                         p.quantidade = parseInt(novaQtd) || 0;
                         editado = true;
                         
+                        // Captura metadados para o retorno
+                        nomeParaModal = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
+                        tipoParaModal = item.tipo;
+                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
+                        const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
+                        saldoParaModal = totalEsperado - totalLancado;
+
                         if (window.itemStatus[uidAlvo]) {
                             window.itemStatus[uidAlvo].obs = p.descricao;
                             window.itemStatus[uidAlvo].quantidade = p.quantidade;
@@ -2442,28 +2455,21 @@ function processarAcaoFinalModal() {
 
     if (editado) {
         renderizarConferencia(); 
-        
-        // ✅ AJUSTE CIRÚRGICO: O ID da linha no DOM é "item-row-" e não "card-"
+        updateOverallStatus();
+
+        // ✅ FLUXO CIRCULAR: Reabre o gerenciador atualizado
         setTimeout(() => {
-            const el = document.getElementById(`item-row-${uidAlvo}`);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.transition = "all 0.5s ease";
-                el.style.backgroundColor = "#e3f2fd"; 
-                el.style.borderLeft = "8px solid #2196F3"; 
-                
-                setTimeout(() => { 
-                    el.style.backgroundColor = ""; 
-                    el.style.borderLeft = ""; 
-                }, 1200);
-            }
+            abrirModalPendenciaV3(uidAlvo, tipoParaModal, nomeParaModal, saldoParaModal);
+            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            Toast.fire({ icon: 'success', title: 'Relato editado!' });
         }, 300);
+
     } else {
         console.error("V3 Error: Pendência " + idProcurado + " não encontrada.");
         alert("❌ Erro ao salvar: O registro original sumiu da memória.");
     }
 }
-async function confirmarExclusaoRelato(pendenciaId, uid) {
+   async function confirmarExclusaoRelato(pendenciaId, uid) {
     const result = await Swal.fire({
         title: 'Apagar Alteração?',
         text: "Esta ação removerá o relato temporário.",
@@ -2475,12 +2481,20 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
         reverseButtons: true
     });
 
-    if (!result.isConfirmed) return;
+    if (!result.isConfirmed) {
+        // ✅ UX: Se cancelar a exclusão, volta para o modal de pendências
+        // Precisamos apenas disparar a abertura novamente
+        const itRef = buscarDadosItemPeloUid(uid);
+        if(itRef) abrirModalPendenciaV3(uid, itRef.tipo, itRef.nome, itRef.saldo);
+        return;
+    };
 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let excluido = false;
     const idProcurado = String(pendenciaId);
     const uidAlvo = String(uid);
+
+    let infoParaRetorno = { nome: "", tipo: "single", saldo: 0, restantes: 0 };
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
@@ -2491,15 +2505,19 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
                     if (index > -1) {
                         alvo.pendencias_ids.splice(index, 1);
                         excluido = true;
-                        
+
+                        // Captura dados para reabertura
+                        infoParaRetorno.nome = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
+                        infoParaRetorno.tipo = item.tipo;
+                        infoParaRetorno.restantes = alvo.pendencias_ids.length;
+                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
+                        infoParaRetorno.saldo = totalEsperado - alvo.pendencias_ids.reduce((s, pnd) => s + pnd.quantidade, 0);
+
                         if (alvo.pendencias_ids.length === 0) {
                             delete window.itemStatus[uidAlvo]; 
-                            
-                            // ✅ AJUSTE CIRÚRGICO: Busca pelo ID da linha v3
                             const elItem = document.getElementById(`item-row-${uidAlvo}`);
                             if (elItem) {
                                 elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
-                                // Remove os estilos das bordas e botões ativos
                                 const btnAlert = elItem.querySelector('.btn-alert');
                                 if(btnAlert) btnAlert.classList.remove('active');
                             }
@@ -2511,18 +2529,31 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
     });
 
     if (excluido) {
-        const Toast = Swal.mixin({
-            toast: true,
-            position: 'top-end',
-            showConfirmButton: false,
-            timer: 2000,
-            timerProgressBar: true
-        });
-        
-        Toast.fire({ icon: 'success', title: 'Relato removido' });
         renderizarConferencia(); 
         updateOverallStatus();
+
+        // ✅ FLUXO CIRCULAR: Reabre o gerenciador (se ainda houver pendências) ou fecha com sucesso
+        setTimeout(() => {
+            if (infoParaRetorno.restantes > 0) {
+                abrirModalPendenciaV3(uidAlvo, infoParaRetorno.tipo, infoParaRetorno.nome, infoParaRetorno.saldo);
+            }
+            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            Toast.fire({ icon: 'success', title: 'Relato removido' });
+        }, 300);
     }
+}
+
+// (Auxiliar): Busca dados do item para retorno caso o modal precise reabrir sem ID
+function buscarDadosItemPeloUid(uid) {
+    const fonte = window.dadosConferencia || [];
+    let result = null;
+    fonte.forEach(s => s.itens.forEach(it => {
+        if(it.id === uid || it.uid_global === uid) result = {nome: it.nome, tipo: it.tipo, saldo: it.quantidadeEsperada};
+        if(it.tombamentos) it.tombamentos.forEach(t => {
+            if(`${it.uid_global || it.id}-${t.tomb}` === uid) result = {nome: `${it.nome} (${t.tomb})`, tipo: it.tipo, saldo: 0};
+        });
+    }));
+    return result;
 }
     
 function salvarNovoID(uid, qtd, tipo, obsModal = null) {
