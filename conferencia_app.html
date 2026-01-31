@@ -2435,9 +2435,10 @@ function processarAcaoFinalModal() {
                         p.quantidade = parseInt(novaQtd) || 0;
                         editado = true;
                         
-                        // Captura metadados para o retorno
+                        // Captura metadados para o retorno exato
                         nomeParaModal = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
                         tipoParaModal = item.tipo;
+                        
                         const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
                         const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
                         saldoParaModal = totalEsperado - totalLancado;
@@ -2454,22 +2455,39 @@ function processarAcaoFinalModal() {
     });
 
     if (editado) {
+        // Atualiza a interface de fundo
         renderizarConferencia(); 
         updateOverallStatus();
 
-        // ✅ FLUXO CIRCULAR: Reabre o gerenciador atualizado
+        // ✅ CORREÇÃO CIRÚRGICA: Limpa o alerta de sucesso anterior e reabre o gerenciador
+        Swal.close(); 
+
         setTimeout(() => {
+            // Reabre o modal de gerenciamento com os dados atualizados
             abrirModalPendenciaV3(uidAlvo, tipoParaModal, nomeParaModal, saldoParaModal);
-            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
-            Toast.fire({ icon: 'success', title: 'Relato editado!' });
-        }, 300);
+            
+            // Toast de confirmação discreto sobreposto ao modal reaberto
+            const Toast = Swal.mixin({ 
+                toast: true, 
+                position: 'top-end', 
+                showConfirmButton: false, 
+                timer: 2000,
+                timerProgressBar: true 
+            });
+            Toast.fire({ icon: 'success', title: 'Relato atualizado!' });
+        }, 150); // Delay reduzido para maior fluidez
 
     } else {
         console.error("V3 Error: Pendência " + idProcurado + " não encontrada.");
-        alert("❌ Erro ao salvar: O registro original sumiu da memória.");
+        Swal.fire({
+            icon: 'error',
+            title: 'Erro ao salvar',
+            text: 'O registro original não foi localizado na memória.',
+            confirmButtonColor: '#800020'
+        });
     }
 }
-   async function confirmarExclusaoRelato(pendenciaId, uid) {
+  async function confirmarExclusaoRelato(pendenciaId, uid) {
     const result = await Swal.fire({
         title: 'Apagar Alteração?',
         text: "Esta ação removerá o relato temporário.",
@@ -2478,22 +2496,23 @@ function processarAcaoFinalModal() {
         confirmButtonColor: '#d33',
         confirmButtonText: '<i class="fas fa-trash-alt"></i> SIM, APAGAR',
         cancelButtonText: 'CANCELAR',
-        reverseButtons: true
+        reverseButtons: true,
+        backdrop: `rgba(15, 23, 42, 0.4)`
     });
 
+    const uidAlvo = String(uid);
+
+    // ✅ UX: Se cancelar a exclusão, retorna imediatamente para o modal de gerenciamento
     if (!result.isConfirmed) {
-        // ✅ UX: Se cancelar a exclusão, volta para o modal de pendências
-        // Precisamos apenas disparar a abertura novamente
-        const itRef = buscarDadosItemPeloUid(uid);
-        if(itRef) abrirModalPendenciaV3(uid, itRef.tipo, itRef.nome, itRef.saldo);
+        const itRef = buscarDadosItemPeloUid(uidAlvo);
+        if (itRef) {
+            abrirModalPendenciaV3(uidAlvo, itRef.tipo, itRef.nome, itRef.saldo);
+        }
         return;
-    };
+    }
 
     const fonteDados = window.dadosConferencia || dadosConferencia;
     let excluido = false;
-    const idProcurado = String(pendenciaId);
-    const uidAlvo = String(uid);
-
     let infoParaRetorno = { nome: "", tipo: "single", saldo: 0, restantes: 0 };
 
     fonteDados.forEach(setor => {
@@ -2501,25 +2520,29 @@ function processarAcaoFinalModal() {
             let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
             alvos.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
-                    const index = alvo.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
+                    const index = alvo.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+                    
                     if (index > -1) {
                         alvo.pendencias_ids.splice(index, 1);
                         excluido = true;
 
-                        // Captura dados para reabertura
+                        // Captura dados atualizados para a reabertura do modal
                         infoParaRetorno.nome = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
                         infoParaRetorno.tipo = item.tipo;
                         infoParaRetorno.restantes = alvo.pendencias_ids.length;
+                        
                         const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
-                        infoParaRetorno.saldo = totalEsperado - alvo.pendencias_ids.reduce((s, pnd) => s + pnd.quantidade, 0);
+                        const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
+                        infoParaRetorno.saldo = totalEsperado - totalLancado;
 
+                        // Se não restarem mais pendências, limpa o estado visual do item na lista
                         if (alvo.pendencias_ids.length === 0) {
                             delete window.itemStatus[uidAlvo]; 
                             const elItem = document.getElementById(`item-row-${uidAlvo}`);
                             if (elItem) {
                                 elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
                                 const btnAlert = elItem.querySelector('.btn-alert');
-                                if(btnAlert) btnAlert.classList.remove('active');
+                                if (btnAlert) btnAlert.classList.remove('active');
                             }
                         }
                     }
@@ -2529,17 +2552,29 @@ function processarAcaoFinalModal() {
     });
 
     if (excluido) {
+        // Sincroniza a interface de fundo
         renderizarConferencia(); 
         updateOverallStatus();
 
-        // ✅ FLUXO CIRCULAR: Reabre o gerenciador (se ainda houver pendências) ou fecha com sucesso
+        // ✅ CORREÇÃO CIRÚRGICA: Fecha o modal de confirmação e reabre o gerenciador
+        Swal.close();
+
         setTimeout(() => {
+            // Só reabre se ainda houver outros carimbos para gerenciar
             if (infoParaRetorno.restantes > 0) {
                 abrirModalPendenciaV3(uidAlvo, infoParaRetorno.tipo, infoParaRetorno.nome, infoParaRetorno.saldo);
             }
-            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            
+            // Feedback discreto de sucesso
+            const Toast = Swal.mixin({ 
+                toast: true, 
+                position: 'top-end', 
+                showConfirmButton: false, 
+                timer: 2000,
+                timerProgressBar: true 
+            });
             Toast.fire({ icon: 'success', title: 'Relato removido' });
-        }, 300);
+        }, 150);
     }
 }
 
