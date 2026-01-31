@@ -273,6 +273,7 @@
    window.userInfo = window.userInfo || {};
    window.isModoChecklist = false;
    window.itemStatus = {};
+   window.setorAtivoIndex = null;
    
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
@@ -2797,14 +2798,16 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const justificativa = justificativaModal ? justificativaModal.trim().toUpperCase() : "";
     const nomeResolutor = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
     const fonteDados = window.dadosConferencia || [];
-    const isChecklist = window.isModoChecklist; // ✅ Contexto Checklist
+    const isChecklist = window.isModoChecklist; 
     let acaoConcluida = false;
     let pendenciasRestantes = 0;
+
+    // Dados para reabertura do modal
+    let infoParaRetorno = { nome: "", tipo: "single", saldo: 0 };
 
     const idProcurado = String(pendenciaId);
     const isResolvendoAvaria = idProcurado.startsWith('AVARIA-');
 
-    // --- LÓGICA DE BAIXA NO OBJETO (NÚCLEO DO SISTEMA) ---
     function executarBaixaNoObjeto(obj) {
         if (isResolvendoAvaria) {
             if (!obj.historico_vida) obj.historico_vida = [];
@@ -2824,7 +2827,6 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
 
         if (!obj.pendencias_ids) return false;
         const index = obj.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
-        
         if (index === -1) return false;
 
         const pOriginal = obj.pendencias_ids[index];
@@ -2850,20 +2852,26 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         return true;
     }
 
-    // --- BUSCA E APLICAÇÃO ---
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            // ✅ AJUSTE: No checklist comparamos apenas o ID único
             const matchesSingle = isChecklist ? (String(item.id) === String(uid)) : (String(item.id) === String(uid) || String(item.uid_global) === String(uid));
             
             if (matchesSingle) {
-                acaoConcluida = executarBaixaNoObjeto(item);
+                if(executarBaixaNoObjeto(item)) {
+                    acaoConcluida = true;
+                    infoParaRetorno = { nome: item.nome, tipo: item.tipo };
+                    const totalEsp = Number(item.quantidadeEsperada || item.quantidade || 0);
+                    const totalAtu = (item.pendencias_ids || []).reduce((s,p) => s + p.quantidade, 0);
+                    infoParaRetorno.saldo = totalEsp - totalAtu;
+                }
             } else if (item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    const uidCompostoGlobal = `${item.uid_global || item.id}-${t.tomb}`;
                     const uidCompostoLocal = `${item.id}-${t.tomb}`;
-                    if (String(uid) === uidCompostoGlobal || String(uid) === uidCompostoLocal) {
-                        acaoConcluida = executarBaixaNoObjeto(t);
+                    if (String(uid) === uidCompostoLocal) {
+                        if(executarBaixaNoObjeto(t)) {
+                            acaoConcluida = true;
+                            infoParaRetorno = { nome: `${item.nome} (${t.tomb})`, tipo: item.tipo, saldo: 0 };
+                        }
                     }
                 });
             }
@@ -2874,14 +2882,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
         
         const uidStr = String(uid);
-
-        // ✅ AJUSTE DNA V3: Define a referência global de forma protegida para Checklist
-        let uidGlobalFull = "";
-        if (isChecklist) {
-            uidGlobalFull = "ITEM_VISTORIA_LIVRE";
-        } else {
-            uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
-        }
+        let uidGlobalFull = isChecklist ? "ITEM_VISTORIA_LIVRE" : (uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0]);
         
         window.itemStatus[uid].status = (pendenciasRestantes > 0) ? 'C/A' : 'ok';
         window.itemStatus[uid].interacao_humana = true;
@@ -2891,29 +2892,28 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== idProcurado);
         }
 
-        const row = document.getElementById(`item-row-${uid}`);
-        if (row) {
-            if (pendenciasRestantes === 0) {
-                row.classList.remove('status-alert');
-                row.classList.add('status-ok');
-                const btnCheck = row.querySelector('.btn-check');
-                const btnAlert = row.querySelector('.btn-alert');
-                if (btnCheck) btnCheck.classList.add('active');
-                if (btnAlert) btnAlert.classList.remove('active');
+        // Feedback Visual
+        renderizarConferencia();
+        
+        // ✅ REABERTURA OU NAVEGAÇÃO
+        setTimeout(() => {
+            if (pendenciasRestantes > 0) {
+                // Se ainda sobrou algo, volta para o gerenciador
+                abrirModalPendenciaV3(uid, infoParaRetorno.tipo, infoParaRetorno.nome, infoParaRetorno.saldo);
+            } else {
+                // Se resolveu TUDO e o modal fechou, aí sim verifica se deve pular de item/setor
+                verificarFluxoSetor(uid);
             }
             
-            row.style.transition = "all 0.5s ease";
-            row.style.backgroundColor = "#e8f5e9";
-            setTimeout(() => row.style.backgroundColor = "", 1500);
-        }
-
-        updateOverallStatus();
-        verificarFluxoSetor(uid);
+            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            Toast.fire({ icon: 'success', title: 'Alteração Resolvida!' });
+        }, 150);
 
     } else {
         Swal.fire('Erro', 'Não foi possível localizar o registro.', 'error');
     }
 }
+   
     function setItemStatusID(btn, status, uid) {
     // 1. GARANTIA DE OBJETO DE MEMÓRIA
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
