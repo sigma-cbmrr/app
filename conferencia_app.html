@@ -172,6 +172,46 @@
    body.swal2-shown {
       overflow: hidden !important;
    }
+
+   /*carimbos na sessão atual*/
+   .v3-carimbos-container {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+   }
+
+   .v3-mini-carimbo {
+      font-size: 0.7em;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1.3;
+      display: block;
+      border-left: 3px solid transparent;
+   }
+
+   /* Cor para rascunhos da sessão atual (Azul) */
+   .v3-mini-carimbo.cor-temp {
+      background: #f0f9ff;
+      color: #0369a1;
+      border-color: #0ea5e9;
+   }
+
+   /* Cor para pendências vindas do banco (Vermelho) */
+   .v3-mini-carimbo.cor-pend {
+      background: #fff1f2;
+      color: #9f1239;
+      border-color: #f43f5e;
+   }
+
+   .v3-mini-carimbo b { font-weight: 800; text-transform: uppercase; }
+   .v3-mini-carimbo .badge-qtd { 
+      font-weight: 900; 
+      float: right; 
+      background: rgba(0,0,0,0.05); 
+      padding: 0 4px; 
+      border-radius: 4px; 
+   }
    
    /* 4. MODAIS E ANIMAÇÕES */
     @keyframes pulse-red {
@@ -995,77 +1035,71 @@ function renderizarConferencia() {
     };
 
     // 4. RENDERIZAÇÃO DA TELA 2: LINHAS ELEGANTES DE ITENS (Visão Micro)
-    function renderizarLinhasItens(itens, setorIndex) {
-        const container = document.getElementById('lista-itens-container');
-        const isChecklist = window.isModoChecklist; // Garante a leitura da global
-        let htmlItens = '';
+   function renderizarLinhasItens(itens, setorIndex) {
+    const container = document.getElementById('lista-itens-container');
+    const isChecklist = window.isModoChecklist;
+    let htmlItens = '';
 
-        itens.forEach((item) => {
-            // ✅ CORREÇÃO CHAVE: Se for checklist, usa o id único (ex: item_4e6o69tjz)
-            // Se for conferência, mantém a lógica de uid_global para bater com inventário.
-            const uid = isChecklist ? item.id : (item.uid_global || item.id);
-            
-            const statusLocal = window.itemStatus[uid] || {};
-            const st = statusLocal.status;
+    itens.forEach((item) => {
+        const uid = isChecklist ? item.id : (item.uid_global || item.id);
+        const statusLocal = window.itemStatus[uid] || {};
+        const st = statusLocal.status;
 
-            // Lógica de Saldo
-            const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
-            const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
-            const totalPendente = (item.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
-            const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
+        // --- LÓGICA DE SALDO ATUALIZADA ---
+        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
+        const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
+        const pendencias = item.pendencias_ids || [];
+        const totalPendente = pendencias.reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
+        const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
 
-            const temCarimbo = (item.pendencias_ids && item.pendencias_ids.length > 0) || (item.cautelas && item.cautelas.length > 0);
-            const classeStatus = (st === 'ok') ? 'status-ok' : (st === 'C/A' ? 'status-alert' : '');
-            const classeCarimbo = temCarimbo ? 'has-carimbo' : '';
+        const temCarimbo = pendencias.length > 0 || (item.cautelas && item.cautelas.length > 0);
+        const classeStatus = (st === 'ok') ? 'status-ok' : (st === 'C/A' ? 'status-alert' : '');
+        const classeCarimbo = temCarimbo ? 'has-carimbo' : '';
 
-            // Higienização do nome para o modal
-            const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-            htmlItens += `
-                <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}">
-                    <div class="v3-item-main-info">
-                        <span class="v3-item-name">${item.nome}</span>
-                        ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
-                        ${item.tipo === 'multi' && item.tombamentos ? 
-                            `<span class="v3-item-subtext">TOMB: <b>${item.tombamentos.map(t=>t.tomb).join(', ')}</b></span>` : ''}
-                    </div>
-                    <div class="v3-item-actions">
-                        <button class="v3-btn-circle btn-check ${st === 'ok' ? 'active' : ''}" 
-                                onclick="registrarCheckRapido(this, '${uid}', ${setorIndex})">
-                            <i class="fas fa-check"></i>
-                        </button>
-                        <button class="v3-btn-circle btn-alert ${st === 'C/A' ? 'active' : ''}" 
-                                onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
-                            <i class="fas fa-exclamation"></i>
-                        </button>
-                    </div>
+        // --- CONSTRUÇÃO DOS MINI-CARIMBOS (Ponto 1 e 2) ---
+        let htmlCarimbos = '';
+        pendencias.forEach(p => {
+            const isTemp = String(p.id).startsWith('TEMP-');
+            htmlCarimbos += `
+                <div class="v3-mini-carimbo ${isTemp ? 'cor-temp' : 'cor-pend'}">
+                    <i class="fas ${isTemp ? 'fa-pen-nib' : 'fa-history'}"></i>
+                    <b>${p.autor_nome}:</b> "${p.descricao}" 
+                    <span class="badge-qtd">${p.quantidade} UN</span>
                 </div>`;
         });
 
-        container.innerHTML = htmlItens;
-        atualizarContadorSetorInterno(itens);
-    }
+        const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-    // 5. LOGICA DE CHECK RÁPIDO (S/A)
-    window.registrarCheckRapido = function(btn, uid, setorIndex) {
-        // Dispara a lógica de gravação existente
-        if (typeof setItemStatusID === 'function') {
-            setItemStatusID(btn, 'ok', uid); 
-        }
-        
-        // Feedback visual imediato na linha
-        const row = document.getElementById(`item-row-${uid}`);
-        if (row) {
-            row.classList.add('status-ok');
-            btn.classList.add('active');
-        }
-    };
+        htmlItens += `
+            <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}">
+                <div class="v3-item-main-info">
+                    <span class="v3-item-name">${item.nome}</span>
+                    
+                    ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
+                    
+                    ${item.tipo === 'multi' && item.tombamentos ? 
+                        `<span class="v3-item-subtext">TOMB: <b>${item.tombamentos.map(t=>t.tomb).join(', ')}</b></span>` : ''}
 
-    // 6. FINALIZAÇÃO DA RENDERIZAÇÃO
-    updateOverallStatus(); // Atualiza barra neon e botão finalizar
-    if (window.infoLocal && window.infoLocal.nome !== "Sincronizando...") {
-        updateHeaderInfo();
-    }    // Sincroniza dados do militar no topo
+                    <div class="v3-carimbos-container">
+                        ${htmlCarimbos}
+                    </div>
+                </div>
+
+                <div class="v3-item-actions">
+                    <button class="v3-btn-circle btn-check ${st === 'ok' ? 'active' : ''}" 
+                            onclick="registrarCheckRapido(this, '${uid}', ${setorIndex})">
+                        <i class="fas fa-check"></i>
+                    </button>
+                    <button class="v3-btn-circle btn-alert ${st === 'C/A' ? 'active' : ''}" 
+                            onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
+                        <i class="fas fa-exclamation"></i>
+                    </button>
+                </div>
+            </div>`;
+    });
+
+    container.innerHTML = htmlItens;
+    atualizarContadorSetorInterno(itens);
 }
 
 function atualizarContadorSetorInterno(itens) {
@@ -2331,16 +2365,32 @@ function processarAcaoFinalModal() {
     const idProcurado = String(pendenciaId);
     const uidAlvo = String(uid);
 
+    // Variáveis para garantir o retorno ao modal certo
+    let nomeParaRetorno = "";
+    let tipoParaRetorno = "single";
+    let saldoParaRetorno = 0;
+
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
+            
             alvosParaVerificar.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
                     const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
+                    
                     if (p) {
                         p.descricao = novaObs.trim().toUpperCase();
                         p.quantidade = parseInt(novaQtd) || 0;
                         editado = true;
+
+                        // Captura dados do item para a função de volta
+                        nomeParaRetorno = (item.tipo === 'multi') ? `${item.nome} (${alvo.tomb})` : item.nome;
+                        tipoParaRetorno = item.tipo;
+                        
+                        // Cálculo de saldo atualizado para o modal
+                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
+                        const totalLancado = item.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
+                        saldoParaRetorno = totalEsperado - totalLancado;
                         
                         if (window.itemStatus[uidAlvo]) {
                             window.itemStatus[uidAlvo].obs = p.descricao;
@@ -2354,23 +2404,25 @@ function processarAcaoFinalModal() {
     });
 
     if (editado) {
-        renderizarConferencia(); 
-        
-        // ✅ AJUSTE CIRÚRGICO: O ID da linha no DOM é "item-row-" e não "card-"
+        renderizarConferencia(); // Atualiza carimbos na tela de fundo
+        updateOverallStatus();
+
+        // ✅ PONTO 3: RETORNO AUTOMÁTICO AO MODAL DE GERENCIAMENTO
         setTimeout(() => {
+            abrirModalPendenciaV3(uidAlvo, tipoParaRetorno, nomeParaRetorno, saldoParaRetorno);
+            
+            // Notificação sutil de sucesso (Toast)
+            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            Toast.fire({ icon: 'success', title: 'Alteração salva!' });
+            
+            // Efeito visual na linha (atrás do modal)
             const el = document.getElementById(`item-row-${uidAlvo}`);
             if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.transition = "all 0.5s ease";
-                el.style.backgroundColor = "#e3f2fd"; 
-                el.style.borderLeft = "8px solid #2196F3"; 
-                
-                setTimeout(() => { 
-                    el.style.backgroundColor = ""; 
-                    el.style.borderLeft = ""; 
-                }, 1200);
+                el.style.backgroundColor = "#e3f2fd";
+                setTimeout(() => el.style.backgroundColor = "", 1000);
             }
         }, 300);
+
     } else {
         console.error("V3 Error: Pendência " + idProcurado + " não encontrada.");
         alert("❌ Erro ao salvar: O registro original sumiu da memória.");
@@ -2395,24 +2447,35 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
     const idProcurado = String(pendenciaId);
     const uidAlvo = String(uid);
 
+    // Variáveis para o retorno inteligente
+    let nomeParaRetorno = "";
+    let tipoParaRetorno = "single";
+    let saldoParaRetorno = 0;
+    let totalPendenciasRestantes = 0;
+
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
             alvos.forEach(alvo => {
                 if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
                     const index = alvo.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
+                    
                     if (index > -1) {
                         alvo.pendencias_ids.splice(index, 1);
                         excluido = true;
+                        totalPendenciasRestantes = alvo.pendencias_ids.length;
+
+                        // Captura dados para reabrir o modal se não estiver vazio
+                        nomeParaRetorno = (item.tipo === 'multi') ? `${item.nome} (${alvo.tomb})` : item.nome;
+                        tipoParaRetorno = item.tipo;
+                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
+                        saldoParaRetorno = totalEsperado - alvo.pendencias_ids.reduce((s, pnd) => s + pnd.quantidade, 0);
                         
-                        if (alvo.pendencias_ids.length === 0) {
-                            delete window.itemStatus[uidAlvo]; 
-                            
-                            // ✅ AJUSTE CIRÚRGICO: Busca pelo ID da linha v3
+                        if (totalPendenciasRestantes === 0) {
+                            delete window.itemStatus[uidAlvo];
                             const elItem = document.getElementById(`item-row-${uidAlvo}`);
                             if (elItem) {
                                 elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
-                                // Remove os estilos das bordas e botões ativos
                                 const btnAlert = elItem.querySelector('.btn-alert');
                                 if(btnAlert) btnAlert.classList.remove('active');
                             }
@@ -2424,32 +2487,31 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
     });
 
     if (excluido) {
-        const Toast = Swal.mixin({
-            toast: true,
-            position: 'top-end',
-            showConfirmButton: false,
-            timer: 2000,
-            timerProgressBar: true
-        });
-        
-        Toast.fire({ icon: 'success', title: 'Relato removido' });
         renderizarConferencia(); 
         updateOverallStatus();
+
+        // ✅ PONTO 3: RETORNO AO MODAL (Apenas se ainda houver o que gerenciar)
+        if (totalPendenciasRestantes > 0) {
+            setTimeout(() => {
+                abrirModalPendenciaV3(uidAlvo, tipoParaRetorno, nomeParaRetorno, saldoParaRetorno);
+                Swal.showValidationMessage("Relato removido com sucesso"); // Feedback dentro do modal
+            }, 300);
+        } else {
+            // Se era o único relato, apenas mostra o Toast de sucesso na tela principal
+            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            Toast.fire({ icon: 'success', title: 'Relato removido' });
+        }
     }
 }
     
 function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     const obsDigitada = obsModal ? obsModal.trim().toUpperCase() : "";
     const qtdInformada = parseInt(qtd) || 1;
-    const militarInfoEl = document.getElementById('militar-info');
     
     // 1. CAPTURA DE ASSINATURA SEGURA
-    let nomeAssinatura = militarInfoEl ? militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : "";
-    if (!nomeAssinatura) {
-        nomeAssinatura = `${userInfo.postoGraduacao} ${userInfo.quadro} ${userInfo.nomeGuerra}`;
-    }
+    let nomeAssinatura = `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`;
 
-    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA
+    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA (Ponto 1: Idêntico ao Banco)
     const novoID = {
         id: "TEMP-" + Date.now(), 
         tipo: "PENDENCIA",
@@ -2462,24 +2524,23 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     };
 
     let itemEncontrado = false;
+    let nomeItemParaRetorno = ""; // Guardamos para o retorno do modal
+    let saldoRestanteParaRetorno = 0;
     const fonteDados = window.dadosConferencia || dadosConferencia;
 
-    // 3. BUSCA E INSERÇÃO NO DATASET (MODO V3 PROTEGIDO - AMPLIADO)
+    // 3. BUSCA E INSERÇÃO (Ponto 2: Permite múltiplos via .push)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             const isChecklist = window.isModoChecklist;
             const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
-            
-            // Verifica se o ID enviado pelo modal bate com este item da lista
             const matchesID = (String(idRealDoItem) === String(uid));
 
-            // ✅ CORREÇÃO: Aceita 'single', 'texto_livre' (Observações) e 'upload_foto' (Fotos)
-            const tiposAceitos = ['single', 'texto_livre', 'upload_foto'];
-
-            if (tiposAceitos.includes(item.tipo) && matchesID) {
+            if (['single', 'texto_livre', 'upload_foto'].includes(item.tipo) && matchesID) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
-                item.pendencias_ids.push(novoID);
+                item.pendencias_ids.push(novoID); // Adiciona sem apagar o anterior
                 itemEncontrado = true;
+                nomeItemParaRetorno = item.nome;
+                saldoRestanteParaRetorno = (item.quantidadeEsperada || 1) - item.pendencias_ids.reduce((s, p) => s + p.quantidade, 0);
             } 
             else if (item.tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
@@ -2488,6 +2549,7 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
+                        nomeItemParaRetorno = `${item.nome} (${t.tomb})`;
                     }
                 });
             }
@@ -2495,39 +2557,32 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     });
 
     if (itemEncontrado) {
-        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO (DNA V3)
+        // 4. ATUALIZAÇÃO DO STATUS (Ponto 2: Não sobrescreve, acumula)
+        if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
+        
         const uidStr = String(uid);
         const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0,4).join('-') : uidStr.split('-')[0];
 
         window.itemStatus[uid] = { 
+            ...window.itemStatus[uid],
             status: 'C/A', 
             interacao_humana: true,
-            obs: obsDigitada,
-            quantidade: qtdInformada,
             uid_global_ref: uidGlobalFull
         };
         
-        // 5. FEEDBACK VISUAL NA LINHA ELEGANTE
-        const row = document.getElementById(`item-row-${uid}`);
-        if (row) {
-            row.classList.remove('status-ok');
-            row.classList.add('status-alert');
-            
-            const btnAlert = row.querySelector('.btn-alert');
-            const btnCheck = row.querySelector('.btn-check');
-            if (btnAlert) btnAlert.classList.add('active');
-            if (btnCheck) btnCheck.classList.remove('active');
-
-            // Efeito visual de "salvo"
-            row.style.backgroundColor = "#fff9c4";
-            setTimeout(() => row.style.backgroundColor = "", 1000);
-        }
-
-        // 6. ATUALIZAÇÃO DO PROGRESSO E GATILHO MÁGICO
+        // 5. FEEDBACK VISUAL
+        renderizarConferencia(); // Renderiza para o novo carimbo aparecer na linha
         updateOverallStatus();
-        
-        // ✅ DISPARA O FLUXO: Pula para o próximo ou encerra o setor
-        verificarFluxoSetor(uid);
+
+        // ✅ PONTO 3: RETORNO AO MODAL (O segredo do fluxo contínuo)
+        // Em vez de pular para o próximo, reabrimos o gerenciador para ele ver o carimbo azul
+        setTimeout(() => {
+            abrirModalPendenciaV3(uid, tipo, nomeItemParaRetorno, saldoRestanteParaRetorno);
+            
+            // Notificação discreta de sucesso
+            const Toast = Swal.mixin({ toast: true, position: 'top-end', showConfirmButton: false, timer: 2000 });
+            Toast.fire({ icon: 'success', title: 'Relato adicionado!' });
+        }, 300);
 
     } else {
         console.error("V3 Error: Falha de vínculo no salvamento.", { uid });
