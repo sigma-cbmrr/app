@@ -152,13 +152,13 @@ function setupUIBasedOnRole() {
     if (typeof atualizarIdentidadeSidebar === 'function') {
         atualizarIdentidadeSidebar();
     }
-    
+
     const role = currentUserData.role || 'operacional';
     const p = currentUserData.permissoes || {};
 
     atualizarSaudacao(currentUserData);
     carregarAlertasTransferencia();
-    
+
     setTimeout(() => {
         if (!document.getElementById('alerta-carga-transito')) {
             carregarAlertasTransferencia();
@@ -170,9 +170,9 @@ function setupUIBasedOnRole() {
     const isGestorGeral = (role === 'gestor_geral');
     const isGestorLocal = (role === 'gestor');
     const isGestorOuAdmin = (isGestorLocal || isAdmin || isGestorGeral);
-    
+
     // ✅ CÚPULA: Apenas estes gerenciam Unidades e criam Ativos
-    const souCúpula = isAdmin || isGestorGeral; 
+    const souCúpula = isAdmin || isGestorGeral;
 
     // 2. MAPEAMENTO DE PERMISSÕES DINÂMICAS
     const canViewDashboardCards = souCúpula || (isGestorLocal && p.canViewDashboardCards);
@@ -186,7 +186,7 @@ function setupUIBasedOnRole() {
     // A. Tratamento de Classes Genéricas (Pula Unidades para evitar conflito)
     document.querySelectorAll('.restricted-admin-only').forEach(el => {
         if (el) {
-            if (el.id === 'link-unidades') return; 
+            if (el.id === 'link-unidades') return;
             el.style.display = isGestorOuAdmin ? 'block' : 'none';
         }
     });
@@ -663,22 +663,24 @@ window.addEventListener('click', function (e) {
 /**
  * Alterna a visibilidade da sidebar no modo mobile
  */
-function toggleMenuMobile() {
+function toggleMenuMobile(forceClose = false) {
     const sidebar = document.getElementById('main-sidebar');
     const overlay = document.getElementById('mobile-overlay');
 
-    if (!sidebar) {
-        console.error("Erro: Elemento 'main-sidebar' não encontrado.");
-        return;
+    if (!sidebar) return;
+
+    // Se forceClose for true, nós removemos a classe. 
+    // Se não, fazemos o toggle normal (abre/fecha).
+    if (forceClose) {
+        sidebar.classList.remove('mobile-active');
+    } else {
+        sidebar.classList.toggle('mobile-active');
     }
 
-    // Alterna a classe que move a sidebar para dentro da tela
-    sidebar.classList.toggle('mobile-active');
-
-    // Controla o fundo escurecido (se ele existir no seu HTML)
+    // Sincroniza o overlay com o estado real da sidebar
     if (overlay) {
-        const isVisible = sidebar.classList.contains('mobile-active');
-        overlay.style.display = isVisible ? 'block' : 'none';
+        const isOpen = sidebar.classList.contains('mobile-active');
+        overlay.style.display = isOpen ? 'block' : 'none';
     }
 }
 
@@ -701,7 +703,7 @@ function logout() {
             auth.signOut().then(() => {
                 console.log("Sessão encerrada com sucesso.");
                 // Redireciona para a página de login (ajuste o nome se for diferente)
-                window.location.href = "index.html"; 
+                window.location.href = "index.html";
             }).catch((error) => {
                 console.error("Erro ao deslogar:", error);
                 Swal.fire('Erro', 'Não foi possível encerrar a sessão.', 'error');
@@ -724,15 +726,15 @@ async function loadCaaData() {
 
     try {
         await loadCautelaPendencies();
-        
+
         const isAdmin = currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral';
         const gestorUnidadeId = currentUserData.unidade_id;
-        
-        console.log("👤 LOG PERMISSÃO:", { 
+
+        console.log("👤 LOG PERMISSÃO:", {
             nome: currentUserData.nome_militar_completo,
-            role: currentUserData.role, 
+            role: currentUserData.role,
             unidadeIdDoGestor: gestorUnidadeId,
-            ehAdmin: isAdmin 
+            ehAdmin: isAdmin
         });
 
         const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(100).get();
@@ -746,7 +748,7 @@ async function loadCaaData() {
             const lId = d.lista_id;
             const nomeViatura = d.local;
 
-            if (map[lId]) continue; 
+            if (map[lId]) continue;
 
             // 1. Identificação de Unidade
             let unidadeVinculada = d.unidade_id;
@@ -768,7 +770,7 @@ async function loadCaaData() {
                         console.warn(`⚠️ LOG TRIANGULAÇÃO: Lista Mestra ${lId} não encontrada no banco!`);
                     }
                 }
-                
+
                 if (cacheUnidadesLista[lId]) {
                     unidadeVinculada = cacheUnidadesLista[lId].id;
                     siglaVinculada = cacheUnidadesLista[lId].sigla;
@@ -2364,7 +2366,7 @@ function switchView(v) {
             } else {
                 // ✅ RESTAURAÇÃO: Liga o container e dispara a busca das pendências (ABT-18, etc)
                 if (adminCont) adminCont.style.display = 'block';
-                loadCaaData(); 
+                loadCaaData();
             }
         }
     }
@@ -2377,49 +2379,49 @@ function switchView(v) {
     if (v === 'listas') carregarCardsListasExistentes();
 
     if (v === 'my-history') {
-    // ✅ Lógica de Abas para Atividades (Unificado)
-    const tabsContainer = document.getElementById('atividades-tabs-container');
-    if (currentUserData && tabsContainer) {
+        // ✅ Lógica de Abas para Atividades (Unificado)
+        const tabsContainer = document.getElementById('atividades-tabs-container');
+        if (currentUserData && tabsContainer) {
+            const role = currentUserData.role;
+            const isGestor = (role === 'admin' || role === 'gestor_geral' || role === 'gestor');
+            tabsContainer.style.display = isGestor ? 'flex' : 'none';
+        }
+
+        // Reset de datas para pessoal
+        const startInput = document.getElementById('my-hist-start');
+        const endInput = document.getElementById('my-hist-end');
+        if (startInput) {
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 30);
+            startInput.valueAsDate = startDate;
+        }
+        if (endInput) endInput.valueAsDate = new Date();
+
         const role = currentUserData.role;
-        const isGestor = (role === 'admin' || role === 'gestor_geral' || role === 'gestor');
-        tabsContainer.style.display = isGestor ? 'flex' : 'none';
-    }
+        if (role === 'admin' || role === 'gestor_geral' || role === 'gestor') {
+            carregarUsuariosFiltro();
+            const globStart = document.getElementById('glob-hist-start');
+            const globEnd = document.getElementById('glob-hist-end');
+            if (globStart) globStart.valueAsDate = new Date(new Date().setDate(new Date().getDate() - 30));
+            if (globEnd) globEnd.valueAsDate = new Date();
+        }
 
-    // Reset de datas para pessoal
-    const startInput = document.getElementById('my-hist-start');
-    const endInput = document.getElementById('my-hist-end');
-    if (startInput) {
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - 30);
-        startInput.valueAsDate = startDate;
-    }
-    if (endInput) endInput.valueAsDate = new Date();
+        // ✅ INICIALIZAÇÃO DO CALENDÁRIO MODERNO (Flatpickr)
+        // Isso mata o visual "velho" e aplica o padrão Sigma V3
+        if (typeof flatpickr !== 'undefined') {
+            flatpickr(".sigma-v3-date-input", {
+                dateFormat: "Y-m-d",
+                altInput: true,
+                altFormat: "d/m/Y",
+                allowInput: true,
+                // Altere "pt" para "Portuguese" caso o erro persista após adicionar o script
+                locale: "pt"
+            });
+        }
 
-    const role = currentUserData.role;
-    if (role === 'admin' || role === 'gestor_geral' || role === 'gestor') {
-        carregarUsuariosFiltro(); 
-        const globStart = document.getElementById('glob-hist-start');
-        const globEnd = document.getElementById('glob-hist-end');
-        if(globStart) globStart.valueAsDate = new Date(new Date().setDate(new Date().getDate() - 30));
-        if(globEnd) globEnd.valueAsDate = new Date();
+        switchAtividadesTab('pessoal');
+        loadMyHistory();
     }
-
-    // ✅ INICIALIZAÇÃO DO CALENDÁRIO MODERNO (Flatpickr)
-    // Isso mata o visual "velho" e aplica o padrão Sigma V3
-    if (typeof flatpickr !== 'undefined') {
-        flatpickr(".sigma-v3-date-input", {
-            dateFormat: "Y-m-d",
-            altInput: true,
-            altFormat: "d/m/Y",
-            allowInput: true,
-            // Altere "pt" para "Portuguese" caso o erro persista após adicionar o script
-            locale: "pt" 
-        });
-    }
-
-    switchAtividadesTab('pessoal'); 
-    loadMyHistory();
-}
 
     // 5. TRATAMENTO MOBILE
     if (window.innerWidth <= 768) {
@@ -7492,7 +7494,7 @@ function gerarInputsTombamentoDinamico(qtd, tipo) {
 async function processarAporteNoBanco(uidGlobal, dados) {
     const { quantidade, observacao, tombamentos } = dados;
     const ehMulti = tombamentos !== null;
-    
+
     const minhaUnidadeId = currentUserData.unidade_id || "ADMIN";
     const minhaUnidadeSigla = currentUserData.unidade || "ADMINISTRATIVO";
     const dataReg = new Date().toLocaleString('pt-BR');
@@ -7507,19 +7509,19 @@ async function processarAporteNoBanco(uidGlobal, dados) {
 
     try {
         const itemRef = db.collection('inventario').doc(uidGlobal);
-        
+
         // ✅ 1. ESTA VARIÁVEL É A CHAVE: Ela vive fora da transação para ser usada no Swal depois
         let qtdFinalParaExibicao = 0;
 
         await db.runTransaction(async (transaction) => {
             const snapItem = await transaction.get(itemRef);
             if (!snapItem.exists) throw new Error("DNA do material não encontrado.");
-            
+
             const d = snapItem.data();
             const idEvento = "EVT-APORTE-" + Date.now();
-            
+
             // Variável local da transação
-            let qtdEfetivaLocal = 0; 
+            let qtdEfetivaLocal = 0;
 
             if (ehMulti) {
                 let listaTombsTxt = [];
@@ -7527,21 +7529,21 @@ async function processarAporteNoBanco(uidGlobal, dados) {
                     qtdEfetivaLocal++;
                     listaTombsTxt.push(tInfo.tomb);
                     const tombRef = itemRef.collection('tombamentos').doc(tInfo.tomb);
-                    
+
                     transaction.set(tombRef, {
-                        tomb: tInfo.tomb, 
-                        serie: tInfo.serie || "N/A", 
+                        tomb: tInfo.tomb,
+                        serie: tInfo.serie || "N/A",
                         situacao_atual: "DISPONÍVEL",
-                        local_id: minhaUnidadeId, 
+                        local_id: minhaUnidadeId,
                         unidade_sigla: minhaUnidadeSigla,
-                        sub_local: "ALMOXARIFADO CENTRAL", 
-                        data_entrada: dataReg, 
+                        sub_local: "ALMOXARIFADO CENTRAL",
+                        data_entrada: dataReg,
                         criado_por: autorNome
                     });
 
                     transaction.set(tombRef.collection('historico_vida').doc(idEvento), {
-                        data: dataReg, 
-                        evento: "APORTE_ESTOQUE", 
+                        data: dataReg,
+                        evento: "APORTE_ESTOQUE",
                         quem: autorNome,
                         detalhes: `Incorporado via Aporte. Justificativa: ${observacao}`
                     });
@@ -7570,8 +7572,8 @@ async function processarAporteNoBanco(uidGlobal, dados) {
                 }, { merge: true });
 
                 transaction.set(saldoUnidadeRef.collection('historico_vida').doc(idEvento), {
-                    data: dataReg, 
-                    evento: "APORTE_ESTOQUE", 
+                    data: dataReg,
+                    evento: "APORTE_ESTOQUE",
                     quem: autorNome,
                     quantidade: qtdEfetivaLocal,
                     detalhes: `Entrada física de material de consumo. Obs: ${observacao}`
