@@ -395,6 +395,7 @@ function renderOperacionalCards() {
     updateOperacionalCards();
     container.style.display = 'block';
 }
+
 // [NOVO] Atualiza a contagem do Card "Minhas Conferências"
 async function getCautelasAReceberCount() {
     if (!currentUserData) return 0;
@@ -424,10 +425,7 @@ async function getCautelasAReceberCount() {
         return 0;
     }
 }
-/**
-* Busca e retorna a contagem de cautelas ativas/recebidas do militar logado,
-* incluindo as que estão EM DEVOLUÇÃO (enviadas por ele).
-*/
+
 /**
  * Calcula a contagem total e desduplicada de cautelas ativas para o dashboard,
  * respeitando os filtros de perfil (Operacional, Gestor, Admin).
@@ -661,6 +659,56 @@ window.addEventListener('click', function (e) {
         }
     }
 });
+
+/**
+ * Alterna a visibilidade da sidebar no modo mobile
+ */
+function toggleMenuMobile() {
+    const sidebar = document.getElementById('main-sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+
+    if (!sidebar) {
+        console.error("Erro: Elemento 'main-sidebar' não encontrado.");
+        return;
+    }
+
+    // Alterna a classe que move a sidebar para dentro da tela
+    sidebar.classList.toggle('mobile-active');
+
+    // Controla o fundo escurecido (se ele existir no seu HTML)
+    if (overlay) {
+        const isVisible = sidebar.classList.contains('mobile-active');
+        overlay.style.display = isVisible ? 'block' : 'none';
+    }
+}
+
+/**
+ * Encerra a sessão do usuário no Firebase e redireciona
+ */
+function logout() {
+    Swal.fire({
+        title: 'Sair do Sistema?',
+        text: "Deseja realmente encerrar sua sessão?",
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#800020',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Sim, Sair',
+        cancelButtonText: 'Cancelar'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            // Executa o logout no Firebase Auth
+            auth.signOut().then(() => {
+                console.log("Sessão encerrada com sucesso.");
+                // Redireciona para a página de login (ajuste o nome se for diferente)
+                window.location.href = "index.html"; 
+            }).catch((error) => {
+                console.error("Erro ao deslogar:", error);
+                Swal.fire('Erro', 'Não foi possível encerrar a sessão.', 'error');
+            });
+        }
+    });
+}
 
 // --- 3. DASHBOARD HIERÁRQUICO ---
 async function loadCaaData() {
