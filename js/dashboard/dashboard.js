@@ -180,7 +180,7 @@ function setupUIBasedOnRole() {
     const canViewUnitHistory = souCúpula || (isGestorLocal && p.canViewUnitHistory);
     const canManagePosts = souCúpula || (isGestorLocal && p.canManagePosts);
     const canManageUnitUsers = souCúpula || (isGestorLocal && p.canManageUnitUsers);
-    const canManageUnitLists = souCúpula || (isGestorLocal && p.canManageUnitLists);
+    const canManageUnitLists = souCúpula || isGestorLocal;
 
     // --- 🔐 BLOCO DE VISIBILIDADE DA SIDEBAR ---
 
@@ -194,9 +194,10 @@ function setupUIBasedOnRole() {
         { id: 'link-unidades', permitir: souCúpula },
         { id: 'link-postos', permitir: canManagePosts },
         { id: 'link-usuarios', permitir: canManageUnitUsers },
-        { id: 'link-listas', permitir: canManageUnitLists },
+        { id: 'link-listas', permitir: canManageUnitLists }, 
         { id: 'link-vtr-bases', permitir: souCúpula },
-        { id: 'link-almoxarifado', permitir: isGestorOuAdmin }
+        { id: 'link-almoxarifado', permitir: isGestorOuAdmin },
+        { id: 'link-global-history', permitir: canViewUnitHistory }
     ];
 
     configuracaoMenus.forEach(item => {
@@ -560,43 +561,73 @@ function renderAdminGestorCards(canViewDashboardCards) {
     const opContainer = document.getElementById('operacional-cards-container');
     const masterContainer = document.getElementById('dashboard-content-by-role');
 
-    // 1. Verificação de segurança
-    if (!containerPai || !cardsContainer) {
-        console.error("❌ LOG: Estrutura estática do Dashboard não encontrada no HTML.");
-        return;
-    }
+    if (!containerPai || !cardsContainer) return;
 
-    // 2. Permissão e Limpeza Radical
     if (!canViewDashboardCards) {
-        cardsContainer.innerHTML = '';
         containerPai.style.setProperty('display', 'none', 'important');
         return;
     }
 
-    // ✅ BLINDAGEM: Oculta o container operacional imediatamente com prioridade máxima
-    if (opContainer) {
-        opContainer.style.setProperty('display', 'none', 'important');
+    const placeholder = document.getElementById('detail-placeholder');
+    const detailsWrapper = document.querySelector('.sigma-v3-details-wrapper');
+    const detailColumn = document.querySelector('.dashboard-detail-column');
+    const caTableWrapper = document.getElementById('ca-table-wrapper');
+
+    // 1. LIMPEZA TOTAL DA COLUNA DA DIREITA
+    if (caTableWrapper) {
+        // ✅ MATANDO A BARRA CINZA: Escondemos o wrapper e resetamos o tamanho
+        caTableWrapper.style.setProperty('display', 'none', 'important');
+        caTableWrapper.style.setProperty('height', '0', 'important'); 
+        caTableWrapper.style.setProperty('padding', '0', 'important'); 
+        
+        caTableWrapper.innerHTML = `
+            <div id="table-title"></div>
+            <div id="no-issues-msg" style="display:none; text-align:center; padding:20px; color:#94a3b8;"></div>
+            <div id="sigma-v3-dynamic-grid" class="sigma-v3-details-grid"></div>
+        `; 
     }
 
-    // ✅ RESTAURAÇÃO DE LAYOUT: Remove a classe full-width do operacional para reativar as colunas
+    // 2. RESET DE LAYOUT
+    if (opContainer) opContainer.style.setProperty('display', 'none', 'important');
+
     if (masterContainer) {
         masterContainer.classList.remove('dashboard-operacional-full');
-        // Garante que o container master volte a ser flex (duas colunas)
         masterContainer.style.setProperty('display', 'flex', 'important');
     }
 
-    // 3. Exibição dos elementos de Gestor com prioridade máxima
-    containerPai.style.setProperty('display', 'block', 'important');
-    if (msgLoading) msgLoading.style.setProperty('display', 'block', 'important');
+    if (detailColumn) {
+        detailColumn.style.setProperty('display', 'block', 'important');
+        detailColumn.style.setProperty('background', '#fff', 'important'); // Coluna sempre branca
+    }
+    
+   if (detailsWrapper) {
+    detailsWrapper.style.setProperty('display', 'block', 'important');
+    detailsWrapper.style.setProperty('background', 'transparent', 'important'); 
+    detailsWrapper.style.setProperty('padding', '0', 'important');
+    detailsWrapper.style.setProperty('border', 'none', 'important');
+    detailsWrapper.style.setProperty('height', 'auto', 'important'); // ✅ Garante que ele não estique sozinho
+}
 
-    // ✅ AJUSTE VISUAL: Garante que o placeholder lateral (coluna da direita) apareça para o Gestor
-    const placeholder = document.getElementById('detail-placeholder');
+    // 3. DESENHO DO PLACEHOLDER
     if (placeholder) {
         placeholder.style.setProperty('display', 'flex', 'important');
+        placeholder.style.setProperty('visibility', 'visible', 'important');
+        
+        // Altura otimizada para Desktop
+        placeholder.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 280px; color: #94a3b8; text-align: center; padding: 20px; background: #fff;">
+                <div style="background: #f8fafc; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px; border: 2px dashed #e2e8f0;">
+                    <i class="fas fa-mouse-pointer" style="font-size: 2em; color: #cbd5e1;"></i>
+                </div>
+                <h3 style="margin: 0; font-size: 1.1em; color: #475569; font-weight: 700;">Gestão de Pendências</h3>
+                <p style="font-size: 0.85em; margin-top: 10px; color: #94a3b8; max-width: 250px;">
+                    Selecione um card de viatura à esquerda para detalhar as alterações.
+                </p>
+            </div>
+        `;
     }
 
-    // 4. Carregamento de dados
-    console.log("✅ LOG: Layout de colunas restaurado. Solicitando dados ao Firebase...");
+    containerPai.style.setProperty('display', 'block', 'important');
     loadCaaData();
 }
 
@@ -2335,6 +2366,7 @@ function switchView(v) {
     // ✅ LIMPEZA DE LAYOUT: Reseta o container master e garante que colunas fantasmas não apareçam
     const masterContainer = document.getElementById('dashboard-content-by-role');
     const detailPlaceholder = document.getElementById('detail-placeholder');
+    const detailColumn = document.querySelector('.dashboard-detail-column'); // Segunda coluna
     const caTableWrapper = document.getElementById('ca-table-wrapper');
 
     if (masterContainer) {
@@ -2345,9 +2377,10 @@ function switchView(v) {
         }
     }
 
-    // ✅ HIGIENE DE DETALHES: Limpa a coluna da direita ao trocar de tela
+    // ✅ HIGIENE DE DETALHES: Garante que a segunda coluna e placeholders sumam ao trocar de tela
     if (detailPlaceholder) detailPlaceholder.style.display = 'none';
     if (caTableWrapper) caTableWrapper.style.display = 'none';
+    if (detailColumn) detailColumn.style.setProperty('display', 'none', 'important');
 
     // ✅ LIMPEZA DE CONTAINER OPERACIONAL: Evita carregar lixo visual
     const opContainer = document.getElementById('operacional-cards-container');
@@ -2404,18 +2437,24 @@ function switchView(v) {
         const adminCont = document.getElementById('admin-gestor-cards-container');
         if (resCont) resCont.innerHTML = '';
         
-        // Garante que o container master-detail apareça apenas agora
-        if (masterContainer) masterContainer.style.setProperty('display', 'flex', 'important');
-
         carregarAlertasTransferencia();
 
         if (currentUserData) {
             const role = currentUserData.role || 'operacional';
             if (role === 'operacional') {
+                // ✅ AJUSTE OPERACIONAL: Container Master como BLOCK (1 coluna) e esconde detalhes
+                if (masterContainer) masterContainer.style.setProperty('display', 'block', 'important');
+                if (detailColumn) detailColumn.style.setProperty('display', 'none', 'important');
                 renderOperacionalCards();
             } else {
-                if (adminCont) adminCont.style.setProperty('display', 'block', 'important');
-                loadCaaData();
+                // ✅ AJUSTE GESTOR: Container Master como FLEX (2 colunas) e ativa detalhes
+                if (masterContainer) masterContainer.style.setProperty('display', 'flex', 'important');
+                if (detailColumn) detailColumn.style.setProperty('display', 'block', 'important');
+                
+                // 🚀 AQUI ESTAVA O ERRO: Chamamos a função que DESENHA o placeholder e 
+                // internamente ela já dispara o loadCaaData().
+                const canViewDashboardCards = true; // Ou use sua variável de permissão
+                renderAdminGestorCards(canViewDashboardCards);
             }
         }
     }
@@ -2487,43 +2526,72 @@ function mostrarTabela(data) {
     const wrapper = document.getElementById('ca-table-wrapper');
     const gridContainer = document.getElementById('sigma-v3-dynamic-grid');
     const msgNoIssues = document.getElementById('no-issues-msg');
-    const placeholder = document.getElementById('detail-placeholder'); // ✅ Novo: Coluna da Direita Vazia
+    const placeholder = document.getElementById('detail-placeholder'); 
+    const tableTitle = document.getElementById('table-title');
+    const detailsWrapper = document.querySelector('.sigma-v3-details-wrapper');
 
     if (!wrapper || !gridContainer) return;
 
     // 0. GESTÃO DE ESTADO (MASTER-DETAIL)
-    if (placeholder) placeholder.style.display = 'none'; // Esconde o ícone de espera
+    if (placeholder) {
+        placeholder.style.setProperty('display', 'none', 'important');
+    }
+    
+    // ✅ CORREÇÃO 1: Ativa o fundo cinza de contraste APENAS agora que há dados
+    if (detailsWrapper) {
+        detailsWrapper.style.setProperty('background', '#f1f5f9', 'important');
+        detailsWrapper.style.setProperty('padding', '20px', 'important');
+        detailsWrapper.style.setProperty('border-radius', '16px', 'important');
+    }
 
-    // 1. CABEÇALHO PREMIUM: Mantendo sua lógica de informações de conferência
-    document.getElementById('table-title').innerHTML = `
-        <div style="display: flex; flex-direction: column; line-height: 1.2;">
-            <span style="letter-spacing: -0.5px;">Lista: ${data.local}</span>
-            <span style="font-size: 0.55em; color: #64748b; font-weight: 600; margin-top: 6px; text-transform: uppercase;">
-                <i class="fas fa-user-check" style="color: #1b8a3e;"></i> Conferido por: <b style="color: #1e293b;">${data.conferente}</b> em ${data.date}
-            </span>
-        </div>
-    `;
+    wrapper.style.setProperty('display', 'block', 'important');
+    wrapper.style.setProperty('height', 'auto', 'important');
+    
+    // 1. CABEÇALHO PREMIUM COM BOTÃO FECHAR ESTILIZADO
+    if (tableTitle) {
+        tableTitle.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px;">
+                <div style="display: flex; flex-direction: column; line-height: 1.2;">
+                    <span style="letter-spacing: -0.5px; font-weight: 800; font-size: 1.2em; color: #1e293b;">Lista: ${data.local}</span>
+                    <span style="font-size: 0.7em; color: #64748b; font-weight: 600; margin-top: 6px; text-transform: uppercase;">
+                        <i class="fas fa-user-check" style="color: #1b8a3e;"></i> Conferido por: <b style="color: #1e293b;">${data.conferente}</b>
+                    </span>
+                    <span style="font-size: 0.65em; color: #94a3b8; margin-top: 2px;">Data: ${data.date}</span>
+                </div>
+                
+                <button class="btn-v3-action" 
+                        style="background: #800020 !important; color: #ffffff !important; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 6px rgba(128, 0, 32, 0.2); transition: all 0.2s ease;" 
+                        onclick="fecharTabela()">
+                    <i class="fas fa-times"></i> <span class="desktop-only">FECHAR</span>
+                </button>
+            </div>
+        `;
+    }
 
-    // Limpa o grid antes de renderizar
     gridContainer.innerHTML = '';
-
     const pendenciasReais = data.items || [];
 
     if (pendenciasReais.length === 0) {
-        gridContainer.style.display = 'none';
-        if (msgNoIssues) msgNoIssues.style.display = 'block';
+        gridContainer.style.setProperty('display', 'none', 'important');
+        if (msgNoIssues) {
+            msgNoIssues.style.setProperty('display', 'block', 'important');
+            msgNoIssues.innerHTML = `
+                <div style="padding: 40px; text-align: center; color: #94a3b8; background: white; border-radius: 12px; border: 1px dashed #cbd5e1;">
+                    <i class="fas fa-check-circle" style="font-size: 3em; color: #1b8a3e; opacity: 0.3; margin-bottom: 15px;"></i>
+                    <p style="font-weight: 600;">Nenhuma alteração pendente nesta lista.</p>
+                </div>
+            `;
+        }
     } else {
-        gridContainer.style.display = 'grid';
-        if (msgNoIssues) msgNoIssues.style.display = 'none';
+        gridContainer.style.setProperty('display', 'grid', 'important');
+        if (msgNoIssues) msgNoIssues.style.setProperty('display', 'none', 'important');
 
         pendenciasReais.forEach(p => {
             const statusG = p.status_gestao || 'PENDENTE';
             const ehCautela = p.tipoRegistro === 'CAUTELA';
-
             const colorRef = ehCautela ? '#f57c00' : (statusG === 'PENDENTE' ? '#d90f23' : '#2c7399');
             const badgeBg = ehCautela ? '#fff3e0' : (statusG === 'PENDENTE' ? '#ffebee' : '#e0f2fe');
             const iconRef = ehCautela ? 'fa-hand-holding' : 'fa-exclamation-triangle';
-
             const nomeAutorCompleto = p.autor_nome || "Militar não identificado";
 
             const btnData = {
@@ -2540,7 +2608,6 @@ function mostrarTabela(data) {
 
             const card = document.createElement('div');
             card.className = 'sigma-v3-card-item';
-
             card.innerHTML = `
                 <div class="sigma-v3-card-header">
                     <span class="sigma-v3-badge" style="background: ${badgeBg}; color: ${colorRef};">
@@ -2550,41 +2617,33 @@ function mostrarTabela(data) {
                         <i class="far fa-calendar-alt"></i> ${p.data_criacao || data.date.split(',')[0]}
                     </span>
                 </div>
-
                 <h4>${p.itemNome}</h4>
-                
                 <div style="display: flex; gap: 10px; font-size: 0.75em; font-weight: 800; text-transform: uppercase;">
                     ${p.tombamento ?
                     `<span style="color: #800020;"><i class="fas fa-tag"></i> Tomb: ${p.tombamento}</span>` :
                     `<span style="color: #d90f23;"><i class="fas fa-layer-group"></i> Qtd: ${p.quantidade} un.</span>`}
                 </div>
-
-                <p class="sigma-v3-obs-box">
-                    "${p.descricao}"
-                </p>
-
+                <p class="sigma-v3-obs-box">"${p.descricao}"</p>
                 <div class="sigma-v3-author-info">
                     <i class="fas fa-user-edit"></i> 
                     <span>Por: <b>${nomeAutorCompleto}</b></span>
                 </div>
-
                 ${!ehCautela ?
                     `<button class="sigma-v3-btn-manage" onclick='abrirModalGestaoID(${btnJson})'>
                         <i class="fas fa-gavel"></i> Gerenciar Pendência
                     </button>` :
-                    `<div style="text-align: center; padding: 12px; background: #f8fafc; border-radius: 10px; font-size: 0.7em; color: #94a3b8; font-weight: 700; border: 1px dashed #cbd5e1;">
+                    `<div style="text-align: center; padding: 12px; background: #ffffff; border-radius: 10px; font-size: 0.7em; color: #94a3b8; font-weight: 700; border: 1px dashed #cbd5e1;">
                         <i class="fas fa-lock"></i> ITEM EM POSSE PESSOAL
                     </div>`
                 }
             `;
-
             gridContainer.appendChild(card);
         });
     }
 
-    wrapper.style.display = 'block';
+    const oldFooter = document.getElementById('wrapper-footer-actions');
+    if (oldFooter) oldFooter.remove();
 
-    // ✅ AJUSTE RESPONSIVO: No Desktop (lado a lado) não rola a tela. No Mobile (empilhado) ele rola para os detalhes.
     if (window.innerWidth <= 1100) {
         wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -2630,18 +2689,21 @@ function fecharTabela() {
     const wrapper = document.getElementById('ca-table-wrapper');
     const placeholder = document.getElementById('detail-placeholder');
 
+    // 1. ESCONDE A TABELA (Mata a "Barra Cinza")
     if (wrapper) {
-        wrapper.style.display = 'none';
+        // ✅ Usamos setProperty com important para garantir que o CSS não a mantenha visível
+        wrapper.style.setProperty('display', 'none', 'important');
     }
 
-    // ✅ LÓGICA DE ESTADO MASTER-DETAIL
-    // Se estiver no Desktop (mais de 1100px), traz o placeholder de volta
+    // 2. LÓGICA DE ESTADO MASTER-DETAIL
+    // No Desktop, o placeholder DEVE voltar para não deixar o quadro branco
     if (window.innerWidth > 1100 && placeholder) {
-        placeholder.style.display = 'flex';
+        placeholder.style.setProperty('display', 'flex', 'important');
     }
 
-    // Opcional: Rola para o topo da coluna de cards no mobile para facilitar a navegação
+    // 3. COMPORTAMENTO MOBILE
     if (window.innerWidth <= 1100) {
+        // No mobile, apenas voltamos para a lista de cards
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 }
@@ -8483,30 +8545,39 @@ async function carregarCardsListasExistentes() {
         const minhaUnidadeId = currentUserData?.unidade_id;
         const isAdminGeral = (role === 'admin' || role === 'gestor_geral');
 
+        // 1. Definição da Query Base
         let query = db.collection('listas_conferencia')
             .where('ativo', '==', true)
             .where('tipo', '==', 'conferencia_materiais');
 
+        // ✅ FILTRO DE UNIDADE: Se não for Admin Geral, filtra obrigatoriamente pela unidade do Gestor
         if (!isAdminGeral) {
+            if (!minhaUnidadeId) {
+                console.warn("⚠️ Unidade do gestor não identificada no perfil.");
+                container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">Erro: Sua unidade não está vinculada ao seu perfil.</div>`;
+                return;
+            }
             query = query.where('unidade_id', '==', minhaUnidadeId);
         }
 
         const snap = await query.get();
 
         if (snap.empty) {
-            container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">Nenhuma lista localizada.</div>`;
+            const msgVazio = isAdminGeral ? "Nenhuma lista localizada no sistema." : "Nenhuma lista localizada para sua unidade.";
+            container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">${msgVazio}</div>`;
             return;
         }
 
         let html = '';
         snap.forEach(doc => {
-            const lista = doc.data(); // Aqui definimos 'lista'
+            const lista = doc.data();
             const qtdItens = (lista.list || []).reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0);
 
-            // ✅ CORREÇÃO CIRÚRGICA: Referenciando 'lista' corretamente e limpando o JSON
+            // Prepara o objeto para edição e sanitiza o JSON para o atributo onclick
             const listaParaEditar = { uid: doc.id, ...lista };
             const listaJson = JSON.stringify(listaParaEditar).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 
+            // ✅ RESTRIÇÃO DE EXCLUSÃO: Apenas Admin/Gestor Geral vê o botão de lixeira
             const btnDelete = isAdminGeral ? `
                 <button class="v3-btn-action" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
                     <i class="fas fa-trash-alt"></i>
@@ -8550,8 +8621,8 @@ async function carregarCardsListasExistentes() {
         if (window.FontAwesome) FontAwesome.dom.i2svg();
 
     } catch (e) {
-        console.error("Erro V3 Listas:", e);
-        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao carregar inventários.</p>`;
+        console.error("❌ Erro ao carregar listas da unidade:", e);
+        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao sincronizar inventários.</p>`;
     }
 }
 
