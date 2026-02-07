@@ -156,6 +156,9 @@ function setupUIBasedOnRole() {
     const role = currentUserData.role || 'operacional';
     const p = currentUserData.permissoes || {};
 
+    // ✅ ETIQUETA MESTRE: Permite que o CSS ajude no bloqueio preventivo
+    document.body.setAttribute('data-user-role', role);
+
     atualizarSaudacao(currentUserData);
     carregarAlertasTransferencia();
 
@@ -166,13 +169,11 @@ function setupUIBasedOnRole() {
     }, 1500);
 
     // 1. DEFINIÇÕES DE PODER
-    const isAdmin = (role === 'admin');
-    const isGestorGeral = (role === 'gestor_geral');
+    const isOperacional = (role === 'operacional');
+    const isAdminOuGeral = (role === 'admin' || role === 'gestor_geral');
     const isGestorLocal = (role === 'gestor');
-    const isGestorOuAdmin = (isGestorLocal || isAdmin || isGestorGeral);
-
-    // ✅ CÚPULA: Apenas estes gerenciam Unidades e criam Ativos
-    const souCúpula = isAdmin || isGestorGeral;
+    const isGestorOuAdmin = (isGestorLocal || isAdminOuGeral);
+    const souCúpula = isAdminOuGeral;
 
     // 2. MAPEAMENTO DE PERMISSÕES DINÂMICAS
     const canViewDashboardCards = souCúpula || (isGestorLocal && p.canViewDashboardCards);
@@ -181,91 +182,88 @@ function setupUIBasedOnRole() {
     const canManageUnitUsers = souCúpula || (isGestorLocal && p.canManageUnitUsers);
     const canManageUnitLists = souCúpula || (isGestorLocal && p.canManageUnitLists);
 
-    // --- 🔐 BLOCO UNIFICADO DE VISIBILIDADE DA SIDEBAR ---
+    // --- 🔐 BLOCO DE VISIBILIDADE DA SIDEBAR ---
 
-    // A. Tratamento de Classes Genéricas (Pula Unidades para evitar conflito)
+    // A. Esconder preventivamente todos os itens de classe restrita e o separador
     document.querySelectorAll('.restricted-admin-only').forEach(el => {
+        el.style.setProperty('display', 'none', 'important');
+    });
+
+    // B. Ativar menus baseados em permissão (Apenas se NÃO for operacional)
+    const configuracaoMenus = [
+        { id: 'link-unidades', permitir: souCúpula },
+        { id: 'link-postos', permitir: canManagePosts },
+        { id: 'link-usuarios', permitir: canManageUnitUsers },
+        { id: 'link-listas', permitir: canManageUnitLists },
+        { id: 'link-vtr-bases', permitir: souCúpula },
+        { id: 'link-almoxarifado', permitir: isGestorOuAdmin }
+    ];
+
+    configuracaoMenus.forEach(item => {
+        const el = document.getElementById(item.id);
         if (el) {
-            if (el.id === 'link-unidades') return;
-            el.style.display = isGestorOuAdmin ? 'block' : 'none';
+            if (!isOperacional && item.permitir) {
+                el.style.setProperty('display', 'flex', 'important');
+            } else {
+                el.style.setProperty('display', 'none', 'important');
+            }
         }
     });
 
-    // B. Trava de Ferro para Unidades (Prioridade Absoluta por ID)
-    const elUnid = document.getElementById('link-unidades');
-    if (elUnid) {
-        if (souCúpula) {
-            elUnid.style.setProperty('display', 'block', 'important');
-        } else {
-            elUnid.style.setProperty('display', 'none', 'important');
+    // C. Forçar menus básicos sempre visíveis (Dashboard, Atividades e Cautelas)
+    const menusBase = ['link-dashboard', 'link-my-history', 'link-cautelas-group'];
+    menusBase.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.setProperty('display', 'flex', 'important');
+    });
+
+    // 3. BOTÕES DE AÇÃO NO DASHBOARD
+    const botoesAcao = ['btn-toggle-posto', 'btn-toggle-vtr-base', 'btn-novo-cadastro-global'];
+    botoesAcao.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.style.display = (!isOperacional && souCúpula) ? 'inline-flex' : 'none';
         }
-    }
+    });
 
-    // C. Controle de Links Individuais (Usando nomes de variáveis únicos)
-    const menuPostos = document.getElementById('link-postos');
-    if (menuPostos) menuPostos.style.display = canManagePosts ? 'block' : 'none';
+    // --- 📊 BLOCO CRÍTICO: RENDERIZAÇÃO DO DASHBOARD (FIM DO PULO VISUAL) ---
 
-    const menuUsuarios = document.getElementById('link-usuarios');
-    if (menuUsuarios) menuUsuarios.style.display = canManageUnitUsers ? 'block' : 'none';
+    const masterContainer = document.getElementById('dashboard-content-by-role');
+    const adminCont = document.getElementById('admin-gestor-cards-container');
+    const opCont = document.getElementById('operacional-cards-container');
 
-    const menuListas = document.getElementById('link-listas');
-    if (menuListas) menuListas.style.display = canManageUnitLists ? 'block' : 'none';
+    // ✅ RESET INICIAL FORÇADO: Garante que nada apareça antes da decisão
+    if (adminCont) adminCont.style.setProperty('display', 'none', 'important');
+    if (opCont) opCont.style.setProperty('display', 'none', 'important');
 
-    const menuAlmox = document.getElementById('link-almoxarifado');
-    if (menuAlmox) menuAlmox.style.display = isGestorOuAdmin ? 'block' : 'none';
-
-    const menuCautelas = document.getElementById('link-cautelas');
-    if (menuCautelas) menuCautelas.style.display = 'block';
-
-    const menuHistory = document.getElementById('link-global-history');
-    if (menuHistory) menuHistory.style.display = canViewUnitHistory ? 'block' : 'none';
-
-    // 3. BOTÕES DE AÇÃO E CADASTRO
-    const btnNovoPosto = document.getElementById('btn-toggle-posto');
-    if (btnNovoPosto) btnNovoPosto.style.display = souCúpula ? 'inline-flex' : 'none';
-
-    const btnNovaVtr = document.getElementById('btn-toggle-vtr-base');
-    if (btnNovaVtr) btnNovaVtr.style.display = souCúpula ? 'inline-flex' : 'none';
-
-    const btnGlobal = document.getElementById('btn-novo-cadastro-global');
-    if (btnGlobal) btnGlobal.style.display = souCúpula ? 'inline-flex' : 'none';
-
-    // 4. RENDERIZAÇÃO DE CARDS DO DASHBOARD
-    if (role === 'operacional') {
-        renderOperacionalCards();
+    if (isOperacional) {
+        // Liga o operacional e garante que o container master-detail se comporte como full-width
+        if (masterContainer) masterContainer.style.setProperty('display', 'block', 'important');
+        renderOperacionalCards(); 
     } else {
+        // Liga o gestor e restaura as colunas (display flex)
+        if (masterContainer) masterContainer.style.setProperty('display', 'flex', 'important');
         renderAdminGestorCards(canViewDashboardCards);
     }
 
     // 5. RÓTULO DA SEÇÃO ADMINISTRATIVA
-    const adminLinks = ['link-unidades', 'link-postos', 'link-usuarios', 'link-listas', 'link-almoxarifado', 'link-global-history'];
-    const anyAdminLinkVisible = adminLinks.some(id => {
-        const el = document.getElementById(id);
-        return el && el.style.display !== 'none';
-    });
-
     const rotuloAdmin = document.getElementById('sidebar-rotulo-admin');
-    if (rotuloAdmin) rotuloAdmin.style.display = anyAdminLinkVisible ? 'block' : 'none';
-
-    // 6. FINALIZAÇÃO DE INTERFACE
-    const selectPostoNovo = document.getElementById('new-user-posto');
-    const selectQuadroNovo = document.getElementById('new-user-quadro');
-    if (selectPostoNovo && selectQuadroNovo) {
-        selectPostoNovo.addEventListener('change', () => atualizarQuadroCad(selectPostoNovo, selectQuadroNovo));
+    if (rotuloAdmin) {
+        const anyAdminVisible = !isOperacional && configuracaoMenus.some(m => m.permitir);
+        rotuloAdmin.style.display = anyAdminVisible ? 'block' : 'none';
     }
 
+    // 6. FINALIZAÇÃO
     const editorArq = document.getElementById('view-editor-arquitetura');
     if (editorArq) editorArq.style.display = 'none';
 
     closeMenuMobile();
+    if (window.innerWidth <= 768) history.pushState(null, null, location.href);
 
-    if (window.innerWidth <= 768) {
-        history.pushState(null, null, location.href);
-    }
-
-    // 🔥 DISPARO FINAL
+    // ✅ DISPARO FINAL: Note que removemos a lógica duplicada de dentro do switchView('dashboard') 
+    // pois já resolvemos a renderização nos passos acima.
     switchView('dashboard');
-
+    
     if (typeof setupMasksForModal === 'function') setupMasksForModal();
 }
 
@@ -316,33 +314,45 @@ function toggleSubMenu(id, btn) {
 // --- NOVO: Cards Específicos para Operacional ---
 function renderOperacionalCards() {
     const container = document.getElementById('operacional-cards-container');
+    const masterContainer = document.getElementById('dashboard-content-by-role');
+    
     if (!container) return;
 
+    // ✅ BLOQUEIO DO PULO VISUAL: Garante que o container operacional apareça e o de admin suma
+    container.style.setProperty('display', 'block', 'important');
+    
     const adminContainer = document.getElementById('admin-gestor-cards-container');
-    if (adminContainer) adminContainer.style.display = 'none';
+    if (adminContainer) {
+        adminContainer.style.setProperty('display', 'none', 'important');
+    }
 
-    // ✅ HIERARQUIA V3: Atividades do dia primeiro, Cards de Resumo depois
+    // ✅ AJUSTE ESTRUTURAL: Ativa a largura total no container pai
+    if (masterContainer) {
+        masterContainer.classList.add('dashboard-operacional-full');
+    }
+
+    // ✅ HIERARQUIA V3: Layout de largura total (Full-Width)
     container.innerHTML = `
-        <div class="sigma-v3-clean-wrapper" style="margin-top: 10px;">
+        <div class="sigma-v3-clean-wrapper" style="margin-top: 10px; width: 100%;">
             
             <div class="sigma-v3-title-label">
                 <i class="fas fa-calendar-day" style="color: #800020;"></i>
                 <span>Atividades Realizadas Hoje</span>
             </div>
-            <ul id="today-list" class="history-list" style="background: white; border-radius: 15px; padding: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); margin-bottom: 40px; list-style: none;">
+            <ul id="today-list" class="history-list" style="background: white; border-radius: 15px; padding: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); margin-bottom: 40px; list-style: none; width: 100%;">
                 <li style="text-align:center; color:#999; padding:20px;">
                     <i class="fas fa-sync fa-spin"></i> Carregando registros de hoje...
                 </li>
             </ul>
 
-            <div class="sigma-v3-title-label" style="border-top: 1px solid rgba(0,0,0,0.05); padding-top: 30px;">
+            <div class="sigma-v3-title-label" style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 30px;">
                 <i class="fas fa-chart-bar" style="color: #2c7399;"></i> 
                 <span>Dashboard de Serviço</span>
             </div>
 
-            <div class="cards-grid" style="display: flex; flex-wrap: wrap; gap: 20px;">
+            <div class="cards-grid-v3-op">
                 
-                <div class="sigma-v3-summary-card sigma-v3-card-ok icon-conferencia" onclick="switchView('my-history')">
+                <div class="sigma-v3-summary-card sigma-v3-card-ok icon-conferencia" onclick="switchView('my-history')" style="width:100%; margin:0;">
                     <h3>Minhas Conferências</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-conf-count">0</div>
@@ -357,7 +367,7 @@ function renderOperacionalCards() {
                     </div>
                 </div>
 
-                <div class="sigma-v3-summary-card sigma-v3-card-unit icon-custodia" onclick="switchView('cautelas'); showCautelasDashboard('Cautelas Ativas');">
+                <div class="sigma-v3-summary-card sigma-v3-card-unit icon-custodia" onclick="switchView('cautelas-ativas')" style="width:100%; margin:0;">
                     <h3>Cautelas Ativas</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-my-active-cautela-count">0</div>
@@ -372,7 +382,7 @@ function renderOperacionalCards() {
                     </div>
                 </div>
 
-                <div class="sigma-v3-summary-card sigma-v3-card-posto icon-receber" onclick="switchView('cautelas'); showCautelasDashboard('Cautelas a Receber');">
+                <div class="sigma-v3-summary-card sigma-v3-card-posto icon-receber" onclick="switchView('cautelas-receber')" style="width:100%; margin:0;">
                     <h3>Cautelas a receber</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-cautela-receive-count">0</div>
@@ -391,9 +401,8 @@ function renderOperacionalCards() {
         </div>
     `;
 
-    // Dispara a lógica de preenchimento dos dados (ul e contadores)
+    // Dispara a lógica de preenchimento dos dados
     updateOperacionalCards();
-    container.style.display = 'block';
 }
 
 // [NOVO] Atualiza a contagem do Card "Minhas Conferências"
@@ -548,27 +557,46 @@ function renderAdminGestorCards(canViewDashboardCards) {
     const containerPai = document.getElementById('admin-gestor-cards-container');
     const cardsContainer = document.getElementById('cards-container');
     const msgLoading = document.getElementById('loading-message-dashboard');
+    const opContainer = document.getElementById('operacional-cards-container');
+    const masterContainer = document.getElementById('dashboard-content-by-role');
 
-    // 1. Verificação de segurança: Se os elementos fixos do HTML não existirem, para aqui.
+    // 1. Verificação de segurança
     if (!containerPai || !cardsContainer) {
         console.error("❌ LOG: Estrutura estática do Dashboard não encontrada no HTML.");
         return;
     }
 
-    // 2. Se o usuário não tem permissão, garante que tudo suma e limpa os cards antigos
+    // 2. Permissão e Limpeza Radical
     if (!canViewDashboardCards) {
         cardsContainer.innerHTML = '';
-        containerPai.style.display = 'none';
+        containerPai.style.setProperty('display', 'none', 'important');
         return;
     }
 
-    // 3. Exibe o container pai (que agora já tem a estrutura interna fixa)
-    containerPai.style.display = 'block';
-    if (msgLoading) msgLoading.style.display = 'block';
+    // ✅ BLINDAGEM: Oculta o container operacional imediatamente com prioridade máxima
+    if (opContainer) {
+        opContainer.style.setProperty('display', 'none', 'important');
+    }
 
-    // 4. ✅ SUCESSO GARANTIDO: Como o elemento é fixo, não precisamos de timers ou frames.
-    // Chamamos a função de dados que vai preencher o 'cards-container'.
-    console.log("✅ LOG: Container localizado. Solicitando dados ao Firebase...");
+    // ✅ RESTAURAÇÃO DE LAYOUT: Remove a classe full-width do operacional para reativar as colunas
+    if (masterContainer) {
+        masterContainer.classList.remove('dashboard-operacional-full');
+        // Garante que o container master volte a ser flex (duas colunas)
+        masterContainer.style.setProperty('display', 'flex', 'important');
+    }
+
+    // 3. Exibição dos elementos de Gestor com prioridade máxima
+    containerPai.style.setProperty('display', 'block', 'important');
+    if (msgLoading) msgLoading.style.setProperty('display', 'block', 'important');
+
+    // ✅ AJUSTE VISUAL: Garante que o placeholder lateral (coluna da direita) apareça para o Gestor
+    const placeholder = document.getElementById('detail-placeholder');
+    if (placeholder) {
+        placeholder.style.setProperty('display', 'flex', 'important');
+    }
+
+    // 4. Carregamento de dados
+    console.log("✅ LOG: Layout de colunas restaurado. Solicitando dados ao Firebase...");
     loadCaaData();
 }
 
@@ -2304,10 +2332,31 @@ function switchView(v) {
     const appRunner = document.getElementById('app-runner-container');
     if (appRunner) { appRunner.style.display = 'none'; }
 
-    // ✅ Limpa todos os links ativos (Pai e Submenu)
+    // ✅ LIMPEZA DE LAYOUT: Reseta o container master e garante que colunas fantasmas não apareçam
+    const masterContainer = document.getElementById('dashboard-content-by-role');
+    const detailPlaceholder = document.getElementById('detail-placeholder');
+    const caTableWrapper = document.getElementById('ca-table-wrapper');
+
+    if (masterContainer) {
+        masterContainer.classList.remove('dashboard-operacional-full');
+        // Se não for dashboard, garante que o container master-detail suma por completo
+        if (v !== 'dashboard') {
+            masterContainer.style.setProperty('display', 'none', 'important');
+        }
+    }
+
+    // ✅ HIGIENE DE DETALHES: Limpa a coluna da direita ao trocar de tela
+    if (detailPlaceholder) detailPlaceholder.style.display = 'none';
+    if (caTableWrapper) caTableWrapper.style.display = 'none';
+
+    // ✅ LIMPEZA DE CONTAINER OPERACIONAL: Evita carregar lixo visual
+    const opContainer = document.getElementById('operacional-cards-container');
+    if (opContainer && v !== 'dashboard') opContainer.innerHTML = '';
+
+    // Limpa todos os links ativos (Pai e Submenu)
     document.querySelectorAll('#main-sidebar a, .sigma-v3-submenu a').forEach(el => el.classList.remove('active'));
 
-    // ✅ BLOCO INTERCEPTADOR DE CAUTELAS
+    // BLOCO INTERCEPTADOR DE CAUTELAS
     if (v && v.startsWith('cautelas')) {
         const viewCautelas = document.getElementById('view-cautelas');
         if (viewCautelas) viewCautelas.style.display = 'block';
@@ -2354,18 +2403,18 @@ function switchView(v) {
         const resCont = document.getElementById('resume-container');
         const adminCont = document.getElementById('admin-gestor-cards-container');
         if (resCont) resCont.innerHTML = '';
+        
+        // Garante que o container master-detail apareça apenas agora
+        if (masterContainer) masterContainer.style.setProperty('display', 'flex', 'important');
+
         carregarAlertasTransferencia();
 
         if (currentUserData) {
             const role = currentUserData.role || 'operacional';
-            const isAdmin = (role === 'admin' || role === 'gestor_geral');
-            const isGestor = (role === 'gestor');
-
             if (role === 'operacional') {
                 renderOperacionalCards();
             } else {
-                // ✅ RESTAURAÇÃO: Liga o container e dispara a busca das pendências (ABT-18, etc)
-                if (adminCont) adminCont.style.display = 'block';
+                if (adminCont) adminCont.style.setProperty('display', 'block', 'important');
                 loadCaaData();
             }
         }
@@ -2379,7 +2428,6 @@ function switchView(v) {
     if (v === 'listas') carregarCardsListasExistentes();
 
     if (v === 'my-history') {
-        // ✅ Lógica de Abas para Atividades (Unificado)
         const tabsContainer = document.getElementById('atividades-tabs-container');
         if (currentUserData && tabsContainer) {
             const role = currentUserData.role;
@@ -2387,34 +2435,29 @@ function switchView(v) {
             tabsContainer.style.display = isGestor ? 'flex' : 'none';
         }
 
-        // Reset de datas para pessoal
         const startInput = document.getElementById('my-hist-start');
         const endInput = document.getElementById('my-hist-end');
-        if (startInput) {
-            const startDate = new Date();
-            startDate.setDate(startDate.getDate() - 30);
-            startInput.valueAsDate = startDate;
-        }
-        if (endInput) endInput.valueAsDate = new Date();
+        
+        const dataHoje = new Date().toISOString().split('T')[0];
+        const dataInicio = new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0];
 
-        const role = currentUserData.role;
-        if (role === 'admin' || role === 'gestor_geral' || role === 'gestor') {
+        if (startInput) startInput.value = dataInicio;
+        if (endInput) endInput.value = dataHoje;
+
+        if (currentUserData.role !== 'operacional') {
             carregarUsuariosFiltro();
             const globStart = document.getElementById('glob-hist-start');
             const globEnd = document.getElementById('glob-hist-end');
-            if (globStart) globStart.valueAsDate = new Date(new Date().setDate(new Date().getDate() - 30));
-            if (globEnd) globEnd.valueAsDate = new Date();
+            if (globStart) globStart.value = dataInicio;
+            if (globEnd) globEnd.value = dataHoje;
         }
 
-        // ✅ INICIALIZAÇÃO DO CALENDÁRIO MODERNO (Flatpickr)
-        // Isso mata o visual "velho" e aplica o padrão Sigma V3
         if (typeof flatpickr !== 'undefined') {
             flatpickr(".sigma-v3-date-input", {
                 dateFormat: "Y-m-d",
                 altInput: true,
                 altFormat: "d/m/Y",
                 allowInput: true,
-                // Altere "pt" para "Portuguese" caso o erro persista após adicionar o script
                 locale: "pt"
             });
         }
