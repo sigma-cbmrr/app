@@ -194,7 +194,7 @@ function setupUIBasedOnRole() {
         { id: 'link-unidades', permitir: souCúpula },
         { id: 'link-postos', permitir: canManagePosts },
         { id: 'link-usuarios', permitir: canManageUnitUsers },
-        { id: 'link-listas', permitir: canManageUnitLists }, 
+        { id: 'link-listas', permitir: canManageUnitLists },
         { id: 'link-vtr-bases', permitir: souCúpula },
         { id: 'link-almoxarifado', permitir: isGestorOuAdmin },
         { id: 'link-global-history', permitir: canViewUnitHistory }
@@ -240,7 +240,7 @@ function setupUIBasedOnRole() {
     if (isOperacional) {
         // Liga o operacional e garante que o container master-detail se comporte como full-width
         if (masterContainer) masterContainer.style.setProperty('display', 'block', 'important');
-        renderOperacionalCards(); 
+        renderOperacionalCards();
     } else {
         // Liga o gestor e restaura as colunas (display flex)
         if (masterContainer) masterContainer.style.setProperty('display', 'flex', 'important');
@@ -264,7 +264,7 @@ function setupUIBasedOnRole() {
     // ✅ DISPARO FINAL: Note que removemos a lógica duplicada de dentro do switchView('dashboard') 
     // pois já resolvemos a renderização nos passos acima.
     switchView('dashboard');
-    
+
     if (typeof setupMasksForModal === 'function') setupMasksForModal();
 }
 
@@ -316,12 +316,12 @@ function toggleSubMenu(id, btn) {
 function renderOperacionalCards() {
     const container = document.getElementById('operacional-cards-container');
     const masterContainer = document.getElementById('dashboard-content-by-role');
-    
+
     if (!container) return;
 
     // ✅ BLOQUEIO DO PULO VISUAL: Garante que o container operacional apareça e o de admin suma
     container.style.setProperty('display', 'block', 'important');
-    
+
     const adminContainer = document.getElementById('admin-gestor-cards-container');
     if (adminContainer) {
         adminContainer.style.setProperty('display', 'none', 'important');
@@ -577,14 +577,14 @@ function renderAdminGestorCards(canViewDashboardCards) {
     if (caTableWrapper) {
         // ✅ MATANDO A BARRA CINZA: Escondemos o wrapper e resetamos o tamanho
         caTableWrapper.style.setProperty('display', 'none', 'important');
-        caTableWrapper.style.setProperty('height', '0', 'important'); 
-        caTableWrapper.style.setProperty('padding', '0', 'important'); 
-        
+        caTableWrapper.style.setProperty('height', '0', 'important');
+        caTableWrapper.style.setProperty('padding', '0', 'important');
+
         caTableWrapper.innerHTML = `
             <div id="table-title"></div>
             <div id="no-issues-msg" style="display:none; text-align:center; padding:20px; color:#94a3b8;"></div>
             <div id="sigma-v3-dynamic-grid" class="sigma-v3-details-grid"></div>
-        `; 
+        `;
     }
 
     // 2. RESET DE LAYOUT
@@ -599,20 +599,20 @@ function renderAdminGestorCards(canViewDashboardCards) {
         detailColumn.style.setProperty('display', 'block', 'important');
         detailColumn.style.setProperty('background', '#fff', 'important'); // Coluna sempre branca
     }
-    
-   if (detailsWrapper) {
-    detailsWrapper.style.setProperty('display', 'block', 'important');
-    detailsWrapper.style.setProperty('background', 'transparent', 'important'); 
-    detailsWrapper.style.setProperty('padding', '0', 'important');
-    detailsWrapper.style.setProperty('border', 'none', 'important');
-    detailsWrapper.style.setProperty('height', 'auto', 'important'); // ✅ Garante que ele não estique sozinho
-}
+
+    if (detailsWrapper) {
+        detailsWrapper.style.setProperty('display', 'block', 'important');
+        detailsWrapper.style.setProperty('background', 'transparent', 'important');
+        detailsWrapper.style.setProperty('padding', '0', 'important');
+        detailsWrapper.style.setProperty('border', 'none', 'important');
+        detailsWrapper.style.setProperty('height', 'auto', 'important'); // ✅ Garante que ele não estique sozinho
+    }
 
     // 3. DESENHO DO PLACEHOLDER
     if (placeholder) {
         placeholder.style.setProperty('display', 'flex', 'important');
         placeholder.style.setProperty('visibility', 'visible', 'important');
-        
+
         // Altura otimizada para Desktop
         placeholder.innerHTML = `
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 280px; color: #94a3b8; text-align: center; padding: 20px; background: #fff;">
@@ -2363,26 +2363,38 @@ function switchView(v) {
     const appRunner = document.getElementById('app-runner-container');
     if (appRunner) { appRunner.style.display = 'none'; }
 
+    // ✅ GESTÃO AUTOMÁTICA DE SUBMENUS: Se sair das cautelas, retrai o menu e reseta a seta
+    if (v && !v.startsWith('cautelas')) {
+        const submenuCautelas = document.getElementById('submenu-cautelas');
+        const linkCautelasGroup = document.getElementById('link-cautelas-group');
+
+        if (submenuCautelas) {
+            submenuCautelas.style.display = 'none';
+        }
+
+        if (linkCautelasGroup) {
+            const arrow = linkCautelasGroup.querySelector('.arrow-icon');
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+        }
+    }
+
     // ✅ LIMPEZA DE LAYOUT: Reseta o container master e garante que colunas fantasmas não apareçam
     const masterContainer = document.getElementById('dashboard-content-by-role');
     const detailPlaceholder = document.getElementById('detail-placeholder');
-    const detailColumn = document.querySelector('.dashboard-detail-column'); // Segunda coluna
+    const detailColumn = document.querySelector('.dashboard-detail-column');
     const caTableWrapper = document.getElementById('ca-table-wrapper');
 
     if (masterContainer) {
         masterContainer.classList.remove('dashboard-operacional-full');
-        // Se não for dashboard, garante que o container master-detail suma por completo
         if (v !== 'dashboard') {
             masterContainer.style.setProperty('display', 'none', 'important');
         }
     }
 
-    // ✅ HIGIENE DE DETALHES: Garante que a segunda coluna e placeholders sumam ao trocar de tela
     if (detailPlaceholder) detailPlaceholder.style.display = 'none';
     if (caTableWrapper) caTableWrapper.style.display = 'none';
     if (detailColumn) detailColumn.style.setProperty('display', 'none', 'important');
 
-    // ✅ LIMPEZA DE CONTAINER OPERACIONAL: Evita carregar lixo visual
     const opContainer = document.getElementById('operacional-cards-container');
     if (opContainer && v !== 'dashboard') opContainer.innerHTML = '';
 
@@ -2402,8 +2414,15 @@ function switchView(v) {
         else if (v === 'cautelas-receber') showCautelasDashboard('Cautelas a Receber');
         else if (v === 'cautelas-historico') showCautelasDashboard('Histórico');
 
+        // ✅ CORREÇÃO: Apenas o subitem recebe a classe 'active'
         const subLink = document.getElementById(`link-${v}`);
-        if (subLink) subLink.classList.add('active');
+        if (subLink) {
+            subLink.classList.add('active');
+        }
+
+        // O menu pai (link-cautelas-group) NÃO recebe active aqui, 
+        // assim ele permanece com a cor padrão de item não selecionado.
+
         return;
     }
 
@@ -2434,26 +2453,21 @@ function switchView(v) {
     // 4. DISPARO DE CARREGAMENTO DE DADOS ESPECÍFICOS
     if (v === 'dashboard') {
         const resCont = document.getElementById('resume-container');
-        const adminCont = document.getElementById('admin-gestor-cards-container');
         if (resCont) resCont.innerHTML = '';
-        
+
         carregarAlertasTransferencia();
 
         if (currentUserData) {
             const role = currentUserData.role || 'operacional';
             if (role === 'operacional') {
-                // ✅ AJUSTE OPERACIONAL: Container Master como BLOCK (1 coluna) e esconde detalhes
                 if (masterContainer) masterContainer.style.setProperty('display', 'block', 'important');
                 if (detailColumn) detailColumn.style.setProperty('display', 'none', 'important');
                 renderOperacionalCards();
             } else {
-                // ✅ AJUSTE GESTOR: Container Master como FLEX (2 colunas) e ativa detalhes
                 if (masterContainer) masterContainer.style.setProperty('display', 'flex', 'important');
                 if (detailColumn) detailColumn.style.setProperty('display', 'block', 'important');
-                
-                // 🚀 AQUI ESTAVA O ERRO: Chamamos a função que DESENHA o placeholder e 
-                // internamente ela já dispara o loadCaaData().
-                const canViewDashboardCards = true; // Ou use sua variável de permissão
+
+                const canViewDashboardCards = true;
                 renderAdminGestorCards(canViewDashboardCards);
             }
         }
@@ -2476,7 +2490,7 @@ function switchView(v) {
 
         const startInput = document.getElementById('my-hist-start');
         const endInput = document.getElementById('my-hist-end');
-        
+
         const dataHoje = new Date().toISOString().split('T')[0];
         const dataInicio = new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0];
 
@@ -2526,7 +2540,7 @@ function mostrarTabela(data) {
     const wrapper = document.getElementById('ca-table-wrapper');
     const gridContainer = document.getElementById('sigma-v3-dynamic-grid');
     const msgNoIssues = document.getElementById('no-issues-msg');
-    const placeholder = document.getElementById('detail-placeholder'); 
+    const placeholder = document.getElementById('detail-placeholder');
     const tableTitle = document.getElementById('table-title');
     const detailsWrapper = document.querySelector('.sigma-v3-details-wrapper');
 
@@ -2536,7 +2550,7 @@ function mostrarTabela(data) {
     if (placeholder) {
         placeholder.style.setProperty('display', 'none', 'important');
     }
-    
+
     // ✅ CORREÇÃO 1: Ativa o fundo cinza de contraste APENAS agora que há dados
     if (detailsWrapper) {
         detailsWrapper.style.setProperty('background', '#f1f5f9', 'important');
@@ -2546,7 +2560,7 @@ function mostrarTabela(data) {
 
     wrapper.style.setProperty('display', 'block', 'important');
     wrapper.style.setProperty('height', 'auto', 'important');
-    
+
     // 1. CABEÇALHO PREMIUM COM BOTÃO FECHAR ESTILIZADO
     if (tableTitle) {
         tableTitle.innerHTML = `
@@ -2654,37 +2668,66 @@ function abrirModalGestaoID(data) {
     const elNome = document.getElementById('gestao-item-nome');
     const elObs = document.getElementById('gestao-obs');
     const modal = document.getElementById('modal-gestao-ca');
+    const selectStatus = document.getElementById('gestao-status');
 
     if (!modal) return console.error("Modal de gestão não encontrado no HTML.");
 
+    // ✅ NOVO: IDENTIFICAÇÃO DE HIERARQUIA (KIT)
+    // Verifica se a pendência possui um pai vinculado (id_pai veio do objeto data)
+    const ehAcessorio = !!data.id_pai;
+
     // 2. Preenchimento de Identidade do Material
-    elNome.textContent = data.nome || data.nomeCompleto || "Item não identificado";
+    // Se for acessório, personalizamos o título para orientar o gestor
+    if (ehAcessorio) {
+        elNome.innerHTML = `<i class="fas fa-link" style="color: #2c7399;"></i> PERMUTAR ACESSÓRIO: <span style="color: #d90f23;">${data.nome || data.nomeCompleto}</span><br>
+                            <small style="color: #64748b; font-size: 0.7em;">VINCULADO AO CONJUNTO: ${data.id_pai}</small>`;
+    } else {
+        elNome.textContent = data.nome || data.nomeCompleto || "Item não identificado";
+    }
 
     // 3. Mapeamento de IDs para o Processamento (Inputs Hidden)
-    // Certifique-se que esses IDs existem no seu HTML
-    document.getElementById('gestao-doc-id').value = data.docId || "";           // Resultado da Conf.
-    document.getElementById('gestao-item-id-lista').value = data.itemId || "";   // UID Global (Inventário)
+    document.getElementById('gestao-doc-id').value = data.docId || "";
+    document.getElementById('gestao-item-id-lista').value = data.itemId || "";
 
     const inputPendId = document.getElementById('gestao-pendencia-id');
     if (inputPendId) {
-        inputPendId.value = data.pendenciaId || ""; // O ID da Pendência (PEND-...)
+        inputPendId.value = data.pendenciaId || "";
     }
 
-    // 4. Configuração do Campo de Texto
+    // ✅ NOVO: INPUT HIDDEN PARA O PAI (Para usarmos no salvarGestaoCa)
+    let inputPai = document.getElementById('gestao-id-pai');
+    if (!inputPai) {
+        inputPai = document.createElement('input');
+        inputPai.type = 'hidden';
+        inputPai.id = 'gestao-id-pai';
+        modal.appendChild(inputPai);
+    }
+    inputPai.value = data.id_pai || "";
+
+    // 4. Configuração do Campo de Texto e Opções de Status
     if (elObs) {
         elObs.value = '';
         const desc = data.descricao || "Sem descrição";
-        elObs.placeholder = `Descreva a solução para: ${desc}`;
+        elObs.placeholder = ehAcessorio ?
+            `Informe os dados da nova peça que substituirá esta avariada no conjunto...` :
+            `Descreva a solução para: ${desc}`;
     }
 
-    // 5. Reset de campos de quantidade (se houver)
+    // ✅ AJUSTE DINÂMICO DE OPÇÕES: Se for kit, o foco é a Permuta/Substituição
+    if (selectStatus && ehAcessorio) {
+        // Opcional: Você pode forçar o valor ou adicionar uma opção "Substituir Peça"
+        // Por enquanto, manteremos a compatibilidade com o que você já tem
+    }
+
+    // 5. Reset de campos de quantidade
     const elQtd = document.getElementById('gestao-qtd');
     if (elQtd) elQtd.value = data.qtd || data.quantidade || '1';
 
     // 6. Exibição
     modal.style.display = 'flex';
-    console.log("🛠️ Modal de Gestão aberto para a pendência:", data.pendenciaId);
+    console.log(`🛠️ Modal de Gestão (${ehAcessorio ? 'ACESSÓRIO' : 'PRINCIPAL'}) aberto:`, data.pendenciaId);
 }
+
 function fecharTabela() {
     const wrapper = document.getElementById('ca-table-wrapper');
     const placeholder = document.getElementById('detail-placeholder');
@@ -2727,12 +2770,15 @@ function toggleGestaoQtd() {
 document.getElementById('gestao-status').onchange = toggleGestaoQtd;
 
 async function salvarGestaoCa() {
-    const docId = document.getElementById('gestao-doc-id').value;          // Doc em resultados_conferencias
-    const itemId = document.getElementById('gestao-item-id-lista').value;  // UID Global (DNA do material)
-    const pendId = document.getElementById('gestao-pendencia-id').value;   // ID da pendência (PEND-...)
-    const statusAcao = document.getElementById('gestao-status').value;     // Solucionado, Em solução, etc.
+    const docId = document.getElementById('gestao-doc-id').value;
+    const itemId = document.getElementById('gestao-item-id-lista').value;
+    const pendId = document.getElementById('gestao-pendencia-id').value;
+    const statusAcao = document.getElementById('gestao-status').value;
     const obsGestor = document.getElementById('gestao-obs').value.trim();
     const qtdInformada = parseInt(document.getElementById('gestao-qtd').value) || 1;
+
+    // ✅ CAPTURA O VÍNCULO DO PAI (Se houver)
+    const idPai = document.getElementById('gestao-id-pai') ? document.getElementById('gestao-id-pai').value : null;
 
     if (!obsGestor) return alert("Descreva a ação tomada.");
 
@@ -2751,15 +2797,30 @@ async function salvarGestaoCa() {
         if (!resSnap.exists) throw new Error("Registro de conferência não encontrado.");
 
         let resData = resSnap.data();
-        let itensRelatorio = resData.itensRelatorio || []; // Usamos itensRelatorio que é a fonte oficial do PDF
+        let itensRelatorio = resData.itensRelatorio || [];
 
-        const itemRes = itensRelatorio.find(i => i.id === itemId || i.uid_global === itemId);
+        // ✅ LÓGICA DE BUSCA HIERÁRQUICA
+        // Se houver idPai, buscamos o "anfitrião". Se não, buscamos o item direto.
+        const idBusca = idPai || itemId;
+        const itemRes = itensRelatorio.find(i => i.id === idBusca || i.uid_global === idBusca);
 
         if (itemRes && itemRes.pendencias_ids) {
             const pIdx = itemRes.pendencias_ids.findIndex(p => p.id === pendId);
+
             if (pIdx > -1) {
                 if (statusAcao === 'Solucionado') {
-                    itemRes.pendencias_ids.splice(pIdx, 1); // Remove do dashboard pois foi resolvido
+                    // Se for acessório, registramos a permuta na descrição antes de remover
+                    if (idPai) {
+                        if (!itemRes.historico_permutas) itemRes.historico_permutas = [];
+                        itemRes.historico_permutas.push({
+                            data: dataHora,
+                            item_substituido: itemId,
+                            gestor: nomeGestor,
+                            obs: obsGestor
+                        });
+                    }
+
+                    itemRes.pendencias_ids.splice(pIdx, 1);
                     if (itemRes.pendencias_ids.length === 0) itemRes.status = 'S/A';
                 } else {
                     itemRes.pendencias_ids[pIdx].status_gestao = statusAcao.toUpperCase();
@@ -2769,26 +2830,26 @@ async function salvarGestaoCa() {
         }
         batch.update(resRef, { itensRelatorio });
 
-        // 2. SINCRONIZAÇÃO COM O INVENTÁRIO (DEVOLUÇÃO DE SALDO)
-        // ✅ AJUSTE CIRÚRGICO: Se resolvido, o saldo sai de PENDENTE e volta para DISPONÍVEL
+        // 2. SINCRONIZAÇÃO COM O INVENTÁRIO (DEVOLUÇÃO/TROCA DE SALDO)
         if (statusAcao === 'Solucionado' && itemId) {
             const unidadeId = currentUserData.unidade_id || "UNID-1767838511310";
             const saldoRef = db.collection('inventario').doc(itemId).collection('saldos_unidades').doc(unidadeId);
 
+            // Se for acessório, a lógica de estoque pode ser diferente (ex: consome 1 novo do estoque)
             batch.update(saldoRef, {
                 qtd_disp: firebase.firestore.FieldValue.increment(qtdInformada),
                 qtd_pend: firebase.firestore.FieldValue.increment(-qtdInformada),
                 last_update: dataHora
             });
 
-            // Registro no Histórico de Vida do Material
             const histRef = saldoRef.collection('historico_vida').doc("SOL-" + Date.now());
             batch.set(histRef, {
                 data: dataHora,
-                evento: "SOLUCAO_GESTOR",
+                evento: idPai ? "PERMUTA_ACESSORIO" : "SOLUCAO_GESTOR",
                 quem: nomeGestor,
-                detalhes: `✅ Pendência ${pendId} resolvida via Dashboard. Despacho: ${obsGestor}`,
-                quantidade: qtdInformada
+                detalhes: idPai ? `♻️ Acessório trocado no Conjunto ${idPai}. Despacho: ${obsGestor}` : `✅ Pendência ${pendId} resolvida. Despacho: ${obsGestor}`,
+                quantidade: qtdInformada,
+                vinculo_pai: idPai || "AVULSO"
             });
         }
 
@@ -2796,8 +2857,8 @@ async function salvarGestaoCa() {
 
         Swal.fire({
             icon: 'success',
-            title: 'Ação Registrada!',
-            text: statusAcao === 'Solucionado' ? 'O item retornou ao status DISPONÍVEL no inventário.' : 'Status de solução atualizado.',
+            title: idPai ? 'Permuta Realizada!' : 'Ação Registrada!',
+            text: idPai ? 'O acessório foi substituído e o conjunto está operacional.' : 'O item retornou ao status DISPONÍVEL.',
             confirmButtonColor: '#800020'
         });
 
@@ -6549,62 +6610,84 @@ async function verDetalhesItemAlmox(docId) {
         snapListas.forEach(docVtr => {
             const vtrData = docVtr.data();
             const ehMinhaVtr = (vtrData.unidade_id === currentUserData.unidade_id);
+
             (vtrData.list || []).forEach(setor => {
-                const itNaVtr = (setor.itens || []).find(i => i.uid_global === uidGlobal || i.nome === itemData.nome);
-                if (!itNaVtr) return;
+                (setor.itens || []).forEach(itemPrincipal => {
 
-                if (ehMulti) {
-                    (itNaVtr.tombamentos || []).forEach(t => {
-                        const temC = !!t.cautela; const temP = t.pendencias_ids?.length > 0;
-                        if (ehMinhaVtr || souAdminGeral) { if (temP) cPend++; else if (temC) cCaut++; else cUso++; }
-                        const statusTxt = temP ? 'PENDENTE' : (temC ? 'CAUTELADO' : 'EM USO');
-                        const badgeStyle = temP ? 'background:#fee2e2;color:#b91c1c;' : (temC ? 'background:#fff3cd;color:#856404;' : 'background:#f1f5f9;color:#475569;');
-                        let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
-                            <td><span style="font-weight:700;">${t.tomb}</span><br><small style="color:#64748b;"><i class="fas fa-truck-container" style="margin-right:5px;"></i> ${vtrData.ativo_nome}</small></td>
-                            <td style="text-align:center; font-weight:800; color:#1e293b;">1 un.</td>
-                            <td style="text-align:center;"><span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; ${badgeStyle}">${statusTxt}</span></td>
-                            <td style="text-align:right;">
-                                <div style="display:flex; gap:5px; justify-content:flex-end;">
-                                    ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" title="Retornar ao estoque" class="sigma-v3-tab" style="background:#f59e0b; color:white;"><i class="fas fa-arrow-down"></i></button>` : ''}
-                                    <button onclick="verHistoricoVidaGlobal('${docId}', '${t.tomb}')" title="Ver histórico" class="sigma-v3-tab" style="padding:6px 10px; background:#fef3c7; color:#92400e;"><i class="fas fa-history"></i></button>
-                                </div>
-                            </td>
-                        </tr>`;
-                        if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
-                    });
-                } else {
-                    const qtdFisicaVtr = Number(itNaVtr.quantidadeEsperada) || 0;
-                    const qtdPendVtr = pendenciasVtrMap[docVtr.id] || 0;
-                    const qtdEmUsoLimpa = qtdFisicaVtr - qtdPendVtr;
+                    // A. Verifica se o item principal é o alvo
+                    let itemAlvo = null;
+                    let infoAdicional = "";
 
-                    if (ehMinhaVtr || souAdminGeral) {
-                        cUso += qtdEmUsoLimpa;
-                        cPend += qtdPendVtr;
+                    if (itemPrincipal.uid_global === uidGlobal || itemPrincipal.nome === itemData.nome) {
+                        itemAlvo = itemPrincipal;
+                    }
+                    // ✅ NOVO: B. Verifica se o alvo está "escondido" dentro de um Kit (Acessórios)
+                    else if (itemPrincipal.acessorios_acoplados) {
+                        const ac = itemPrincipal.acessorios_acoplados.find(a => a.uid_global === uidGlobal);
+                        if (ac) {
+                            itemAlvo = ac;
+                            infoAdicional = ` <small style="color:#800020; font-weight:800;">[NO KIT: ${itemPrincipal.nome}]</small>`;
+                        }
                     }
 
-                    if (qtdFisicaVtr > 0) {
-                        let statusHtml = '';
-                        if (qtdEmUsoLimpa > 0 && qtdPendVtr > 0) {
-                            statusHtml = `<div><span style="font-size:0.75em; font-weight:800; color:#475569;">${qtdEmUsoLimpa} un. EM USO</span></div>
-                                          <div style="margin-top:2px;"><span style="padding:2px 8px; border-radius:4px; font-size:0.7em; font-weight:800; background:#fee2e2; color:#b91c1c;">${qtdPendVtr} un. PENDENTE</span></div>`;
-                        } else if (qtdPendVtr > 0) {
-                            statusHtml = `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">${qtdPendVtr} un. PENDENTE</span>`;
-                        } else {
-                            statusHtml = `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#f1f5f9; color:#475569;">EM USO</span>`;
+                    if (!itemAlvo) return;
+
+                    if (ehMulti) {
+                        // ... (Mantenha sua lógica original de Multi aqui se necessário, 
+                        // mas geralmente itens Multi como Suportes Dorsais são os Pais)
+                        (itemAlvo.tombamentos || []).forEach(t => {
+                            const temC = !!t.cautela; const temP = t.pendencias_ids?.length > 0;
+                            if (ehMinhaVtr || souAdminGeral) { if (temP) cPend++; else if (temC) cCaut++; else cUso++; }
+                            const statusTxt = temP ? 'PENDENTE' : (temC ? 'CAUTELADO' : 'EM USO');
+                            const badgeStyle = temP ? 'background:#fee2e2;color:#b91c1c;' : (temC ? 'background:#fff3cd;color:#856404;' : 'background:#f1f5f9;color:#475569;');
+                            let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
+                                <td><span style="font-weight:700;">${t.tomb}</span>${infoAdicional}<br><small style="color:#64748b;"><i class="fas fa-truck-container" style="margin-right:5px;"></i> ${vtrData.ativo_nome}</small></td>
+                                <td style="text-align:center; font-weight:800; color:#1e293b;">1 un.</td>
+                                <td style="text-align:center;"><span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; ${badgeStyle}">${statusTxt}</span></td>
+                                <td style="text-align:right;">
+                                    <div style="display:flex; gap:5px; justify-content:flex-end;">
+                                        ${ehMinhaVtr || role === 'admin' ? `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO','${t.tomb}','${docVtr.id}')" title="Retornar ao estoque" class="sigma-v3-tab" style="background:#f59e0b; color:white;"><i class="fas fa-arrow-down"></i></button>` : ''}
+                                        <button onclick="verHistoricoVidaGlobal('${docId}', '${t.tomb}')" title="Ver histórico" class="sigma-v3-tab" style="padding:6px 10px; background:#fef3c7; color:#92400e;"><i class="fas fa-history"></i></button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                            if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
+                        });
+                    } else {
+                        // Lógica para itens SINGLE (Cilindros, Máscaras, etc.)
+                        const qtdFisicaVtr = Number(itemAlvo.quantidadeEsperada || itemAlvo.quantidade) || 0;
+                        const qtdPendVtr = pendenciasVtrMap[docVtr.id] || 0;
+                        const qtdEmUsoLimpa = qtdFisicaVtr - qtdPendVtr;
+
+                        if (ehMinhaVtr || souAdminGeral) {
+                            cUso += qtdEmUsoLimpa;
+                            cPend += qtdPendVtr;
                         }
 
-                        let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
-                            <td><i class="fas fa-truck-pickup" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${vtrData.ativo_nome}</span></td>
-                            <td style="text-align:center; font-weight:800; color:#1e293b;">${qtdFisicaVtr} un.</td>
-                            <td style="text-align:center;">${statusHtml}</td>
-                            <td style="text-align:right;">
-                                ${ehMinhaVtr || role === 'admin' ?
-                                `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO', null,'${docVtr.id}')" title="Recolher material" class="sigma-v3-tab" style="background:#f59e0b; color:white;"><i class="fas fa-arrow-down"></i></button>` : ''}
-                            </td>
-                        </tr>`;
-                        if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
+                        if (qtdFisicaVtr > 0) {
+                            let statusHtml = '';
+                            if (qtdEmUsoLimpa > 0 && qtdPendVtr > 0) {
+                                statusHtml = `<div><span style="font-size:0.75em; font-weight:800; color:#475569;">${qtdEmUsoLimpa} un. EM USO</span></div>
+                                              <div style="margin-top:2px;"><span style="padding:2px 8px; border-radius:4px; font-size:0.7em; font-weight:800; background:#fee2e2; color:#b91c1c;">${qtdPendVtr} un. PENDENTE</span></div>`;
+                            } else if (qtdPendVtr > 0) {
+                                statusHtml = `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#fee2e2; color:#b91c1c;">${qtdPendVtr} un. PENDENTE</span>`;
+                            } else {
+                                statusHtml = `<span style="padding:4px 10px; border-radius:6px; font-size:0.75em; font-weight:800; background:#f1f5f9; color:#475569;">EM USO</span>`;
+                            }
+
+                            let bufferVtr = `<tr style="background:${ehMinhaVtr ? 'rgba(16,185,129,0.03)' : '#fff'};">
+                                <td><i class="fas fa-truck-pickup" style="margin-right:8px; color:#64748b;"></i><span style="font-weight:700;">${vtrData.ativo_nome}</span>${infoAdicional}</td>
+                                <td style="text-align:center; font-weight:800; color:#1e293b;">${qtdFisicaVtr} un.</td>
+                                <td style="text-align:center;">${statusHtml}</td>
+                                <td style="text-align:right;">
+                                    ${ehMinhaVtr || role === 'admin' ?
+                                    `<button onclick="prepararMovimentacao('${docId}','RECOLHIMENTO', null,'${docVtr.id}')" title="Recolher material" class="sigma-v3-tab" style="background:#f59e0b; color:white;"><i class="fas fa-arrow-down"></i></button>` : ''}
+                                </td>
+                            </tr>`;
+                            if (ehMinhaVtr) htmlPrioridade += bufferVtr; else htmlRestante += bufferVtr;
+                        }
                     }
-                }
+                });
             });
         });
 
@@ -6666,6 +6749,12 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
     const ehMulti = itemData.tipo === 'multi';
     const role = currentUserData.role;
     const souAdmin = (role === 'admin' || role === 'gestor_geral');
+
+    // ✅ NOVO: INTERCEPTAÇÃO DE ANFITRIÃO (Apenas no ENVIO)
+    // Se o item for um anfitrião (Kit) e estiver saindo do estoque
+    if (operacao === 'ENVIO' && itemData.is_anfitriao && !souAdmin) {
+        return abrirModalAcoplamentoAnfitriao(docId, itemData, tombamento);
+    }
 
     // 2. Define Identidade Visual (Cores e Títulos)
     const config = {
@@ -6738,7 +6827,6 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
             if (ehMulti) {
                 await popularTombamentosMovimentacao(docId, operacao, tombamento, viaturaId, config.cor);
             } else {
-                // ✅ BUSCA DE SALDO PARA TRAVA DE QUANTIDADE
                 try {
                     const minhaUnidadeId = currentUserData.unidade_id;
                     const snapSaldo = await db.collection('inventario').doc(docId)
@@ -6749,7 +6837,7 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
                     const labelQtd = document.getElementById('label-qtd-swal');
 
                     if (inputQtd) {
-                        inputQtd.max = saldoDisp; // Define o teto matemático no atributo max
+                        inputQtd.max = saldoDisp;
                         if (labelQtd) {
                             labelQtd.innerHTML = `QUANTIDADE PARA MOVIMENTAR: <span style="float:right; color:#1b8a3e;">Saldo Disponível: ${saldoDisp}</span>`;
                         }
@@ -6772,7 +6860,6 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
                 const qtdMax = parseInt(inputQtd.max);
 
                 if (!qtdValor || qtdValor <= 0) return Swal.showValidationMessage('Informe uma quantidade válida');
-                // ✅ VALIDAÇÃO FINAL DE SEGURANÇA
                 if (qtdValor > qtdMax && operacao === 'ENVIO') {
                     return Swal.showValidationMessage(`Saldo insuficiente! Você só possui ${qtdMax} unidades.`);
                 }
@@ -6798,20 +6885,341 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
         }
     });
 }
+
+// Adicionado o parâmetro setorDestinoIdx para saber onde inserir ao confirmar
+async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = null, setorDestinoIdx = null) {
+    const minhaUnidadeId = currentUserData.unidade_id;
+    const componentesRegra = itemData.componentes_regra || [];
+
+    const isNoEditor = (document.getElementById('view-editor-arquitetura').style.display === 'block');
+
+    Swal.fire({
+        title: 'Montagem de Kit / Acoplamento',
+        width: '600px',
+        html: `
+            <div style="text-align: left; padding: 5px;">
+                <div style="background: #fff8e1; padding: 12px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ffe0b2;">
+                    <small style="color: #e65100; font-weight: 800; text-transform: uppercase; font-size: 0.7em;">Item Anfitrião Identificado</small>
+                    <div style="font-weight: 800; color: #333; font-size: 1.1em;">${itemData.nome} ${tombamentoAlvo ? `[TOMB: ${tombamentoAlvo}]` : ''}</div>
+                    <p style="font-size: 0.8em; margin: 5px 0 0 0; color: #666;">
+                        ${isNoEditor ? 'Selecione os acessórios que compõem este conjunto para a lista atual.' : 'Deseja acoplar acessórios a este item antes de enviar?'}
+                    </p>
+                </div>
+
+                <div id="container-acoplamento-dinamico">
+                    <i class="fas fa-sync fa-spin"></i> Consultando estoque...
+                </div>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'CONFIRMAR COMPOSIÇÃO',
+        confirmButtonColor: '#1b8a3e',
+        cancelButtonText: 'CANCELAR',
+        didOpen: async () => {
+            const container = document.getElementById('container-acoplamento-dinamico');
+            let htmlComponentes = "";
+
+            if (componentesRegra.length === 0) {
+                container.innerHTML = `<p style="font-size:0.85em; color:#94a3b8;">Nenhuma regra de montagem definida.</p>`;
+                return;
+            }
+
+            for (const regra of componentesRegra) {
+                const snapEstoque = await db.collection('inventario')
+                    .where(firebase.firestore.FieldPath.documentId(), '>=', regra.familia_uid)
+                    .where(firebase.firestore.FieldPath.documentId(), '<=', regra.familia_uid + '\uf8ff')
+                    .get();
+
+                let optionsItens = `<option value="">Não acoplar ${regra.nome_familia}</option>`;
+                let temDisponivel = false;
+
+                for (const docIt of snapEstoque.docs) {
+                    const itGlobal = docIt.data();
+                    const saldoDoc = await docIt.ref.collection('saldos_unidades').doc(minhaUnidadeId).get();
+
+                    if (saldoDoc.exists) {
+                        const disponivel = Number(saldoDoc.data().qtd_disp) || 0;
+                        if (disponivel > 0) {
+                            temDisponivel = true;
+                            optionsItens += `<option value="${docIt.id}">${itGlobal.nome} (Disp: ${disponivel})</option>`;
+                        }
+                    }
+                }
+
+                htmlComponentes += `
+                    <div class="linha-acoplamento" style="margin-bottom: 15px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc;">
+                        <label style="display:block; font-weight:800; font-size:0.7em; color:#64748b; text-transform:uppercase; margin-bottom:8px;">${regra.nome_familia}</label>
+                        <div style="display:flex; gap:10px;">
+                            <select class="swal2-select select-item-acoplar" style="flex:2; margin:0; font-size:0.85em; height: 42px;">
+                                ${temDisponivel ? optionsItens : `<option value="">Sem saldo em ${currentUserData.unidade}</option>`}
+                            </select>
+                            <input type="number" class="swal2-input input-qtd-acoplar" value="${temDisponivel ? regra.qtd_sugerida : 0}" min="1" style="flex:0.5; margin:0; height:42px; font-size:0.9em; text-align:center;" ${!temDisponivel ? 'disabled' : ''}>
+                        </div>
+                    </div>`;
+            }
+            container.innerHTML = htmlComponentes;
+        },
+        preConfirm: () => {
+            const acoplados = [];
+            const linhas = document.querySelectorAll('.linha-acoplamento');
+
+            linhas.forEach(linha => {
+                const select = linha.querySelector('.select-item-acoplar');
+                const input = linha.querySelector('.input-qtd-acoplar');
+
+                if (select && select.value) {
+                    acoplados.push({
+                        uid_global: select.value,
+                        nome: select.options[select.selectedIndex].text.split(' (Disp:')[0],
+                        quantidade: parseInt(input.value) || 0
+                    });
+                }
+            });
+            return acoplados;
+        }
+    }).then((result) => {
+        if (result.isConfirmed) {
+            const acopladosConfirmados = result.value || [];
+
+            if (isNoEditor) {
+                itemSelecionadoTemp = {
+                    ...itemData,
+                    id_almox: docId,
+                    tombamentoExibicao: tombamentoAlvo,
+                    acessorios_acoplados: acopladosConfirmados,
+                    acessorios_ja_montados: true
+                };
+
+                exibirDraftCard(`${itemData.nome} [TOMB: ${tombamentoAlvo}] + ${acopladosConfirmados.length} acessórios`);
+
+                // ✅ AJUSTE AQUI: Chama a gravação final diretamente
+                if (setorDestinoIdx !== null) {
+                    executarInsercaoNoSetor(setorDestinoIdx);
+                } else {
+                    setTimeout(() => {
+                        const selectSetor = document.getElementById('select-setor-destino');
+                        if (selectSetor) {
+                            selectSetor.focus();
+                            selectSetor.style.border = "2px solid #2c7399";
+                        }
+                    }, 100);
+                }
+
+            } else {
+                executarMovimentacaoAnfitriao(docId, 'ENVIO', {
+                    tombamento: tombamentoAlvo,
+                    acessorios: acopladosConfirmados
+                });
+            }
+        } else {
+            // Se cancelar, reseta o select para o usuário não achar que o item foi adicionado
+            const selectSetor = document.getElementById('select-setor-destino');
+            if (selectSetor) selectSetor.value = "";
+        }
+    });
+}
+
+function executarInsercaoNoSetor(setorIdx) {
+    const selectSetor = document.getElementById('select-setor-destino');
+    const inputBusca = document.getElementById('input-busca-estoque');
+
+    const novoItem = {
+        uid_global: itemSelecionadoTemp.uid_global || itemSelecionadoTemp.id_almox,
+        nome: itemSelecionadoTemp.nome,
+        tipo: itemSelecionadoTemp.tipo,
+        quantidadeEsperada: 0,
+        is_anfitriao: itemSelecionadoTemp.is_anfitriao || false
+    };
+
+    // Recupera os acessórios (se houver)
+    const acessorios = itemSelecionadoTemp.acessorios_acoplados || itemSelecionadoTemp.acessoriosEscolhidos;
+    if (novoItem.is_anfitriao && acessorios) {
+        novoItem.acessorios_acoplados = JSON.parse(JSON.stringify(acessorios));
+    }
+
+    // Define Saldos/Tombamentos
+    if (itemSelecionadoTemp.tipo === 'single') {
+        novoItem.quantidadeEsperada = itemSelecionadoTemp.quantidadeEscolhida || 1;
+    } else {
+        novoItem.tombamentos = [{
+            tomb: itemSelecionadoTemp.tombamentoExibicao,
+            situacao: "EM CARGA"
+        }];
+        novoItem.quantidadeEsperada = 1;
+    }
+
+    // Inserção na Arquitetura Ativa
+    if (!arquiteturaAtiva[setorIdx].itens) arquiteturaAtiva[setorIdx].itens = [];
+    arquiteturaAtiva[setorIdx].itens.push(novoItem);
+
+    // LIMPEZA E FINALIZAÇÃO
+    cancelarRascunho();
+
+    if (selectSetor) {
+        selectSetor.value = "";
+        selectSetor.style.border = "1px solid #cbd5e1";
+    }
+
+    // Só mescla se NÃO for kit
+    if (!novoItem.is_anfitriao) {
+        processarMesclagemAutomatica(setorIdx);
+    }
+
+    marcarAlteracao();
+    renderizarArquiteturaEditor();
+
+    if (inputBusca) {
+        inputBusca.value = '';
+        inputBusca.focus();
+    }
+}
+
+async function executarMovimentacaoAnfitriao(uidAnfitriao, operacao, dadosKit) {
+    const { tombamento, acessorios } = dadosKit;
+    const minhaUnidadeId = currentUserData.unidade_id;
+    const dataReg = new Date().toLocaleString('pt-BR');
+    const autor = currentUserData.nome_militar_completo;
+
+    const { value: formValues } = await Swal.fire({
+        title: '<span style="font-size: 1.2em; font-weight: 800; color: #1e293b;">Destino do Conjunto</span>',
+        width: '500px',
+        html: `
+            <div style="text-align: left; margin-top: 15px;">
+                <label style="font-size: 0.75em; font-weight: 800; color: #64748b; text-transform: uppercase;">1. Viatura / Destino Alvo:</label>
+                <select id="swal-destino-kit" class="swal2-select" style="width: 100%; height: 45px; margin: 8px 0 20px 0; display: flex;"></select>
+                <label style="font-size: 0.75em; font-weight: 800; color: #64748b; text-transform: uppercase;">2. Setor de Carga Disponível:</label>
+                <select id="swal-setor-kit" class="swal2-select" style="width: 100%; height: 45px; margin: 8px 0 5px 0; display: flex;" disabled></select>
+            </div>
+        `,
+        didOpen: () => {
+            const selectVtr = document.getElementById('swal-destino-kit');
+            const selectSetor = document.getElementById('swal-setor-kit');
+            popularDestinosMovimentacao(false, 'ENVIO');
+            selectVtr.addEventListener('change', async (e) => {
+                const vtrId = e.target.value;
+                if (!vtrId) return;
+                const docVtr = await db.collection('listas_conferencia').doc(vtrId).get();
+                if (docVtr.exists) {
+                    const setores = docVtr.data().list || [];
+                    selectSetor.innerHTML = setores.map(s => `<option value="${s.nome}">${s.nome}</option>`).join('');
+                    selectSetor.disabled = false;
+                }
+            });
+        },
+        preConfirm: () => {
+            const d = document.getElementById('swal-destino-kit').value;
+            const s = document.getElementById('swal-setor-kit').value;
+            if (!d || !s) return Swal.showValidationMessage('Selecione viatura e setor!');
+            return { destinoId: d, setorId: s }
+        }
+    });
+
+    if (!formValues) return;
+
+    Swal.fire({ title: 'Processando Kit...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    try {
+        await db.runTransaction(async (transaction) => {
+            // --- 1. BLOCO DE LEITURAS (OBRIGATÓRIO NO TOPO) ---
+
+            // Leitura Viatura
+            const vtrRef = db.collection('listas_conferencia').doc(formValues.destinoId);
+            const vtrSnap = await transaction.get(vtrRef);
+
+            // Leitura Anfitrião
+            const anfitriaoRef = db.collection('inventario').doc(uidAnfitriao);
+            const anfitriaoSnap = await transaction.get(anfitriaoRef);
+
+            // Leituras de Saldos dos Acessórios (Mapeamos todos antes das escritas)
+            const acessoriosSaldosSnaps = [];
+            for (const ac of acessorios) {
+                const sRef = db.collection('inventario').doc(ac.uid_global).collection('saldos_unidades').doc(minhaUnidadeId);
+                const sSnap = await transaction.get(sRef);
+                acessoriosSaldosSnaps.push({ snap: sSnap, ref: sRef, info: ac });
+            }
+
+            // --- 2. VALIDAÇÕES ---
+            if (!vtrSnap.exists) throw new Error("Viatura não encontrada.");
+            if (!anfitriaoSnap.exists) throw new Error("Anfitrião não encontrado.");
+
+            for (const item of acessoriosSaldosSnaps) {
+                if (!item.snap.exists || item.snap.data().qtd_disp < item.info.quantidade) {
+                    throw new Error(`Saldo insuficiente: ${item.info.nome}`);
+                }
+            }
+
+            // --- 3. BLOCO DE ESCRITAS (APÓS TODAS AS LEITURAS) ---
+
+            const vtrData = vtrSnap.data();
+            let novaLista = [...vtrData.list];
+            let setorObj = novaLista.find(s => s.nome === formValues.setorId);
+
+            const itemAnfitriaoParaVtr = {
+                uid_global: uidAnfitriao,
+                nome: anfitriaoSnap.data().nome,
+                tipo: 'multi',
+                quantidadeEsperada: 1,
+                tombamentos: [{ tomb: tombamento, situacao: "EM CARGA" }],
+                acessorios_acoplados: acessorios
+            };
+            setorObj.itens.push(itemAnfitriaoParaVtr);
+
+            // Escrita Anfitrião
+            const tombRef = anfitriaoRef.collection('tombamentos').doc(tombamento);
+            transaction.update(tombRef, {
+                viatura_id: formValues.destinoId,
+                situacao_atual: "EM CARGA",
+                acessorios_vinculados: acessorios,
+                ultima_mov: dataReg
+            });
+
+            // Escritas Acessórios
+            for (const item of acessoriosSaldosSnaps) {
+                transaction.update(item.ref, {
+                    qtd_disp: firebase.firestore.FieldValue.increment(-item.info.quantidade),
+                    qtd_em_carga: firebase.firestore.FieldValue.increment(item.info.quantidade),
+                    last_update: dataReg
+                });
+
+                const histRef = item.ref.collection('historico_vida').doc();
+                transaction.set(histRef, {
+                    data: dataReg,
+                    evento: "ACOPLAMENTO_KIT",
+                    detalhes: `Acoplado ao Suporte ${tombamento} -> Destino: ${vtrData.ativo_nome}`,
+                    quem: autor,
+                    quantidade: item.info.quantidade
+                });
+            }
+
+            transaction.update(vtrRef, { list: novaLista });
+        });
+
+        Swal.fire('Sucesso!', 'Kit montado e enviado.', 'success');
+        if (typeof carregarAlmoxarifadoUI === 'function') carregarAlmoxarifadoUI();
+
+    } catch (e) {
+        console.error("Erro na Transaction:", e);
+        Swal.fire('Erro de Sincronismo', e.message, 'error');
+    }
+}
+
 async function popularDestinosMovimentacao(souAdmin, operacao, viaturaIdPreSeleccionada = null) {
-    const selectDestino = document.getElementById('swal-mov-destino');
-    if (!selectDestino) return;
+    // ✅ CORREÇÃO: Tenta encontrar o ID do modal comum OU o ID do modal de kit
+    const selectDestino = document.getElementById('swal-mov-destino') || document.getElementById('swal-destino-kit');
+
+    if (!selectDestino) {
+        console.warn("⚠️ [DEBUG] Select de destino não encontrado no DOM.");
+        return;
+    }
 
     try {
         let htmlOptions = `<option value="" disabled selected>Selecione o destino...</option>`;
 
         if (souAdmin) {
-            // ✅ CORREÇÃO V3: Busca na coleção estruturada e ordenada por sigla
             const snapUnidades = await db.collection('unidades_estruturadas')
                 .where('ativo', '==', true)
                 .get();
 
-            // Ordenação manual para garantir estética
             const unidades = snapUnidades.docs.map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => a.sigla.localeCompare(b.sigla));
 
@@ -6819,19 +7227,23 @@ async function popularDestinosMovimentacao(souAdmin, operacao, viaturaIdPreSelec
                 htmlOptions += `<option value="${u.id}">${u.sigla} - ${u.nome_completo}</option>`;
             });
         } else {
-            // GESTOR LOCAL: Busca as listas de conferência (Viaturas/Bases) da unidade dele
+            // GESTOR LOCAL: Busca as listas de conferência (ABT, ABS, etc)
             const snapVtrs = await db.collection('listas_conferencia')
                 .where('unidade_id', '==', currentUserData.unidade_id)
                 .where('ativo', '==', true)
                 .get();
 
-            snapVtrs.forEach(doc => {
-                const data = doc.data();
-                const isSelected = (viaturaIdPreSeleccionada === doc.id) ? 'selected' : '';
-                htmlOptions += `<option value="${doc.id}" ${isSelected}>${data.ativo_nome} (${data.posto_nome})</option>`;
-            });
+            if (snapVtrs.empty) {
+                htmlOptions = `<option value="">Nenhuma viatura ativa na unidade</option>`;
+            } else {
+                snapVtrs.forEach(doc => {
+                    const data = doc.data();
+                    const isSelected = (viaturaIdPreSeleccionada === doc.id) ? 'selected' : '';
+                    // Exibe o nome da viatura (Ex: ABT-18) e o posto (Ex: BRAVO)
+                    htmlOptions += `<option value="${doc.id}" ${isSelected}>${data.ativo_nome} (${data.posto_nome || 'GERAL'})</option>`;
+                });
+            }
 
-            // Se for recolhimento vindo do rastreio, trava o destino para evitar erro
             if (operacao === 'RECOLHIMENTO' && viaturaIdPreSeleccionada) {
                 selectDestino.disabled = true;
                 selectDestino.style.backgroundColor = "#f1f5f9";
@@ -6839,12 +7251,14 @@ async function popularDestinosMovimentacao(souAdmin, operacao, viaturaIdPreSelec
         }
 
         selectDestino.innerHTML = htmlOptions;
+        console.log("✅ Destinos populados com sucesso.");
 
     } catch (e) {
-        console.error("Erro ao popular destinos:", e);
+        console.error("❌ Erro ao popular destinos:", e);
         selectDestino.innerHTML = `<option value="">Erro ao carregar dados</option>`;
     }
 }
+
 async function popularTombamentosMovimentacao(docId, operacao, tombamentoFoco, viaturaId, corTema) {
     const containerTomb = document.getElementById('lista-tomb-swal');
     if (!containerTomb) return;
@@ -7341,40 +7755,53 @@ document.addEventListener('change', function (e) {
 * 1. AUTOCOMPLETE: Busca em tempo real no Catálogo Global
 * Acoplado ao campo 'cat-nome-tecnico' do modal
 */
-async function buscarInteligenteFamilia(termo) {
-    const listUI = document.getElementById('list-suggestions-familia');
-    const boxUI = document.getElementById('suggestions-familia');
+async function buscarInteligenteFamilia(termo, contexto = 'principal') {
+    // Contexto pode ser 'principal' (campo do topo) ou 'componente' (aba de composição)
+    const listUI = contexto === 'principal' ?
+        document.getElementById('list-suggestions-familia') :
+        document.getElementById('list-suggestions-componentes'); // Criaremos este ID no JS da aba
+
+    const boxUI = contexto === 'principal' ?
+        document.getElementById('suggestions-familia') :
+        document.getElementById('suggestions-componentes');
+
     const uidPaiInput = document.getElementById('cat-uid-pai');
 
     if (termo.length < 2) {
-        boxUI.style.display = 'none';
+        if (boxUI) boxUI.style.display = 'none';
         return;
     }
 
     try {
         const termoUpper = termo.toUpperCase();
-        // Busca famílias que tenham o nome ou marcas vinculadas
         const snap = await db.collection('catalogo_familias')
             .where('tags_busca', 'array-contains', termoUpper)
             .limit(5).get();
 
         if (snap.empty) {
-            boxUI.style.display = 'none';
-            uidPaiInput.value = ''; // Se não achou, limpa o ID para criar novo
+            if (boxUI) boxUI.style.display = 'none';
+            if (contexto === 'principal') uidPaiInput.value = '';
             return;
         }
 
         let html = '';
         snap.forEach(doc => {
             const fam = doc.data();
-            html += `<li onclick="selecionarFamilia('${doc.id}', '${fam.nome_pai}')" style="padding:10px; cursor:pointer; border-bottom:1px solid #eee;">
+            // ✅ Mudança cirúrgica na chamada do onclick baseada no contexto
+            const funcChamada = contexto === 'principal' ?
+                `selecionarFamilia('${doc.id}', '${fam.nome_pai}')` :
+                `adicionarLinhaComponenteRegra('${doc.id}', '${fam.nome_pai}')`;
+
+            html += `<li onclick="${funcChamada}" style="padding:10px; cursor:pointer; border-bottom:1px solid #eee;">
                         <i class="fas fa-folder"></i> Família: <b>${fam.nome_pai}</b>
                      </li>`;
         });
 
-        listUI.innerHTML = html;
-        boxUI.style.display = 'block';
-    } catch (e) { console.error(e); }
+        if (listUI) listUI.innerHTML = html;
+        if (boxUI) boxUI.style.display = 'block';
+    } catch (e) {
+        console.error("Erro na busca de família:", e);
+    }
 }
 
 function selecionarFamilia(uid, nome) {
@@ -7382,6 +7809,46 @@ function selecionarFamilia(uid, nome) {
     document.getElementById('cat-uid-pai').value = uid;
     document.getElementById('suggestions-familia').style.display = 'none';
     document.getElementById('cat-nome-pai').style.borderColor = '#1b8a3e';
+}
+
+/*função auxiliar de "selecionarfamilia" */
+function adicionarLinhaComponenteRegra(uid, nome) {
+    const container = document.getElementById('lista-componentes-selecionados');
+    if (!container) return;
+
+    // Evita adicionar a mesma família duas vezes no mesmo kit
+    if (container.querySelector(`[data-familia-uid="${uid}"]`)) {
+        return Swal.fire('Aviso', 'Esta família já foi adicionada à composição.', 'info');
+    }
+
+    const div = document.createElement('div');
+    div.className = 'componente-selecionado-regra'; // Classe que o seu salvamento procura
+    div.dataset.familiaUid = uid;
+    div.dataset.nomeFamilia = nome;
+    div.style.cssText = "display: flex; align-items: center; justify-content: space-between; background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);";
+
+    div.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-link" style="color: #2c7399; font-size: 0.8em;"></i>
+            <b style="font-size: 0.9em; color: #1e293b;">${nome}</b>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <label style="font-size: 0.7em; font-weight: 800; color: #64748b; margin: 0;">QTD SUGERIDA:</label>
+            <input type="number" class="input-qtd-regra" value="1" min="1" 
+                   style="width: 50px; padding: 4px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; font-weight: bold;">
+            <button onclick="this.parentElement.parentElement.remove()" 
+                    style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 5px;">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+
+    container.appendChild(div);
+
+    // Limpa a busca de componentes após adicionar
+    const inputBusca = document.getElementById('input-busca-componente-kit'); // Precisamos criar esse input no HTML da aba
+    if (inputBusca) inputBusca.value = '';
+    document.getElementById('suggestions-componentes').style.display = 'none';
 }
 
 /**
@@ -7395,6 +7862,24 @@ async function salvarCadastroGlobalHierarquico() {
     const tipoControle = document.querySelector('input[name="cat-tipo"]:checked').value;
     let uidPai = document.getElementById('cat-uid-pai').value;
 
+    // ✅ NOVOS CAMPOS CAPTURADOS DO HTML
+    const unidadeMedida = document.getElementById('cat-unidade-medida').value;
+    const exigeInspecao = document.getElementById('cat-has-inspecao').checked;
+    const isAnfitriao = document.getElementById('cat-is-kit').checked;
+
+    // ✅ CAPTURA DE COMPONENTES DA COMPOSIÇÃO (SE HOUVER)
+    let listaComponentesRegra = [];
+    if (isAnfitriao) {
+        const itensSelecionados = document.querySelectorAll('.componente-selecionado-regra');
+        itensSelecionados.forEach(el => {
+            listaComponentesRegra.push({
+                familia_uid: el.dataset.familiaUid,
+                nome_familia: el.dataset.nomeFamilia,
+                qtd_sugerida: parseInt(el.querySelector('.input-qtd-regra').value) || 1
+            });
+        });
+    }
+
     if (!nomePai || !marca || !modelo) return alert("Preencha os campos obrigatórios.");
 
     const btn = document.querySelector('.btn-sync');
@@ -7403,7 +7888,6 @@ async function salvarCadastroGlobalHierarquico() {
     btn.textContent = "Processando DNA...";
 
     const autorNome = currentUserData.nome_militar_completo;
-    // ✅ CAPTURA A UNIDADE DO CRIADOR DINAMICAMENTE
     const unidadeCriadorId = currentUserData.unidade_id || "ADMIN";
     const unidadeCriadorSigla = currentUserData.unidade || "ADMINISTRATIVO";
     const dataRegistro = new Date().toLocaleString('pt-BR');
@@ -7443,6 +7927,10 @@ async function salvarCadastroGlobalHierarquico() {
                 modelo: modelo,
                 categoria: categoria,
                 tipo_controle: tipoControle,
+                unidade_medida: unidadeMedida, // ✅ Adicionado
+                exige_inspecao: exigeInspecao, // ✅ Adicionado
+                is_anfitriao: isAnfitriao,     // ✅ Novo: Flag de Kit
+                componentes_regra: listaComponentesRegra, // ✅ Novo: Lista de famílias compatíveis
                 criado_por: autorNome,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             });
@@ -7460,10 +7948,12 @@ async function salvarCadastroGlobalHierarquico() {
                 nome: nomeTecnicoCompleto,
                 tipo: tipoControle,
                 categoria: categoria,
+                is_anfitriao: isAnfitriao, // ✅ Importante para filtros no Almox
+                componentes_regra: listaComponentesRegra, // ✅ Referência rápida para saída
                 qtd_corporativa_total: 0,
                 criado_em: dataRegistro,
                 criado_por: autorNome,
-                unidade_origem_id: unidadeCriadorId // ✅ Rastro de quem criou
+                unidade_origem_id: unidadeCriadorId
             });
 
             // ✅ SE FOR SINGLE, JÁ CRIA O DOCUMENTO DE SALDO NA UNIDADE DO CRIADOR
@@ -7479,7 +7969,6 @@ async function salvarCadastroGlobalHierarquico() {
                     last_update: dataRegistro
                 });
             }
-            // Itens Multi não precisam de doc prévio, o local_id irá no tombamento no Teste 2.
         });
 
         alert(`✅ Cadastro Global realizado!\nItem vinculado à unidade ${unidadeCriadorSigla}.`);
@@ -8916,62 +9405,57 @@ function fecharEditorArquitetura() {
 // ================================================================
 async function carregarEstoqueParaEditor(unidadeId) {
     try {
-        // 1. RESET: Limpa o cache para garantir que não haja "lixo" de outras unidades
+        console.log("🚀 INICIANDO CARGA DE ESTOQUE PARA UNIDADE:", unidadeId);
         estoqueGestorLocal = [];
 
-        // 2. BUSCA NA NOVA ARQUITETURA:
-        // Entramos no Inventário Único. O desafio aqui é listar apenas os itens 
-        // onde a unidade possui um documento de saldo criado.
-        // Usamos uma "Group Query" ou buscamos os itens globais e filtramos o saldo local.
         const snapItens = await db.collection('inventario').get();
 
         for (const doc of snapItens.docs) {
             const itemGlobal = doc.data();
             const ehMulti = itemGlobal.tipo === 'multi';
+            const uidItem = doc.id;
 
-            // 3. CAPTURA DO SALDO ESPECÍFICO DA UNIDADE
-            // Buscamos na sub-coleção 'saldos_unidades' pelo ID da unidade do gestor
+            // 1. BUSCA DE TOMBAMENTOS (Para itens Multi)
+            let tombamentosDaUnidade = [];
+            if (ehMulti) {
+                const snapTombs = await db.collection('inventario').doc(uidItem)
+                    .collection('tombamentos')
+                    .where('local_id', '==', unidadeId)
+                    .get();
+
+                tombamentosDaUnidade = snapTombs.docs.map(t => t.data());
+            }
+
+            // 2. BUSCA DE SALDO (Para itens Single)
             const saldoDoc = await doc.ref.collection('saldos_unidades').doc(unidadeId).get();
+            const temSaldoSingle = saldoDoc.exists && (Number(saldoDoc.data().qtd_total) > 0);
 
-            if (saldoDoc.exists) {
-                const s = saldoDoc.data();
-                const totalDisponivel = Number(s.qtd_disp) || 0;
+            // ✅ CORREÇÃO CRÍTICA: Se o item estiver no estoque da unidade, montamos o objeto de busca
+            if (tombamentosDaUnidade.length > 0 || temSaldoSingle) {
 
-                // 4. MAPEAMENTO PARA O BUSCADOR (estoqueGestorLocal)
                 const objetoParaBusca = {
-                    id_almox: doc.id, // O UID_GLOBAL (Ex: FAM-001-MOD-1)
-                    nome: itemGlobal.nome,
+                    id_almox: uidItem,
+                    uid_global: uidItem,
+                    nome: itemGlobal.nome || "Item sem nome",
                     tipo: itemGlobal.tipo,
-                    categoria: itemGlobal.categoria,
-                    disponivel: totalDisponivel,
+                    categoria: itemGlobal.categoria || "OUTROS",
                     unidade_id: unidadeId,
-                    uid_global: doc.id
+                    tombamentos: tombamentosDaUnidade,
+                    disponivel: ehMulti ? tombamentosDaUnidade.length : (Number(saldoDoc.data().qtd_disp) || 0),
+                    
+                    // 🔥 A PEÇA QUE FALTA: Injeta as regras de KIT no rascunho de busca
+                    is_anfitriao: itemGlobal.is_anfitriao || false,
+                    componentes_regra: itemGlobal.componentes_regra || [] 
                 };
 
-                // Se for MULTI, precisamos carregar os tombamentos disponíveis para o autocomplete
-                if (ehMulti) {
-                    const snapTombs = await doc.ref.collection('tombamentos')
-                        .where('local_id', '==', unidadeId)
-                        .where('situacao_atual', '==', 'DISPONÍVEL')
-                        .get();
-
-                    objetoParaBusca.tombamentos = snapTombs.docs.map(t => t.data());
-                    // Para itens multi, o 'disponivel' é a contagem de tombamentos livres
-                    objetoParaBusca.disponivel = snapTombs.size;
-                }
-
-                // 5. ALIMENTA O CACHE
-                // Só adicionamos se houver o que gerenciar (saldo > 0 ou tombamentos livres)
-                if (objetoParaBusca.disponivel > 0) {
-                    estoqueGestorLocal.push(objetoParaBusca);
-                }
+                estoqueGestorLocal.push(objetoParaBusca);
             }
         }
 
-        console.log(`🚀 Buscador Inteligente: ${estoqueGestorLocal.length} itens do Inventário mapeados para a unidade ${unidadeId}`);
+        console.log("🏁 CACHE FINALIZADO. Itens com regras de kit mapeados:", estoqueGestorLocal.length);
 
     } catch (e) {
-        console.error("Erro ao mapear Inventário para o Editor:", e);
+        console.error("❌ ERRO CRÍTICO NA CARGA DO ESTOQUE:", e);
     }
 }
 // ================================================================
@@ -8983,7 +9467,6 @@ function renderizarArquiteturaEditor() {
 
     container.innerHTML = '';
 
-    // Define a cor temática baseada no modo (Checklist VTR ou Lista Materiais)
     const corTemaSetor = window.isModoVistoria ? '#2c3e50' : '#800020';
 
     if (arquiteturaAtiva.length === 0) {
@@ -8999,7 +9482,6 @@ function renderizarArquiteturaEditor() {
         setorDiv.className = 'setor-arquitetura-card';
         setorDiv.dataset.index = indexSetor;
 
-        // ✅ Aplica a cor dinâmica no background do cabeçalho do setor
         let htmlHeader = `
             <div class="setor-arquitetura-header" style="background-color: ${corTemaSetor} !important;">
                 <span><i class="fas fa-grip-lines" style="margin-right:10px; opacity:0.5;"></i> ${setor.nome}</span>
@@ -9012,47 +9494,78 @@ function renderizarArquiteturaEditor() {
 
         (setor.itens || []).forEach((item, indexItem) => {
             const ehMulti = item.tipo === 'multi';
+            const ehAnfitriao = item.is_anfitriao || (item.acessorios_acoplados && item.acessorios_acoplados.length > 0);
 
+            // ✅ INÍCIO DO CARD DO ITEM
             htmlItens += `
-                <div class="item-arquitetura-linha" data-item-index="${indexItem}" style="flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px; border-bottom: 1px solid #f1f5f9; position: relative;">
-                    <div class="item-arquitetura-info" style="width: 100%; display: flex; justify-content: space-between; align-items: flex-start;">
-                        <b style="color: #1e293b; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; font-family: 'Inter', sans-serif; padding-right: 25px;">${item.nome}</b>
-                        
-                        <button onclick="${ehMulti ? '' : `marcarParaEstorno(${indexSetor}, ${indexItem})`}" 
-                                style="${ehMulti ? 'display:none;' : 'background: #f1f5f9; border: none; color: #94a3b8; cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s;'}" 
-                                onmouseover="this.style.background='#fee2e2'; this.style.color='#ef4444'" 
-                                onmouseout="this.style.background='#f1f5f9'; this.style.color='#94a3b8'">
-                            <i class="fas fa-times" style="font-size: 9px;"></i>
-                        </button>
-                    </div>
-                    
-                    <div class="lista-tombamentos-container" style="width: 100%; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
-                        ${ehMulti ?
+    <div class="item-arquitetura-linha" data-item-index="${indexItem}" 
+         style="flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px; border-bottom: 1px solid #f1f5f9; position: relative; ${ehAnfitriao ? 'background: #fffcf5; border-left: 3px solid #f59e0b;' : ''}">
+        
+        <div class="item-arquitetura-info" style="width: 100%; display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="display: flex; flex-direction: column;">
+                <b style="color: #1e293b; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; font-family: 'Inter', sans-serif;">
+                    ${ehAnfitriao ? '<i class="fas fa-box-open" style="color:#f59e0b; margin-right:5px;"></i>' : ''}${item.nome}
+                </b>
+            </div>
+            
+            <button onclick="${ehMulti ? '' : `marcarParaEstorno(${indexSetor}, ${indexItem})`}" 
+                    style="${ehMulti ? 'display:none;' : 'background: #f1f5f9; border: none; color: #94a3b8; cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s;'}" 
+                    onmouseover="this.style.background='#fee2e2'; this.style.color='#ef4444'" 
+                    onmouseout="this.style.background='#f1f5f9'; this.style.color='#94a3b8'">
+                <i class="fas fa-times" style="font-size: 9px;"></i>
+            </button>
+        </div>
+        
+        <div class="lista-tombamentos-container" style="width: 100%; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+            ${ehMulti ?
                     (item.tombamentos || []).map((tData, tIndex) => `
-                                <div style="display: flex; align-items: center; background: #f8fafc; padding: 2px 2px 2px 8px; border-radius: 4px; border: 1px solid #e2e8f0; gap: 6px;">
-                                    <span style="font-size: 11px; font-family: 'Inter', sans-serif; font-weight: 700; color: #475569; letter-spacing: -0.2px;">
-                                        <i class="fas fa-tag" style="font-size: 9px; color: ${corTemaSetor}; margin-right: 3px;"></i>${tData.tomb || 'S/N'}
-                                    </span>
-                                    <button onclick="removerTombamentoIndividual(${indexSetor}, ${indexItem}, ${tIndex})" 
-                                            style="background: #fee2e2; border: none; color: #b91c1c; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 9px;">
-                                        <i class="fas fa-times"></i>
-                                    </button>
-                                </div>
-                            `).join('')
+                    <div style="display: flex; align-items: center; background: #f8fafc; padding: 2px 2px 2px 8px; border-radius: 4px; border: 1px solid #e2e8f0; gap: 6px;">
+                        <span style="font-size: 11px; font-family: 'Inter', sans-serif; font-weight: 700; color: #475569; letter-spacing: -0.2px;">
+                            <i class="fas fa-tag" style="font-size: 9px; color: ${corTemaSetor}; margin-right: 3px;"></i>${tData.tomb || 'S/N'}
+                        </span>
+                        <button onclick="removerTombamentoIndividual(${indexSetor}, ${indexItem}, ${tIndex})" 
+                                style="background: #fee2e2; border: none; color: #b91c1c; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 9px;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>`).join('')
                     :
                     `<div style="font-size: 10px; font-weight: 800; color: #b45309; background: #fff7ed; padding: 2px 8px; border-radius: 4px; border: 1px solid #ffedd5; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 4px;">
-                                <i class="fas fa-boxes" style="font-size: 9px; opacity: 0.7;"></i>
-                                QTD: ${item.quantidadeEsperada}
-                            </div>`
+                    <i class="fas fa-boxes" style="font-size: 9px; opacity: 0.7;"></i>
+                    QTD: ${item.quantidadeEsperada}
+                </div>`
                 }
+        </div>
+
+        ${item.acessorios_acoplados && item.acessorios_acoplados.length > 0 ? `
+            <div class="acessorios-vtr-container" style="width: 100%; margin-top: 8px; padding-left: 12px; border-left: 2px dashed #f59e0b; box-sizing: border-box;">
+                <small style="display:block; font-size: 0.6em; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px;">Acessórios Vinculados ao Kit:</small>
+                ${item.acessorios_acoplados.map((ac, indexAc) => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: white; padding: 4px 8px; border-radius: 5px; border: 1px solid #f1f5f9; margin-bottom: 3px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                        <span style="font-size: 10px; font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+                            <i class="fas fa-link" style="font-size: 8px; color: #f59e0b;"></i> ${ac.nome}
+                        </span>
+    
+                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                            <b style="font-size: 10px; color: #1e293b;">${ac.quantidade} un.</b>
+                            <button onclick="removerAcessorioDeKit(${indexSetor}, ${indexItem}, ${indexAc})" 
+                                    title="Remover apenas este acessório"
+                                    style="background: #fff1f2; border: none; color: #e11d48; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 8px; transition: 0.2s;"
+                                    onmouseover="this.style.background='#ffe4e6'" onmouseout="this.style.background='#fff1f2'">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
                     </div>
-                </div>`;
+                `).join('')}
+            </div>
+        ` : ''}
+    </div>`;
         });
 
         htmlItens += `</div>`;
         setorDiv.innerHTML = htmlHeader + htmlItens;
         container.appendChild(setorDiv);
 
+        // Configuração do Drag and Drop para itens
         new Sortable(setorDiv.querySelector('.setor-arquitetura-body'), {
             group: 'itens_viatura',
             animation: 150,
@@ -9069,6 +9582,7 @@ function renderizarArquiteturaEditor() {
         });
     });
 
+    // Configuração do Drag and Drop para setores
     new Sortable(container, {
         animation: 150,
         handle: '.setor-arquitetura-header',
@@ -9081,6 +9595,38 @@ function renderizarArquiteturaEditor() {
         }
     });
 }
+
+/**
+ * Remove um acessório específico de dentro de um item anfitrião.
+ * O acessório removido vai para a Caixa de Saída para retornar ao estoque.
+ */
+function removerAcessorioDeKit(setorIdx, itemPaiIdx, acessorioIdx) {
+    const itemPai = arquiteturaAtiva[setorIdx].itens[itemPaiIdx];
+
+    // 1. Remove o acessório do array do pai
+    const acessorioRemovido = itemPai.acessorios_acoplados.splice(acessorioIdx, 1)[0];
+
+    // 2. Registra na Caixa de Saída (Estorno) para que o saldo volte ao estoque no 'Publish'
+    itensParaEstorno.push({
+        uid_global: acessorioRemovido.uid_global,
+        nome: acessorioRemovido.nome,
+        tipo: 'single', // Acessórios são sempre tratados como single no estoque
+        quantidadeEsperada: acessorioRemovido.quantidade,
+        setorOrigem: arquiteturaAtiva[setorIdx].nome,
+        detalheOrigem: `(Desvinculado do kit: ${itemPai.nome})`
+    });
+
+    // 3. Atualiza a interface
+    const badge = document.getElementById('badge-estorno-count');
+    if (badge) badge.classList.add('badge-pulse');
+
+    atualizarInterfaceEstorno();
+    renderizarArquiteturaEditor();
+    marcarAlteracao();
+
+    console.log(`♻️ Acessório "${acessorioRemovido.nome}" desvinculado e movido para estorno.`);
+}
+
 function removerTombamentoIndividual(indexSetor, indexItem, tIndex) {
     const setorOrigem = arquiteturaAtiva[indexSetor];
     const itemOrigem = setorOrigem.itens[indexItem];
@@ -9182,34 +9728,44 @@ function marcarAlteracao() {
     btn.style.animation = 'pulse-orange 2s infinite';
 }
 // ================================================================
-// 6. BUSCA INTELIGENTE NO ESTOQUE (AUTOCOMPLETE)
+// 6. BUSCA INTELIGENTE NO ESTOQUE (AUTOCOMPLETE) - ATUALIZADA PARA KITS
 // ================================================================
 function buscarItemParaAdicionar(termo) {
     const box = document.getElementById('sugestoes-estoque-editor');
     if (!box) return;
 
-    if (termo.length < 2) {
+    const t = termo.toLowerCase().trim();
+    if (t.length < 2) {
         box.style.display = 'none';
         return;
     }
 
-    const t = termo.toLowerCase().trim();
     const suggestions = [];
+    const minhaUnidadeId = currentUserData.unidade_id;
+
+    console.group("🔍 DEBUG BUSCADOR SIGMA");
+    console.log("1. Termo pesquisado:", t);
+    console.log("2. Unidade do Gestor:", minhaUnidadeId);
+    console.log("3. Itens no cache:", estoqueGestorLocal.length);
 
     estoqueGestorLocal.forEach(item => {
-        const nomeMatch = item.nome.toLowerCase().includes(t);
+        const nomeItem = (item.nome || "").toLowerCase();
+        const categoriaItem = (item.categoria || "").toLowerCase();
+        const basicoMatch = nomeItem.includes(t) || categoriaItem.includes(t);
 
-        // ✅ CÁLCULO CIRÚRGICO: Quanto deste item já foi adicionado aos setores no rascunho?
-        let qtdJaEscalada = 0;
-        let tombamentosEmUsoNoRascunho = [];
+        let tombamentosNaTela = [];
+        let qtdNaTela = 0;
 
+        // Mapeia o que já está na tela para evitar duplicidade
         arquiteturaAtiva.forEach(setor => {
             (setor.itens || []).forEach(it => {
                 if (it.uid_global === item.uid_global) {
                     if (item.tipo === 'multi') {
-                        (it.tombamentos || []).forEach(tm => tombamentosEmUsoNoRascunho.push(tm.tomb));
+                        (it.tombamentos || []).forEach(tm => {
+                            tombamentosNaTela.push(String(tm.tomb || tm));
+                        });
                     } else {
-                        qtdJaEscalada += Number(it.quantidadeEsperada || 0);
+                        qtdNaTela += Number(it.quantidadeEsperada || 0);
                     }
                 }
             });
@@ -9217,94 +9773,138 @@ function buscarItemParaAdicionar(termo) {
 
         if (item.tipo === 'multi') {
             (item.tombamentos || []).forEach(tomb => {
-                const tombNum = String(tomb.tomb || "");
-                // ✅ FILTRO: Só sugere se não estiver na VTR (DB) E nem no rascunho atual (tela)
-                if (!tomb.viatura_id && !tombamentosEmUsoNoRascunho.includes(tomb.tomb) && (nomeMatch || tombNum.toLowerCase().includes(t))) {
-                    suggestions.push({
-                        ...item,
-                        tombamentoExibicao: tomb.tomb,
-                        id_unico: `${item.id_almox}_${tomb.tomb}`
-                    });
+                const numTomb = String(tomb.tomb);
+                const numTombMatch = numTomb.toLowerCase().includes(t);
+
+                if ((basicoMatch || numTombMatch) && tomb.local_id === minhaUnidadeId) {
+                    if (!tombamentosNaTela.includes(numTomb)) {
+                        const isAlocado = !!tomb.viatura_id;
+
+                        suggestions.push({
+                            ...item,
+                            tombamentoExibicao: numTomb,
+                            statusExtra: isAlocado ? "ALOCADO" : "DISPONÍVEL",
+                            id_unico: `${item.id_almox}_${numTomb}`,
+                            disponivelReal: 1 // Para consistência no label
+                        });
+                    }
                 }
             });
-        } else {
-            // ✅ CÁLCULO: Saldo Real = Saldo do Almoxarifado - O que já está na tela
-            const saldoRealDisponivel = item.disponivel - qtdJaEscalada;
-
-            if (nomeMatch && saldoRealDisponivel > 0) {
+        } else if (basicoMatch) {
+            const saldoRestante = (Number(item.disponivel) || 0) - qtdNaTela;
+            if (saldoRestante > 0) {
                 suggestions.push({
                     ...item,
                     id_unico: item.id_almox,
-                    disponivelReal: saldoRealDisponivel // Passamos o saldo abatido
+                    disponivelReal: saldoRestante
                 });
             }
         }
     });
 
-    const matches = suggestions.slice(0, 10);
-    window.tempSuggestionsSearch = matches;
+    console.log("4. Total de sugestões encontradas:", suggestions.length);
+    console.groupEnd();
 
-    if (matches.length === 0) {
-        if (isModoVistoria) {
-            box.innerHTML = `
-                <div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" 
-                     style="padding:15px; background:#f0f9ff; border:1px dashed #0369a1; border-radius:6px; cursor:pointer; text-align:center;">
-                    <i class="fas fa-plus-circle" style="color:#0369a1;"></i>
-                    <b style="color:#0369a1; font-size:0.9em; display:block;">Adicionar "${termo}"</b>
-                    <small style="color:#64748b; font-size:0.75em;">Como item de vistoria técnica</small>
-                </div>`;
-        } else {
-            box.innerHTML = '<div style="padding:15px; color:#94a3b8; text-align:center;">Sem saldo disponível.</div>';
-        }
+    if (suggestions.length === 0) {
+        box.innerHTML = `<div style="padding:15px; color:#64748b; text-align:center; font-size:0.9em;">
+                            <i class="fas fa-search-minus" style="display:block; margin-bottom:5px;"></i>
+                            Nenhum item reserva disponível para "${termo.toUpperCase()}"
+                         </div>`;
     } else {
-        let htmlFinal = matches.map((i, index) => `
-            <div class="suggestion-item" onclick="selecionarSugestaoPorIndex(${index})" 
-                 style="display: flex !important; align-items: center !important; width: 100% !important; border-bottom: 1px solid #f1f5f9; padding: 10px 15px; cursor: pointer; background: white; gap: 12px; box-sizing: border-box;">
-                <div style="flex-shrink: 0; width: 24px; display: flex; justify-content: center; align-items: center;">
-                    <i class="fas ${i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes'}" 
-                       style="color: ${i.tipo === 'multi' ? '#800020' : '#2c7399'}; font-size: 1.1em; position: static !important; transform: none !important;"></i>
-                </div>
-                <div style="flex-grow: 1; display: flex; flex-direction: column; line-height: 1.2; overflow: hidden;">
-                    <b style="font-size: 0.85em; color: #1e293b; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                        ${i.nome}
-                    </b>
-                    <small style="color: #64748b; font-size: 0.72em; font-weight: 600;">
-                        ${i.tipo === 'multi' ? 'TOMB: ' + i.tombamentoExibicao : 'SALDO RESTANTE: ' + i.disponivelReal}
-                    </small>
-                </div>
-            </div>`).join('');
+        // ✅ CORREÇÃO: Aplicar scroll na caixa de sugestões e aumentar limite para 50
+        box.style.maxHeight = "350px";
+        box.style.overflowY = "auto";
+        box.style.border = "1px solid #cbd5e1";
 
-        if (isModoVistoria) {
-            htmlFinal += `<div class="suggestion-item" onclick="prepararInclusaoTextoLivre('${termo.replace(/'/g, "\\'")}')" style="padding:10px; background:#fff8e1; border-top:2px solid #ffb300; cursor:pointer; text-align:center; margin-top:5px;"><span style="font-size:0.8em; color:#856404; font-weight:bold;">+ ADICIONAR COMO TEXTO LIVRE</span></div>`;
-        }
-        box.innerHTML = htmlFinal;
+        const matches = suggestions.slice(0, 50);
+
+        box.innerHTML = matches.map((i) => {
+            const isAlocado = i.statusExtra === "ALOCADO";
+            const icon = i.is_anfitriao ? 'fa-box-open' : (i.tipo === 'multi' ? 'fa-tag' : 'fa-boxes');
+            const color = isAlocado ? '#94a3b8' : (i.is_anfitriao ? '#f59e0b' : '#2c7399');
+            const detail = i.tipo === 'multi' ? `TOMB: ${i.tombamentoExibicao}` : `DISP: ${i.disponivelReal} un`;
+
+            return `
+        <div class="suggestion-item" onclick='selecionarSugestaoManual(${JSON.stringify(i).replace(/"/g, "&quot;")})' 
+             style="display: flex; align-items: center; padding: 12px 15px; border-bottom: 1px solid #f1f5f9; cursor: pointer; background: white;">
+            
+            <div style="width:32px; height:32px; background:${color}15; color:${color}; border-radius:8px; display:flex; align-items:center; justify-content:center; margin-right:12px; flex-shrink:0; position: relative !important;">
+                
+                <i class="fas ${icon}" style="
+                    position: static !important; 
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    width: auto !important;
+                    height: auto !important;
+                    margin: 0 !important; 
+                    padding: 0 !important;
+                    font-size: 14px !important; 
+                    line-height: 1 !important;
+                    transform: none !important;
+                    pointer-events: none !important;
+                "></i>
+
+            </div>
+
+            <div style="flex:1; overflow:hidden;">
+                <b style="font-size:0.85em; display:block; color:${isAlocado ? '#94a3b8' : '#1e293b'}; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${i.nome} ${i.is_anfitriao ? '<span style="color:#f59e0b; font-size:0.8em;">[KIT]</span>' : ''}
+                </b>
+                <small style="color:${isAlocado ? '#cbd5e1' : '#64748b'}; font-weight:700; font-size:0.7em;">
+                    ${detail} ${isAlocado ? '• (ALOCADO)' : ''}
+                </small>
+            </div>
+        </div>`;
+        }).join('');
     }
     box.style.display = 'block';
 }
-function prepararInclusaoTextoLivre(nomeDigitado) {
-    const box = document.getElementById('sugestoes-estoque-editor');
+
+// Função auxiliar para evitar erros de index
+function selecionarSugestaoManual(item) {
+    selecionarItemParaAdicionar(item);
+    document.getElementById('sugestoes-estoque-editor').style.display = 'none';
+    document.getElementById('input-busca-estoque').value = '';
+}
+
+// ================================================================
+// 7. SELEÇÃO COM MICRO-MODAL - ATUALIZADA PARA KITS
+// ================================================================
+async function selecionarItemParaAdicionar(item) {
+    if (!item) return;
+
+    // ✅ NOVO: INTERCEPTAÇÃO DE ANFITRIÃO NO EDITOR
+    if (item.is_anfitriao) {
+        document.getElementById('sugestoes-estoque-editor').style.display = 'none';
+
+        // Chamamos o modal que já existe, mas passamos um contexto de 'EDITOR'
+        // para que ele não tente perguntar viatura/setor no final.
+        return abrirModalAcoplamentoAnfitriao(item.uid_global, item, item.tombamentoExibicao);
+    }
+
+    itemSelecionadoTemp = item;
+    const popover = document.getElementById('popover-qtd-editor');
     const inputBusca = document.getElementById('input-busca-estoque');
 
-    // 1. Cria o objeto do item no formato que o seu editor espera
-    const novoItemVistoria = {
-        id_almox: "VISTORIA_" + Date.now(), // ID temporário único
-        nome: nomeDigitado.toUpperCase(),
-        tipo: "single",
-        disponivel: 1,
-        uid_global: "ITEM_VISTORIA_LIVRE",
-        categoria: "VISTORIA"
-    };
+    document.getElementById('sugestoes-estoque-editor').style.display = 'none';
 
-    // 2. Simula a seleção de uma sugestão para abrir o popover de quantidade/setor
-    // Usamos a lógica que você já tem no sistema para manter a consistência
-    window.tempSuggestionsSearch = [novoItemVistoria];
-    selecionarSugestaoPorIndex(0);
+    if (item.tipo === 'single') {
+        const saldoFinal = item.disponivelReal;
+        popover.style.display = 'block';
+        popover.style.top = (inputBusca.offsetTop + inputBusca.offsetHeight + 5) + 'px';
+        popover.style.left = inputBusca.offsetLeft + 'px';
 
-    // 3. Limpa a interface de busca
-    if (box) box.style.display = 'none';
-    if (inputBusca) inputBusca.value = '';
+        const inputQtd = document.getElementById('input-qtd-popover');
+        inputQtd.max = saldoFinal;
+        inputQtd.value = 1;
+        document.getElementById('info-max-popover').textContent = `Saldo livre na tela: ${saldoFinal} un.`;
 
-    console.log("🛠️ Preparando inclusão de item de vistoria:", nomeDigitado);
+        setTimeout(() => inputQtd.focus(), 50);
+    } else {
+        exibirDraftCard(`${item.nome} (TOMB: ${item.tombamentoExibicao})`);
+        document.getElementById('select-setor-destino').focus();
+    }
 }
 
 // Função de apoio para evitar passar JSON gigante no HTML
@@ -9424,42 +10024,29 @@ function adicionarItemRapido() {
     const setorIdx = selectSetor.value;
     const inputBusca = document.getElementById('input-busca-estoque');
 
-    // 1. Validações de segurança
-    if (!itemSelecionadoTemp) return alert("Selecione um item primeiro.");
-    if (setorIdx === "") return alert("Escolha o setor de destino.");
+    // 1. Validação básica: se não houver item no rascunho ou setor selecionado, para.
+    if (!itemSelecionadoTemp || setorIdx === "") return;
 
-    const novoItem = {
-        uid_global: itemSelecionadoTemp.uid_global || itemSelecionadoTemp.id_almox,
-        nome: itemSelecionadoTemp.nome,
-        tipo: itemSelecionadoTemp.tipo,
-        quantidadeEsperada: 0
-    };
+    // ✅ VERIFICAÇÃO DE KIT: Se for anfitrião e ainda não passou pelo modal de montagem...
+    if (itemSelecionadoTemp.is_anfitriao && !itemSelecionadoTemp.acessorios_ja_montados) {
 
-    if (itemSelecionadoTemp.tipo === 'single') {
-        const qtd = itemSelecionadoTemp.quantidadeEscolhida || 1;
-        novoItem.quantidadeEsperada = qtd;
-    } else {
-        novoItem.tombamentos = [{
-            tomb: itemSelecionadoTemp.tombamentoExibicao,
-            situacao: "EM CARGA"
-        }];
-        novoItem.quantidadeEsperada = 1;
+        // Abrimos o modal passando o setorIdx para que ele saiba onde inserir ao terminar
+        abrirModalAcoplamentoAnfitriao(
+            itemSelecionadoTemp.uid_global || itemSelecionadoTemp.id_almox,
+            itemSelecionadoTemp,
+            itemSelecionadoTemp.tombamentoExibicao,
+            setorIdx // Passamos o destino para o modal concluir a ação
+        );
+
+        // Interrompemos esta execução aqui. O modal cuidará de chamar a inserção final.
+        return;
     }
 
-    arquiteturaAtiva[setorIdx].itens.push(novoItem);
-
-    // --- MUDANÇAS CIRÚRGICAS: LIMPEZA MODERNA ---
-    cancelarRascunho(); // Limpa o card, o itemTemp e o botão
-
-    if (selectSetor) {
-        selectSetor.value = "";
-        selectSetor.style.border = "1px solid #cbd5e1"; // Reseta a borda
-    }
-
-    processarMesclagemAutomatica(setorIdx);
-    marcarAlteracao();
-    inputBusca.focus();
+    // ✅ FLUXO DE EXECUÇÃO: Chamada da função centralizada para gravar os dados
+    // Isso substitui toda a lógica repetida e mantém o código limpo.
+    executarInsercaoNoSetor(setorIdx);
 }
+
 /**
  * Cancela a seleção atual e reseta a interface de busca.
  */
@@ -9765,13 +10352,13 @@ function cancelarEstorno(idx) {
 // 10. PUBLICAÇÃO FINAL (GRAVAÇÃO NO FIREBASE)
 // ================================================================
 async function confirmarPublicacaoLista() {
-    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque.")) return;
+    if (!confirm("Deseja publicar as alterações? Isso atualizará a lista e ajustará o saldo do estoque global.")) return;
 
     const firestore = firebase.firestore();
     const elNome = document.getElementById('edit-vtr-nome');
     const nomeAmigavelVtr = elNome ? (elNome.innerText || elNome.textContent).split('\n').pop().trim() : "Viatura";
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
-    const unidadeGestoraId = currentUserData.unidade_id || (typeof dados !== 'undefined' ? dados.unidade_id : null);
+    const unidadeGestoraId = currentUserData.unidade_id;
 
     const estornosReais = itensParaEstorno.filter(i => i.uid_global !== "ITEM_VISTORIA_LIVRE");
 
@@ -9791,113 +10378,129 @@ async function confirmarPublicacaoLista() {
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
 
-        // 1. MAPEIA ESTADO ANTERIOR
-        const mapaAnterior = {};
-        listaAnterior.forEach(setor => {
-            (setor.itens || []).forEach(it => {
-                mapaAnterior[it.uid_global] = (mapaAnterior[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
+        // --- 1. MAPEAMENTO HIERÁRQUICO (DNA DO KIT) ---
+        const mapearSaldos = (arquitetura) => {
+            const mapa = {};
+            arquitetura.forEach(setor => {
+                (setor.itens || []).forEach(it => {
+                    if (it.uid_global === "ITEM_VISTORIA_LIVRE") return;
+                    mapa[it.uid_global] = (mapa[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
+                    
+                    if (it.acessorios_acoplados) {
+                        it.acessorios_acoplados.forEach(ac => {
+                            mapa[ac.uid_global] = (mapa[ac.uid_global] || 0) + (Number(ac.quantidade) || 0);
+                        });
+                    }
+                });
             });
-        });
+            return mapa;
+        };
 
-        // 2. IDENTIFICA MUDANÇAS LÍQUIDAS NA ARQUITETURA ATIVA
-        const mapaAtual = {};
-        arquiteturaAtiva.forEach(setor => {
-            (setor.itens || []).forEach(it => {
-                if (it.uid_global !== "ITEM_VISTORIA_LIVRE") {
-                    mapaAtual[it.uid_global] = (mapaAtual[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
-                }
-            });
-        });
+        const mapaAnterior = mapearSaldos(listaAnterior);
+        const mapaAtual = mapearSaldos(arquiteturaAtiva);
 
-        // --- A. ATUALIZA A ESTRUTURA DA LISTA ---
+        // --- 2. ATUALIZAÇÃO DA ESTRUTURA DA LISTA ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
             editado_por: currentUserData.nome_militar_completo
         });
 
-        const idEvento = "EDT-" + Date.now();
         const dataReg = new Date().toLocaleString('pt-BR');
 
-        // --- B. PROCESSA LOGÍSTICA DE INVENTÁRIO ---
-
-        // B1. SAÍDAS E ENTRADAS PROPORCIONAIS (Itens Single)
-        // Comparamos o total que havia na lista vs o total que há agora
+        // --- 3. LOGÍSTICA DE INVENTÁRIO (ITENS SINGLE / ACESSÓRIOS) ---
         const todosUids = new Set([...Object.keys(mapaAnterior), ...Object.keys(mapaAtual)]);
 
         for (const uid of todosUids) {
             const qtdAnt = mapaAnterior[uid] || 0;
             const qtdAtu = mapaAtual[uid] || 0;
-            const diferenca = qtdAtu - qtdAnt; // Positivo = saiu do estoque | Negativo = voltou
+            const diferenca = qtdAtu - qtdAnt;
 
             if (diferenca !== 0) {
-                const itemDoc = estoqueGestorLocal.find(i => i.uid_global === uid);
-                if (itemDoc && itemDoc.tipo === 'single') {
-                    const saldoRef = firestore.collection('inventario').doc(uid).collection('saldos_unidades').doc(unidadeGestoraId);
-                    batch.update(saldoRef, {
-                        qtd_disp: firebase.firestore.FieldValue.increment(-diferenca),
-                        qtd_em_carga: firebase.firestore.FieldValue.increment(diferenca),
-                        last_update: dataReg
-                    });
-                }
+                const saldoRef = firestore.collection('inventario').doc(uid).collection('saldos_unidades').doc(unidadeGestoraId);
+                
+                // ✅ CORREÇÃO: Usamos SET com MERGE para evitar o erro "No document to update"
+                batch.set(saldoRef, {
+                    unidade_sigla: currentUserData.unidade || "N/D", // Garante a sigla se o doc for criado agora
+                    qtd_disp: firebase.firestore.FieldValue.increment(-diferenca),
+                    qtd_em_carga: firebase.firestore.FieldValue.increment(diferenca),
+                    last_update: dataReg
+                }, { merge: true });
+
+                const histRef = saldoRef.collection('historico_vida').doc();
+                batch.set(histRef, {
+                    data: dataReg,
+                    evento: "AJUSTE_VIA_EDITOR",
+                    detalhes: `${diferenca > 0 ? 'Saída' : 'Retorno'} de ${Math.abs(diferenca)} un. via Editor (${nomeAmigavelVtr}).`,
+                    quem: currentUserData.nome_militar_completo
+                });
             }
         }
 
-        // B2. PROCESSA ITENS MULTI (Tombamentos Novos)
+        // --- 4. PROCESSA ITENS MULTI (TOMBAMENTOS) ---
         arquiteturaAtiva.forEach(setor => {
             (setor.itens || []).forEach(item => {
                 if (item.tipo === 'multi' && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
-                    // Verifica se este item/tombamento já existia na lista anterior
-                    // Se é novo (não estava no mapaAnterior), atualiza o prontuário
                     (item.tombamentos || []).forEach(t => {
-                        const itemRef = firestore.collection('inventario').doc(item.uid_global);
-                        const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
-
+                        const tombRef = firestore.collection('inventario').doc(item.uid_global).collection('tombamentos').doc(t.tomb);
                         batch.update(tombRef, {
                             situacao_atual: "EM CARGA",
                             viatura_id: idListaSendoEditada,
-                            sub_local: setor.nome
-                        });
-                        batch.set(tombRef.collection('historico_vida').doc(idEvento), {
-                            data: dataReg, evento: "SAIDA_EDITOR", quem: currentUserData.nome_militar_completo,
-                            detalhes: `Alocado no setor ${setor.nome} da lista ${nomeAmigavelVtr}.`
+                            sub_local: setor.nome,
+                            acessorios_vinculados: item.acessorios_acoplados || []
                         });
                     });
                 }
             });
         });
 
-        // B3. PROCESSA ESTORNOS (Itens Multi que voltaram ao estoque)
+        // --- 5. PROCESSA ESTORNOS MANUAIS (INCLUINDO ACESSÓRIOS DE KITS DESFEITOS) ---
         for (const item of estornosReais) {
-            if (item.tipo === 'multi') {
-                const itemRef = firestore.collection('inventario').doc(item.uid_global);
-                for (const t of (item.tombamentos || [])) {
-                    const tombRef = itemRef.collection('tombamentos').doc(t.tomb);
+            // A. Trata o item principal se for MULTI
+            if (item.tipo === 'multi' && item.tombamentos) {
+                const invRef = firestore.collection('inventario').doc(item.uid_global);
+                item.tombamentos.forEach(t => {
+                    const tombRef = invRef.collection('tombamentos').doc(t.tomb);
                     batch.update(tombRef, {
                         situacao_atual: "DISPONÍVEL",
                         viatura_id: null,
-                        sub_local: "ALMOXARIFADO"
+                        sub_local: "ALMOXARIFADO",
+                        acessorios_vinculados: [] 
                     });
-                    batch.set(tombRef.collection('historico_vida').doc(idEvento), {
-                        data: dataReg, evento: "ESTORNO_EDITOR", quem: currentUserData.nome_militar_completo,
-                        detalhes: `Removido da lista ${nomeAmigavelVtr}. Motivo: ${justificativa}`
+
+                    const histLogRef = tombRef.collection('historico_vida').doc();
+                    batch.set(histLogRef, {
+                        data: dataReg,
+                        evento: "ESTORNO_EDITOR",
+                        quem: currentUserData.nome_militar_completo,
+                        detalhes: `Material removido da lista ${nomeAmigavelVtr}. Motivo: ${justificativa}`
                     });
-                }
+                });
             }
-            // Nota: Itens Single removidos já são tratados pelo cálculo de diferença no passo B1
+
+            // ✅ CORREÇÃO CIRÚRGICA: Se o item estornado for um KIT, limpa também os acessórios filhos dele
+            if (item.acessorios_acoplados && item.acessorios_acoplados.length > 0) {
+                item.acessorios_acoplados.forEach(ac => {
+                    // O saldo numérico do acessório já foi devolvido no Passo 3. 
+                    // Aqui você pode adicionar um log específico no histórico do acessório se desejar rastreio individual.
+                });
+            }
         }
 
         await batch.commit();
-        await Swal.fire({ icon: 'success', title: 'Publicado!', text: 'Inventário atualizado com sucesso.', timer: 2000, showConfirmButton: false });
+
+        itensParaEstorno = [];
+        await Swal.fire({ icon: 'success', title: 'Publicado!', text: 'O inventário e os kits foram atualizados com sucesso.', timer: 2000, showConfirmButton: false });
         location.reload();
 
     } catch (e) {
         console.error("Erro na publicação:", e);
-        alert("Falha ao salvar: " + e.message);
+        Swal.fire('Erro de Sincronismo', 'Falha ao atualizar inventário: ' + e.message, 'error');
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Tentar Novamente';
     }
 }
+
 // Fecha as caixas de busca e popover ao clicar fora delas
 document.addEventListener('keydown', function (event) {
     // 1. Tratamento da tecla ESC
