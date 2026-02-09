@@ -7,7 +7,7 @@ function navegarParaItens() {
 }
 
 //Retorna à visão macro dos setores e dispara a re-renderização para atualizar os indicadores de progresso.
-window.navegarParaSetores = function() {
+window.navegarParaSetores = function () {
     console.log("%c[NAV] Retornando para o Painel de Setores...", "color: #f43f5e; font-weight: bold;");
 
     // 1. Transição Visual de Telas
@@ -22,13 +22,13 @@ window.navegarParaSetores = function() {
     if (typeof renderizarConferencia === 'function') {
         // ✅ IMPORTANTE: O renderizarConferencia agora NÃO deve ter o updateOverallStatus dentro dele
         renderizarConferencia();
-        
+
         // 3. O SEGREDO DO SINCRONISMO:
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 if (typeof updateOverallStatus === 'function') {
                     console.log("%c[UI] Forçando atualização de badges e barra neon...", "color: #10b981");
-                    
+
                     // ✅ AJUSTE: Forçamos a limpeza de cache visual do navegador antes do update
                     updateOverallStatus();
                 }
@@ -201,10 +201,10 @@ function updateOverallStatus() {
             // 2. CONTAGEM DE ALERTA (Para o badge vermelho "ALT")
             // Condição A: O item está marcado como Alteração Mantida ou Nova (C/A)
             const temAlteracaoAtiva = (st && st.status === 'C/A');
-            
+
             // Condição B: Tem pendência no banco mas o usuário ainda NÃO interagiu com ela
             const temPendenciaBancoSemInteracao = (it.pendencias_ids && it.pendencias_ids.length > 0 && (!st || !st.interacao_humana));
-            
+
             // Condição C: Segurança para não contar se o status final for 'ok' (Resolvido)
             const foiResolvidoAgora = (st && st.status === 'ok');
 
@@ -226,7 +226,7 @@ function updateOverallStatus() {
         // Gerencia badge de alertas
         // --- GERENCIAMENTO AGRESSIVO DO BADGE DE ALERTAS ---
         const containerBadges = row.querySelector('.v3-setor-badges');
-        
+
         if (containerBadges) {
             // Removemos qualquer badge antigo para evitar duplicidade
             const badgeAntigo = containerBadges.querySelector('.badge-alerta');
@@ -249,7 +249,7 @@ function updateOverallStatus() {
                     opacity: 1 !important;">
                     <i class="fas fa-exclamation-triangle"></i> ${alertasSetor} ALT
                 </span>`;
-                
+
                 containerBadges.insertAdjacentHTML('beforeend', htmlAlerta);
                 console.log(`%c[UI] Badge injetado no setor ${index} com ${alertasSetor} alertas.`, "color: #10b981");
             }
@@ -309,7 +309,7 @@ function renderizarConferencia() {
         setor.itens.forEach(it => {
             const uid = it.uid_global || it.id;
             const status = window.itemStatus[uid];
-            
+
             // 1. Contagem de Conclusão (Para o 1/1)
             if (status && status.interacao_humana) {
                 concluidosSetor++;
@@ -370,52 +370,41 @@ function renderizarConferencia() {
 
     // 4. RENDERIZAÇÃO DA TELA 2: LINHAS ELEGANTES DE ITENS (Visão Micro)
     function renderizarLinhasItens(itens, setorIndex) {
-    const container = document.getElementById('lista-itens-container');
-    const isChecklist = window.isModoChecklist;
+        const container = document.getElementById('lista-itens-container');
+        const isChecklist = window.isModoChecklist;
 
-    // Proteção contra containers ausentes
-    if (!container) return;
+        if (!container) return;
+        container.innerHTML = '';
 
-    // ✅ CORREÇÃO PASSO 3: Limpamos o container para as novas linhas, 
-    // mas não injetamos o botão de volta, pois ele já existe fixo no seu HTML.
-    container.innerHTML = '';
-
-    // PROTEÇÃO V3: Recuperação de dados em caso de falha de fluxo
-    if (!itens || itens.length === 0) {
-        const fonteBackup = window.dadosConferencia || [];
-        if (fonteBackup[setorIndex]) {
-            itens = fonteBackup[setorIndex].itens;
-        } else {
-            console.error("Erro Crítico: Setor não localizado.");
-            return;
+        if (!itens || itens.length === 0) {
+            const fonteBackup = window.dadosConferencia || [];
+            if (fonteBackup[setorIndex]) {
+                itens = fonteBackup[setorIndex].itens;
+            } else {
+                console.error("Erro Crítico: Setor não localizado.");
+                return;
+            }
         }
-    }
 
-    // 2. CONSTRUÇÃO DAS LINHAS
-    itens.forEach((item) => {
-        const uid = isChecklist ? item.id : (item.uid_global || item.id);
-        const statusLocal = window.itemStatus[uid] || {};
-        const st = statusLocal.status;
+        itens.forEach((item) => {
+            const uid = isChecklist ? item.id : (item.uid_global || item.id);
+            const statusLocal = window.itemStatus[uid] || {};
+            const st = statusLocal.status;
 
-        // Verifica se o item possui pendências anteriores vindas do banco
-        const temPendenciaAnterior = item.pendencias_ids && item.pendencias_ids.length > 0;
+            const temPendenciaAnterior = item.pendencias_ids && item.pendencias_ids.length > 0;
+            const devePulsar = temPendenciaAnterior && !statusLocal.interacao_humana;
 
-        // Regra de Ouro do Passo 3: Se tem pendência e não houve interação humana, o botão deve pulsar
-        const devePulsar = temPendenciaAnterior && !statusLocal.interacao_humana;
+            const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
+            const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
+            const totalPendente = (item.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
+            const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
 
-        // Cálculos de Saldo
-        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
-        const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
-        const totalPendente = (item.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
-        const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
+            const classeStatus = (st === 'ok') ? 'status-ok' : (st === 'C/A' ? 'status-alert' : '');
+            const classeCarimbo = (temPendenciaAnterior || (item.cautelas && item.cautelas.length > 0)) ? 'has-carimbo' : '';
+            const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-        // Classes de Status
-        const classeStatus = (st === 'ok') ? 'status-ok' : (st === 'C/A' ? 'status-alert' : '');
-        const classeCarimbo = (temPendenciaAnterior || (item.cautelas && item.cautelas.length > 0)) ? 'has-carimbo' : '';
-
-        const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-        container.innerHTML += `
+            // --- ITEM PRINCIPAL (PAI OU AVULSO) ---
+            container.innerHTML += `
             <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}">
                 <div class="v3-item-main-info">
                     <span class="v3-item-name">${item.nome}</span>
@@ -435,12 +424,47 @@ function renderizarConferencia() {
                     </button>
                 </div>
             </div>`;
-    });
-    
-    if (typeof atualizarContadorSetorInterno === 'function') {
-        atualizarContadorSetorInterno(itens);
+
+            // ✅ NOVO: RENDERIZAÇÃO DE ACESSÓRIOS ACOPLADOS (FILHOS)
+            // Se este item (anfitrião) carregar acessórios vinculados
+            if (item.acessorios_acoplados && item.acessorios_acoplados.length > 0) {
+                item.acessorios_acoplados.forEach((ac, idx) => {
+                    const acUid = `${uid}_ac_${idx}`; // ID virtual para controle de status
+                    const acStatus = window.itemStatus[acUid] || {};
+                    const acSt = acStatus.status;
+                    const acClasse = (acSt === 'ok') ? 'status-ok' : (acSt === 'C/A' ? 'status-alert' : '');
+
+                    container.innerHTML += `
+                    <div class="v3-item-row child-item ${acClasse}" id="item-row-${acUid}" 
+                         style="margin-left: 25px; min-height: 50px; background: #fdfdfd; border-left: 3px solid #cbd5e1; width: calc(100% - 25px);">
+                        <div class="v3-item-main-info" style="padding-left: 10px;">
+                            <span class="v3-item-name" style="font-size: 0.85em; color: #475569;">
+                                <i class="fas fa-level-up-alt fa-rotate-90" style="font-size: 0.7em; margin-right: 5px; color: #94a3b8;"></i>
+                                ${ac.nome}
+                            </span>
+                            <span class="v3-item-subtext" style="font-size: 0.65em;">ACESSÓRIO ACOPLADO • QTD: ${ac.quantidade}</span>
+                        </div>
+                        <div class="v3-item-actions">
+                            <button class="v3-btn-circle btn-check ${acSt === 'ok' ? 'active' : ''}" 
+                                    style="width: 32px; height: 32px; font-size: 0.7em;"
+                                    onclick="registrarCheckRapido(this, '${acUid}', ${setorIndex})">
+                                <i class="fas fa-check"></i>
+                            </button>
+                            <button class="v3-btn-circle btn-alert ${acSt === 'C/A' ? 'active' : ''}" 
+                                    style="width: 32px; height: 32px; font-size: 0.7em;"
+                                    onclick="abrirModalPendenciaV3('${acUid}', 'single', '${ac.nome.replace(/'/g, "\\'")}', ${ac.quantidade}, '${uid}')">
+                                <i class="fas fa-exclamation"></i>
+                            </button>
+                        </div>
+                    </div>`;
+                });
+            }
+        });
+
+        if (typeof atualizarContadorSetorInterno === 'function') {
+            atualizarContadorSetorInterno(itens);
+        }
     }
-}
 
     /**
      * LOGICA DE CHECK RÁPIDO (S/A)
@@ -636,12 +660,12 @@ function atualizarContadorSetorInterno(itens) {
 }
 
 // --- VERIFICADOR MÁGICO DE FLUXO (AUTO-NEXT) ---
-window.verificarFluxoSetor = function(uidAtual) {
+window.verificarFluxoSetor = function (uidAtual) {
     console.log(`%c🚀 Iniciando Verificação de Fluxo para: ${uidAtual}`, "color: #8b5cf6; font-weight: bold;");
 
     const rows = Array.from(document.querySelectorAll('.v3-item-row'));
     const index = rows.findIndex(r => r.id === `item-row-${uidAtual}`);
-    
+
     // ✅ 2. Garantia de Leitura de Status
     const statusAtual = window.itemStatus[uidAtual];
     const itemConcluido = statusAtual && statusAtual.interacao_humana === true && statusAtual.status === 'ok';
@@ -658,20 +682,20 @@ window.verificarFluxoSetor = function(uidAtual) {
         console.log("➡️ Indo para o próximo item do setor...");
         setTimeout(() => {
             nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
+
             const isChecklist = window.isModoChecklist;
             const corDestaque = isChecklist ? "rgba(44, 62, 80, 0.1)" : "rgba(128, 0, 32, 0.1)";
-            
+
             nextRow.style.transition = "background 0.5s ease";
             nextRow.style.background = corDestaque;
-            
+
             setTimeout(() => { nextRow.style.background = ""; }, 800);
         }, 100); // Reduzido para ser mais rápido
 
     } else {
         // ✅ 4. Lógica de Retorno (Fim do Setor)
         console.log("%c✅ Fim do setor detectado. Preparando retorno para Tela 1.", "color: #10b981; font-weight: bold;");
-        
+
         // Atualiza a barra de progresso imediatamente
         updateOverallStatus();
 
@@ -679,7 +703,7 @@ window.verificarFluxoSetor = function(uidAtual) {
             toast: true,
             position: 'top',
             showConfirmButton: false,
-            timer: 1200, 
+            timer: 1200,
             timerProgressBar: true
         });
 
@@ -692,10 +716,10 @@ window.verificarFluxoSetor = function(uidAtual) {
         // ✅ AUTO-BACK REFORÇADO E ACELERADO
         setTimeout(() => {
             console.log("🔄 Executando navegação para Tela 1...");
-            
+
             // Removemos a classe de inspeção antes de trocar os painéis
             document.body.classList.remove('modo-inspecao');
-            
+
             if (typeof window.navegarParaSetores === 'function') {
                 window.navegarParaSetores();
             } else if (typeof navegarParaSetores === 'function') {
@@ -704,18 +728,18 @@ window.verificarFluxoSetor = function(uidAtual) {
                 // Fallback de emergência (Garante a troca visual de painéis)
                 const painelSetores = document.getElementById('v3-painel-setores');
                 const painelItens = document.getElementById('v3-painel-itens');
-                
+
                 if (painelSetores) painelSetores.style.display = 'block';
                 if (painelItens) painelItens.style.display = 'none';
-                
+
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             }
-            
+
             // Recontagem final após a transição de tela
             setTimeout(() => {
                 if (typeof updateOverallStatus === 'function') updateOverallStatus();
             }, 300);
-            
+
         }, 1300); // Tempo reduzido para maior fluidez
     }
 };
