@@ -1,5 +1,5 @@
 /* --- A central de comando do item; exibe todas as pendências ativas de um material e oferece as opções de manter, resolver ou relatar um novo problema --- */
-async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
+async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPai = null) {
     const isChecklist = window.isModoChecklist;
     const corPrimaria = isChecklist ? "#2c3e50" : "#800020";
     const nomeLimpo = nomeItem.replace(/\\'/g, "'");
@@ -19,6 +19,14 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
                     if (uidComp === uid && t.pendencias_ids) pendencias = [...t.pendencias_ids];
                 });
             }
+
+            // ✅ AJUSTE PARA ACESSÓRIOS: Se for um filho, busca pendências temporárias da sessão
+            if (uidPai && (it.uid_global === uidPai || it.id === uidPai)) {
+                const statusLocal = window.itemStatus[uid];
+                if (statusLocal && statusLocal.pendencias_temporarias) {
+                    pendencias = [...statusLocal.pendencias_temporarias];
+                }
+            }
         });
     });
 
@@ -27,8 +35,6 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
     pendencias.forEach((p, index) => {
         const isTemp = String(p.id).startsWith('TEMP-');
         const isMantido = window.itemStatus[uid]?.ids_mantidos?.includes(String(p.id));
-        
-        // ✅ NOVA LÓGICA: Identifica se o relato foi resolvido nesta sessão
         const isResolvido = p.status_gestao === 'RESOLVIDO';
 
         htmlPendencias += `
@@ -91,7 +97,9 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
         padding: '1.5em 1em',
         html: `
             <div style="margin-bottom: 15px; text-align: center;">
-                <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em;"> ${nomeLimpo}</small>
+                <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em;">
+                    ${uidPai ? `<i class="fas fa-link"></i> ACESSÓRIO DE CONJUNTO: ` : ''} ${nomeLimpo}
+                </small>
             </div>
 
             <div id="v3-modal-scroll" style="text-align:left; max-height:45vh; overflow-y:auto; padding-right:2px; width: 100%; box-sizing: border-box;">
@@ -101,7 +109,7 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
             <div style="display: flex; gap: 10px; margin-top: 25px; width: 100%;">
                 
                 ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
-                    <button onclick="exibirModalInsercaoNovoRelato('${uid}', '${tipo}', '${nomeItem}', ${saldoDisponivel}, '${corPrimaria}')" 
+                    <button onclick="exibirModalInsercaoNovoRelato('${uid}', '${tipo}', '${nomeItem}', ${saldoDisponivel}, '${corPrimaria}', '${uidPai || ''}')" 
                             style="flex: 1; background: #0284c7; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s;">
                         <i class="fas fa-plus-circle"></i> NOVO RELATO
                     </button>
@@ -113,13 +121,8 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
                 </button>
             </div>
         `,
-        showConfirmButton: false, // ✅ Agora usamos nossos botões customizados lado a lado
+        showConfirmButton: false,
         allowOutsideClick: false,
-        customClass: {
-            container: 'sigma-v3-modal',
-            popup: 'v3-popup-radius'
-        },
-        // ✅ VERIFICAÇÃO DE FLUXO AO CONCLUIR (Disparado pelo clickConfirm nosso)
         preConfirm: () => {
             try {
                 const status = window.itemStatus[uid];
@@ -127,51 +130,26 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel) {
                     Swal.showValidationMessage('Interaja com os relatos antes de concluir.');
                     return false;
                 }
-
-                // ✅ Escrita síncrona imediata
                 window.itemStatus[uid].status = 'ok';
-                
-                if (typeof updateOverallStatus === 'function') {
-                    updateOverallStatus();
-                }
-
-                // Retornamos o UID para o próximo passo
+                if (typeof updateOverallStatus === 'function') updateOverallStatus();
                 return { confirmado: true, uid: uid };
             } catch (e) {
                 console.error("Erro no preConfirm:", e);
                 return true; 
             }
-        },
-        // ✅ O SEGREDO: Usamos o callback de fechamento do Swal.fire().then(...)
-        // mas mantemos o didClose apenas para limpeza de UI se necessário.
-        didClose: () => {
-            console.log("=== MODAL FECHADO (UI LIMPA) ===");
         }
     }).then((result) => {
-        // Se o usuário clicou em "Concluir" (Confirmou)
         if (result.isConfirmed) {
-            console.log("%c[FLUXO] Navegação disparada após fechamento real.", "color: #10b981; font-weight: bold;");
-            
-            // Pequeno delay apenas para garantir que o overlay sumiu da frente dos olhos
             setTimeout(() => {
                 const funcFluxo = window.verificarFluxoSetor || verificarFluxoSetor;
-                if (typeof funcFluxo === 'function') {
-                    funcFluxo(uid);
-                } else {
-                    // Fallback de emergência (Navegação manual)
-                    document.body.classList.remove('modo-inspecao');
-                    const pSetores = document.getElementById('v3-painel-setores');
-                    const pItens = document.getElementById('v3-painel-itens');
-                    if (pSetores) pSetores.style.display = 'block';
-                    if (pItens) pItens.style.display = 'none';
-                }
+                if (typeof funcFluxo === 'function') funcFluxo(uid);
             }, 150);
         }
     });
 }
 
 /* --- Abre o formulário para o militar descrever uma nova avaria ou falta, controlando a quantidade e a descrição técnica --- */
-async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria) {
+async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria, uidPai = null) {
     const isChecklist = window.isModoChecklist;
 
     const { value: formValues } = await Swal.fire({
@@ -183,6 +161,7 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
                 
                 <div style="margin-bottom: 20px; text-align: center;">
                     <b style="color: #475569; font-size: 0.9em; text-transform: uppercase;">${nomeItem}</b>
+                    ${uidPai ? `<br><small style="color:#800020; font-weight:bold;">(ACESSÓRIO VINCULADO)</small>` : ''}
                 </div>
 
                 ${(tipo === 'single' && !isChecklist) ? `
@@ -232,13 +211,13 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
     });
 
     if (formValues) {
-        // 1. Executa o salvamento
-        salvarNovoID(uid, formValues.qtd, tipo, formValues.obs);
+        // ✅ ATUALIZAÇÃO CIRÚRGICA: Passa o uidPai para que o rascunho de salvamento saiba a origem
+        salvarNovoID(uid, formValues.qtd, tipo, formValues.obs, uidPai);
 
         // 2. DIRECIONAMENTO CIRÚRGICO: Reabre o modal de gerenciamento atualizado
-        // O timeout de 300ms garante que o DOM local já processou a inclusão do novo item
         setTimeout(() => {
-            abrirModalPendenciaV3(uid, tipo, nomeItem, (saldoDisponivel - formValues.qtd));
+            // Repassa o uidPai também na reabertura do modal de pendências
+            abrirModalPendenciaV3(uid, tipo, nomeItem, (saldoDisponivel - formValues.qtd), uidPai);
         }, 300);
     }
 }
@@ -503,12 +482,12 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
 }
 
 /* --- Função de apoio que gera o objeto de pendência (TEMP-...) com carimbo de autoria e insere na memória do sistema --- */
-function salvarNovoID(uid, qtd, tipo, obsModal = null) {
+function salvarNovoID(uid, qtd, tipo, obsModal = null, uidPai = null) {
     const obsDigitada = obsModal ? obsModal.trim().toUpperCase() : "";
     const qtdInformada = parseInt(qtd) || 1;
     const militarInfoEl = document.getElementById('militar-info');
 
-    // 1. CAPTURA DE ASSINATURA SEGURA (Hierarquia: Elemento UI > Global config)
+    // 1. CAPTURA DE ASSINATURA SEGURA
     let nomeAssinatura = militarInfoEl ? militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : "";
     if (!nomeAssinatura) {
         nomeAssinatura = `${window.userInfo.postoGraduacao} ${window.userInfo.quadro} ${window.userInfo.nomeGuerra}`;
@@ -523,7 +502,8 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
         autor_nome: nomeAssinatura,
         descricao: obsDigitada,
         quantidade: qtdInformada,
-        status_gestao: "PENDENTE"
+        status_gestao: "PENDENTE",
+        id_pai: uidPai // ✅ NOVO: Vínculo hierárquico para itens de conjunto (Kits)
     };
 
     let itemEncontrado = false;
@@ -536,11 +516,20 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
             const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
             const matchesID = (String(idRealDoItem) === String(uid));
 
+            // Caso A: Item Single ou Acessório vinculado ao Pai
             if (['single', 'texto_livre', 'upload_foto'].includes(item.tipo) && matchesID) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
             }
+            // Caso B: Acessório Acoplado (Busca dentro do array acessorios_acoplados do Anfitrião)
+            else if (uidPai && (String(idRealDoItem) === String(uidPai))) {
+                if (!item.pendencias_ids) item.pendencias_ids = [];
+                // Registra a pendência no pai, mas o objeto novoID carrega a informação do componente
+                item.pendencias_ids.push(novoID);
+                itemEncontrado = true;
+            }
+            // Caso C: Item Multi (Tombamentos)
             else if (item.tipo === 'multi' && item.tombamentos) {
                 item.tombamentos.forEach(t => {
                     const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
@@ -555,20 +544,21 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
     });
 
     if (itemEncontrado) {
-        // 4. ATUALIZAÇÃO DO ESTADO DE INTERAÇÃO (DNA V3 - OBRIGATÓRIO PARA O PASSO 3)
+        // 4. ATUALIZAÇÃO DO ESTOQUE DE INTERAÇÃO (DNA V3)
         const uidStr = String(uid);
         const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
 
         window.itemStatus[uid] = {
             ...window.itemStatus[uid],
             status: 'C/A',
-            interacao_humana: true, // Libera a trava de segurança do modal
+            interacao_humana: true,
             obs: obsDigitada,
             quantidade: qtdInformada,
-            uid_global_ref: uidGlobalFull
+            uid_global_ref: uidGlobalFull,
+            id_pai: uidPai // Mantém o rastro no status local da sessão
         };
 
-        // 5. FEEDBACK VISUAL NA LINHA (TELA 2 AO FUNDO)
+        // 5. FEEDBACK VISUAL NA LINHA
         const row = document.getElementById(`item-row-${uid}`);
         if (row) {
             row.classList.remove('status-ok');
@@ -578,19 +568,18 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null) {
             const btnCheck = row.querySelector('.btn-check');
             if (btnAlert) {
                 btnAlert.classList.add('active');
-                btnAlert.classList.remove('v3-pulse-orange'); // Para de pulsar pois já houve interação
+                btnAlert.classList.remove('v3-pulse-orange');
                 btnAlert.style.backgroundColor = ""; 
             }
             if (btnCheck) btnCheck.classList.remove('active');
 
-            row.style.backgroundColor = "#fff9c4"; // Destaque amarelo momentâneo
+            row.style.backgroundColor = "#fff9c4"; 
             setTimeout(() => row.style.backgroundColor = "", 1000);
         }
 
-        // 6. ATUALIZAÇÃO SÍNCRONA DE BADGES E PROGRESSO
+        // 6. ATUALIZAÇÃO SÍNCRONA
         updateOverallStatus();
-
-        console.log("✅ Novo relato salvo e interação humana registrada.");
+        console.log(`✅ Relato salvo. ${uidPai ? '(Vínculo com Pai: ' + uidPai + ')' : ''}`);
 
     } else {
         console.error("V3 Error: Falha ao vincular relato ao item.", { uid });
