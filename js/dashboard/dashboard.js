@@ -354,7 +354,7 @@ function renderOperacionalCards() {
             <div class="cards-grid-v3-op">
                 
                 <div class="sigma-v3-summary-card sigma-v3-card-ok icon-conferencia" onclick="switchView('my-history')" style="width:100%; margin:0;">
-                    <h3>Minhas Conferências</h3>
+                    <h3>Minhas Atividades</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-conf-count">0</div>
                         <div style="line-height: 1.2;">
@@ -369,7 +369,7 @@ function renderOperacionalCards() {
                 </div>
 
                 <div class="sigma-v3-summary-card sigma-v3-card-unit icon-custodia" onclick="switchView('cautelas-ativas')" style="width:100%; margin:0;">
-                    <h3>Cautelas Ativas</h3>
+                    <h3>TRUGs Ativos</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-my-active-cautela-count">0</div>
                         <div style="line-height: 1.2;">
@@ -384,7 +384,7 @@ function renderOperacionalCards() {
                 </div>
 
                 <div class="sigma-v3-summary-card sigma-v3-card-posto icon-receber" onclick="switchView('cautelas-receber')" style="width:100%; margin:0;">
-                    <h3>Cautelas a receber</h3>
+                    <h3>TRUGs a receber</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-cautela-receive-count">0</div>
                         <div style="line-height: 1.2;">
@@ -481,7 +481,8 @@ async function countActiveCautelas() {
     // O tamanho do Set é a contagem total desduplicada de todas as cautelas ativas
     return countedIds.size;
 }
-// Localização: Linha ~2792
+
+/*RENDERIZAÇÃO DO DASHBOARD OPERACIONAL: CARDS E LISTA DE HOJE*/
 async function updateOperacionalCards() {
     const ul = document.getElementById('today-list');
     const countEl = document.getElementById('op-conf-count');
@@ -544,8 +545,12 @@ async function updateOperacionalCards() {
             }
         });
 
-        ul.innerHTML = html ||
-            '<li style="padding:15px; text-align:center; color:#999;">Nenhuma atividade hoje.</li>';
+        ul.innerHTML = html || `
+            <li style="padding: 30px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; list-style: none; opacity: 0.6;">
+                <i class="fas fa-history" style="font-size: 1.2rem; color: #94a3b8;"></i>
+                <span style="font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Sem registros hoje</span>
+            </li>
+        `;
 
     } catch (e) {
         console.error("Erro ao carregar dados operacionais unificados:", e);
@@ -2066,9 +2071,19 @@ function reimprimirPDF(data) {
         const TITULO_DOC = isChecklist ? "RELATÓRIO DE VISTORIA DE VIATURA" : (isTransferencia ? "TERMO DE TRANSFERÊNCIA DE CARGA" : "RELATÓRIO DE CONFERÊNCIA");
 
         const logoDraw = (domId, x) => {
-            const el = document.querySelector(`img[src*="${domId}"]`);
+            // ✅ CORREÇÃO: Busca apenas a imagem que possui a classe .header-icon
+            // Isso garante que o JS use a logo de 32px do Header como referência.
+            const el = document.querySelector(`.header-icon[src*="${domId}"]`) ||
+                document.querySelector(`img[src*="${domId}"]`);
+
             if (el) {
                 try {
+                    // Se a imagem capturada for a intrusa grande, nós a forçamos a não aparecer
+                    if (el.naturalWidth > 100 && !el.classList.contains('header-icon')) {
+                        el.style.display = 'none';
+                        return;
+                    }
+
                     const c = document.createElement('canvas');
                     c.width = 160; c.height = 160;
                     c.getContext('2d').drawImage(el, 0, 0, 160, 160);
@@ -3397,7 +3412,7 @@ function getNovaCautelaFormHTML() {
     return `
         <div class="sigma-v3-title-label" style="margin-bottom: 25px;">
             <i class="fas fa-file-contract" style="color: #800020;"></i>
-            <span>Nova Cautela de Material</span>
+            <span>Novo Termo de Responsabilidade de Uso e Guarda</span>
         </div>
 
         <div style="background: white; border-radius: 20px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid #eef2f6;">
@@ -3497,16 +3512,16 @@ function showCautelasDashboard(type) {
         // Definindo as variáveis de texto para evitar repetição de HTML
         if (type === 'Cautelas Ativas') {
             icon = 'fa-clipboard-check';
-            title = 'Cautelas Ativas';
-            description = 'Lista de materiais sob sua cautela. Clique em uma linha para ver os detalhes.';
+            title = 'TRUGs Ativos';
+            description = 'Termo de Responsabilida de Uso e Guarda Ativos. Clique em uma linha para ver os detalhes.';
         } else if (type === 'Cautelas a Receber') {
             icon = 'fa-inbox';
-            title = 'Cautelas a Receber (Ação Imediata)';
-            description = 'Cautelas emitidas por terceiros que precisam ser confirmadas por você.';
+            title = 'TRUGs a Receber (Devolução)';
+            description = 'TRUGs emitidos por terceiros que precisam ser confirmadas por você.';
         } else if (type === 'Histórico') {
             icon = 'fa-archive';
-            title = 'Histórico de Cautelas';
-            description = 'Visualize as cautelas finalizadas de acordo com o seu papel na transação.';
+            title = 'Histórico de TRUGs';
+            description = 'Visualize os TRUGs finalizados de acordo com o seu papel na transação.';
         }
 
         // Cabeçalho Padrão Sigma V3 (Substitui o antigo header-container)
@@ -9442,10 +9457,10 @@ async function carregarEstoqueParaEditor(unidadeId) {
                     unidade_id: unidadeId,
                     tombamentos: tombamentosDaUnidade,
                     disponivel: ehMulti ? tombamentosDaUnidade.length : (Number(saldoDoc.data().qtd_disp) || 0),
-                    
+
                     // 🔥 A PEÇA QUE FALTA: Injeta as regras de KIT no rascunho de busca
                     is_anfitriao: itemGlobal.is_anfitriao || false,
-                    componentes_regra: itemGlobal.componentes_regra || [] 
+                    componentes_regra: itemGlobal.componentes_regra || []
                 };
 
                 estoqueGestorLocal.push(objetoParaBusca);
@@ -10385,7 +10400,7 @@ async function confirmarPublicacaoLista() {
                 (setor.itens || []).forEach(it => {
                     if (it.uid_global === "ITEM_VISTORIA_LIVRE") return;
                     mapa[it.uid_global] = (mapa[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
-                    
+
                     if (it.acessorios_acoplados) {
                         it.acessorios_acoplados.forEach(ac => {
                             mapa[ac.uid_global] = (mapa[ac.uid_global] || 0) + (Number(ac.quantidade) || 0);
@@ -10418,7 +10433,7 @@ async function confirmarPublicacaoLista() {
 
             if (diferenca !== 0) {
                 const saldoRef = firestore.collection('inventario').doc(uid).collection('saldos_unidades').doc(unidadeGestoraId);
-                
+
                 // ✅ CORREÇÃO: Usamos SET com MERGE para evitar o erro "No document to update"
                 batch.set(saldoRef, {
                     unidade_sigla: currentUserData.unidade || "N/D", // Garante a sigla se o doc for criado agora
@@ -10465,7 +10480,7 @@ async function confirmarPublicacaoLista() {
                         situacao_atual: "DISPONÍVEL",
                         viatura_id: null,
                         sub_local: "ALMOXARIFADO",
-                        acessorios_vinculados: [] 
+                        acessorios_vinculados: []
                     });
 
                     const histLogRef = tombRef.collection('historico_vida').doc();
