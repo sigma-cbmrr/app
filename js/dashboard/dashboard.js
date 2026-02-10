@@ -776,6 +776,62 @@ function logout() {
     });
 }
 
+// Captura o evento de 'Voltar' do navegador/celular
+window.onpopstate = function(event) {
+    // Se existir um estado salvo no histórico (ou seja, o usuário navegou por menus)
+    if (event.state && event.state.viewId) {
+        // Volta para a tela anterior sem salvar novo histórico (saveHistory = false)
+        switchView(event.state.viewId, false);
+    } else {
+        // Se não houver estado, significa que ele voltou para o ponto zero (Dashboard inicial)
+        const currentHash = window.location.hash;
+        
+        if (currentHash === "" || currentHash === "#dashboard") {
+            // Se já está na home e tentou voltar, aciona o Logout
+            confirmarSaidaSistema();
+        } else {
+            // Caso caia em um limbo, força o retorno ao dashboard
+            switchView('dashboard', false);
+        }
+    }
+};
+
+// Função de Logout com Confirmação (UX Mobile)
+function confirmarSaidaSistema() {
+    Swal.fire({
+        title: 'Encerrar Sessão?',
+        text: "Deseja realmente sair do SIGMA?",
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#800020',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Sair agora',
+        cancelButtonText: 'Permanecer'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            logout(); // Chame sua função de logout aqui
+        } else {
+            // Se ele cancelar, "empurramos" o dashboard de volta para o histórico
+            // Assim o próximo "voltar" não fecha o navegador de imediato
+            window.history.pushState({ viewId: 'dashboard' }, "", "#dashboard");
+        }
+    });
+}
+
+// Ao carregar a página
+window.addEventListener('load', () => {
+    const hash = window.location.hash.replace('#', '');
+    
+    if (hash && hash !== 'dashboard') {
+        // Se o cara entrar por sigmacc.com#atividades, abre direto lá
+        switchView(hash, false); 
+    } else {
+        // Caso contrário, garante que o Dashboard seja o primeiro item do histórico
+        window.history.replaceState({ viewId: 'dashboard' }, "", "#dashboard");
+        switchView('dashboard', false);
+    }
+});
+
 // --- 3. DASHBOARD HIERÁRQUICO ---
 async function loadCaaData() {
     const container = document.getElementById('cards-container');
@@ -2535,9 +2591,8 @@ function switchView(v) {
     }
 
     // 5. TRATAMENTO MOBILE
-    if (window.innerWidth <= 768) {
-        history.pushState(null, null, location.href);
-        if (typeof closeMenuMobile === "function") closeMenuMobile();
+    if (saveHistory) {
+        window.history.pushState({ viewId: viewId }, "", "#" + viewId);
     }
 }
 
