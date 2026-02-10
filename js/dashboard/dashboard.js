@@ -354,7 +354,7 @@ function renderOperacionalCards() {
             <div class="cards-grid-v3-op">
                 
                 <div class="sigma-v3-summary-card sigma-v3-card-ok icon-conferencia" onclick="switchView('my-history')" style="width:100%; margin:0;">
-                    <h3>Minhas Conferências</h3>
+                    <h3>Minhas Atividades</h3>
                     <div class="sigma-v3-main-stat">
                         <div class="sigma-v3-stat-circle" id="op-conf-count">0</div>
                         <div style="line-height: 1.2;">
@@ -2071,26 +2071,26 @@ function reimprimirPDF(data) {
         const TITULO_DOC = isChecklist ? "RELATÓRIO DE VISTORIA DE VIATURA" : (isTransferencia ? "TERMO DE TRANSFERÊNCIA DE CARGA" : "RELATÓRIO DE CONFERÊNCIA");
 
         const logoDraw = (domId, x) => {
-    // ✅ CORREÇÃO: Busca apenas a imagem que possui a classe .header-icon
-    // Isso garante que o JS use a logo de 32px do Header como referência.
-    const el = document.querySelector(`.header-icon[src*="${domId}"]`) || 
-               document.querySelector(`img[src*="${domId}"]`);
-    
-    if (el) {
-        try {
-            // Se a imagem capturada for a intrusa grande, nós a forçamos a não aparecer
-            if (el.naturalWidth > 100 && !el.classList.contains('header-icon')) {
-                el.style.display = 'none';
-                return;
-            }
+            // ✅ CORREÇÃO: Busca apenas a imagem que possui a classe .header-icon
+            // Isso garante que o JS use a logo de 32px do Header como referência.
+            const el = document.querySelector(`.header-icon[src*="${domId}"]`) ||
+                document.querySelector(`img[src*="${domId}"]`);
 
-            const c = document.createElement('canvas');
-            c.width = 160; c.height = 160;
-            c.getContext('2d').drawImage(el, 0, 0, 160, 160);
-            doc.addImage(c.toDataURL('image/png'), 'PNG', x, 10, LOGO_S, LOGO_S);
-        } catch (e) { console.warn(`Logo erro: ${domId}`); }
-    }
-};
+            if (el) {
+                try {
+                    // Se a imagem capturada for a intrusa grande, nós a forçamos a não aparecer
+                    if (el.naturalWidth > 100 && !el.classList.contains('header-icon')) {
+                        el.style.display = 'none';
+                        return;
+                    }
+
+                    const c = document.createElement('canvas');
+                    c.width = 160; c.height = 160;
+                    c.getContext('2d').drawImage(el, 0, 0, 160, 160);
+                    doc.addImage(c.toDataURL('image/png'), 'PNG', x, 10, LOGO_S, LOGO_S);
+                } catch (e) { console.warn(`Logo erro: ${domId}`); }
+            }
+        };
 
         logoDraw('cbmrr.png', MARGIN);
         logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
@@ -9457,10 +9457,10 @@ async function carregarEstoqueParaEditor(unidadeId) {
                     unidade_id: unidadeId,
                     tombamentos: tombamentosDaUnidade,
                     disponivel: ehMulti ? tombamentosDaUnidade.length : (Number(saldoDoc.data().qtd_disp) || 0),
-                    
+
                     // 🔥 A PEÇA QUE FALTA: Injeta as regras de KIT no rascunho de busca
                     is_anfitriao: itemGlobal.is_anfitriao || false,
-                    componentes_regra: itemGlobal.componentes_regra || [] 
+                    componentes_regra: itemGlobal.componentes_regra || []
                 };
 
                 estoqueGestorLocal.push(objetoParaBusca);
@@ -10400,7 +10400,7 @@ async function confirmarPublicacaoLista() {
                 (setor.itens || []).forEach(it => {
                     if (it.uid_global === "ITEM_VISTORIA_LIVRE") return;
                     mapa[it.uid_global] = (mapa[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
-                    
+
                     if (it.acessorios_acoplados) {
                         it.acessorios_acoplados.forEach(ac => {
                             mapa[ac.uid_global] = (mapa[ac.uid_global] || 0) + (Number(ac.quantidade) || 0);
@@ -10433,7 +10433,7 @@ async function confirmarPublicacaoLista() {
 
             if (diferenca !== 0) {
                 const saldoRef = firestore.collection('inventario').doc(uid).collection('saldos_unidades').doc(unidadeGestoraId);
-                
+
                 // ✅ CORREÇÃO: Usamos SET com MERGE para evitar o erro "No document to update"
                 batch.set(saldoRef, {
                     unidade_sigla: currentUserData.unidade || "N/D", // Garante a sigla se o doc for criado agora
@@ -10480,7 +10480,7 @@ async function confirmarPublicacaoLista() {
                         situacao_atual: "DISPONÍVEL",
                         viatura_id: null,
                         sub_local: "ALMOXARIFADO",
-                        acessorios_vinculados: [] 
+                        acessorios_vinculados: []
                     });
 
                     const histLogRef = tombRef.collection('historico_vida').doc();
