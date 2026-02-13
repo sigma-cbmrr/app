@@ -1,15 +1,3 @@
-const firebaseConfig = { apiKey: "AIzaSyCB0PH0UgghgsvH0BgPkG4AkKON6xSQ9mc", authDomain: "sigma-cbmrr.firebaseapp.com", projectId: "sigma-cbmrr", storageBucket: "sigma-cbmrr.firebasestorage.app", messagingSenderId: "378026276038", appId: "1:378026276038:web:620dd6ff57501b1a8313c7" };
-if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-firebase.firestore().clearPersistence().catch((err) => {
-    if (err.code == 'failed-precondition') {
-        console.warn("Múltiplas abas abertas, persistência não pôde ser limpa.");
-    }
-});
-const auth = firebase.auth();
-const secondaryApp = firebase.initializeApp(firebaseConfig, 'Secondary');
-const secondaryAuth = secondaryApp.auth();
-
 // Constantes Globais
 const COLECAO_RESULTADOS = 'resultados_conferencias';
 const COLECAO_LISTAS = 'listas_conferencia';
@@ -41,22 +29,62 @@ window.colecaoAtivaNoEditor = 'listas_conferencia';
 let visaoAtual = 'grid'; // Padrão
 let letraAtiva = 'TODOS';
 let isCaaLoading = false;
+let itemSelecionadoTemp = null;
 
 // --- 1. AUTH & PERMISSÕES ---
 auth.onAuthStateChanged(async (user) => {
     if (user) {
         try {
             const doc = await db.collection('usuarios').doc(user.uid).get();
+            
             if (doc.exists) {
                 currentUserData = doc.data();
                 conferente = currentUserData.nome_militar_completo;
+
+                // --- 🛠️ INJEÇÃO DE DADOS NA INTERFACE (HEADER) ---
+                
+                // 1. Nome de Guerra ou Completo
+                const elNome = document.getElementById('user-name-top');
+                if (elNome) {
+                    elNome.innerText = currentUserData.nome_guerra || currentUserData.nome_completo || "MILITAR";
+                }
+
+                // 2. Sigla da Unidade
+                const elUnidade = document.getElementById('user-unit-top');
+                if (elUnidade) {
+                    elUnidade.innerText = currentUserData.unidade || "SIGMA";
+                }
+
+                // 3. Nível de Acesso (Mapeamento amigável)
+                const roleMap = { 'admin': 'Administrador', 'gestor': 'Gestor Local', 'operacional': 'Operacional' };
+                const elRole = document.getElementById('user-role-top');
+                const elAcesso = document.getElementById('user-access-top');
+                const labelRole = roleMap[currentUserData.role] || "MILITAR";
+
+                if (elRole) elRole.innerText = labelRole;
+                if (elAcesso) elAcesso.innerText = labelRole;
+
+                // 4. Avatar (Foto ou Gerador de Iniciais)
+                const elAvatar = document.getElementById('user-avatar-top');
+                if (elAvatar) {
+                    if (currentUserData.foto_url) {
+                        elAvatar.src = currentUserData.foto_url;
+                    } else {
+                        const iniciais = (currentUserData.nome_guerra || "M").substring(0, 2).toUpperCase();
+                        elAvatar.src = `https://ui-avatars.com/api/?name=${iniciais}&background=800020&color=fff&bold=true`;
+                    }
+                }
+
+                // --- 🚀 DISPARO DE FUNÇÕES DE TELA ---
                 setupUIBasedOnRole();
+                atualizarSaudacao(currentUserData);
+
             } else {
-                alert("Usuário sem registro no banco.");
+                console.warn("Usuário logado mas sem documento no Firestore.");
                 window.location.href = 'index.html';
             }
         } catch (e) {
-            console.error(e);
+            console.error("Erro ao carregar dados do usuário:", e);
         }
     } else {
         window.location.href = 'index.html';
@@ -488,4 +516,57 @@ function logout() {
             });
         }
     });
+}
+
+//--- GERENCIAMENTO DE COMUNICAÇÃO COM IFRAME (CAUTELAS) ---//
+function handleIframeMessage(event) {
+    if (event.origin !== window.location.origin) return;
+
+    if (event.data && event.data.type === 'SIGMA_FINISHED') {
+        // Removi o alert comum e sugiro um Toast do Swal se quiser algo mais profissional
+        Swal.fire({
+            icon: 'success',
+            title: 'Operação Finalizada',
+            timer: 2000,
+            showConfirmButton: false
+        });
+
+        // 1. Limpeza do Iframe
+        const container = document.getElementById('app-runner-container');
+        if (container) {
+            container.style.display = 'none';
+            document.getElementById('app-iframe').src = 'about:blank';
+        }
+
+        // 2. Restaura Interface
+        const contentArea = document.getElementById('content-area');
+        if (contentArea) contentArea.style.display = 'block';
+        
+        const sidebar = document.getElementById('sidebar') || document.getElementById('main-sidebar');
+        if (sidebar) sidebar.style.display = 'block';
+
+        // 3. Atualização Inteligente de Dados
+        loadCautionsToReceive(); 
+        loadActiveCautelas();    
+
+        // ✅ CORREÇÃO: Chama a renderização nova baseada no cargo do usuário
+        const role = currentUserData ? currentUserData.role : 'operacional';
+        
+        if (role === 'operacional') {
+            if (typeof renderOperacionalCards === 'function') {
+                renderOperacionalCards();
+            }
+        } else {
+            // Se for gestor e terminou algo no iframe, atualiza o painel de controle
+            if (typeof loadCaaData === 'function') {
+                loadCaaData();
+            }
+        }
+
+        // 4. Navegação de retorno
+        switchView('cautelas');
+        if (typeof showCautelasDashboard === 'function') {
+            showCautelasDashboard('Cautelas Ativas');
+        }
+    }
 }
