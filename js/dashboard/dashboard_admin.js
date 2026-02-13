@@ -1,8 +1,7 @@
-/*--- RENDERIZA OS CARDS DE GESTÃO DE PENDÊNCIAS PARA ADMIN/GESTOR ---*/
+/*--- RENDERIZA O LAYOUT DE GESTÃO PARA ADMIN/GESTOR (PREPARADOR DE PALCO) ---*/
 function renderAdminGestorCards(canViewDashboardCards) {
     const containerPai = document.getElementById('admin-gestor-cards-container');
     const cardsContainer = document.getElementById('cards-container');
-    const msgLoading = document.getElementById('loading-message-dashboard');
     const opContainer = document.getElementById('operacional-cards-container');
     const masterContainer = document.getElementById('dashboard-content-by-role');
 
@@ -14,17 +13,12 @@ function renderAdminGestorCards(canViewDashboardCards) {
     }
 
     const placeholder = document.getElementById('detail-placeholder');
-    const detailsWrapper = document.querySelector('.sigma-v3-details-wrapper');
     const detailColumn = document.querySelector('.dashboard-detail-column');
     const caTableWrapper = document.getElementById('ca-table-wrapper');
 
-    // 1. LIMPEZA TOTAL DA COLUNA DA DIREITA
+    // 1. RESET DE INTERFACE
     if (caTableWrapper) {
-        // ✅ MATANDO A BARRA CINZA: Escondemos o wrapper e resetamos o tamanho
         caTableWrapper.style.setProperty('display', 'none', 'important');
-        caTableWrapper.style.setProperty('height', '0', 'important');
-        caTableWrapper.style.setProperty('padding', '0', 'important');
-
         caTableWrapper.innerHTML = `
             <div id="table-title"></div>
             <div id="no-issues-msg" style="display:none; text-align:center; padding:20px; color:#94a3b8;"></div>
@@ -32,50 +26,44 @@ function renderAdminGestorCards(canViewDashboardCards) {
         `;
     }
 
-    // 2. RESET DE LAYOUT
+    // 2. CONFIGURAÇÃO DE LAYOUT INICIAL (Cards em Grid)
     if (opContainer) opContainer.style.setProperty('display', 'none', 'important');
 
     if (masterContainer) {
         masterContainer.classList.remove('dashboard-operacional-full');
-        masterContainer.style.setProperty('display', 'flex', 'important');
+        masterContainer.style.removeProperty('display'); // Libera para o Grid do CSS
+        masterContainer.classList.remove('split-view');  // Remove o modo de duas colunas
     }
 
+    // ✅ CORREÇÃO: A coluna de detalhes deve começar ESCONDIDA para o Grid ocupar a tela toda
     if (detailColumn) {
-        detailColumn.style.setProperty('display', 'block', 'important');
-        detailColumn.style.setProperty('background', '#fff', 'important'); // Coluna sempre branca
+        detailColumn.style.setProperty('display', 'none', 'important');
     }
 
-    if (detailsWrapper) {
-        detailsWrapper.style.setProperty('display', 'block', 'important');
-        detailsWrapper.style.setProperty('background', 'transparent', 'important');
-        detailsWrapper.style.setProperty('padding', '0', 'important');
-        detailsWrapper.style.setProperty('border', 'none', 'important');
-        detailsWrapper.style.setProperty('height', 'auto', 'important'); // ✅ Garante que ele não estique sozinho
-    }
-
-    // 3. DESENHO DO PLACEHOLDER
+    // 3. PREPARAÇÃO DO PLACEHOLDER (Mas não exibe ainda)
     if (placeholder) {
-        placeholder.style.setProperty('display', 'flex', 'important');
-        placeholder.style.setProperty('visibility', 'visible', 'important');
-
-        // Altura otimizada para Desktop
+        // Deixamos o conteúdo pronto, mas o display:none da detailColumn manda agora
         placeholder.innerHTML = `
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; min-height: 180px; color: #94a3b8; text-align: center; padding: 15px; background: #fff; border-radius: 12px;">
                 <div style="background: #f8fafc; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; border: 1.5px dashed #e2e8f0;">
-                    <i class="fas fa-mouse-pointer" style="font-size: 1.2em; color: #cbd5e1;"></i>
+                    <i class="fas fa-list-check" style="font-size: 1.2em; color: #cbd5e1;"></i>
                 </div>
-                    <h3 style="margin: 0; font-size: 1rem; color: #475569; font-weight: 700;">Gestão de Pendências</h3>
-                    <p style="font-size: 0.8rem; margin-top: 6px; color: #94a3b8; max-width: 220px; line-height: 1.3;">
-                    Selecione um card de pendência à esquerda para detalhar as alterações.
+                <h3 style="margin: 0; font-size: 1rem; color: #475569; font-weight: 700;">Monitoramento Listas de Conferência</h3>
+                <p style="font-size: 0.8rem; margin-top: 6px; color: #94a3b8; max-width: 220px; line-height: 1.3;">
+                    Selecione um card à esquerda para verificar o status do inventário e pendências.
                 </p>
             </div>
         `;
     }
 
+    // Exibe o contêiner de cards
     containerPai.style.setProperty('display', 'block', 'important');
+    
+    // Carrega os dados (cards)
     loadCaaData();
 }
 
+/*--- FUNÇÃO PRINCIPAL DE CARGA DE DADOS DE PENDÊNCIAS DAS CONFERÊNCIAS ---*/
 /*---FUNÇÃO PRINCIPAL DE CARGA DE DADOS DE PENDÊNCIAS DAS CONFERÊNCIAS---*/
 async function loadCaaData() {
     const container = document.getElementById('cards-container');
@@ -94,101 +82,104 @@ async function loadCaaData() {
         const isAdmin = currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral';
         const gestorUnidadeId = currentUserData.unidade_id;
 
-        console.log("👤 LOG PERMISSÃO:", {
-            nome: currentUserData.nome_militar_completo,
-            role: currentUserData.role,
-            unidadeIdDoGestor: gestorUnidadeId,
-            ehAdmin: isAdmin
-        });
-
-        const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(100).get();
-        console.log(`📊 LOG BANCO: Encontrados ${snap.size} registros brutos em ${COLECAO_RESULTADOS}`);
-
         const map = {};
         const cacheUnidadesLista = {};
+
+        // 1. BUSCA DOS RESULTADOS (Ordenados do mais recente para o mais antigo)
+        const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(100).get();
+        console.log(`📊 LOG BANCO: Encontrados ${snap.size} registros para análise.`);
 
         for (const doc of snap.docs) {
             const d = doc.data();
             const lId = d.lista_id;
-            const nomeViatura = d.local;
+            if (!lId) continue;
 
-            if (map[lId]) continue;
-
-            // 1. Identificação de Unidade
+            // Identificação de Unidade para conferência de permissão
             let unidadeVinculada = d.unidade_id;
             let siglaVinculada = d.unidade_sigla || "GERAL";
 
-            // Se o resultado for "órfão" (seu caso do ABT-18), busca na lista mestra
-            if (!unidadeVinculada && lId) {
-                console.log(`🔍 LOG TRIANGULAÇÃO: Buscando unidade para a viatura: ${nomeViatura} (ID: ${lId})`);
+            // Triangulação se o documento for órfão de unidade_id
+            if (!unidadeVinculada) {
                 if (!cacheUnidadesLista[lId]) {
                     const docLista = await db.collection('listas_conferencia').doc(lId).get();
                     if (docLista.exists) {
-                        const dataL = docLista.data();
-                        cacheUnidadesLista[lId] = {
-                            id: dataL.unidade_id,
-                            sigla: dataL.unidade_sigla
-                        };
-                        console.log(`✅ LOG TRIANGULAÇÃO: Viatura ${nomeViatura} pertence a: ${dataL.unidade_sigla} (ID: ${dataL.unidade_id})`);
-                    } else {
-                        console.warn(`⚠️ LOG TRIANGULAÇÃO: Lista Mestra ${lId} não encontrada no banco!`);
+                        const dL = docLista.data();
+                        cacheUnidadesLista[lId] = { id: dL.unidade_id, sigla: dL.unidade_sigla };
                     }
                 }
-
                 if (cacheUnidadesLista[lId]) {
                     unidadeVinculada = cacheUnidadesLista[lId].id;
                     siglaVinculada = cacheUnidadesLista[lId].sigla;
                 }
             }
 
-            // 2. Filtro de Pendências
-            let pendenciasReais = [];
-            const fonte = d.itensRelatorio || d.itensCaa || [];
-            fonte.forEach(it => {
-                if (it.status === 'C/A' && it.pendencias_ids) {
-                    it.pendencias_ids.forEach(p => {
-                        if (p.status_gestao !== 'RESOLVIDO') {
-                            pendenciasReais.push({
-                                ...p,
-                                itemNome: it.nomeCompleto || it.nome,
-                                itemId: it.id || it.uid_global,
-                                tipoRegistro: 'PENDENCIA'
-                            });
-                        }
-                    });
-                }
-            });
-
-            // 3. Validação de Visibilidade com Log de Bloqueio
+            // Validação de Visibilidade
             const bateUnidade = (unidadeVinculada === gestorUnidadeId);
             const podeVer = isAdmin || bateUnidade;
 
-            if (pendenciasReais.length > 0 && podeVer) {
-    
-                // ✅ LÓGICA DE EXIBIÇÃO DE SIGLA
-                // Se for Admin Geral, podemos forçar a sigla "GERAL" para agrupar tudo,
-                // ou manter a sigla real da unidade.
-                let siglaParaExibir = siglaVinculada;
-    
-                if (isAdmin && !bateUnidade) {
-                    // Se eu sou admin e estou vendo algo que não é da minha unidade 'sede'
-                    // Posso escolher manter a sigla original ou marcar como GERAL.
-                // siglaParaExibir = "GERAL"; // Descomente se quiser unificar tudo para o Admin
+            if (podeVer) {
+                // ✅ O PULO DO GATO: Se é a primeira vez que vemos esta lista no loop, 
+                // ela é a conferência mais recente (devido ao orderBy timestamp desc).
+                // Portanto, definimos o rodapé com estes dados.
+                if (!map[lId]) {
+                    map[lId] = {
+                        docId: doc.id,
+                        lista_id: lId,
+                        local: d.local,
+                        conferente: d.conferente, // Aqui será o 3º SGT JHONATH
+                        date: d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D',
+                        unidade_sigla: siglaVinculada,
+                        items: []
+                    };
                 }
 
-                map[lId] = {
-                    docId: doc.id,
-                    lista_id: lId,
-                    local: d.local,
-                    conferente: d.conferente,
-                    date: d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D',
-                    unidade_sigla: siglaParaExibir, // <--- Aqui define o grupo na tela
-                    items: pendenciasReais
-                };
+                // Agora, independente de quem conferiu, acumulamos as pendências ativas
+                const fonte = d.itensRelatorio || d.itensCaa || [];
+                fonte.forEach(it => {
+                    if (it.status === 'C/A' && it.pendencias_ids) {
+                        it.pendencias_ids.forEach(p => {
+                            if (p.status_gestao !== 'RESOLVIDO') {
+                                // Evita duplicar a mesma pendência se ela aparecer em vários logs
+                                const jaExiste = map[lId].items.some(existente => existente.id === p.id);
+                                if (!jaExiste) {
+                                    map[lId].items.push({
+                                        ...p,
+                                        itemNome: it.nomeCompleto || it.nome,
+                                        itemId: it.id || it.uid_global,
+                                        tipoRegistro: 'PENDENCIA'
+                                    });
+                                }
+                            }
+                        });
+                    }
+                });
             }
         }
 
-        console.log("🖼️ LOG FINAL: Renderizando total de cards:", Object.keys(map).length);
+        // --- 2. COMPLEMENTO DE LISTAS VAZIAS (S/A) ---
+        // Se for gestor, garante que listas que não tiveram conferência recente no snap também apareçam
+        if (!isAdmin && gestorUnidadeId) {
+            const snapMestras = await db.collection('listas_conferencia')
+                .where('unidade_id', '==', gestorUnidadeId)
+                .where('ativo', '==', true).get();
+
+            snapMestras.forEach(docM => {
+                if (!map[docM.id]) {
+                    const dM = docM.data();
+                    map[docM.id] = {
+                        docId: docM.id,
+                        lista_id: docM.id,
+                        local: dM.ativo_nome || dM.local || docM.id,
+                        conferente: dM.atualizado_por || "N/D",
+                        date: dM.atualizado_em ? dM.atualizado_em.toDate().toLocaleString('pt-BR') : 'N/D',
+                        unidade_sigla: dM.unidade_sigla || "CCI",
+                        items: []
+                    };
+                }
+            });
+        }
+
+        console.log("🖼️ LOG FINAL: Renderizando cards com último conferente cronológico.");
         renderCards(map);
 
     } catch (e) {
@@ -206,30 +197,28 @@ async function renderCards(map) {
     container.innerHTML = '';
     const keys = Object.keys(map);
 
+    // 1. Carrega rotas para fallback de unidade (se necessário)
     let rotas = {};
     try {
         const rotasDoc = await db.collection('config_geral').doc('rotas').get();
         rotas = rotasDoc.data() || {};
     } catch (e) { console.warn("Falha rotas:", e); }
 
+    // Se o mapa estiver vazio aqui, significa que não há nem listas cadastradas
     if (keys.length === 0) {
         container.innerHTML = `
-            <div style="padding:60px; text-align:center; color:#64748b; width:100%;">
-                <i class="fas fa-check-circle" style="font-size:4em; color:#1b8a3e; opacity:0.2; display:block; margin-bottom:20px;"></i>
-                <b style="font-size:1.2em;">Tudo em Conformidade</b><br>Nenhuma pendência ativa identificada.
+            <div style="padding:60px; text-align:center; color:#94a3b8; width:100%;">
+                <i class="fas fa- ghost fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
+                <p>Nenhuma viatura ou lista mapeada para sua unidade.</p>
             </div>`;
         return;
     }
 
-    // 1. AGRUPAMENTO INTELIGENTE (UNIFICAÇÃO)
+    // 2. AGRUPAMENTO POR UNIDADE
     const groupedCards = {};
     keys.forEach(listaId => {
         const d = map[listaId];
-
-        // ✅ Prioridade absoluta para a unidade gravada no documento de conferência
-        // Isso impede que o Admin veja o mesmo item em 'GERAL' e na 'UNIDADE'
         const unit = d.unidade_sigla || rotas[listaId]?.unidade || 'OUTROS';
-
         if (!groupedCards[unit]) groupedCards[unit] = [];
         groupedCards[unit].push(d);
     });
@@ -237,12 +226,11 @@ async function renderCards(map) {
     const sortedUnits = Object.keys(groupedCards).sort();
 
     sortedUnits.forEach(unit => {
-        // ✅ Títulos Dinâmicos por Unidade
+        // Títulos da Unidade
         const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
-        unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid rgba(0,0,0,0.05); padding-bottom: 10px; margin-top: 20px; margin-bottom: 15px; font-size: 1.1em; font-weight: 800; text-transform: uppercase;';
-
-        // Ícone seletivo para categorias especiais
+        unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid rgba(0,0,0,0.05); padding-bottom: 10px; margin-top: 25px; margin-bottom: 15px; font-size: 1.1em; font-weight: 800; text-transform: uppercase;';
+        
         const icon = (unit === 'OUTROS' || unit === 'GERAL') ? 'fa-folder-open' : 'fa-building';
         unitHeader.innerHTML = `<div class="unit-flex-title"><i class="fas ${icon}"></i> <span>${unit}</span></div>`;
         container.appendChild(unitHeader);
@@ -253,20 +241,29 @@ async function renderCards(map) {
             const countTotal = allItems.length;
             const temAlteracao = countTotal > 0;
 
+            // ✅ DEFINIÇÃO DE CORES V3
+            const corPrimaria = temAlteracao ? '#d90f23' : '#1b8a3e'; // Vermelho vs Verde
+            const corFundoBadge = temAlteracao ? '#fff1f2' : '#f0fdf4'; // Fundo do badge
+            const labelStatus = temAlteracao ? '⚠️ Atenção Requerida' : '✅ Inventário em Dia';
+
             const div = document.createElement('div');
-            div.className = `sigma-v3-floating-card`;
+            // Mantemos a classe base e adicionamos uma classe de estado se necessário
+            div.className = `sigma-v3-floating-card ${temAlteracao ? 'has-issue' : 'is-ok'}`;
+            
+            // Aplica borda lateral colorida dinamicamente
+            div.style.borderLeft = `6px solid ${corPrimaria}`;
 
             div.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                     <h3 style="margin:0; font-size: 1.2em; font-weight: 900; color: #1e293b;">${d.local}</h3>
-                    <div class="sigma-v3-stat-badge ${!temAlteracao ? 'sigma-v3-card-ok-badge' : ''}">
-                        ${countTotal === 0 ? '<i class="fas fa-check" style="font-size: 0.6em;"></i>' : countTotal}
+                    <div class="sigma-v3-stat-badge" style="background: ${corFundoBadge}; color: ${corPrimaria}; border: 1px solid ${corPrimaria}22;">
+                        ${!temAlteracao ? '<i class="fas fa-check" style="font-size: 0.7em;"></i>' : countTotal}
                     </div>
                 </div>
         
                 <div style="margin-top: 10px;">
-                    <span style="font-size: 0.7em; font-weight: 800; color: ${temAlteracao ? '#d90f23' : '#1b8a3e'}; text-transform: uppercase;">
-                        ${temAlteracao ? '⚠️ Atenção Requerida' : '✅ Inventário em Dia'}
+                    <span style="font-size: 0.7em; font-weight: 800; color: ${corPrimaria}; text-transform: uppercase; letter-spacing: 0.5px;">
+                        ${labelStatus}
                     </span>
                 </div>
 
@@ -276,12 +273,32 @@ async function renderCards(map) {
                         <span style="font-size: 0.75em; color: #64748b; font-weight: 600;">${d.conferente}</span>
                     </div>
                     <small style="display: block; color: #94a3b8; font-size: 0.7em; margin-top: 4px; margin-left: 22px;">
-                        ${d.date}
+                        <i class="far fa-clock"></i> ${d.date}
                     </small>
                 </div>
             `;
 
-            div.onclick = () => mostrarTabela(d);
+            // Ao clicar, abre a tabela de detalhes (que mostrará as pendências ou a msg de S/A)
+            div.onclick = () => {
+                const masterContainer = document.getElementById('dashboard-content-by-role');
+                const detailColumn = document.querySelector('.dashboard-detail-column');
+
+                if (masterContainer) {
+                    // 1. Ativa a transição CSS (cards encolhem para 380px)
+                    masterContainer.classList.add('split-view');
+                }
+
+                if (detailColumn) {
+                    // 2. Garante que a coluna de detalhes fique visível
+                    detailColumn.style.setProperty('display', 'block', 'important');
+                }
+
+                // 3. Carrega os dados na tabela (sua função original)
+                mostrarTabela(d);
+
+                // 4. Scroll suave para o topo da tabela (opcional, melhora a experiência)
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
             container.appendChild(div);
         });
     });
@@ -289,6 +306,12 @@ async function renderCards(map) {
 
 /*CRIA A TABELA DE PENDÊNCIAS COM BASE NOS DADOS FORNECIDOS PELO BACKEND (CA-ADMIN)*/
 function mostrarTabela(data) {
+    const masterContainer = document.getElementById('dashboard-content-by-role'); // O pai de todos
+    const detailColumn = document.querySelector('.dashboard-detail-column'); // A coluna branca
+
+    // ✅ GARANTE QUE O LAYOUT MUDE PARA DUAS COLUNAS
+    if (masterContainer) masterContainer.classList.add('split-view');
+    if (detailColumn) detailColumn.style.setProperty('display', 'block', 'important');
     const wrapper = document.getElementById('ca-table-wrapper');
     const gridContainer = document.getElementById('sigma-v3-dynamic-grid');
     const msgNoIssues = document.getElementById('no-issues-msg');
@@ -424,26 +447,33 @@ function mostrarTabela(data) {
 
 // Função para fechar a tabela e resetar o estado
 function fecharTabela() {
+    const masterContainer = document.getElementById('dashboard-content-by-role');
+    const detailColumn = document.querySelector('.dashboard-detail-column');
     const wrapper = document.getElementById('ca-table-wrapper');
     const placeholder = document.getElementById('detail-placeholder');
 
-    // 1. ESCONDE A TABELA (Mata a "Barra Cinza")
-    if (wrapper) {
-        // ✅ Usamos setProperty com important para garantir que o CSS não a mantenha visível
-        wrapper.style.setProperty('display', 'none', 'important');
+    console.log("🔙 Executando fechamento e reset de Grid...");
+
+    // 1. O PONTO CHAVE: Remove a classe que divide a tela
+    if (masterContainer) {
+        masterContainer.classList.remove('split-view');
+        // Removemos qualquer trava de display que o JS possa ter colocado
+        masterContainer.style.removeProperty('display'); 
     }
 
-    // 2. LÓGICA DE ESTADO MASTER-DETAIL
-    // No Desktop, o placeholder DEVE voltar para não deixar o quadro branco
-    if (window.innerWidth > 1100 && placeholder) {
-        placeholder.style.setProperty('display', 'flex', 'important');
+    // 2. ESCONDE A COLUNA DE DETALHES COMPLETAMENTE
+    // Se ela ficar como 'block', os cards continuam espremidos na esquerda
+    if (detailColumn) {
+        detailColumn.style.setProperty('display', 'none', 'important');
     }
 
-    // 3. COMPORTAMENTO MOBILE
-    if (window.innerWidth <= 1100) {
-        // No mobile, apenas voltamos para a lista de cards
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    // 3. LIMPEZA INTERNA (Opcional, mas boa prática)
+    if (wrapper) wrapper.style.setProperty('display', 'none', 'important');
+    if (placeholder) placeholder.style.setProperty('display', 'none', 'important');
+
+    // 4. COMPORTAMENTO DE NAVEGAÇÃO
+    // Independente de ser mobile ou desktop, voltamos o scroll para o topo dos cards
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /**
@@ -697,5 +727,147 @@ async function buscarSaldoEstoqueGestor(itemId) {
     } catch (e) {
         console.error("Erro ao buscar estoque:", e);
         return { total: 0, tombamentos: [] };
+    }
+}
+async function carregarAlertasTransferencia() {
+    const container = document.getElementById('resume-container');
+
+    // Verifica se os dados básicos existem
+    if (!currentUserData || !currentUserData.unidade_id) {
+        // Se ainda não carregou, não exibe erro, apenas sai silenciosamente 
+        // pois o setTimeout ou o switchView tentarão novamente.
+        return;
+    }
+
+    // Se o usuário for Operacional, ele não recebe carga (geralmente), 
+    // então paramos aqui para poupar processamento
+    if (currentUserData.role === 'operacional') return;
+
+    try {
+        const minhaUnidadeId = currentUserData.unidade_id;
+
+        const snap = await db.collection('transferencias_pendentes')
+            .where('destino_id', '==', minhaUnidadeId)
+            .where('status', '==', 'EM_TRANSITO')
+            .get();
+
+        if (snap.empty) {
+            console.log("Nenhuma carga em trânsito para a unidade:", minhaUnidadeId);
+            return;
+        }
+
+        // Se chegou aqui, há carga. Remove duplicados e insere.
+        const alertaExistente = document.getElementById('alerta-carga-transito');
+        if (alertaExistente) alertaExistente.remove();
+
+        const alertaHtml = `
+            <div id="alerta-carga-transito" class="op-card resume" style="background-color: #fff8e1; border-left-color: #f57c00; margin-bottom: 20px; animation: fadeIn 0.5s ease;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <i class="fas fa-truck-loading fa-2x" style="color: #f57c00;"></i>
+                    <div style="flex: 1; text-align: left;">
+                        <h3 style="margin: 0; color: #e65100; font-size: 1.1em;">Carga em Trânsito</h3>
+                        <p style="margin: 5px 0 0 0; font-size: 0.9em; color: #666;">
+                            Existem <b>${snap.size}</b> guias aguardando conferência nesta unidade.
+                        </p>
+                    </div>
+                    <button class="btn-modern-action" style="background-color: #f57c00 !important;" onclick="abrirListaRecebimentoCarga()">
+                        <i class="fas fa-clipboard-check"></i> Conferir
+                    </button>
+                </div>
+            </div>`;
+
+        if (container) {
+            const alertaAntigo = document.getElementById('alerta-carga-transito');
+            if (alertaAntigo) alertaAntigo.remove(); // Limpa apenas o dele, se houver
+
+            container.insertAdjacentHTML('afterbegin', alertaHtml); // Insere no topo sem apagar os outros
+        }
+
+    } catch (e) {
+        console.error("Erro na busca de transferências:", e);
+    }
+}
+async function abrirListaRecebimentoCarga() {
+    const minhaUnidadeId = currentUserData.unidade_id;
+    const snap = await db.collection('transferencias_pendentes')
+        .where('destino_id', '==', minhaUnidadeId)
+        .where('status', '==', 'EM_TRANSITO')
+        .get();
+
+    if (snap.empty) {
+        Swal.fire('Informação', 'Nenhuma carga em trânsito para sua unidade.', 'info');
+        return;
+    }
+
+    let htmlLista = '<div style="text-align: left; max-height: 350px; overflow-y: auto; padding: 5px;">';
+
+    snap.forEach(doc => {
+        const tr = doc.data();
+
+        // 1. Lógica do Número da Guia (TR-AAAA / Prefixo do ID)
+        const ano = tr.timestamp_envio ? tr.timestamp_envio.toDate().getFullYear() : new Date().getFullYear();
+        const guiaLegivel = `TR-${ano}/${doc.id.substring(0, 5).toUpperCase()}`;
+
+        // 2. Cálculo do Volume Total - CORREÇÃO: Usando 'quantidade' conforme o banco
+        const totalVolumes = tr.itens.reduce((acc, item) => acc + (Number(item.quantidade) || 0), 0);
+
+        htmlLista += `
+            <div class="result-vtr-card" onclick="iniciarRecebimentoCargaApp('${doc.id}')" 
+                 style="margin-bottom: 12px; padding: 15px; border: 1px solid #eee; border-left: 6px solid #000; border-radius: 10px; cursor: pointer; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: transform 0.2s;">
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+                    <span style="font-weight: 800; color: #000; font-size: 1.1em;">${guiaLegivel}</span>
+                    <span style="font-size: 0.75em; background: #f0f0f0; padding: 2px 8px; border-radius: 4px; color: #666;">
+                        <i class="far fa-calendar-alt"></i> ${tr.timestamp_envio?.toDate().toLocaleDateString('pt-BR')}
+                    </span>
+                </div>
+
+                <div style="font-size: 0.85em; color: #444; line-height: 1.5;">
+                    <div style="margin-bottom: 4px;">
+                        <i class="fas fa-user-edit" style="width: 18px; color: #888;"></i> 
+                        Origem: <b>${tr.origem_sigla || 'DLOG'}</b> (${tr.emitente})
+                    </div>
+                    <div style="display: flex; gap: 15px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;">
+                        <span><i class="fas fa-boxes" style="color: #2c3e50;"></i> Itens: <b>${tr.itens.length}</b></span>
+                        <span><i class="fas fa-layer-group" style="color: #2c3e50;"></i> Volume Total: <b>${totalVolumes}</b></span>
+                    </div>
+                </div>
+            </div>`;
+    });
+
+    htmlLista += '</div>';
+
+    Swal.fire({
+        title: '<i class="fas fa-truck-loading"></i> Cargas Destinadas à Unidade',
+        html: htmlLista,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: 'Fechar',
+        customClass: {
+            title: 'swal-title-left'
+        }
+    });
+}
+function iniciarRecebimentoCargaApp(transferenciaId) {
+    Swal.close();
+
+    const userUid = firebase.auth().currentUser.uid;
+    const guerra = (currentUserData.nome_guerra || 'ND').toUpperCase();
+    const posto = (currentUserData.posto || 'ND');
+    const quadro = (currentUserData.quadro || 'ND');
+
+    const url = `conferencia_app.html?transferenciaId=${transferenciaId}` +
+        `&modo=recebimento_carga` +
+        `&posto_grad=${encodeURIComponent(posto)}` +
+        `&quadro_mil=${encodeURIComponent(quadro)}` +
+        `&nome_guerra=${encodeURIComponent(guerra)}` +
+        `&user_uid=${userUid}`;
+
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+
+    if (container && iframe) {
+        iframe.src = url;
+        container.style.display = 'block';
     }
 }
