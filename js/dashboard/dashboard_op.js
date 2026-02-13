@@ -91,3 +91,61 @@ function renderOperacionalCards() {
     // Dispara a lógica de preenchimento dos dados
     updateOperacionalCards();
 }
+
+/**
+ * Busca os dados reais no Firebase para preencher os círculos de contagem 
+ * do Dashboard Operacional (Minhas Conferências, TRUGs Ativos e a Receber)
+ */
+async function updateOperacionalCards() {
+    const ul = document.getElementById('today-list');
+    const countEl = document.getElementById('op-conf-count');
+    const cautelaReceiveCountEl = document.getElementById('op-cautela-receive-count');
+    const myActiveCautelaCountEl = document.getElementById('op-my-active-cautela-count');
+    
+    const conferenteUid = firebase.auth().currentUser.uid;
+    
+    // Verificação de segurança para não quebrar o script
+    if (!conferenteUid || !ul || !countEl || !cautelaReceiveCountEl || !myActiveCautelaCountEl) {
+        return; 
+    }
+    
+    try {
+        // 1. Histórico de Conferências (Total e Hoje)
+        // Substituí COLECAO_RESULTADOS pelo nome real da coleção para evitar erros
+        const snapTotal = await db.collection('resultados_conferencias')
+            .where('conferente_uid', '==', conferenteUid) 
+            .orderBy('timestamp', 'desc')
+            .get();
+
+        countEl.textContent = snapTotal.size; 
+
+        // 2. TRUGs - Busca os contadores das funções que estão no trug.js
+        if (typeof getCautelasAReceberCount === 'function') {
+            cautelaReceiveCountEl.textContent = await getCautelasAReceberCount(); 
+        }
+        
+        if (typeof countActiveCautelas === 'function') {
+            myActiveCautelaCountEl.textContent = await countActiveCautelas(); 
+        }
+        
+        // 3. Renderização da Timeline de Hoje
+        const hojeStr = new Date().toLocaleDateString('pt-BR');
+        let html = '';
+        
+        snapTotal.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.timestamp) {
+                const dt = data.timestamp.toDate();
+                if(dt.toLocaleDateString('pt-BR') === hojeStr) {
+                    // Usa a função de fábrica de cards
+                    html += criarItemHistoricoHTML(data);
+                }
+            }
+        });
+        
+        ul.innerHTML = html || '<li style="padding:25px; text-align:center; color:#94a3b8; font-size:0.9em;"><i class="fas fa-history" style="display:block; font-size:1.5em; margin-bottom:10px; opacity:0.5;"></i> Nenhuma atividade registrada hoje.</li>';
+        
+    } catch(e) { 
+        console.error("Erro ao atualizar dashboard operacional:", e);
+    }
+}
