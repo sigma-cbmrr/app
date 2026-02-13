@@ -386,7 +386,7 @@ async function carregarPostosVisuais() {
         };
 
         htmlFinal = renderGrupo(operacionais, 'Prontidão Operacional', '#800020') +
-            renderGrupo(missoes, 'Missões e Reforços', '#2c3e50');
+            renderGrupo(missoes, 'Missões e Extras', '#2c3e50');
 
         container.innerHTML = htmlFinal;
 
@@ -403,7 +403,7 @@ async function deletarPostoSistema(uid, nome) {
         title: 'Excluir Posto?',
         html: `Você está prestes a remover <b>${nome}</b>.<br><br>
                <div style="font-size: 0.8em; background: #fff5f5; color: #c53030; padding: 10px; border-radius: 8px; border: 1px solid #feb2b2;">
-                <i class="fas fa-exclamation-triangle"></i> <b>AVISO:</b> Viaturas vinculadas a este posto ficarão com o local indefinido.
+                <i class="fas fa-exclamation-triangle"></i> <b>AVISO:</b> Listas vinculadas a este posto ficarão com o local indefinido.
                </div>`,
         icon: 'warning',
         showCancelButton: true,
