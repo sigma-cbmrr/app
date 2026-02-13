@@ -1,4 +1,8 @@
-/* --- FUNÇÕES DE CONTROLE DE ABAS (Atividades Pessoais x Unidade) --- */
+//====================================//
+//--- BLOCO: NAVEGAÇÃO E CONTROLE ---//
+//===================================//
+
+//=== Alterna entre a visão do Militar (Pessoal) e a visão do Gestor (Unidade) ===//
 function switchAtividadesTab(tab) {
     // 1. Definição de elementos
     const contentPessoal = document.getElementById('content-pessoal');
@@ -25,11 +29,60 @@ function switchAtividadesTab(tab) {
         btnUnidade.classList.add('active');
         titleSpan.innerText = 'Gestão de Registros (Unidade)';
 
+        // ✅ GATILHOS DE SEGURANÇA E FILTRO
+        // Carrega os filtros baseados na Unidade do Gestor antes de listar o histórico
+        carregarLocaisFiltroHistorico(); 
+        carregarUsuariosFiltro();
+        
         loadGlobalHistory(); // Recarrega os dados da unidade
     }
 }
 
-//--- CARREGA A ABA DE ATIVIDADES PESSOAIS (HISTÓRICO DE CONFERÊNCIAS, CHECKLISTS E TRANSFERÊNCIAS) ---//
+//=== CARREGA O FILTRO DE USUÁRIOS NA ABA DE ATIVIDADES DA UNIDADE ===//
+async function carregarUsuariosFiltro() {
+    const select = document.getElementById('glob-hist-user');
+    if (!select) return;
+
+    select.innerHTML = '<option value="">Todos</option>';
+
+    // ✅ AJUSTE: O Gestor agora filtra pelo unidade_id (mais seguro e preciso)
+    const isGestor = currentUserData.role === 'gestor';
+    const unidadeIdGestor = currentUserData.unidade_id;
+
+    let userQuery = db.collection('usuarios');
+
+    if (isGestor && unidadeIdGestor) {
+        userQuery = userQuery.where('unidade_id', '==', unidadeIdGestor);
+    }
+
+    try {
+        const snap = await userQuery.get();
+        let users = [];
+        snap.forEach(doc => {
+            const u = doc.data();
+            if (u.nome_militar_completo) {
+                users.push(u.nome_militar_completo);
+            }
+        });
+
+        // Remove duplicatas e ordena alfabeticamente
+        [...new Set(users)].sort().forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+
+    } catch (e) {
+        console.error("Erro ao carregar filtro de usuários:", e);
+    }
+}
+
+//==============================================//
+//--- BLOCO: CARREGAMENTO DE DADOS (Queries) ---//
+//==============================================//
+
+//=== CARREGA A ABA DE ATIVIDADES PESSOAIS (HISTÓRICO DE CONFERÊNCIAS, CHECKLISTS E TRANSFERÊNCIAS) ===//
 async function loadMyHistory() {
     const ul = document.getElementById('my-history-list');
     const conferenteUid = firebase.auth()?.currentUser?.uid;
@@ -131,19 +184,20 @@ async function loadMyHistory() {
     }
 }
 
-//---CARREGA O HISTÓRICO GLOBAL DE CONFERÊNCIAS E CHECKLISTS PARA A UNIDADE (ABA UNIDADE)---//
+//=== CARREGA O HISTÓRICO GLOBAL DE CONFERÊNCIAS E CHECKLISTS PARA A UNIDADE (ABA UNIDADE) ===//
 async function loadGlobalHistory() {
     const listContainer = document.getElementById('global-history-list');
-    const localFilter = document.getElementById('glob-hist-local').value;
+    const localIdFilter = document.getElementById('glob-hist-local').value; // Agora espera o ID da VTR
     const conferenteFilter = document.getElementById('glob-hist-user').value;
 
     if (!listContainer) return;
 
+    // Feedback visual moderno
     listContainer.innerHTML = `
         <div style="text-align:center; padding:60px; color:#64748b;">
             <i class="fas fa-circle-notch fa-spin fa-2x"></i>
-            <p style="margin-top:15px; font-weight:700; text-transform:uppercase; font-size:0.8em;">
-                Consultando registros da unidade ${currentUserData.unidade}...
+            <p style="margin-top:15px; font-weight:700; text-transform:uppercase; font-size:0.8em; letter-spacing:1px;">
+                Consultando registros da unidade...
             </p>
         </div>`;
 
@@ -151,7 +205,11 @@ async function loadGlobalHistory() {
     const dF = new Date(document.getElementById('glob-hist-end').value + 'T23:59:59');
 
     if (isNaN(dI.getTime()) || isNaN(dF.getTime())) {
-        listContainer.innerHTML = `<div class="status-error">Selecione o período corretamente.</div>`;
+        listContainer.innerHTML = `
+            <div style="text-align:center; padding:40px; color:#d90f23; background:#fff1f2; border-radius:12px;">
+                <i class="fas fa-calendar-times fa-2x"></i>
+                <p style="margin-top:10px; font-weight:bold;">Selecione o período (Início e Fim) para pesquisar.</p>
+            </div>`;
         return;
     }
 
@@ -159,7 +217,7 @@ async function loadGlobalHistory() {
     const endTS = firebase.firestore.Timestamp.fromDate(dF);
 
     try {
-        // ✅ 1. CONSULTA DIRECIONADA (Filtro por Unidade no Servidor)
+        // 1. Definição das referências base com filtro de tempo
         let refConf = db.collection('resultados_conferencias')
             .where('timestamp', '>=', startTS)
             .where('timestamp', '<=', endTS);
@@ -168,19 +226,22 @@ async function loadGlobalHistory() {
             .where('timestamp', '>=', startTS)
             .where('timestamp', '<=', endTS);
 
-        // Se for GESTOR, ele só pode ver a própria unidade (Filtro nativo do banco)
+        // 2. Filtro de Jurisdição (Gestor vê apenas sua Unidade ID)
         if (currentUserData.role === 'gestor') {
-            refConf = refConf.where('unidade', '==', currentUserData.unidade);
-            refCheck = refCheck.where('unidade', '==', currentUserData.unidade);
+            const unidId = currentUserData.unidade_id;
+            if (unidId) {
+                refConf = refConf.where('unidade_id', '==', unidId);
+                refCheck = refCheck.where('unidade_id', '==', unidId);
+            }
         }
 
-        // Filtro opcional por nome do militar
+        // 3. Filtro opcional por militar
         if (conferenteFilter) {
             refConf = refConf.where('conferente', '==', conferenteFilter);
             refCheck = refCheck.where('conferente', '==', conferenteFilter);
         }
 
-        // Executa busca
+        // Execução das buscas em paralelo
         const [snapConf, snapCheck] = await Promise.all([
             refConf.orderBy('timestamp', 'desc').get(),
             refCheck.orderBy('timestamp', 'desc').get()
@@ -190,28 +251,94 @@ async function loadGlobalHistory() {
         snapConf.forEach(d => docs.push({ ...d.data(), id_doc: d.id }));
         snapCheck.forEach(d => docs.push({ ...d.data(), id_doc: d.id }));
 
-        // Ordena tudo por tempo
-        docs.sort((a, b) => b.timestamp.seconds - a.timestamp.seconds);
+        // Ordenação unificada por tempo (mais recente primeiro)
+        docs.sort((a, b) => {
+            const timeA = a.timestamp?.seconds || 0;
+            const timeB = b.timestamp?.seconds || 0;
+            return timeB - timeA;
+        });
 
+        // 4. Renderização com filtro de Local (Viatura/Base)
         let html = '';
         docs.forEach(d => {
-            // ✅ 2. FILTRO DE LOCAL (Filtro na memória apenas para o local específico)
-            const localLimpo = d.local.includes(': ') ? d.local.split(': ')[1] : (d.local.split(' - ')[1] || d.local);
+            // ✅ PRECISÃO CIRÚRGICA: 
+            // O 'localIdFilter' contém o doc.id da lista.
+            // No histórico, buscamos preferencialmente pelo campo 'lista_id' ou 'local_id'.
+            const idDaVtrNoHistorico = d.lista_id || d.local_id || d.local;
 
-            if (!localFilter || localLimpo === localFilter) {
+            if (!localIdFilter || idDaVtrNoHistorico === localIdFilter) {
                 html += criarItemHistoricoHTML(d);
             }
         });
 
-        listContainer.innerHTML = html || `<div style="text-align:center; padding:80px; color:#94a3b8;"><p>Nenhum registro encontrado.</p></div>`;
+        listContainer.innerHTML = html || `
+            <div style="text-align:center; padding:80px; color:#94a3b8;">
+                <i class="fas fa-search fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
+                <p>Nenhum registro localizado para esta viatura/período.</p>
+            </div>`;
 
     } catch (e) {
-        console.error("Erro no loadGlobalHistory:", e);
-        listContainer.innerHTML = `<div style="text-align:center; padding:40px; color:#d90f23;"><p>Erro na consulta. Certifique-se de que os índices do Firestore foram criados.</p></div>`;
+        console.error("Erro ao carregar histórico global:", e);
+        listContainer.innerHTML = `
+            <div style="text-align:center; padding:40px; color:#d90f23;">
+                <i class="fas fa-exclamation-triangle fa-2x"></i>
+                <p style="margin-top:10px; font-weight:800;">Erro na consulta ao banco de dados.</p>
+                <small>${e.message}</small>
+            </div>`;
     }
 }
 
-//--- CRIA OS CARDS DE HISTÓRICO (CONFERÊNCIAS, CHECKLISTS E TRANSFERÊNCIAS) ---//
+//=== CARREGA O FILTRO DE LOCAIS (LISTAS/VTRs) NA ABA DE HISTÓRICO DA UNIDADE ===//
+async function carregarLocaisFiltroHistorico() {
+    const selectLocal = document.getElementById('glob-hist-local');
+    if (!selectLocal || !currentUserData) return;
+
+    selectLocal.innerHTML = '<option value="">Todas as Listas</option>';
+
+    try {
+        // Consultamos a coleção onde as listas de conferência são armazenadas
+        let query = db.collection('listas_conferencia').where('ativo', '==', true);
+
+        // Bloqueio de Jurisdição: Gestor só vê o que é da unidade dele
+        if (currentUserData.role === 'gestor') {
+            const unidIdGestor = currentUserData.unidade_id;
+            if (unidIdGestor) {
+                query = query.where('unidade_id', '==', unidIdGestor);
+            }
+        }
+
+        const snap = await query.get();
+
+        if (snap.empty) {
+            console.warn("Nenhuma lista ativa encontrada para esta unidade.");
+            return;
+        }
+
+        snap.forEach(doc => {
+            const data = doc.data();
+            const opt = document.createElement('option');
+            
+            // O value deve ser o ID do documento (ex: alfa_abt18) para bater com o histórico
+            opt.value = doc.id; 
+
+            // Rótulo: "ABT-18 (BIOMA)" ou "Mucajaí - Apiaú (BIOMA)"
+            const identificador = data.ativo_nome || data.prefixo || doc.id;
+            const posto = data.posto_nome ? ` (${data.posto_nome})` : "";
+            
+            opt.textContent = `${identificador}${posto}`.toUpperCase();
+            selectLocal.appendChild(opt);
+        });
+
+    } catch (e) {
+        console.error("Erro ao carregar locais para filtro:", e);
+    }
+}
+
+//================================================//
+//--- BLOCO: RENDERIZAÇÃO E TEMPLATES (Visual) ---//
+//================================================//
+
+//=== CRIA OS CARDS DE HISTÓRICO (CONFERÊNCIAS, CHECKLISTS E TRANSFERÊNCIAS) ===//
 function criarItemHistoricoHTML(data) {
     const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
     const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
@@ -266,42 +393,3 @@ function criarItemHistoricoHTML(data) {
     `;
 }
 
-//--- CARREGA O FILTRO DE USUÁRIOS NA ABA DE ATIVIDADES DA UNIDADE ---//
-async function carregarUsuariosFiltro() {
-    const select = document.getElementById('glob-hist-user');
-    if (!select) return;
-
-    select.innerHTML = '<option value="">Todos</option>';
-
-    // ✅ AJUSTE: O Gestor agora filtra pelo unidade_id (mais seguro e preciso)
-    const isGestor = currentUserData.role === 'gestor';
-    const unidadeIdGestor = currentUserData.unidade_id;
-
-    let userQuery = db.collection('usuarios');
-
-    if (isGestor && unidadeIdGestor) {
-        userQuery = userQuery.where('unidade_id', '==', unidadeIdGestor);
-    }
-
-    try {
-        const snap = await userQuery.get();
-        let users = [];
-        snap.forEach(doc => {
-            const u = doc.data();
-            if (u.nome_militar_completo) {
-                users.push(u.nome_militar_completo);
-            }
-        });
-
-        // Remove duplicatas e ordena alfabeticamente
-        [...new Set(users)].sort().forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            select.appendChild(opt);
-        });
-
-    } catch (e) {
-        console.error("Erro ao carregar filtro de usuários:", e);
-    }
-}
