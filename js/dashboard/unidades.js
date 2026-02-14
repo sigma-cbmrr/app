@@ -1,3 +1,112 @@
+async function configurarBuscaComandanteUnidade() {
+    const input = document.getElementById('new-unit-commander-search');
+    const suggestionsBox = document.getElementById('unit-commander-suggestions');
+    const suggestionsList = document.getElementById('unit-commander-list');
+    const uidInput = document.getElementById('new-unit-commander-uid');
+
+    if (!input) return;
+
+    // Garante que temos militares carregados para a busca global
+    // Se o array global allTargetUsers estiver vazio, buscamos todos os militares do banco
+    if (typeof allTargetUsers === 'undefined' || allTargetUsers.length === 0) {
+        console.log("Populando lista global de militares para seleção de comando...");
+        const snap = await db.collection('usuarios').get();
+        allTargetUsers = [];
+        snap.forEach(doc => {
+            const u = doc.data();
+            allTargetUsers.push({
+                id: doc.id,
+                nome: u.nome_militar_completo || u.nome_completo
+            });
+        });
+    }
+
+    input.addEventListener('input', () => {
+        const termo = input.value.toUpperCase();
+        suggestionsList.innerHTML = '';
+
+        if (termo.length < 2) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        const filtrados = allTargetUsers.filter(u =>
+            u.nome.toUpperCase().includes(termo)
+        );
+
+        filtrados.forEach(militar => {
+            const li = document.createElement('li');
+            li.style.padding = "10px";
+            li.style.cursor = "pointer";
+            li.style.borderBottom = "1px solid #eee";
+            li.innerHTML = `<i class="fas fa-user-shield"></i> ${militar.nome}`;
+
+            li.onclick = () => {
+                input.value = militar.nome;
+                uidInput.value = militar.id; // Salva o UID imutável (ex: 8snxsQcrahT4...)
+                suggestionsBox.style.display = 'none';
+                input.style.borderColor = '#1b8a3e';
+                console.log("Comandante selecionado:", militar.id);
+            };
+            suggestionsList.appendChild(li);
+        });
+
+        suggestionsBox.style.display = filtrados.length > 0 ? 'block' : 'none';
+    });
+
+    // Fecha a lista se clicar fora
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target)) suggestionsBox.style.display = 'none';
+    });
+}
+
+function filtrarUnidadesCards() {
+    // Captura o termo e normaliza (remove acentos e caracteres especiais para busca precisa)
+    const inputBusca = document.getElementById('input-busca-unidade');
+    if (!inputBusca) return;
+
+    const termo = inputBusca.value.trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove acentos
+        .replace(/[^a-z0-9]/g, ""); // Mantém apenas letras e números
+
+    // Seleciona os cards padrão V3 dentro do container de unidades
+    const cards = document.querySelectorAll('#units-cards-container .v3-posto-card');
+    const headers = document.querySelectorAll('#units-cards-container .unit-header');
+
+    cards.forEach(card => {
+        // Captura o conteúdo do card e normaliza para comparação
+        const textoCard = card.innerText.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]/g, "");
+
+        const matches = textoCard.includes(termo);
+
+        if (matches) {
+            card.style.display = "flex";
+            card.style.animation = "fadeIn 0.3s ease";
+        } else {
+            card.style.display = "none";
+        }
+    });
+
+    // Filtra os títulos de grupo (Headers), escondendo se o grupo estiver vazio
+    headers.forEach(header => {
+        let proximo = header.nextElementSibling;
+        let temVisivel = false;
+
+        // Varre os elementos seguintes até o próximo header ou fim do container
+        while (proximo && !proximo.classList.contains('unit-header')) {
+            if (proximo.classList.contains('v3-posto-card') && proximo.style.display !== 'none') {
+                temVisivel = true;
+                break;
+            }
+            proximo = proximo.nextElementSibling;
+        }
+
+        header.style.display = temVisivel ? "block" : "none";
+    });
+}
+
 //--- CARREGA AS UNIDADES E RENDERIZA OS CARDS ---//
 async function carregarUnidadesVisuais() {
     const container = document.getElementById('units-cards-container');
