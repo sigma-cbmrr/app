@@ -1,1159 +1,951 @@
-/* --- A central de comando do item; exibe todas as pendências ativas de um material e oferece as opções de manter, resolver ou relatar um novo problema --- */
-async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPai = null) {
+// --- ENGINE VISUAL SIGMA V3 ---
+
+//Ativa o modo de inspeção visual, escondendo a lista de setores e mostrando os itens específicos para conferência.
+function navegarParaItens() {
+    document.body.classList.add('modo-inspecao');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+//Retorna à visão macro dos setores e dispara a re-renderização para atualizar os indicadores de progresso.
+window.navegarParaSetores = function () {
+    console.log("%c[NAV] Retornando para o Painel de Setores...", "color: #f43f5e; font-weight: bold;");
+
+    // 1. Transição Visual de Telas
+    document.body.classList.remove('modo-inspecao');
+    const painelSetores = document.getElementById('v3-painel-setores');
+    const painelItens = document.getElementById('v3-painel-itens');
+
+    if (painelSetores) painelSetores.style.display = 'block';
+    if (painelItens) painelItens.style.display = 'none';
+
+    // 2. Sincronização de Dados e UI
+    if (typeof renderizarConferencia === 'function') {
+        // ✅ IMPORTANTE: O renderizarConferencia agora NÃO deve ter o updateOverallStatus dentro dele
+        renderizarConferencia();
+
+        // 3. O SEGREDO DO SINCRONISMO:
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (typeof updateOverallStatus === 'function') {
+                    console.log("%c[UI] Forçando atualização de badges e barra neon...", "color: #10b981");
+
+                    // ✅ AJUSTE: Forçamos a limpeza de cache visual do navegador antes do update
+                    updateOverallStatus();
+                }
+            });
+        });
+    }
+
+    // 4. Reset de posição
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+//Atualiza o HUD (painel superior) com o nome da viatura, posto, data, hora e as cores institucionais do modo ativo.
+function updateHeaderInfo() {
+    const elListaNome = document.getElementById('militar-nome-hud'); // Destaque (Linha 1)
+    const elApoioInfo = document.getElementById('local-titulo-hud'); // Apoio (Linha 2)
+    const elAvatar = document.getElementById('militar-avatar');
+
+    if (!elListaNome || !elApoioInfo) return;
+
+    // 1. DEFINIÇÃO DE CORES E ÍCONE POR MODO
     const isChecklist = window.isModoChecklist;
-    const corPrimaria = isChecklist ? "#2c3e50" : "#800020";
-    const nomeLimpo = nomeItem.replace(/\\'/g, "'");
+    const isCarga = (new URLSearchParams(window.location.search)).get('modo') === 'recebimento_carga';
 
-    const fonteDados = window.dadosConferencia || dadosConferencia;
-    let pendencias = [];
+    let corHUD = "#800020"; // Bordô (Padrão)
+    let iconeHUD = "fa-clipboard-list";
 
-    // 1. LOCALIZA TODAS AS PENDÊNCIAS ATUAIS E HERDADAS
+    if (isChecklist) {
+        corHUD = "#2c3e50"; // Azul Petróleo (Vistoria)
+        iconeHUD = "fa-truck-moving";
+    } else if (isCarga) {
+        corHUD = "#000000"; // Preto (Carga)
+        iconeHUD = "fa-exchange-alt";
+    }
+
+    // 2. FORMATAÇÃO DOS DADOS DE EXIBIÇÃO
+    let destaquePrincipal = infoLocal.nome || "LISTA";
+
+    if (isChecklist) {
+        // Captura KM e Combustível via URL (Parâmetros já definidos no app-config.js)
+        const km = urlParams.get('km') || "0";
+        const combustivel = urlParams.get('combustivel') || "N/D";
+        const kmFormatado = Number(km).toLocaleString('pt-BR');
+
+        // Monta o destaque com ÍCONES em vez de textos
+        // Usamos innerHTML para renderizar as tags <i> do FontAwesome
+        elListaNome.innerHTML = `
+            ${infoLocal.nome} 
+            <span style="margin: 0 10px; opacity: 0.3;">|</span> 
+            <i class="fas fa-tachometer-alt" style="font-size: 0.8em; color: #94a3b8;"></i> ${kmFormatado} 
+            <span style="margin: 0 10px; opacity: 0.3;">|</span> 
+            <i class="fas fa-gas-pump" style="font-size: 0.8em; color: #94a3b8;"></i> ${combustivel.toUpperCase()}
+        `;
+    } else {
+        const nomePosto = infoLocal.posto ? ` | ${infoLocal.posto}` : "";
+        elListaNome.textContent = `${destaquePrincipal}${nomePosto}`;
+    }
+
+    // Apoio: Data e Hora atual da sessão
+    const agora = new Date();
+    const dataFormatada = agora.toLocaleDateString('pt-BR');
+    const horaFormatada = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const apoioTexto = `${dataFormatada} às ${horaFormatada}`;
+    elApoioInfo.textContent = apoioTexto;
+
+    // 3. ATUALIZAÇÃO DA ESTILIZAÇÃO (HUD)
+    if (elAvatar) {
+        elAvatar.style.background = corHUD;
+        elAvatar.innerHTML = `<i class="fas ${iconeHUD}"></i>`;
+    }
+
+    const progressFill = document.getElementById('overall-progress-bar');
+    if (progressFill) {
+        progressFill.style.background = corHUD;
+        progressFill.style.boxShadow = `0 0 10px ${corHUD}`;
+    }
+}
+
+//Calcula o progresso global da conferência, atualiza a barra neon de progresso e gerencia o estado do botão "Finalizar".
+function updateOverallStatus() {
+    // 1. MAPEAMENTO DE DADOS (INDEPENDENTE DA TELA ATIVA)
+    const fonteDados = window.dadosConferencia || [];
+    const isChecklist = window.isModoChecklist;
+    let totalItensObrigatorios = 0; // Itens que PRECISAM de conferência
+    let concluidosGeral = 0;
+
     fonteDados.forEach(setor => {
-        setor.itens.forEach(it => {
-            const isMatch = (it.uid_global === uid || it.id === uid);
-            if (isMatch && it.pendencias_ids) pendencias = [...it.pendencias_ids];
+        setor.itens.forEach(item => {
+            // ✅ EXCEÇÃO: Ignora o item de foto na contagem de obrigatoriedade global
+            if (item.tipo === 'upload_foto') return;
 
-            if (it.tombamentos) {
-                it.tombamentos.forEach(t => {
-                    const uidComp = `${it.uid_global || it.id}-${t.tomb}`;
-                    if (uidComp === uid && t.pendencias_ids) pendencias = [...t.pendencias_ids];
-                });
-            }
+            const uid = isChecklist ? item.id : (item.uid_global || item.id);
+            const status = window.itemStatus[uid];
 
-            // ✅ AJUSTE PARA ACESSÓRIOS: Se for um filho, busca pendências temporárias da sessão
-            if (uidPai && (it.uid_global === uidPai || it.id === uidPai)) {
-                const statusLocal = window.itemStatus[uid];
-                if (statusLocal && statusLocal.pendencias_temporarias) {
-                    pendencias = [...statusLocal.pendencias_temporarias];
+            totalItensObrigatorios++;
+
+            // ✅ AJUSTE PASSO 3: Validação rigorosa de Interação Humana
+            // Além do status, exigimos que o militar tenha interagido (Manter/Resolver/Check)
+            if (status && status.interacao_humana === true) {
+                if (status.status === 'ok' || status.status === 'C/A' || status.cautela_confirmada) {
+                    concluidosGeral++;
                 }
             }
         });
     });
 
-    // 2. CONSTRUÇÃO DINÂMICA DOS CARDS DE PENDÊNCIA
-    let htmlPendencias = "";
-    pendencias.forEach((p, index) => {
-        const isTemp = String(p.id).startsWith('TEMP-');
-        const isMantido = window.itemStatus[uid]?.ids_mantidos?.includes(String(p.id));
-        const isResolvido = p.status_gestao === 'RESOLVIDO';
+    const todosConcluidos = totalItensObrigatorios > 0 && concluidosGeral === totalItensObrigatorios;
 
-        htmlPendencias += `
-            <div class="v3-manage-card" style="background:${isResolvido ? '#f0fdf4' : (isTemp ? '#f0f9ff' : '#fff5f5')}; 
-                 border:1px solid ${isResolvido ? '#bbf7d0' : (isTemp ? '#bae6fd' : '#ffcccc')}; 
-                 padding:15px; border-radius:12px; margin-bottom:12px; position:relative; width: 100%; box-sizing: border-box; transition: 0.3s;
-                 ${isResolvido ? 'opacity: 0.9;' : ''}">
+    // 2. ATUALIZAÇÃO DA BARRA NEON (HEADER HUD)
+    const progBar = document.getElementById('overall-progress-bar');
+    if (progBar) {
+        const percentual = totalItensObrigatorios > 0 ? (concluidosGeral / totalItensObrigatorios) * 100 : 0;
+        progBar.style.width = `${percentual}%`;
+
+        if (percentual === 100) {
+            progBar.style.background = "#1b8a3e";
+            progBar.style.boxShadow = "0 0 10px #1b8a3e";
+        } else {
+            const corModo = isChecklist ? "#2c3e50" : "#800020";
+            progBar.style.background = corModo;
+            progBar.style.boxShadow = `0 0 10px ${corModo}`;
+        }
+    }
+
+    // 3. ATUALIZAÇÃO DO BOTÃO FINALIZAR (TELA 1)
+    const btn = document.getElementById('btn-finalizar');
+    if (btn) {
+        // Cores institucionais SIGMA V3
+        const corVinho = '#800020';
+        const corPetroleo = '#2c3e50';
+        
+        const corAtiva = isChecklist ? corPetroleo : corVinho;
+        const buttonText = isChecklist ? 'FINALIZAR VISTORIA' : 'FINALIZAR CONFERÊNCIA';
+
+        btn.disabled = !todosConcluidos;
+
+        if (btn.disabled) {
+            // ESTADO: APAGADO (PENDENTE)
+            btn.innerHTML = `<i class="fas fa-tasks"></i> PENDENTE (${concluidosGeral}/${totalItensObrigatorios})`;
+            btn.style.background = '#94a3b8';
+            btn.style.boxShadow = 'none';
+            btn.style.animation = 'none';
+            btn.style.transform = 'scale(1)';
+        } else {
+            // ESTADO: ACESO (FINALIZAR)
+            btn.innerHTML = `<i class="fas fa-paper-plane"></i> ${buttonText}`;
+            btn.style.background = corAtiva;
+            btn.style.boxShadow = `0 10px 20px rgba(0,0,0,0.2)`;
+            btn.style.animation = "v3-pulse 2s infinite";
+            
+            // Força a cor do pulso no box-shadow dinâmico
+            btn.style.setProperty('box-shadow', `0 0 0 0 ${corAtiva}66`); 
+        }
+    }
+
+    // 4. ATUALIZAÇÃO DAS LINHAS DE SETOR (TELA 1)
+    document.querySelectorAll('.v3-setor-row').forEach((row, index) => {
+        const setor = fonteDados[index];
+        if (!setor) return;
+
+        let totalSetorObrigatorio = 0;
+        let concluidosSetor = 0;
+        let alertasSetor = 0;
+
+        setor.itens.forEach(it => {
+            if (it.tipo === 'upload_foto') return;
+
+            totalSetorObrigatorio++;
+            const uidSetor = isChecklist ? it.id : (it.uid_global || it.id);
+            const st = window.itemStatus[uidSetor];
+
+            // 1. CONTAGEM DE CONCLUSÃO (Para barra de progresso e ícone de check)
+            // Se houve interação humana E o status final é positivo (OK ou Alteração Mantida)
+            if (st && st.interacao_humana === true) {
+                if (st.status === 'ok' || st.status === 'C/A') {
+                    concluidosSetor++;
+                }
+            }
+
+            // 2. CONTAGEM DE ALERTA (Para o badge vermelho "ALT")
+            // Condição A: O item está marcado como Alteração Mantida ou Nova (C/A)
+            const temAlteracaoAtiva = (st && st.status === 'C/A');
+
+            // Condição B: Tem pendência no banco mas o usuário ainda NÃO interagiu com ela
+            const temPendenciaBancoSemInteracao = (it.pendencias_ids && it.pendencias_ids.length > 0 && (!st || !st.interacao_humana));
+
+            // Condição C: Segurança para não contar se o status final for 'ok' (Resolvido)
+            const foiResolvidoAgora = (st && st.status === 'ok');
+
+            if ((temAlteracaoAtiva || temPendenciaBancoSemInteracao) && !foiResolvidoAgora) {
+                alertasSetor++;
+            }
+        });
+
+        // Atualiza os badges de texto dentro da linha do setor
+        const badgeTotal = row.querySelector('.badge-total');
+        if (badgeTotal) {
+            if (totalSetorObrigatorio === 0) {
+                badgeTotal.innerText = "REGISTRO OPCIONAL";
+            } else {
+                badgeTotal.innerText = `${concluidosSetor}/${totalSetorObrigatorio} CONFERIDOS`;
+            }
+        }
+
+        // Gerencia badge de alertas
+        // --- GERENCIAMENTO AGRESSIVO DO BADGE DE ALERTAS ---
+        const containerBadges = row.querySelector('.v3-setor-badges');
+
+        if (containerBadges) {
+            // Removemos qualquer badge antigo para evitar duplicidade
+            const badgeAntigo = containerBadges.querySelector('.badge-alerta');
+            if (badgeAntigo) badgeAntigo.remove();
+
+            if (alertasSetor > 0) {
+                // Injetamos o HTML puro diretamente
+                const htmlAlerta = `<span class="badge-mini badge-alerta" style="
+                    display: inline-flex !important; 
+                    align-items: center; 
+                    gap: 5px; 
+                    background-color: #be123c !important; 
+                    color: white !important; 
+                    padding: 2px 8px !important; 
+                    border-radius: 4px !important; 
+                    font-weight: bold !important; 
+                    font-size: 11px !important;
+                    margin-left: 8px !important;
+                    visibility: visible !important;
+                    opacity: 1 !important;">
+                    <i class="fas fa-exclamation-triangle"></i> ${alertasSetor} ALT
+                </span>`;
+
+                containerBadges.insertAdjacentHTML('beforeend', htmlAlerta);
+                console.log(`%c[UI] Badge injetado no setor ${index} com ${alertasSetor} alertas.`, "color: #10b981");
+            }
+        }
+        // Status de Concluído (Fica verde se os itens OBRIGATÓRIOS estiverem OK)
+        if (concluidosSetor === totalSetorObrigatorio && totalSetorObrigatorio > 0) {
+            row.classList.add('concluido');
+            const icon = row.querySelector('i.fas');
+            if (icon) {
+                icon.className = 'fas fa-check-circle';
+                icon.style.color = "#1b8a3e"; // ✅ VERDE SIGMA
+            }
+        } else if (totalSetorObrigatorio === 0) {
+            row.classList.remove('concluido');
+            const icon = row.querySelector('i.fas');
+            if (icon) {
+                icon.className = 'fas fa-camera';
+                icon.style.color = "#94a3b8";
+            }
+        } else {
+            row.classList.remove('concluido');
+            const icon = row.querySelector('i.fas');
+            if (icon) {
+                icon.className = 'fas fa-chevron-right';
+                icon.style.color = "#94a3b8";
+            }
+        }
+    });
+}
+
+//A função principal de montagem; gera dinamicamente todo o HTML dos setores e itens baseado nos dados vindos do banco.
+function renderizarConferencia() {
+    // 1. MAPEAMENTO E LIMPEZA DE CONTAINERS V3
+    const containerSetores = document.getElementById('lista-setores-container');
+    const containerItens = document.getElementById('lista-itens-container');
+
+    if (!containerSetores || !containerItens) return;
+
+    // Limpa os containers antes de renderizar para evitar duplicidade
+    containerSetores.innerHTML = '';
+    containerItens.innerHTML = '';
+
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    const isChecklist = window.isModoChecklist || false;
+    const isRecebimentoCarga = (new URLSearchParams(window.location.search)).get('modo') === 'recebimento_carga';
+
+    // --- CONFIGURAÇÃO DE CORES V3 ---
+    let corTema = isChecklist ? '#2c3e50' : (isRecebimentoCarga ? '#000000' : '#800020');
+
+    // 2. RENDERIZAÇÃO DA TELA 1: LINHAS DE SETORES (Visão Macro)
+    let htmlSetores = '';
+    fonteDados.forEach((setor, index) => {
+        const totalItens = setor.itens.length;
+
+        let concluidosSetor = 0;
+        let alertasSetor = 0;
+        setor.itens.forEach(it => {
+            const uid = it.uid_global || it.id;
+            const status = window.itemStatus[uid];
+
+            // 1. Contagem de Conclusão (Para o 1/1)
+            if (status && status.interacao_humana) {
+                concluidosSetor++;
+            }
+
+            // 2. Contagem de Alertas (Para o Badge Vermelho)
+            // Se o status for 'C/A' (Mantido) OU se o item tem pendências reais no banco
+            // Mas apenas se ele NÃO foi resolvido totalmente (status 'ok')
+            const temAlteracaoAtiva = (status && status.status === 'C/A');
+            const temPendenciaBanco = (it.pendencias_ids && it.pendencias_ids.length > 0);
+            const foiResolvidoTotal = (status && status.status === 'ok');
+
+            if ((temAlteracaoAtiva || temPendenciaBanco) && !foiResolvidoTotal) {
+                alertasSetor++;
+            }
+        });
+
+        const setorCompleto = (concluidosSetor === totalItens && totalItens > 0);
+
+        // SOLUÇÃO: Define a cor verde se estiver concluído, caso contrário mantém o cinza padrão
+        const estiloIcone = setorCompleto ? 'color: #1b8a3e !important;' : 'color: #94a3b8;';
+
+        htmlSetores += `
+                <div class="v3-setor-row ${setorCompleto ? 'concluido' : ''}" onclick="entrarNoSetor(${index})">
+                    <div class="v3-setor-label">
+                        <strong>${setor.nome}</strong>
+                        <div class="v3-setor-badges">
+                            <span class="badge-mini badge-total">${concluidosSetor}/${totalItens} CONFERIDOS</span>
+                            ${alertasSetor > 0 ? `<span class="badge-mini badge-alerta"><i class="fas fa-exclamation-triangle"></i> ${alertasSetor} ALT</span>` : ''}
+                        </div>
+                    </div>
+                    <i class="fas ${setorCompleto ? 'fa-check-circle' : 'fa-chevron-right'}" style="${estiloIcone}"></i>
+                </div>`;
+    });
+
+    containerSetores.innerHTML = htmlSetores;
+
+    // 3. FUNÇÃO DE NAVEGAÇÃO (Com Desvio Inteligente para Fotos)
+    window.entrarNoSetor = function (index) {
+        const setor = fonteDados[index];
+        const containerItens = document.getElementById('lista-itens-container');
+
+        // Atualiza cabeçalho da Tela 2
+        document.getElementById('nome-setor-atual').innerText = setor.nome;
+        document.getElementById('nome-setor-atual').style.color = corTema;
+
+        // ✅ DESVIO PARA MÓDULO FOTOGRÁFICO
+        if (setor.nome.toUpperCase().includes("FOTOGRÁFICO")) {
+            renderizarPainelFotos(containerItens);
+        } else {
+            // Renderização padrão de itens
+            renderizarLinhasItens(setor.itens, index);
+        }
+
+        document.body.classList.add('modo-inspecao');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // 4. RENDERIZAÇÃO DA TELA 2: LINHAS ELEGANTES DE ITENS (Visão Micro)
+    function renderizarLinhasItens(itens, setorIndex) {
+    const container = document.getElementById('lista-itens-container');
+    const isChecklist = window.isModoChecklist;
+
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!itens || itens.length === 0) {
+        const fonteBackup = window.dadosConferencia || [];
+        if (fonteBackup[setorIndex]) {
+            itens = fonteBackup[setorIndex].itens;
+        } else {
+            console.error("Erro Crítico: Setor não localizado.");
+            return;
+        }
+    }
+
+    itens.forEach((item) => {
+        const uid = isChecklist ? item.id : (item.uid_global || item.id);
+        const statusLocal = window.itemStatus[uid] || {};
+        const st = statusLocal.status;
+
+        // Regras de Pendência e Alerta
+        const temPendenciaAnterior = item.pendencias_ids && item.pendencias_ids.length > 0;
+        const devePulsar = temPendenciaAnterior && !statusLocal.interacao_humana;
+
+        // Cálculos de Saldo
+        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
+        const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
+        const totalPendente = (item.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
+        const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
+
+        const classeStatus = (st === 'ok') ? 'status-ok' : (st === 'C/A' ? 'status-alert' : '');
+        const classeCarimbo = (temPendenciaAnterior || (item.cautelas && item.cautelas.length > 0)) ? 'has-carimbo' : '';
+        const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+        // Verificação se é um Anfitrião de Kit
+        const temAcessorios = item.acessorios_acoplados && item.acessorios_acoplados.length > 0;
+
+        // --- CONSTRUÇÃO DO CARD UNIFICADO ---
+        let htmlKitContent = '';
+        if (temAcessorios) {
+            htmlKitContent = `
+                <div class="v3-kit-internal-list" style="width: 100%; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+                    <small style="display:block; color: #94a3b8; font-weight: 800; font-size: 0.65em; margin-bottom: 5px; text-transform: uppercase;">
+                        Componentes do Kit:
+                    </small>
+                    ${item.acessorios_acoplados.map(ac => `
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: #64748b; font-size: 0.8em;">
+                            <i class="fas fa-caret-right" style="font-size: 0.7em; color: #cbd5e1;"></i>
+                            <span style="font-weight: 600;">${ac.quantidade}x</span>
+                            <span style="text-transform: uppercase;">${ac.nome}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        container.innerHTML += `
+            <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}" 
+                 style="display: flex; flex-direction: column; align-items: flex-start; gap: 0;">
                 
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
-                    <div style="display:flex; flex-direction: column; gap:2px;">
-                        <small style="color:${isResolvido ? '#166534' : '#64748b'}; font-weight:800; font-size:0.6em; text-transform:uppercase; letter-spacing:0.5px;">
-                            ${isResolvido ? '✅ SOLUÇÃO REGISTRADA (AGUARDANDO ENVIO)' : (isTemp ? '✨ RELATO ATUAL' : '📜 RELATO ANTERIOR')}
-                        </small>
-                        <span style="font-size: 0.65em; font-weight: 900; color: ${isResolvido ? '#166534' : corPrimaria}; opacity: 0.8;">
-                            ${p.quantidade} UNIDADE(S)
-                        </span>
+                <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+                    <div class="v3-item-main-info">
+                        <span class="v3-item-name">${item.nome} ${temAcessorios ? '<i class="fas fa-box-open" style="font-size: 0.8em; margin-left: 5px; color: #2c7399;"></i>' : ''}</span>
+                        ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
+                        ${item.tipo === 'multi' && item.tombamentos ?
+                        `<span class="v3-item-subtext">TOMB: <b>${item.tombamentos.map(t => t.tomb).join(', ')}</b></span>` : ''}
                     </div>
-                    <div style="display:flex; gap:10px;">
-                        ${isResolvido ? `
-                            <div style="color: #166534; background: #dcfce7; padding: 5px 10px; border-radius: 8px; font-size: 0.7em; font-weight: bold;">
-                                <i class="fas fa-check-double"></i> RESOLVIDO
-                            </div>
-                        ` : `
-                            ${isTemp ? `
-                                <button onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" class="v3-mini-btn" title="Editar"><i class="fas fa-pen"></i></button>
-                                <button onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" class="v3-mini-btn delete" title="Excluir"><i class="fas fa-trash"></i></button>
-                            ` : `
-                                <button id="btn-manter-${index}" onclick="manterID('${p.id}', '${uid}', ${index})" class="v3-action-icon ${isMantido ? 'active' : ''}" title="Manter Alteração">
-                                    <i class="fas ${isMantido ? 'fa-check-double' : 'fa-thumbtack'}"></i>
-                                </button>
-                                <button onclick="abrirFormularioResolucaoV3(${JSON.stringify(p).replace(/"/g, '&quot;')}, '${uid}')" class="v3-action-icon resolver" title="Resolver">
-                                    <i class="fas fa-wrench"></i>
-                                </button>
-                            `}
-                        `}
+
+                    <div class="v3-item-actions">
+                        <button class="v3-btn-circle btn-check ${st === 'ok' ? 'active' : ''}" 
+                                onclick="registrarCheckRapido(this, '${uid}', ${setorIndex})">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <button class="v3-btn-circle btn-alert ${st === 'C/A' ? 'active' : ''} ${devePulsar ? 'v3-pulse-orange' : ''}" 
+                                style="${devePulsar ? 'background-color: #f57c00 !important; color: white;' : ''}"
+                                onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
+                            <i class="fas fa-exclamation"></i>
+                        </button>
                     </div>
                 </div>
 
-                <div style="font-weight:700; color:${isResolvido ? '#166534' : '#1e293b'}; font-size:0.95em; line-height:1.4; margin-bottom:10px; word-wrap: break-word; text-transform: uppercase; ${isResolvido ? 'text-decoration: line-through; opacity: 0.7;' : ''}">
-                    ${p.descricao}
+                ${htmlKitContent}
+            </div>`;
+    });
+
+    if (typeof atualizarContadorSetorInterno === 'function') {
+        atualizarContadorSetorInterno(itens);
+    }
+}
+
+    /**
+     * LOGICA DE CHECK RÁPIDO (S/A)
+     * Modificada para respeitar o Auto-Advance se for o último item.
+     */
+    window.registrarCheckRapido = function (btn, uid, setorIndex) {
+    // 1. Identifica o item nos dados originais para saber se ele possui acessórios (Kit)
+    const fonteDados = window.dadosConferencia || [];
+    const setor = fonteDados[setorIndex];
+    const itemDados = setor ? setor.itens.find(it => (it.uid_global || it.id) === uid) : null;
+
+    // 2. Registro do ITEM PAI (Anfitrião)
+    if (typeof setItemStatusID === 'function') {
+        setItemStatusID(btn, 'ok', uid);
+    }
+
+    // 3. LÓGICA DE KIT: Se houver acessórios, marca todos como 'ok' automaticamente na memória
+    if (itemDados && itemDados.acessorios_acoplados && itemDados.acessorios_acoplados.length > 0) {
+        console.log(`%c📦 Kit detectado: Marcando ${itemDados.acessorios_acoplados.length} acessórios como OK...`, "color: #2c7399; font-weight: bold;");
+        
+        itemDados.acessorios_acoplados.forEach((ac, idx) => {
+            const acUid = `${uid}_ac_${idx}`; // O ID virtual que definimos na renderização
+            
+            // Simula a chamada do setItemStatusID para os filhos (apenas lógica de memória)
+            // Passamos 'null' no lugar do botão pois eles não têm botão físico mais.
+            if (typeof setItemStatusID === 'function') {
+                setItemStatusID(null, 'ok', acUid);
+            }
+        });
+    }
+
+    // 4. ATUALIZAÇÃO VISUAL DO CARD (Pai)
+    const row = document.getElementById(`item-row-${uid}`);
+    if (row) {
+        row.classList.remove('status-alert');
+        row.classList.add('status-ok');
+        btn.classList.add('active');
+
+        // Remove pulso do botão de alerta se existir
+        const btnAlert = row.querySelector('.btn-alert');
+        if (btnAlert) {
+            btnAlert.classList.remove('v3-pulse-orange');
+            btnAlert.style.backgroundColor = "";
+        }
+    }
+
+    // 5. AUTO-ADVANCE: Se sua engine tiver lógica de pular para o próximo, ela é disparada aqui
+    if (typeof verificarFluxoSetor === 'function') {
+        verificarFluxoSetor(uid);
+    }
+};
+}
+
+/*---------------------------------------------------------------------------------------------------------------------------
+-- Analisa um setor específico e atualiza seu selo de status (Check, Alerta ou em andamento) conforme os itens são conferidos
+---------------------------------------------------------------------------------------------------------------------------*/
+function updateSetorStatus(setorEl) {
+    if (!setorEl) return;
+
+    const itensPai = setorEl.querySelectorAll('.item-conferencia');
+    let concluidos = 0;
+    let total = itensPai.length;
+
+    itensPai.forEach(item => {
+        if (item.classList.contains('status-ok') || item.classList.contains('status-alert')) {
+            concluidos++;
+        }
+    });
+
+    setorEl.dataset.totalItems = total;
+
+    const st = setorEl.querySelector('.setor-status');
+    if (st) {
+        st.dataset.completed = concluidos;
+        st.style.color = "#ffffff";
+        st.style.transition = "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)";
+
+        if (concluidos === total && total > 0) {
+            const temAlerta = setorEl.querySelectorAll('.item-conferencia.status-alert').length > 0;
+
+            // ✅ UX V3: Texto mais curto com ícone para não quebrar o layout no mobile
+            if (temAlerta) {
+                st.innerHTML = '<i class="fas fa-exclamation-triangle"></i> C/ ALT';
+                st.style.backgroundColor = "#d90f23";
+                st.style.boxShadow = "0 0 12px rgba(217, 15, 35, 0.4)";
+            } else {
+                st.innerHTML = '<i class="fas fa-check-circle"></i> S/A';
+                st.style.backgroundColor = "#1b8a3e";
+                st.style.boxShadow = "0 0 12px rgba(27, 138, 62, 0.4)";
+            }
+            st.classList.add('ok');
+            st.style.minWidth = "70px"; // Largura ajustada para o ícone
+        } else {
+            // Estado de Progresso (Andamento)
+            st.innerHTML = `<i class="fas fa-spinner fa-spin" style="font-size: 0.8em; margin-right: 4px;"></i> ${concluidos}/${total}`;
+            st.classList.remove('ok');
+            st.style.backgroundColor = "rgba(0,0,0,0.4)"; // Efeito de transparência V3
+            st.style.boxShadow = "none";
+            st.style.minWidth = "55px";
+        }
+    }
+}
+
+/*--------------------------------------------------------------------------------------------------------------------------------
+-- Gerencia a identidade visual dos cards de materiais, mudando cores e ícones conforme o preenchimento de tombamentos ou cautelas.
+---------------------------------------------------------------------------------------------------------------------------------*/
+function updateItemMainStatusDisplay(item) {
+    if (!item || item.dataset.type === 'single') return;
+
+    const tombs = item.querySelectorAll('.tombamento-container');
+    let concluidos = 0;
+    let temAlteracao = false;
+
+    // ✅ AJUSTE V3: Identidade Visual Dinâmica
+    const isChecklist = window.isModoChecklist;
+    const corV3 = isChecklist ? '#2c3e50' : '#800020';
+
+    tombs.forEach(t => {
+        const uidOriginal = t.getAttribute('data-id');
+        const uidCautela = `CAUTELA-${uidOriginal}`;
+
+        const statusObj = window.itemStatus[uidOriginal];
+        const statusCautelaObj = window.itemStatus[uidCautela];
+
+        const s = statusObj ? statusObj.status : null;
+        const sCautela = statusCautelaObj ? statusCautelaObj.status : null;
+
+        // Lógica de Preenchimento: OK, Alteração, Mantido ou Ciente
+        const preenchido = (s === 'ok' || s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente');
+
+        if (preenchido) {
+            concluidos++;
+            if (s === 'C/A' || s === 'KEEP' || sCautela === 'cautela_ciente') {
+                temAlteracao = true;
+            }
+        }
+    });
+
+    const icon = item.querySelector('.status-icon');
+
+    // Reseta classes e estilos para aplicação limpa
+    item.classList.remove('status-ok', 'status-alert');
+    item.style.backgroundColor = "";
+    if (icon) {
+        icon.className = 'status-icon';
+        icon.style.backgroundColor = "";
+    }
+
+    // ✅ LÓGICA DE ATIVAÇÃO V3: Feedback Visual do Item Pai
+    if (concluidos === tombs.length && tombs.length > 0) {
+        if (temAlteracao) {
+            item.classList.add('status-alert');
+            if (icon) {
+                icon.classList.add('alert');
+                icon.style.backgroundColor = "#d90f23"; // Vermelho Alerta
+            }
+        } else {
+            item.classList.add('status-ok');
+            if (icon) {
+                icon.classList.add('ok');
+                icon.style.backgroundColor = corV3; // Cor Institucional (Bordô/Azul)
+            }
+            // Efeito sutil de preenchimento no card pai para indicar "Setor Resolvido"
+            item.style.backgroundColor = "rgba(40, 167, 69, 0.03)";
+        }
+    }
+
+    // Atualiza o contador do setor (badge) lá no topo
+    const setorEl = item.closest('.setor');
+    if (setorEl) updateSetorStatus(setorEl);
+}
+
+/*---------------------------------------------------------------------------------------------------------
+-- Renderiza o painel fotográfico com sugestões e botão de upload (em breve integração com Firebase Storage)
+----------------------------------------------------------------------------------------------------------*/
+function renderizarPainelFotos(container) {
+    container.innerHTML = `
+            <div class="v3-foto-panel" style="text-align: center; padding: 10px;">
+                <div style="background: #fff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px; text-align: left;">
+                    <strong style="color: var(--petroleo); font-size: 0.85em; display: block; margin-bottom: 10px;">
+                        <i class="fas fa-lightbulb"></i> SUGESTÕES DE REGISTRO:
+                    </strong>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 0.8em; color: #64748b; line-height: 1.6;">
+                        <li>Frente e Traseira (Placa visível)</li>
+                        <li>Laterais (Direita e Esquerda)</li>
+                        <li>Painel (Hodômetro e Combustível)</li>
+                        <li style="color: var(--vinho); font-weight: bold; margin-top: 5px;">
+                            <i class="fas fa-mobile-alt" style="transform: rotate(90deg);"></i> PREFIRA FOTOS NA HORIZONTAL
+                        </li>
+                    </ul>
                 </div>
 
-                ${isResolvido ? `
-                    <div style="font-size: 0.7em; color: #15803d; background: rgba(22, 101, 52, 0.05); padding: 8px; border-radius: 6px; border-left: 3px solid #166534;">
-                        <b>SOLUÇÃO:</b> ${p.justificativa_solucao}
+                <div id="container-camera-v3">
+                    <button class="v3-btn-main" style="background: #64748b; width: 100%; height: 80px; border-radius: 15px; font-size: 1em;" 
+                            onclick="Swal.fire('Em breve', 'O módulo de upload para o Firebase Storage está sendo preparado.', 'info')">
+                        <i class="fas fa-camera" style="font-size: 1.5em; display: block; margin-bottom: 5px;"></i>
+                        ANEXAR FOTOS (EM BREVE)
+                    </button>
+                    <small style="color: #94a3b8; display: block; margin-top: 10px; font-weight: 600;">
+                        MÁXIMO: 5 FOTOS | ATÉ 10MB CADA
+                    </small>
+                </div>
+
+                <div id="galeria-miniaturas" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 25px;">
                     </div>
-                ` : `
-                    <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(0,0,0,0.05); padding-top:8px;">
-                        <span style="font-size:0.65em; color:#94a3b8; font-weight:600; text-transform: uppercase;">${p.autor_nome} • ${p.data_criacao}</span>
-                    </div>
-                `}
             </div>
         `;
-    });
-
-    // 3. DISPARO DO MODAL CENTRAL
-    return Swal.fire({
-        title: `<span style="color:${corPrimaria}; font-weight:700; letter-spacing:-0.5px;">GERENCIAR PENDÊNCIAS</span>`,
-        width: '95%',
-        padding: '1.5em 1em',
-        html: `
-            <div style="margin-bottom: 15px; text-align: center;">
-                <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em;">
-                    ${uidPai ? `<i class="fas fa-link"></i> ACESSÓRIO DE CONJUNTO: ` : ''} ${nomeLimpo}
-                </small>
-            </div>
-
-            <div id="v3-modal-scroll" style="text-align:left; max-height:45vh; overflow-y:auto; padding-right:2px; width: 100%; box-sizing: border-box;">
-                ${htmlPendencias || '<p style="text-align:center; color:#94a3b8; padding:30px;">Nenhum relato encontrado.</p>'}
-            </div>
-            
-            <div style="display: flex; gap: 10px; margin-top: 25px; width: 100%;">
-                
-                ${(tipo === 'single' && (isChecklist || saldoDisponivel > 0)) ? `
-                    <button onclick="exibirModalInsercaoNovoRelato('${uid}', '${tipo}', '${nomeItem}', ${saldoDisponivel}, '${corPrimaria}', '${uidPai || ''}')" 
-                            style="flex: 1; background: #0284c7; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s;">
-                        <i class="fas fa-plus-circle"></i> NOVO RELATO
-                    </button>
-                ` : ''}
-
-                <button onclick="Swal.clickConfirm()" 
-                        style="flex: 1; background: ${corPrimaria}; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s;">
-                    <i class="fas fa-check-circle"></i> CONCLUIR
-                </button>
-            </div>
-        `,
-        showConfirmButton: false,
-        allowOutsideClick: false,
-        preConfirm: () => {
-            try {
-                const status = window.itemStatus[uid];
-                if (!status || !status.interacao_humana) {
-                    Swal.showValidationMessage('Interaja com os relatos antes de concluir.');
-                    return false;
-                }
-                window.itemStatus[uid].status = 'ok';
-                if (typeof updateOverallStatus === 'function') updateOverallStatus();
-                return { confirmado: true, uid: uid };
-            } catch (e) {
-                console.error("Erro no preConfirm:", e);
-                return true; 
-            }
-        }
-    }).then((result) => {
-        if (result.isConfirmed) {
-            setTimeout(() => {
-                const funcFluxo = window.verificarFluxoSetor || verificarFluxoSetor;
-                if (typeof funcFluxo === 'function') funcFluxo(uid);
-            }, 150);
-        }
-    });
 }
 
-/* --- Abre o formulário para o militar descrever uma nova avaria ou falta, controlando a quantidade e a descrição técnica --- */
-async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria, uidPai = null) {
-    const isChecklist = window.isModoChecklist;
-
-    const { value: formValues } = await Swal.fire({
-        title: `<span style="color:${corPrimaria}; font-weight:900; letter-spacing:-0.5px;">RELATAR ALTERAÇÃO</span>`,
-        width: '95%',
-        padding: '1.5em 1em',
-        html: `
-            <div style="text-align:left; width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif;">
-                
-                <div style="margin-bottom: 20px; text-align: center;">
-                    <b style="color: #475569; font-size: 0.9em; text-transform: uppercase;">${nomeItem}</b>
-                    ${uidPai ? `<br><small style="color:#800020; font-weight:bold;">(ACESSÓRIO VINCULADO)</small>` : ''}
-                </div>
-
-                ${(tipo === 'single' && !isChecklist) ? `
-                    <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 10px 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
-                        <label style="font-size:0.8em; font-weight:800; color:#64748b; text-transform:uppercase;">Quantidade:</label>
-                        <input id="swal-qtd" type="number" value="1" max="${saldoDisponivel}" min="1" 
-                               style="width: 70px; height: 35px; border-radius: 8px; border: 2px solid ${corPrimaria}; text-align: center; font-weight: 900; color: ${corPrimaria}; margin: 0;">
-                    </div>
-                ` : ''}
-
-                <label style="font-size:0.75em; font-weight:800; color:#64748b; text-transform:uppercase; margin-left: 5px; display: block; margin-bottom: 8px;">
-                    Descrição do Problema:
-                </label>
-                <textarea id="swal-obs" class="swal2-textarea" placeholder="DETALHE A ALTERAÇÃO ENCONTRADA..." 
-                          style="height:140px; text-transform:uppercase; width: 100%; box-sizing: border-box; font-size: 0.95em; border-radius: 12px; margin: 0; padding: 15px; border: 1px solid #e2e8f0; background: #fff;"></textarea>
-            </div>`,
-        showCancelButton: true,
-        confirmButtonText: 'SALVAR RELATO',
-        confirmButtonColor: corPrimaria,
-        cancelButtonText: 'CANCELAR',
-        reverseButtons: true,
-        backdrop: `rgba(15, 23, 42, 0.5)`,
-        customClass: { popup: 'v3-popup-radius' },
-        didOpen: () => {
-            const inputObs = document.getElementById('swal-obs');
-            if (inputObs) inputObs.focus();
-
-            const inputQtd = document.getElementById('swal-qtd');
-            if (inputQtd) {
-                inputQtd.addEventListener('input', (e) => {
-                    if (parseInt(e.target.value) > saldoDisponivel) e.target.value = saldoDisponivel;
-                });
-            }
-        },
-        preConfirm: () => {
-            const obs = document.getElementById('swal-obs').value.trim();
-            const qtdInput = document.getElementById('swal-qtd');
-            const qtd = isChecklist ? 1 : (qtdInput ? parseInt(qtdInput.value) : 1);
-
-            if (obs.length < 5) return Swal.showValidationMessage("A descrição deve ser mais detalhada.");
-            if (!isChecklist && tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) {
-                return Swal.showValidationMessage(`Saldo insuficiente (Máx: ${saldoDisponivel})`);
-            }
-
-            return { qtd, obs };
-        }
+/*--------------------------------------------------------------------------------------------------------------------
+-- Analisa os itens de um setor específico e atualiza o contador de progresso exibido no cabeçalho da tela de inspeção.
+----------------------------------------------------------------------------------------------------------------------*/
+function atualizarContadorSetorInterno(itens) {
+    let feitos = 0;
+    itens.forEach(it => {
+        const st = window.itemStatus[it.uid_global || it.id]?.status;
+        if (st === 'ok' || st === 'C/A' || st === 'cautela_ciente') feitos++;
     });
-
-    if (formValues) {
-        // ✅ ATUALIZAÇÃO CIRÚRGICA: Passa o uidPai para que o rascunho de salvamento saiba a origem
-        salvarNovoID(uid, formValues.qtd, tipo, formValues.obs, uidPai);
-
-        // 2. DIRECIONAMENTO CIRÚRGICO: Reabre o modal de gerenciamento atualizado
-        setTimeout(() => {
-            // Repassa o uidPai também na reabertura do modal de pendências
-            abrirModalPendenciaV3(uid, tipo, nomeItem, (saldoDisponivel - formValues.qtd), uidPai);
-        }, 300);
-    }
+    document.getElementById('progresso-setor-atual').innerText = `${feitos}/${itens.length}`;
 }
 
-/* --- Abre a interface para que o conferente registre como um problema antigo foi sanado, exigindo a justificativa da solução--- */
-async function abrirFormularioResolucaoV3(pendencia, uid) {
-    const isChecklist = window.isModoChecklist;
-    const corSucesso = "#1b8a3e"; // Verde Sigma
-    const corCancel = "#64748b"; // Cinza Slate
+// --- VERIFICADOR MÁGICO DE FLUXO (AUTO-NEXT) ---
+window.verificarFluxoSetor = function (uidAtual) {
+    console.log(`%c🚀 Iniciando Verificação de Fluxo para: ${uidAtual}`, "color: #8b5cf6; font-weight: bold;");
+
+    // 1. MAPEAMENTO DE CARDS REAIS NO DOM
+    // Forçamos a busca apenas pelos cards que são raízes de itens (o Kit unificado é um só)
+    const rows = Array.from(document.querySelectorAll('.v3-item-row'));
     
-    // Captura dados do item para o retorno em caso de cancelamento
-    const itRef = buscarDadosItemPeloUid(uid);
-    const nomeItem = itRef ? itRef.nome : (pendencia.itemNome || "Material");
+    // Normalização absoluta: Sempre operamos o fluxo baseados no card PAI que está na tela
+    const uidCardNoDom = uidAtual.includes('_ac_') ? uidAtual.split('_ac_')[0] : uidAtual;
+    const index = rows.findIndex(r => r.id === `item-row-${uidCardNoDom}`);
 
-    const { value: resolucao } = await Swal.fire({
-        title: `<span style="color: ${corSucesso}; font-weight: 800; letter-spacing: -0.5px;">RESOLVER ALTERAÇÃO</span>`,
-        width: '95%',
-        padding: '1.5em 1em',
-        html: `
-            <div style="text-align: center; margin-bottom: 20px;">
-                <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em; letter-spacing: 1px;">
-                    ${pendencia.descricao}
-                </small>
-            </div>
+    console.log(`[FLUXO] Posicionamento no DOM: Card ${index + 1} de ${rows.length}`);
 
-            <div style="text-align: left; font-family: sans-serif;">
-                
-                ${!isChecklist ? `
-                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
-                    <label style="font-weight: 800; font-size: 0.75rem; color: #475569; text-transform: uppercase; margin: 0;">
-                        Unidades Resolvidas:
-                    </label>
-                    <input id="swal-res-qtd" type="number" value="${pendencia.quantidade}" min="1" max="${pendencia.quantidade}" 
-                           style="width: 70px; border: 2px solid ${corSucesso}; border-radius: 8px; padding: 5px; text-align: center; font-weight: 900; color: ${corSucesso}; outline: none;">
-                </div>
-                ` : ''}
+    // 2. GARANTIA DE LEITURA DE STATUS
+    // Verificamos o status do UID que disparou o evento (pode ser o filho ou o pai)
+    const statusAtual = window.itemStatus[uidAtual];
+    const itemConcluido = statusAtual && statusAtual.interacao_humana === true;
 
-                <label style="display: block; font-weight: 800; font-size: 0.75rem; color: #475569; text-transform: uppercase; margin-bottom: 8px; margin-left: 5px;">
-                    Justificativa da Solução:
-                </label>
-                <textarea id="swal-res-obs" placeholder="DESCREVA COMO O PROBLEMA FOI SANADO..." 
-                          style="width: 100%; height: 120px; border: 2px solid #cbd5e1; border-radius: 12px; padding: 12px; font-size: 0.9rem; text-transform: uppercase; box-sizing: border-box; outline: none; transition: border-color 0.3s;"></textarea>
-            </div>
-
-            <div style="display: flex; gap: 10px; margin-top: 25px; width: 100%;">
-                <button id="btn-cancelar-res" style="flex: 1; background: ${corCancel}; color: white; border: none; padding: 15px; border-radius: 10px; font-weight: 800; font-size: 0.8rem; cursor: pointer; text-transform: uppercase;">
-                    <i class="fas fa-arrow-left"></i> VOLTAR
-                </button>
-                <button id="btn-confirmar-res" style="flex: 1; background: ${corSucesso}; color: white; border: none; padding: 15px; border-radius: 10px; font-weight: 800; font-size: 0.8rem; cursor: pointer; text-transform: uppercase; display: flex; align-items: center; justify-content: center; gap: 5px;">
-                    <i class="fas fa-check"></i> RESOLVER
-                </button>
-            </div>
-        `,
-        showConfirmButton: false,
-        allowOutsideClick: false,
-        customClass: {
-            container: 'sigma-v3-modal',
-            popup: 'v3-popup-radius'
-        },
-        didOpen: () => {
-            // Foco automático na justificativa
-            const textarea = document.getElementById('swal-res-obs');
-            if (textarea) textarea.focus();
-
-            // Mapeamento dos botões customizados
-            document.getElementById('btn-cancelar-res').onclick = () => Swal.close();
-            document.getElementById('btn-confirmar-res').onclick = () => {
-                const obs = document.getElementById('swal-res-obs').value.trim();
-                if (obs.length < 5) {
-                    Swal.showValidationMessage("Descreva a solução (mín. 5 letras)");
-                    return;
-                }
-                Swal.clickConfirm();
-            };
-        },
-        preConfirm: () => {
-            const obs = document.getElementById('swal-res-obs').value.trim();
-            const qtdInput = document.getElementById('swal-res-qtd');
-            const qtd = isChecklist ? pendencia.quantidade : (qtdInput ? qtdInput.value : pendencia.quantidade);
-
-            return {
-                qtd: parseInt(qtd),
-                obs: obs.toUpperCase()
-            };
-        }
-    });
-
-    if (resolucao) {
-        // Executa a lógica de banco
-        resolverID(pendencia.id, uid, resolucao.qtd, resolucao.obs);
-    } else {
-        // Se cancelar ou voltar, mantém o loop do Passo 3 reabrindo o modal pai
-        abrirModalPendenciaV3(uid, itRef ? itRef.tipo : 'single', nomeItem, itRef ? itRef.saldo : 0);
-    }
-}
-
-/* --- Permite ao usuário corrigir um relato feito na mesma sessão antes de finalizar a conferência --- */
-async function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
-    const corEdicao = "#2196F3";
-    const uidString = String(uid);
-    const isChecklist = window.isModoChecklist;
-
-    // Buscamos o nome do item para manter o contexto no título/subtítulo
-    const dadosItem = buscarDadosItemPeloUid(uidString);
-    const nomeItem = dadosItem ? dadosItem.nome : "Item";
-
-    const { value: formValues, dismiss } = await Swal.fire({
-        title: `<span style="color: ${corEdicao}; font-size: 0.9em; font-weight: bold;"><i class="fas fa-edit"></i> Editar Relato</span>`,
-        width: '95%',
-        padding: '1em',
-        html: `
-            <div style="text-align: left; font-family: sans-serif; width: 100%; box-sizing: border-box;">
-                <p style="margin-bottom: 15px; font-size: 0.85em; color: #666; text-align: center;"><b>${nomeItem}</b></p>
-                
-                ${!isChecklist ? `
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Quantidade:</label>
-                    <input id="swal-input-qtd" type="number" class="swal2-input" value="${qtdAtual}" min="1" 
-                           style="width: 100%; margin: 5px 0 0 0; height: 40px; box-sizing: border-box;">
-                </div>
-                ` : ''}
-
-                <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Nova Descrição:</label>
-                <textarea id="swal-input-obs" class="swal2-textarea" placeholder="Descreva a alteração..." 
-                          style="width: 100%; margin: 5px 0 0 0; min-height: 100px; text-transform: uppercase; font-size: 0.9em; box-sizing: border-box;">${descricaoAtual}</textarea>
-            </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'SALVAR ALTERAÇÕES',
-        cancelButtonText: 'VOLTAR',
-        confirmButtonColor: corEdicao,
-        reverseButtons: true,
-        backdrop: `rgba(15, 23, 42, 0.6)`, // Isola visualmente o modal de edição
-        allowOutsideClick: false,
-        didOpen: () => {
-            const input = document.getElementById('swal-input-obs');
-            if (input) {
-                input.focus();
-                input.setSelectionRange(input.value.length, input.value.length);
-            }
-        },
-        preConfirm: () => {
-            const obs = document.getElementById('swal-input-obs').value;
-            const qtdInput = document.getElementById('swal-input-qtd');
-            const qtd = isChecklist ? 1 : (qtdInput ? qtdInput.value : 1);
-
-            if (!obs || obs.trim().length < 5) {
-                Swal.showValidationMessage('A descrição deve ter pelo menos 5 caracteres');
-                return false;
-            }
-            return { qtd: parseInt(qtd), obs: obs.trim().toUpperCase() };
-        }
-    });
-
-    // Se confirmou a edição
-    if (formValues) {
-        // Executa a edição na memória
-        executarEdicaoRelato(pendenciaId, uidString, formValues.qtd, formValues.obs);
-        
-        // ✅ GARANTIA DE RETORNO APÓS EDIÇÃO
-        setTimeout(() => {
-            abrirModalPendenciaV3(uidString, isChecklist ? 'single' : 'multi', nomeItem, (dadosItem ? dadosItem.saldo : 0));
-        }, 500); // Delay ligeiramente maior para o DOM respirar
-    } 
-    else if (dismiss === Swal.DismissReason.cancel) {
-        // ✅ RETORNO AO CANCELAR
-        setTimeout(() => {
-            abrirModalPendenciaV3(uidString, isChecklist ? 'single' : 'multi', nomeItem, (dadosItem ? dadosItem.saldo : 0));
-        }, 100);
-    }
-}
-
-/* --- Gera o alerta de segurança para deletar uma alteração recém-lançada --- */
-async function confirmarExclusaoRelato(pendenciaId, uid) {
-    const uidAlvo = String(uid);
-    const itRef = buscarDadosItemPeloUid(uidAlvo);
-
-    const result = await Swal.fire({
-        title: 'Apagar Alteração?',
-        text: "Esta ação removerá o relato selecionado da memória.",
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#d33',
-        confirmButtonText: '<i class="fas fa-trash-alt"></i> SIM, APAGAR',
-        cancelButtonText: 'CANCELAR',
-        reverseButtons: true,
-        backdrop: `rgba(15, 23, 42, 0.6)` // Isolamento visual V3
-    });
-
-    // ✅ UX: Se cancelar, volta para o modal de gerenciamento mantendo o fluxo
-    if (!result.isConfirmed) {
-        if (itRef) {
-            abrirModalPendenciaV3(uidAlvo, itRef.tipo, itRef.nome, itRef.saldo);
-        }
+    if (!itemConcluido) {
+        console.warn("⚠️ Sem interação humana confirmada para:", uidAtual);
         return;
     }
 
-    const fonteDados = window.dadosConferencia || [];
-    let excluido = false;
-    let infoParaRetorno = { nome: itRef?.nome || "Item", tipo: itRef?.tipo || "single", saldo: 0, restantes: 0 };
+    // 3. DEFINIÇÃO DO PRÓXIMO ALVO
+    const nextRow = rows[index + 1];
+
+    if (nextRow) {
+        // --- LOGICA DE AVANÇO ---
+        console.log("➡️ Rolando para o próximo card...");
+        setTimeout(() => {
+            nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            const isChecklist = window.isModoChecklist;
+            const corDestaque = isChecklist ? "rgba(44, 62, 80, 0.15)" : "rgba(128, 0, 32, 0.15)";
+
+            nextRow.style.transition = "background 0.5s ease";
+            nextRow.style.background = corDestaque;
+
+            setTimeout(() => { nextRow.style.background = ""; }, 800);
+        }, 50);
+
+    } else {
+        // ✅ 4. LÓGICA DE RETORNO (ÚLTIMO ITEM DO SETOR)
+        // Se o index é o último da lista física, não há mais o que fazer nesta tela.
+        console.log("%c✅ Último card conferido. Retornando ao Painel Geral.", "color: #10b981; font-weight: bold;");
+
+        // Atualiza badges e barra de progresso antes de sair
+        updateOverallStatus();
+
+        const Toast = Swal.mixin({
+            toast: true,
+            position: 'top',
+            showConfirmButton: false,
+            timer: 1000,
+            timerProgressBar: true
+        });
+
+        Toast.fire({
+            icon: 'success',
+            title: 'Setor Finalizado!'
+        });
+
+        // Executa a transição de volta
+        setTimeout(() => {
+            document.body.classList.remove('modo-inspecao');
+
+            // Tenta disparar a função oficial de navegação
+            if (typeof window.navegarParaSetores === 'function') {
+                window.navegarParaSetores();
+            } else {
+                // Fallback visual robusto
+                const painelSetores = document.getElementById('v3-painel-setores');
+                const painelItens = document.getElementById('v3-painel-itens');
+                if (painelSetores) painelSetores.style.display = 'block';
+                if (painelItens) painelItens.style.display = 'none';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            // Sincroniza o progresso uma última vez após a troca de tela
+            setTimeout(() => {
+                if (typeof updateOverallStatus === 'function') updateOverallStatus();
+            }, 200);
+
+        }, 1100); // Reduzido ligeiramente para dar mais agilidade
+    }
+};
+
+function checkSetorCompletion(currentSetor, currentItemId) {
+    if (!currentSetor) return;
+
+    updateOverallStatus();
+
+    const totalItensNoSetor = parseInt(currentSetor.getAttribute('data-total-items')) || 0;
+    const itensNoSetor = currentSetor.querySelectorAll('.item-conferencia');
+    let concluidos = 0;
+
+    itensNoSetor.forEach(item => {
+        const id = item.getAttribute('data-id');
+        const isSingle = item.getAttribute('data-type') === 'single';
+        const temStatusVisual = item.classList.contains('status-ok') || item.classList.contains('status-alert');
+
+        if (isSingle) {
+            // LÓGICA V3: Verificação rigorosa de interação humana para garantir validade
+            const statusMemoria = window.itemStatus[id];
+            if (temStatusVisual && statusMemoria && statusMemoria.interacao_humana === true) {
+                concluidos++;
+            }
+        } else {
+            if (temStatusVisual) concluidos++;
+        }
+    });
+
+    // ✅ FLUXO V3: Avanço de Setor ou busca do próximo item pendente
+    if (concluidos >= totalItensNoSetor && totalItensNoSetor > 0) {
+        // Setor finalizado: Feedback visual de "Check" antes de fechar
+        currentSetor.style.transition = "opacity 0.3s";
+        currentSetor.style.opacity = "0.7";
+
+        setTimeout(() => {
+            currentSetor.style.opacity = "1";
+            autoAdvanceSetor(currentSetor);
+        }, 550);
+    } else {
+        // Busca inteligente do próximo alvo (Single ou Tombamento) dentro da lista geral
+        const todosAlvos = Array.from(document.querySelectorAll('.tombamento-container, .item-conferencia[data-type="single"]'));
+        const indexAtual = todosAlvos.findIndex(el => el.getAttribute('data-id') === currentItemId);
+
+        const proximoAlvo = todosAlvos.slice(indexAtual + 1).find(el => {
+            const id = el.getAttribute('data-id');
+            const type = el.getAttribute('data-type');
+            const stNormal = window.itemStatus[id]?.status;
+            const stCautela = window.itemStatus[`CAUTELA-${id}`]?.status;
+            const interacao = window.itemStatus[id]?.interacao_humana;
+
+            const jaResolvido = (type === 'single')
+                ? (interacao === true && (stNormal === 'ok' || stNormal === 'C/A'))
+                : (stNormal === 'ok' || stNormal === 'C/A' || stNormal === 'KEEP' || stCautela === 'cautela_ciente');
+
+            return !jaResolvido;
+        });
+
+        if (proximoAlvo) {
+            setTimeout(() => {
+                // ✅ UX V3: Scroll com efeito Spotlight (brilho de foco)
+                proximoAlvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                // Aplica um "alerta visual" suave de que este é o novo foco
+                const isChecklist = window.isModoChecklist;
+                const glowColor = isChecklist ? "rgba(44, 62, 80, 0.4)" : "rgba(245, 124, 0, 0.4)";
+
+                proximoAlvo.style.transition = "box-shadow 0.4s ease";
+                proximoAlvo.style.boxShadow = `0 0 20px ${glowColor}`;
+
+                setTimeout(() => proximoAlvo.style.boxShadow = "none", 1200);
+            }, 350);
+        }
+    }
+}
+
+function autoAdvanceSetor(currentSetorElement) {
+    const todosSetores = Array.from(document.querySelectorAll('.setor'));
+    const currentIndex = todosSetores.indexOf(currentSetorElement);
+
+    const currentContent = currentSetorElement.querySelector('.setor-content');
+    const currentArrow = currentSetorElement.querySelector('.arrow');
+    const currentHeader = currentSetorElement.querySelector('.setor-header');
+
+    // ✅ UX V3: Fechamento elegante com reset de bordas
+    if (currentContent) currentContent.classList.remove('expanded');
+    if (currentArrow) currentArrow.innerHTML = '<i class="fas fa-chevron-right"></i>';
+    if (currentHeader) currentHeader.style.borderRadius = "12px";
+
+    // Verifica se existe um próximo setor
+    if (currentIndex !== -1 && currentIndex < todosSetores.length - 1) {
+        const nextSetorEl = todosSetores[currentIndex + 1];
+        const nextContent = nextSetorEl.querySelector('.setor-content');
+        const nextArrow = nextSetorEl.querySelector('.arrow');
+        const nextHeader = nextSetorEl.querySelector('.setor-header');
+
+        // ✅ Transição V3: Pequena pausa para o olho humano processar o fechamento
+        setTimeout(() => {
+            if (nextContent) nextContent.classList.add('expanded');
+            if (nextArrow) nextArrow.innerHTML = '<i class="fas fa-chevron-down"></i>';
+            if (nextHeader) nextHeader.style.borderRadius = "12px 12px 0 0";
+
+            // Scroll suave focado no início do novo setor
+            nextSetorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            // Feedback visual: Brilho temporário no cabeçalho do novo setor
+            if (nextHeader) {
+                const isChecklist = window.isModoChecklist;
+                const activeColor = isChecklist ? "rgba(44, 62, 80, 0.2)" : "rgba(128, 0, 32, 0.2)";
+                nextHeader.style.boxShadow = `0 0 20px ${activeColor}`;
+                setTimeout(() => { nextHeader.style.boxShadow = ""; }, 1000);
+            }
+        }, 300);
+
+    } else {
+        // ✅ FINAL DO FLUXO: Guia o usuário diretamente ao botão de ação final
+        const btnFin = document.getElementById('btn-finalizar');
+        if (btnFin) {
+            setTimeout(() => {
+                btnFin.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                // Animação de pulso no botão para indicar prontidão
+                btnFin.style.transform = "translateX(-50%) scale(1.1)";
+                setTimeout(() => { btnFin.style.transform = "translateX(-50%) scale(1)"; }, 400);
+            }, 400);
+        }
+    }
+}
+
+function injetarCautelasNaLista() {
+    const fonteDados = window.dadosConferencia || dadosConferencia;
+    // Aqui simulamos a leitura da sua coleção cautelas_abertas
+    // No seu código real, você deve garantir que window.cautelasAbertas contenha os itens que você me enviou
+    const cautelas = window.cautelasAbertas || [];
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
-            alvos.forEach(alvo => {
-                const isMatch = (item.id === uidAlvo || item.uid_global === uidAlvo || `${item.id}-${alvo.tomb}` === uidAlvo || `${item.uid_global}-${alvo.tomb}` === uidAlvo);
-                
-                if (isMatch && alvo.pendencias_ids) {
-                    const index = alvo.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+            cautelas.forEach(cautelaDoc => {
+                cautelaDoc.itens.forEach(itemCautelado => {
+                    // Se o ID base coincide (Ex: 56911524-64012364)
+                    if (item.id === itemCautelado.id_base) {
 
-                    if (index > -1) {
-                        alvo.pendencias_ids.splice(index, 1);
-                        excluido = true;
-
-                        infoParaRetorno.restantes = alvo.pendencias_ids.length;
-                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
-                        const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
-                        infoParaRetorno.saldo = totalEsperado - totalLancado;
-
-                        // ✅ REGRA PASSO 3: Se apagou tudo, reseta a Interação Humana
-                        // O item volta a ser "pendente de conferência" real.
-                        if (alvo.pendencias_ids.length === 0) {
-                            delete window.itemStatus[uidAlvo];
-                            
-                            const elItem = document.getElementById(`item-row-${uidAlvo}`);
-                            if (elItem) {
-                                elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
-                                const btnAlert = elItem.querySelector('.btn-alert');
-                                const btnCheck = elItem.querySelector('.btn-check');
-                                if (btnAlert) btnAlert.classList.remove('active', 'v3-pulse-orange');
-                                if (btnCheck) btnCheck.classList.remove('active');
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            // Procura o tombamento específico (Ex: 511.524 ou 511.527)
+                            const t = item.tombamentos.find(tomb => tomb.tomb === itemCautelado.tombamento);
+                            if (t) {
+                                t.cautela = {
+                                    destinatario: cautelaDoc.destinatario_original_nome,
+                                    quantidade: 1,
+                                    id_cautela: cautelaDoc.cautela_id
+                                };
+                            }
+                        } else if (item.tipo === 'single') {
+                            if (!item.cautelas) item.cautelas = [];
+                            // Evita duplicados
+                            if (!item.cautelas.find(c => c.id_cautela === cautelaDoc.cautela_id)) {
+                                item.cautelas.push({
+                                    destinatario: cautelaDoc.destinatario_original_nome,
+                                    quantidade: itemCautelado.quantidade,
+                                    id_cautela: cautelaDoc.cautela_id
+                                });
                             }
                         }
                     }
-                }
-            });
-        });
-    });
-
-    if (excluido) {
-        updateOverallStatus();
-
-        // ✅ FEEDBACK E RETORNO SINCRONIZADO
-        const Toast = Swal.mixin({
-            toast: true,
-            position: 'top-end',
-            showConfirmButton: false,
-            timer: 1500
-        });
-
-        Toast.fire({ icon: 'success', title: 'Relato removido' });
-
-        // Espera o Toast e o modal de confirmação sumirem totalmente
-        setTimeout(() => {
-            // Reabre o gerenciador se ainda houver o que gerenciar
-            // Se não houver mais nada, o sistema naturalmente volta para a tela de itens
-            if (infoParaRetorno.restantes > 0) {
-                abrirModalPendenciaV3(uidAlvo, infoParaRetorno.tipo, infoParaRetorno.nome, infoParaRetorno.saldo);
-            }
-        }, 600); 
-    }
-}
-
-/* --- Função de apoio que gera o objeto de pendência (TEMP-...) com carimbo de autoria e insere na memória do sistema --- */
-function salvarNovoID(uid, qtd, tipo, obsModal = null, uidPai = null) {
-    const obsDigitada = obsModal ? obsModal.trim().toUpperCase() : "";
-    const qtdInformada = parseInt(qtd) || 1;
-    const militarInfoEl = document.getElementById('militar-info');
-
-    // 1. CAPTURA DE ASSINATURA SEGURA
-    let nomeAssinatura = militarInfoEl ? militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : "";
-    if (!nomeAssinatura) {
-        nomeAssinatura = `${window.userInfo.postoGraduacao} ${window.userInfo.quadro} ${window.userInfo.nomeGuerra}`;
-    }
-
-    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA TEMPORÁRIA
-    const novoID = {
-        id: "TEMP-" + Date.now(),
-        tipo: "PENDENCIA",
-        data_criacao: new Date().toLocaleDateString('pt-BR'),
-        autor_uid: String(window.userInfo.uid || "S_UID"),
-        autor_nome: nomeAssinatura,
-        descricao: obsDigitada,
-        quantidade: qtdInformada,
-        status_gestao: "PENDENTE",
-        id_pai: uidPai // ✅ NOVO: Vínculo hierárquico para itens de conjunto (Kits)
-    };
-
-    let itemEncontrado = false;
-    const fonteDados = window.dadosConferencia || [];
-
-    // 3. BUSCA E INSERÇÃO NO DATASET EM MEMÓRIA
-    fonteDados.forEach(setor => {
-        setor.itens.forEach(item => {
-            const isChecklist = window.isModoChecklist;
-            const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
-            const matchesID = (String(idRealDoItem) === String(uid));
-
-            // Caso A: Item Single ou Acessório vinculado ao Pai
-            if (['single', 'texto_livre', 'upload_foto'].includes(item.tipo) && matchesID) {
-                if (!item.pendencias_ids) item.pendencias_ids = [];
-                item.pendencias_ids.push(novoID);
-                itemEncontrado = true;
-            }
-            // Caso B: Acessório Acoplado (Busca dentro do array acessorios_acoplados do Anfitrião)
-            else if (uidPai && (String(idRealDoItem) === String(uidPai))) {
-                if (!item.pendencias_ids) item.pendencias_ids = [];
-                // Registra a pendência no pai, mas o objeto novoID carrega a informação do componente
-                item.pendencias_ids.push(novoID);
-                itemEncontrado = true;
-            }
-            // Caso C: Item Multi (Tombamentos)
-            else if (item.tipo === 'multi' && item.tombamentos) {
-                item.tombamentos.forEach(t => {
-                    const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
-                    if (String(uid) === uidComposto) {
-                        if (!t.pendencias_ids) t.pendencias_ids = [];
-                        t.pendencias_ids.push(novoID);
-                        itemEncontrado = true;
-                    }
                 });
-            }
-        });
-    });
-
-    if (itemEncontrado) {
-        // 4. ATUALIZAÇÃO DO ESTOQUE DE INTERAÇÃO (DNA V3)
-        const uidStr = String(uid);
-        const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
-
-        window.itemStatus[uid] = {
-            ...window.itemStatus[uid],
-            status: 'C/A',
-            interacao_humana: true,
-            obs: obsDigitada,
-            quantidade: qtdInformada,
-            uid_global_ref: uidGlobalFull,
-            id_pai: uidPai // Mantém o rastro no status local da sessão
-        };
-
-        // 5. FEEDBACK VISUAL NA LINHA
-        const row = document.getElementById(`item-row-${uid}`);
-        if (row) {
-            row.classList.remove('status-ok');
-            row.classList.add('status-alert');
-
-            const btnAlert = row.querySelector('.btn-alert');
-            const btnCheck = row.querySelector('.btn-check');
-            if (btnAlert) {
-                btnAlert.classList.add('active');
-                btnAlert.classList.remove('v3-pulse-orange');
-                btnAlert.style.backgroundColor = ""; 
-            }
-            if (btnCheck) btnCheck.classList.remove('active');
-
-            row.style.backgroundColor = "#fff9c4"; 
-            setTimeout(() => row.style.backgroundColor = "", 1000);
-        }
-
-        // 6. ATUALIZAÇÃO SÍNCRONA
-        updateOverallStatus();
-        console.log(`✅ Relato salvo. ${uidPai ? '(Vínculo com Pai: ' + uidPai + ')' : ''}`);
-
-    } else {
-        console.error("V3 Error: Falha ao vincular relato ao item.", { uid });
-        Swal.fire("Erro", "Não foi possível vincular o relato ao item selecionado.", "error");
-    }
-}
-
-/* --- Processa a baixa de uma pendência na memória, movendo o saldo de "pendente" para "ok" e registrando o histórico de solução --- */
-function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
-    const qtdResolvida = parseInt(qtdResolvidaModal) || 1;
-    const justificativa = justificativaModal ? justificativaModal.trim().toUpperCase() : "";
-    const nomeResolutor = `${window.userInfo.postoGraduacao} ${window.userInfo.quadro} ${window.userInfo.nomeGuerra}`;
-    const fonteDados = window.dadosConferencia || [];
-    const isChecklist = window.isModoChecklist;
-    let acaoConcluida = false;
-    let pendenciasRestantes = 0;
-    let itemContexto = null; 
-
-    const idProcurado = String(pendenciaId);
-    const isResolvendoAvaria = idProcurado.startsWith('AVARIA-');
-
-    // --- LÓGICA DE BAIXA NO OBJETO (REVISADA) ---
-    function executarBaixaNoObjeto(obj) {
-        if (isResolvendoAvaria) {
-            if (!obj.historico_vida) obj.historico_vida = [];
-            obj.historico_vida.push({
-                evento: "RESOLUÇÃO_AVARIA_CAUTELA",
-                data: new Date().toLocaleString('pt-BR'),
-                quem: nomeResolutor,
-                detalhes: `AVARIA RESOLVIDA. JUSTIFICATIVA: ${justificativa}`,
-                cautela_origem: idProcurado.replace('AVARIA-', '')
-            });
-            obj.situacao = "DISPONÍVEL";
-            obj.status = "OK";
-            delete obj.id_cautela_origem;
-            delete obj.motivo_avaria;
-            return true;
-        }
-
-        if (!obj.pendencias_ids) return false;
-        const index = obj.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
-
-        if (index === -1) return false;
-
-        const pOriginal = obj.pendencias_ids[index];
-        if (!obj.historico_vida) obj.historico_vida = [];
-
-        const registroHistorico = {
-            id_referencia: pOriginal.id,
-            evento: qtdResolvida >= pOriginal.quantidade ? "SOLUCAO_TOTAL" : "SOLUCAO_PARCIAL",
-            quantidade: qtdResolvida,
-            data: new Date().toLocaleString('pt-BR'),
-            quem: nomeResolutor,
-            detalhes: `RESOLVIDO VIA CONFERÊNCIA. JUSTIFICATIVA: ${justificativa}. (REF: ${pOriginal.descricao})`
-        };
-
-        if (qtdResolvida >= pOriginal.quantidade) {
-            pOriginal.status_gestao = 'RESOLVIDO'; 
-            pOriginal.justificativa_solucao = justificativa;
-            pOriginal.data_solucao = new Date().toLocaleString('pt-BR');
-            pOriginal.resolvido_por = nomeResolutor;
-        } else {
-            pOriginal.quantidade -= qtdResolvida;
-        }
-
-        obj.historico_vida.push(registroHistorico);
-        pendenciasRestantes = obj.pendencias_ids.filter(p => p.status_gestao !== 'RESOLVIDO').length;
-        return true;
-    }
-
-    // --- BUSCA E APLICAÇÃO ---
-    fonteDados.forEach(setor => {
-        setor.itens.forEach(item => {
-            const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
-            const isMatch = (String(idRealDoItem) === String(uid));
-
-            if (isMatch) {
-                itemContexto = item;
-                acaoConcluida = executarBaixaNoObjeto(item);
-            } else if (item.tombamentos) {
-                item.tombamentos.forEach(t => {
-                    const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
-                    if (String(uid) === uidComposto) {
-                        itemContexto = item;
-                        acaoConcluida = executarBaixaNoObjeto(t);
-                    }
-                });
-            }
-        });
-    });
-
-    if (acaoConcluida) {
-        // ✅ REFORÇO DE MEMÓRIA: Sincronização prévia
-        if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
-        
-        const uidStr = String(uid);
-        let uidGlobalFull = isChecklist ? "ITEM_VISTORIA_LIVRE" : (uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0]);
-
-        window.itemStatus[uid].status = 'C/A';
-        window.itemStatus[uid].interacao_humana = true;
-        window.itemStatus[uid].uid_global_ref = uidGlobalFull;
-
-        if (window.itemStatus[uid].ids_mantidos) {
-            window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== idProcurado);
-        }
-
-        // Feedback visual na linha
-        const row = document.getElementById(`item-row-${uid}`);
-        if (row) {
-            row.style.backgroundColor = "#dcfce7";
-            setTimeout(() => row.style.backgroundColor = "", 1500);
-        }
-
-        // ✅ FECHAMENTO LIMPO: Destruímos o modal de justificativa
-        Swal.close();
-
-        // ✅ REABERTURA CONTROLADA: Aumentamos o delay para 500ms para estabilizar o DOM
-        setTimeout(async () => {
-            // Sincronizamos a barra antes de abrir o próximo modal
-            if (typeof updateOverallStatus === 'function') updateOverallStatus();
-
-            const itRef = buscarDadosItemPeloUid(uid);
-            const nomeParaModal = itRef ? itRef.nome : (itemContexto ? itemContexto.nome : "Item");
-            const saldoParaModal = itRef ? itRef.saldo : 0;
-
-            // Reabre o gerenciador (prioridade para o escopo window)
-            const abrirModal = window.abrirModalPendenciaV3 || abrirModalPendenciaV3;
-            if (typeof abrirModal === 'function') {
-                await abrirModal(uid, itemContexto.tipo, nomeParaModal, saldoParaModal);
-            }
-            
-            // Notificação de sucesso
-            Swal.mixin({ 
-                toast: true, 
-                position: 'top-end', 
-                showConfirmButton: false, 
-                timer: 2000 
-            }).fire({ icon: 'success', title: 'Solução registrada!' });
-
-        }, 500); 
-
-    } else {
-        Swal.fire('Erro', 'Não foi possível localizar o registro.', 'error');
-    }
-}
-
-/* --- Registra que uma pendência antiga foi vista e continua existindo, garantindo a rastreabilidade do item --- */
-function manterID(pendenciaId, uid, index) {
-    // 1. GARANTE A EXISTÊNCIA DO OBJETO E DNA DO ITEM NA MEMÓRIA
-    if (!window.itemStatus[uid]) {
-        window.itemStatus[uid] = {
-            status: 'C/A',
-            ids_mantidos: [],
-            interacao_humana: true
-        };
-    }
-
-    if (!window.itemStatus[uid].ids_mantidos) {
-        window.itemStatus[uid].ids_mantidos = [];
-    }
-
-    // 2. REGISTRO DO ID MANTIDO (DNA SEGURO)
-    const idStr = String(pendenciaId);
-    if (!window.itemStatus[uid].ids_mantidos.includes(idStr)) {
-        window.itemStatus[uid].ids_mantidos.push(idStr);
-    }
-
-    // 3. ATUALIZAÇÃO DO ESTADO GLOBAL DO ITEM (DNA V3)
-    window.itemStatus[uid].status = 'C/A';
-    window.itemStatus[uid].interacao_humana = true;
-
-    // VÍNCULO COM O UID GLOBAL COMPLETO
-    if (!window.itemStatus[uid].uid_global_ref) {
-        const uidStr = String(uid);
-        const isChecklist = window.isModoChecklist;
-        const uidGlobalFull = isChecklist ? "ITEM_VISTORIA_LIVRE" : (uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0]);
-        window.itemStatus[uid].uid_global_ref = uidGlobalFull;
-    }
-
-    // ✅ 4. FEEDBACK VISUAL NO BOTÃO DENTRO DO MODAL
-    const btnModal = document.getElementById(`btn-manter-${index}`);
-    if (btnModal) {
-        btnModal.classList.add('active'); // Faz o botão "acender" (Verde via CSS)
-        const icon = btnModal.querySelector('i');
-        if (icon) {
-            icon.className = 'fas fa-check-double'; // Troca o ícone para check duplo
-        }
-        
-        // Pequena animação de "click" no botão do modal
-        btnModal.style.transform = "scale(1.2)";
-        setTimeout(() => btnModal.style.transform = "scale(1)", 200);
-    }
-
-    // 5. FEEDBACK VISUAL NA LINHA (TELA 2 AO FUNDO)
-    const row = document.getElementById(`item-row-${uid}`);
-    if (row) {
-        row.classList.remove('status-ok');
-        row.classList.add('status-alert');
-
-        const btnAlert = row.querySelector('.btn-alert');
-        if (btnAlert) {
-            btnAlert.classList.add('active');
-            btnAlert.classList.remove('v3-pulse-orange');
-            btnAlert.style.backgroundColor = ""; 
-        }
-
-        row.style.transition = "transform 0.2s ease, background-color 0.3s ease";
-        row.style.transform = "scale(1.02)";
-        row.style.backgroundColor = "rgba(245, 124, 0, 0.1)"; 
-        
-        setTimeout(() => {
-            row.style.transform = "scale(1)";
-            row.style.backgroundColor = "";
-        }, 300);
-    }
-
-    console.log(`✅ Pendência ${idStr} mantida e interface atualizada.`);
-}
-
-/* --- Exibe um resumo rápido dos dados de emissão de uma cautela específica para consulta rápida durante o recebimento --- */
-async function verExtratoCautela(cautelaId) {
-    if (!cautelaId) return;
-    try {
-        const doc = await db.collection('cautelas_abertas').doc(cautelaId).get();
-        if (!doc.exists) return alert("Cautela não encontrada.");
-
-        const data = doc.data();
-
-        const html = `
-            <div id="extrato-wrapper" style="position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.4); z-index: 29999; display: flex; align-items: center; justify-content: center;" onclick="this.remove()">
-                <div style="position: relative; background: white; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); padding: 15px; z-index: 30000; width: 85%; max-width: 320px; border-top: 4px solid #f57c00; font-family: Arial, sans-serif;" onclick="event.stopPropagation()">
-                    <h4 style="margin:0 0 10px 0; color:#800020; font-size:1em; border-bottom:1px solid #eee; padding-bottom:5px; display: flex; align-items: center; gap: 8px;">
-                        <i class="fas fa-eye"></i> Detalhes da Cautela
-                    </h4>
-                    <p style="font-size:0.85em; margin:8px 0; color: #333;"><b>Emitente:</b><br>${data.emitente}</p>
-                    
-                    <p style="font-size:0.85em; margin:12px 0; color: #333; display: flex; align-items: center; gap: 8px;">
-                        <b>Status:</b> 
-                        <span style="background: #f57c00; color: white; padding: 3px 10px; border-radius: 12px; font-weight: bold; font-size: 0.85em; text-transform: uppercase;">
-                            ${data.status}
-                        </span>
-                    </p>
-
-                    <p style="font-size:0.85em; margin:10px 0 5px 0; color: #333;"><b>Observação:</b></p>
-                    <div style="font-size:0.8em; background:#f9f9f9; padding:8px; border-radius:4px; font-style:italic; color:#555; max-height:100px; overflow-y:auto; border: 1px solid #eee; line-height: 1.4;">
-                        ${data.observacoes_emissao || 'Sem observações.'}
-                    </div>
-                    <button onclick="document.getElementById('extrato-wrapper').remove()" style="width:100%; margin-top:15px; padding:10px; background:#800020; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer; text-transform: uppercase; font-size: 0.8em;">Fechar</button>
-                </div>
-            </div>`;
-        document.body.insertAdjacentHTML('beforeend', html);
-    } catch (e) { console.error(e); }
-}
-
-/* --- Modal de entrada rápida para novos registros, adaptando-se para itens com ou sem tombamento. --- */
-async function abrirFormNovoID(uid, tipo, nomeItem, saldo, tombReal = "") {
-    // ✅ IDENTIDADE VISUAL DINÂMICA V3
-    const isChecklist = window.isModoChecklist;
-    const corPrimaria = isChecklist ? "#2c3e50" : "#800020";
-    const nomeLimpo = nomeItem.replace(/\\'/g, "'");
-    const saldoReal = parseInt(saldo) || 0;
-
-    // Validação de saldo inicial para itens que não são tombados
-    if (tipo !== 'multi' && saldoReal <= 0) {
-        return Swal.fire({
-            icon: 'error',
-            title: 'Saldo Insuficiente',
-            text: 'Este item não possui saldo disponível para relatar nova alteração.',
-            confirmButtonColor: corPrimaria
-        });
-    }
-
-    // ✅ DISPARO DO MODAL ELEGANTE (Swal)
-    const { value: formValues } = await Swal.fire({
-        title: `<span style="color: ${corPrimaria}; font-size: 0.9em; font-weight: bold;">${nomeLimpo}</span>`,
-        html: `
-            <div style="text-align: left; font-family: sans-serif;">
-                ${tipo === 'multi'
-                ? `<p style="margin-bottom: 15px; font-size: 0.9em;">Referência Tomb.: <b style="color: #d90f23;">${tombReal}</b></p>`
-                : `
-                    <div style="margin-bottom: 15px;">
-                        <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Quantidade Alterada (Disponível: ${saldoReal}):</label>
-                        <input id="swal-input-qtd" type="number" class="swal2-input" value="1" min="1" max="${saldoReal}" style="width: 100%; margin: 5px 0 0 0; height: 40px;">
-                    </div>`
-            }
-                <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Descrição do Problema:</label>
-                <textarea id="swal-input-obs" class="swal2-textarea" placeholder="Descreva o problema detalhadamente..." style="width: 100%; margin: 5px 0 0 0; min-height: 100px; text-transform: uppercase; font-size: 0.9em;"></textarea>
-            </div>
-        `,
-        showCancelButton: true,
-        confirmButtonText: 'INCLUIR ALTERAÇÃO',
-        cancelButtonText: 'CANCELAR',
-        confirmButtonColor: corPrimaria,
-        reverseButtons: true,
-        backdrop: `rgba(15, 23, 42, 0.4)`, // Backdrop suave V3
-        didOpen: () => {
-            // Foco automático no campo de observação ao abrir
-            const input = document.getElementById('swal-input-obs');
-            if (input) input.focus();
-        },
-        preConfirm: () => {
-            const obs = document.getElementById('swal-input-obs').value;
-            const qtd = tipo === 'multi' ? 1 : document.getElementById('swal-input-qtd').value;
-
-            // Validações internas do modal
-            if (!obs || obs.trim().length < 5) {
-                Swal.showValidationMessage('Por favor, descreva o problema (mínimo 5 caracteres)');
-                return false;
-            }
-            if (tipo !== 'multi' && (parseInt(qtd) > saldoReal || parseInt(qtd) < 1)) {
-                Swal.showValidationMessage(`Quantidade inválida (Máx: ${saldoReal})`);
-                return false;
-            }
-
-            return { qtd: parseInt(qtd), obs: obs.trim().toUpperCase() };
-        }
-    });
-
-    // ✅ PROCESSAMENTO FINAL
-    if (formValues) {
-        // Envia para a função de salvamento que já existe no seu código
-        salvarNovoID(uid, formValues.qtd, tipo, formValues.obs);
-    }
-}
-
-function processarAcaoFinalModal() {
-    // 1. CAPTURA DE DADOS
-    const objetivo = document.getElementById('modal-acao-objetivo').value;
-    const uid = document.getElementById('modal-uid').value; // Referência do Item/Tombamento
-    const qtdInput = document.getElementById('modal-input-qtd');
-    const obs = document.getElementById('modal-input-obs').value;
-    const tipoOuPendenciaId = document.getElementById('modal-tipo').value;
-
-    // 2. VALIDAÇÃO DE CONTEÚDO (UX V3)
-    if (obs.trim().length < 5) {
-        // Alerta visual no próprio campo antes do alert do navegador
-        document.getElementById('modal-input-obs').style.borderColor = "#d90f23";
-        return alert("⚠️ Detalhamento insuficiente! Por favor, descreva a situação com pelo menos 5 caracteres.");
-    }
-
-    // 3. NORMALIZAÇÃO E SEGURANÇA
-    const qtdNumerica = parseInt(qtdInput.value) || 1;
-    const uidString = String(uid);
-    const refIdString = String(tipoOuPendenciaId);
-
-    // Validação de limite de quantidade (evita erros de digitação)
-    if (qtdInput.max && qtdNumerica > parseInt(qtdInput.max)) {
-        return alert(`⚠️ Erro de Quantidade! O valor máximo permitido para este item é ${qtdInput.max}.`);
-    }
-
-    // 4. ORQUESTRAÇÃO LOGÍSTICA
-    try {
-        if (objetivo === "editar") {
-            executarEdicaoRelato(refIdString, uidString, qtdNumerica, obs);
-        }
-        else if (objetivo === "resolver") {
-            resolverID(refIdString, uidString, qtdNumerica, obs);
-        }
-        else {
-            salvarNovoID(uidString, qtdNumerica, refIdString, obs);
-        }
-
-        // ✅ FEEDBACK V3: Efeito visual de sucesso no elemento que originou a ação
-        const elAlvo = document.querySelector(`[data-id="${uidString}"]`);
-        if (elAlvo) {
-            elAlvo.style.transition = "all 0.5s ease";
-            elAlvo.style.boxShadow = "0 0 15px rgba(27, 138, 62, 0.4)";
-            setTimeout(() => elAlvo.style.boxShadow = "none", 1500);
-        }
-
-        // 5. FECHAMENTO E LIMPEZA
-        fecharModalPendencia();
-
-    } catch (error) {
-        console.error("Erro ao processar ação do modal:", error);
-        alert("❌ Ocorreu um erro ao salvar esta alteração. Verifique o console.");
-    }
-}
-
-function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
-    const fonteDados = window.dadosConferencia || dadosConferencia;
-    let editado = false;
-    const idProcurado = String(pendenciaId);
-    const uidAlvo = String(uid);
-
-    // Variáveis para garantir a reabertura correta do modal
-    let nomeParaModal = "";
-    let tipoParaModal = "single";
-    let saldoParaModal = 0;
-
-    fonteDados.forEach(setor => {
-        setor.itens.forEach(item => {
-            let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
-
-            alvosParaVerificar.forEach(alvo => {
-                if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
-                    const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
-                    if (p) {
-                        p.descricao = novaObs.trim().toUpperCase();
-                        p.quantidade = parseInt(novaQtd) || 0;
-                        editado = true;
-
-                        // Captura metadados para o retorno exato
-                        nomeParaModal = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
-                        tipoParaModal = item.tipo;
-
-                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
-                        const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
-                        saldoParaModal = totalEsperado - totalLancado;
-
-                        if (window.itemStatus[uidAlvo]) {
-                            window.itemStatus[uidAlvo].obs = p.descricao;
-                            window.itemStatus[uidAlvo].quantidade = p.quantidade;
-                            window.itemStatus[uidAlvo].interacao_humana = true;
-                        }
-                    }
-                }
             });
         });
     });
-
-    if (editado) {
-        // Atualiza a interface de fundo
-        renderizarConferencia();
-        updateOverallStatus();
-
-        // ✅ CORREÇÃO CIRÚRGICA: Limpa o alerta de sucesso anterior e reabre o gerenciador
-        Swal.close();
-
-        setTimeout(() => {
-            // Reabre o modal de gerenciamento com os dados atualizados
-            abrirModalPendenciaV3(uidAlvo, tipoParaModal, nomeParaModal, saldoParaModal);
-
-            // Toast de confirmação discreto sobreposto ao modal reaberto
-            const Toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 2000,
-                timerProgressBar: true
-            });
-            Toast.fire({ icon: 'success', title: 'Relato atualizado!' });
-        }, 150); // Delay reduzido para maior fluidez
-
-    } else {
-        console.error("V3 Error: Pendência " + idProcurado + " não encontrada.");
-        Swal.fire({
-            icon: 'error',
-            title: 'Erro ao salvar',
-            text: 'O registro original não foi localizado na memória.',
-            confirmButtonColor: '#800020'
-        });
-    }
 }
 
-function setItemStatusID(btn, status, uid) {
-    // 1. GARANTIA DE OBJETO DE MEMÓRIA
-    if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
-
-    const isChecklist = window.isModoChecklist;
-    const uidStr = String(uid);
-
-    // ✅ AJUSTE V3: Definição inteligente da referência global
-    // Se for checklist, a referência global é o ID genérico. Se não, extrai o ID do inventário.
-    let uidGlobalFull = "";
-    if (isChecklist) {
-        uidGlobalFull = "ITEM_VISTORIA_LIVRE";
-    } else {
-        uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
-    }
-
-    // 2. LÓGICA DE ATUALIZAÇÃO POR STATUS
-    if (status === 'ok') {
-        window.itemStatus[uid] = {
-            ...window.itemStatus[uid],
-            status: 'ok',
-            interacao_humana: true,
-            uid_global_ref: uidGlobalFull
-        };
-
-        const row = document.getElementById(`item-row-${uid}`);
-        if (row) {
-            row.classList.remove('status-alert');
-            row.classList.add('status-ok');
-
-            const btnCheck = row.querySelector('.btn-check');
-            const btnAlert = row.querySelector('.btn-alert');
-            if (btnCheck) btnCheck.classList.add('active');
-            if (btnAlert) btnAlert.classList.remove('active');
-
-            // Remove o fundo de alerta caso existisse
-            row.style.backgroundColor = "";
-        }
-
-        verificarFluxoSetor(uid);
-
-    } else if (status === 'cautela_ciente') {
-        window.itemStatus[uid] = {
-            ...window.itemStatus[uid],
-            status: 'cautela_ciente',
-            cautela_confirmada: true,
-            interacao_humana: true,
-            uid_global_ref: uidGlobalFull
-        };
-
-        btn.innerHTML = '<i class="fas fa-check-double"></i> Ciente registrado';
-        btn.disabled = true;
-        btn.style.opacity = "0.8";
-
-        setTimeout(() => {
-            renderizarConferencia();
-            updateOverallStatus();
-            verificarFluxoSetor(uid);
-        }, 400);
-    }
-
-    // 3. ATUALIZAÇÃO DO PROGRESSO (Barra Neon e Badges da Tela 1)
-    updateOverallStatus();
+/* --- Função auxiliar de detecção visual de elementos --- */
+function isElementInViewport(el) {
+    const rect = el.getBoundingClientRect();
+    return (rect.top >= 60 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth));
 }
-
-// ✅ FUNÇÃO DE FEEDBACK PARA O MÓDULO DE FOTOS
-function handlePhotoUploadClick() {
-    // Usamos um alerta simples, mas informativo
-    alert("📷 Módulo de Registro Fotográfico\n\n" +
-        "Esta funcionalidade está em fase de integração com o servidor de arquivos (Storage).\n\n" +
-        "Em breve, você poderá anexar até 5 fotos diretamente da câmera ou galeria para evidenciar o estado da viatura.");
-}
-
-// ✅ AJUSTE V3: Fechamento de Modal Dinâmico
-function fecharModalPendencia() {
-    // 1. Se estiver usando o sistema global do SIGMA:
-    // sigmaModal.close(); 
-
-    // 2. Se estiver usando a abordagem dinâmica pura:
-    const modal = document.getElementById('modal-nova-pendencia');
-    if (modal) {
-        modal.classList.add('v3-modal-out'); // Animação de saída
-        setTimeout(() => {
-            modal.style.display = 'none'; // Ou modal.remove() se for 100% dinâmico
-            // Limpa o scroll da página (caso tenha sido travado)
-            document.body.style.overflow = 'auto';
-        }, 300);
-    }
-}
-
-// ✅ FUNÇÃO MANTER ATUALIZADA (Removido o texto "MANTIDO" sobreposto)
-window.manterRelatoV3 = function (pendenciaId, uid, index) {
-    const pId = String(pendenciaId);
-
-    if (!window.itemStatus[uid]) window.itemStatus[uid] = { status: 'C/A', ids_mantidos: [], interacao_humana: true };
-    if (!window.itemStatus[uid].ids_mantidos) window.itemStatus[uid].ids_mantidos = [];
-
-    const indexId = window.itemStatus[uid].ids_mantidos.indexOf(pId);
-    const jaMantido = indexId > -1;
-
-    if (jaMantido) {
-        window.itemStatus[uid].ids_mantidos.splice(indexId, 1);
-    } else {
-        window.itemStatus[uid].ids_mantidos.push(pId);
-    }
-
-    window.itemStatus[uid].interacao_humana = true;
-    window.itemStatus[uid].status = 'C/A';
-
-    // Atualiza o botão: O ícone passa a ser check-double quando mantido
-    const btn = document.getElementById(`btn-manter-${index}`);
-    if (btn) {
-        btn.classList.toggle('active');
-        btn.innerHTML = `<i class="fas ${!jaMantido ? 'fa-check-double' : 'fa-thumbtack'}"></i>`;
-
-        // Efeito de clique no botão
-        btn.style.transform = "scale(0.9)";
-        setTimeout(() => btn.style.transform = "scale(1)", 100);
-    }
-
-    updateOverallStatus();
-};
