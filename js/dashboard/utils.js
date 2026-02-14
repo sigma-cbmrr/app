@@ -292,3 +292,27 @@ async function compartilharPdfInterno() {
         Swal.fire({ icon: 'info', title: 'Download realizado', text: 'Seu dispositivo não suporta compartilhamento direto, o arquivo foi baixado.', timer: 2000 });
     }
 }
+
+// Força o fechamento do menu e do fundo escurecido (overlay)
+function closeMenuMobile() {
+    const s = document.getElementById('main-sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+
+    if (s) s.classList.remove('mobile-active');
+    if (overlay) overlay.style.display = 'none';
+}
+
+//=== Gera o formato de log usado no "Histórico de Vida" dos itens ===/
+function gerarLogMovimentacao(itemObj, evento, detalhes) {
+    if (!itemObj.historico_vida) itemObj.historico_vida = [];
+
+    itemObj.historico_vida.push({
+        data: new Date().toLocaleString('pt-BR'),
+        evento: evento,
+        autor: `${userInfo.postoGraduacao} ${userInfo.nomeGuerra}`,
+        detalhes: detalhes,
+        timestamp: Date.now()
+    });
+
+    return itemObj.historico_vida;
+}
