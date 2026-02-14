@@ -155,22 +155,31 @@ function updateOverallStatus() {
     // 3. ATUALIZAÇÃO DO BOTÃO FINALIZAR (TELA 1)
     const btn = document.getElementById('btn-finalizar');
     if (btn) {
-        const corV3 = isChecklist ? '#2c3e50' : '#800020';
-        const buttonPrefix = isChecklist ? 'FINALIZAR VISTORIA' : 'FINALIZAR CONFERÊNCIA';
+        // Cores institucionais SIGMA V3
+        const corVinho = '#800020';
+        const corPetroleo = '#2c3e50';
+
+        const corAtiva = isChecklist ? corPetroleo : corVinho;
+        const buttonText = isChecklist ? 'FINALIZAR VISTORIA' : 'FINALIZAR CONFERÊNCIA';
 
         btn.disabled = !todosConcluidos;
-        btn.style.transition = "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)";
 
         if (btn.disabled) {
+            // ESTADO: APAGADO (PENDENTE)
             btn.innerHTML = `<i class="fas fa-tasks"></i> PENDENTE (${concluidosGeral}/${totalItensObrigatorios})`;
             btn.style.background = '#94a3b8';
-            btn.style.transform = 'scale(1)'; // Preservado da sua versão original
-            btn.style.animation = 'none';    // Preservado da sua versão original
+            btn.style.boxShadow = 'none';
+            btn.style.animation = 'none';
+            btn.style.transform = 'scale(1)';
         } else {
-            btn.innerHTML = `<i class="fas fa-paper-plane"></i> ${buttonPrefix}`;
-            btn.style.background = corV3;
+            // ESTADO: ACESO (FINALIZAR)
+            btn.innerHTML = `<i class="fas fa-paper-plane"></i> ${buttonText}`;
+            btn.style.background = corAtiva;
             btn.style.boxShadow = `0 10px 20px rgba(0,0,0,0.2)`;
-            btn.style.animation = "v3-pulse 2s infinite"; // Preservado da sua versão original
+            btn.style.animation = "v3-pulse 2s infinite";
+
+            // Força a cor do pulso no box-shadow dinâmico
+            btn.style.setProperty('box-shadow', `0 0 0 0 ${corAtiva}66`);
         }
     }
 
@@ -391,9 +400,11 @@ function renderizarConferencia() {
             const statusLocal = window.itemStatus[uid] || {};
             const st = statusLocal.status;
 
+            // Regras de Pendência e Alerta
             const temPendenciaAnterior = item.pendencias_ids && item.pendencias_ids.length > 0;
             const devePulsar = temPendenciaAnterior && !statusLocal.interacao_humana;
 
+            // Cálculos de Saldo
             const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
             const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
             const totalPendente = (item.pendencias_ids || []).reduce((s, p) => s + (Number(p.quantidade) || 0), 0);
@@ -403,62 +414,55 @@ function renderizarConferencia() {
             const classeCarimbo = (temPendenciaAnterior || (item.cautelas && item.cautelas.length > 0)) ? 'has-carimbo' : '';
             const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-            // --- ITEM PRINCIPAL (PAI OU AVULSO) ---
-            container.innerHTML += `
-            <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}">
-                <div class="v3-item-main-info">
-                    <span class="v3-item-name">${item.nome}</span>
-                    ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
-                    ${item.tipo === 'multi' && item.tombamentos ?
-                    `<span class="v3-item-subtext">TOMB: <b>${item.tombamentos.map(t => t.tomb).join(', ')}</b></span>` : ''}
-                </div>
-                <div class="v3-item-actions">
-                    <button class="v3-btn-circle btn-check ${st === 'ok' ? 'active' : ''}" 
-                            onclick="registrarCheckRapido(this, '${uid}', ${setorIndex})">
-                        <i class="fas fa-check"></i>
-                    </button>
-                    <button class="v3-btn-circle btn-alert ${st === 'C/A' ? 'active' : ''} ${devePulsar ? 'v3-pulse-orange' : ''}" 
-                            style="${devePulsar ? 'background-color: #f57c00 !important; color: white;' : ''}"
-                            onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
-                        <i class="fas fa-exclamation"></i>
-                    </button>
-                </div>
-            </div>`;
+            // Verificação se é um Anfitrião de Kit
+            const temAcessorios = item.acessorios_acoplados && item.acessorios_acoplados.length > 0;
 
-            // ✅ NOVO: RENDERIZAÇÃO DE ACESSÓRIOS ACOPLADOS (FILHOS)
-            // Se este item (anfitrião) carregar acessórios vinculados
-            if (item.acessorios_acoplados && item.acessorios_acoplados.length > 0) {
-                item.acessorios_acoplados.forEach((ac, idx) => {
-                    const acUid = `${uid}_ac_${idx}`; // ID virtual para controle de status
-                    const acStatus = window.itemStatus[acUid] || {};
-                    const acSt = acStatus.status;
-                    const acClasse = (acSt === 'ok') ? 'status-ok' : (acSt === 'C/A' ? 'status-alert' : '');
-
-                    container.innerHTML += `
-                    <div class="v3-item-row child-item ${acClasse}" id="item-row-${acUid}" 
-                         style="margin-left: 25px; min-height: 50px; background: #fdfdfd; border-left: 3px solid #cbd5e1; width: calc(100% - 25px);">
-                        <div class="v3-item-main-info" style="padding-left: 10px;">
-                            <span class="v3-item-name" style="font-size: 0.85em; color: #475569;">
-                                <i class="fas fa-level-up-alt fa-rotate-90" style="font-size: 0.7em; margin-right: 5px; color: #94a3b8;"></i>
-                                ${ac.nome}
-                            </span>
-                            <span class="v3-item-subtext" style="font-size: 0.65em;">ACESSÓRIO ACOPLADO • QTD: ${ac.quantidade}</span>
+            // --- CONSTRUÇÃO DO CARD UNIFICADO ---
+            let htmlKitContent = '';
+            if (temAcessorios) {
+                htmlKitContent = `
+                <div class="v3-kit-internal-list" style="width: 100%; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+                    <small style="display:block; color: #94a3b8; font-weight: 800; font-size: 0.65em; margin-bottom: 5px; text-transform: uppercase;">
+                        Componentes do Kit:
+                    </small>
+                    ${item.acessorios_acoplados.map(ac => `
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: #64748b; font-size: 0.8em;">
+                            <i class="fas fa-caret-right" style="font-size: 0.7em; color: #cbd5e1;"></i>
+                            <span style="font-weight: 600;">${ac.quantidade}x</span>
+                            <span style="text-transform: uppercase;">${ac.nome}</span>
                         </div>
-                        <div class="v3-item-actions">
-                            <button class="v3-btn-circle btn-check ${acSt === 'ok' ? 'active' : ''}" 
-                                    style="width: 32px; height: 32px; font-size: 0.7em;"
-                                    onclick="registrarCheckRapido(this, '${acUid}', ${setorIndex})">
-                                <i class="fas fa-check"></i>
-                            </button>
-                            <button class="v3-btn-circle btn-alert ${acSt === 'C/A' ? 'active' : ''}" 
-                                    style="width: 32px; height: 32px; font-size: 0.7em;"
-                                    onclick="abrirModalPendenciaV3('${acUid}', 'single', '${ac.nome.replace(/'/g, "\\'")}', ${ac.quantidade}, '${uid}')">
-                                <i class="fas fa-exclamation"></i>
-                            </button>
-                        </div>
-                    </div>`;
-                });
+                    `).join('')}
+                </div>
+            `;
             }
+
+            container.innerHTML += `
+            <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}" 
+                 style="display: flex; flex-direction: column; align-items: flex-start; gap: 0;">
+                
+                <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+                    <div class="v3-item-main-info">
+                        <span class="v3-item-name">${item.nome} ${temAcessorios ? '<i class="fas fa-box-open" style="font-size: 0.8em; margin-left: 5px; color: #2c7399;"></i>' : ''}</span>
+                        ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
+                        ${item.tipo === 'multi' && item.tombamentos ?
+                    `<span class="v3-item-subtext">TOMB: <b>${item.tombamentos.map(t => t.tomb).join(', ')}</b></span>` : ''}
+                    </div>
+
+                    <div class="v3-item-actions">
+                        <button class="v3-btn-circle btn-check ${st === 'ok' ? 'active' : ''}" 
+                                onclick="registrarCheckRapido(this, '${uid}', ${setorIndex})">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <button class="v3-btn-circle btn-alert ${st === 'C/A' ? 'active' : ''} ${devePulsar ? 'v3-pulse-orange' : ''}" 
+                                style="${devePulsar ? 'background-color: #f57c00 !important; color: white;' : ''}"
+                                onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
+                            <i class="fas fa-exclamation"></i>
+                        </button>
+                    </div>
+                </div>
+
+                ${htmlKitContent}
+            </div>`;
         });
 
         if (typeof atualizarContadorSetorInterno === 'function') {
@@ -471,22 +475,49 @@ function renderizarConferencia() {
      * Modificada para respeitar o Auto-Advance se for o último item.
      */
     window.registrarCheckRapido = function (btn, uid, setorIndex) {
+        // 1. Identifica o item nos dados originais para saber se ele possui acessórios (Kit)
+        const fonteDados = window.dadosConferencia || [];
+        const setor = fonteDados[setorIndex];
+        const itemDados = setor ? setor.itens.find(it => (it.uid_global || it.id) === uid) : null;
+
+        // 2. Registro do ITEM PAI (Anfitrião)
         if (typeof setItemStatusID === 'function') {
             setItemStatusID(btn, 'ok', uid);
         }
 
+        // 3. LÓGICA DE KIT: Se houver acessórios, marca todos como 'ok' automaticamente na memória
+        if (itemDados && itemDados.acessorios_acoplados && itemDados.acessorios_acoplados.length > 0) {
+            console.log(`%c📦 Kit detectado: Marcando ${itemDados.acessorios_acoplados.length} acessórios como OK...`, "color: #2c7399; font-weight: bold;");
+
+            itemDados.acessorios_acoplados.forEach((ac, idx) => {
+                const acUid = `${uid}_ac_${idx}`; // O ID virtual que definimos na renderização
+
+                // Simula a chamada do setItemStatusID para os filhos (apenas lógica de memória)
+                // Passamos 'null' no lugar do botão pois eles não têm botão físico mais.
+                if (typeof setItemStatusID === 'function') {
+                    setItemStatusID(null, 'ok', acUid);
+                }
+            });
+        }
+
+        // 4. ATUALIZAÇÃO VISUAL DO CARD (Pai)
         const row = document.getElementById(`item-row-${uid}`);
         if (row) {
             row.classList.remove('status-alert');
             row.classList.add('status-ok');
             btn.classList.add('active');
 
-            // Remove pulso se existir
+            // Remove pulso do botão de alerta se existir
             const btnAlert = row.querySelector('.btn-alert');
             if (btnAlert) {
                 btnAlert.classList.remove('v3-pulse-orange');
                 btnAlert.style.backgroundColor = "";
             }
+        }
+
+        // 5. AUTO-ADVANCE: Se sua engine tiver lógica de pular para o próximo, ela é disparada aqui
+        if (typeof verificarFluxoSetor === 'function') {
+            verificarFluxoSetor(uid);
         }
     };
 }
@@ -663,84 +694,87 @@ function atualizarContadorSetorInterno(itens) {
 window.verificarFluxoSetor = function (uidAtual) {
     console.log(`%c🚀 Iniciando Verificação de Fluxo para: ${uidAtual}`, "color: #8b5cf6; font-weight: bold;");
 
+    // 1. MAPEAMENTO DE CARDS REAIS NO DOM
+    // Forçamos a busca apenas pelos cards que são raízes de itens (o Kit unificado é um só)
     const rows = Array.from(document.querySelectorAll('.v3-item-row'));
-    const index = rows.findIndex(r => r.id === `item-row-${uidAtual}`);
 
-    // ✅ 2. Garantia de Leitura de Status
+    // Normalização absoluta: Sempre operamos o fluxo baseados no card PAI que está na tela
+    const uidCardNoDom = uidAtual.includes('_ac_') ? uidAtual.split('_ac_')[0] : uidAtual;
+    const index = rows.findIndex(r => r.id === `item-row-${uidCardNoDom}`);
+
+    console.log(`[FLUXO] Posicionamento no DOM: Card ${index + 1} de ${rows.length}`);
+
+    // 2. GARANTIA DE LEITURA DE STATUS
+    // Verificamos o status do UID que disparou o evento (pode ser o filho ou o pai)
     const statusAtual = window.itemStatus[uidAtual];
-    const itemConcluido = statusAtual && statusAtual.interacao_humana === true && statusAtual.status === 'ok';
+    const itemConcluido = statusAtual && statusAtual.interacao_humana === true;
 
     if (!itemConcluido) {
-        console.warn("⚠️ Item ainda não consta como 'ok' na memória. Abortando fluxo.");
+        console.warn("⚠️ Sem interação humana confirmada para:", uidAtual);
         return;
     }
 
+    // 3. DEFINIÇÃO DO PRÓXIMO ALVO
     const nextRow = rows[index + 1];
 
-    // ✅ 3. Lógica de Avanço (Próximo Item)
     if (nextRow) {
-        console.log("➡️ Indo para o próximo item do setor...");
+        // --- LOGICA DE AVANÇO ---
+        console.log("➡️ Rolando para o próximo card...");
         setTimeout(() => {
             nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
             const isChecklist = window.isModoChecklist;
-            const corDestaque = isChecklist ? "rgba(44, 62, 80, 0.1)" : "rgba(128, 0, 32, 0.1)";
+            const corDestaque = isChecklist ? "rgba(44, 62, 80, 0.15)" : "rgba(128, 0, 32, 0.15)";
 
             nextRow.style.transition = "background 0.5s ease";
             nextRow.style.background = corDestaque;
 
             setTimeout(() => { nextRow.style.background = ""; }, 800);
-        }, 100); // Reduzido para ser mais rápido
+        }, 50);
 
     } else {
-        // ✅ 4. Lógica de Retorno (Fim do Setor)
-        console.log("%c✅ Fim do setor detectado. Preparando retorno para Tela 1.", "color: #10b981; font-weight: bold;");
+        // ✅ 4. LÓGICA DE RETORNO (ÚLTIMO ITEM DO SETOR)
+        // Se o index é o último da lista física, não há mais o que fazer nesta tela.
+        console.log("%c✅ Último card conferido. Retornando ao Painel Geral.", "color: #10b981; font-weight: bold;");
 
-        // Atualiza a barra de progresso imediatamente
+        // Atualiza badges e barra de progresso antes de sair
         updateOverallStatus();
 
         const Toast = Swal.mixin({
             toast: true,
             position: 'top',
             showConfirmButton: false,
-            timer: 1200,
+            timer: 1000,
             timerProgressBar: true
         });
 
         Toast.fire({
             icon: 'success',
-            title: 'Setor Finalizado!',
-            text: 'Atualizando progresso...'
+            title: 'Setor Finalizado!'
         });
 
-        // ✅ AUTO-BACK REFORÇADO E ACELERADO
+        // Executa a transição de volta
         setTimeout(() => {
-            console.log("🔄 Executando navegação para Tela 1...");
-
-            // Removemos a classe de inspeção antes de trocar os painéis
             document.body.classList.remove('modo-inspecao');
 
+            // Tenta disparar a função oficial de navegação
             if (typeof window.navegarParaSetores === 'function') {
                 window.navegarParaSetores();
-            } else if (typeof navegarParaSetores === 'function') {
-                navegarParaSetores();
             } else {
-                // Fallback de emergência (Garante a troca visual de painéis)
+                // Fallback visual robusto
                 const painelSetores = document.getElementById('v3-painel-setores');
                 const painelItens = document.getElementById('v3-painel-itens');
-
                 if (painelSetores) painelSetores.style.display = 'block';
                 if (painelItens) painelItens.style.display = 'none';
-
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             }
 
-            // Recontagem final após a transição de tela
+            // Sincroniza o progresso uma última vez após a troca de tela
             setTimeout(() => {
                 if (typeof updateOverallStatus === 'function') updateOverallStatus();
-            }, 300);
+            }, 200);
 
-        }, 1300); // Tempo reduzido para maior fluidez
+        }, 1100); // Reduzido ligeiramente para dar mais agilidade
     }
 };
 
