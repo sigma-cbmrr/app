@@ -1,4 +1,8 @@
-//--- FUNÇÃO PRINCIPAL: Retorna o HTML do formulário de nova cautela, com estrutura limpa e preparada para injeção ---//
+//======================================//
+//--- BLOCO: NOVA CAUTELA (Emissão) ---//
+//=====================================//
+
+//--- Retorna o HTML do formulário de nova cautela, com estrutura limpa e preparada para injeção ---//
 function getNovaCautelaFormHTML() {
     return `
         <div class="sigma-v3-title-label" style="margin-bottom: 25px;">
@@ -58,7 +62,7 @@ function getNovaCautelaFormHTML() {
     `;
 }
 
-//--- FUNÇÃO PRINCIPAL: Exibe o formulário de nova cautela, com campos limpos, listeners ativados e carregamento de dados necessários ---//
+//=== Exibe o formulário de nova cautela, com campos limpos, listeners ativados e carregamento de dados necessários ===//
 function loadNewCautelaForm() {
     const contentArea = document.getElementById('cautelas-content');
 
@@ -85,7 +89,305 @@ function loadNewCautelaForm() {
     }
 }
 
-//--- FUNÇÃO PRINCIPAL: Exibe as diferentes visões de Cautelas (Ativas, a Receber, Histórico), com layout atualizado e chamadas para carregamento de dados ---//
+//=== Executa a transação no Firebase: grava o TRUG e "carimba" os itens no estoque===//
+async function iniciarCautelaProcesso() {
+    const localId = document.getElementById('cautela-local-origem').value;
+    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
+    const destinatarioNome = document.getElementById('cautela-destinatario').value;
+    const obsEmissao = document.getElementById('cautela-obs')?.value || "";
+
+    if (!localId || !destinatarioUid || cautelaItensSelecionados.length === 0) {
+        alert("Preencha todos os campos e selecione ao menos um item.");
+        return;
+    }
+
+    const btn = document.getElementById('btn-iniciar-cautela');
+    btn.disabled = true; btn.textContent = "Processando...";
+
+    try {
+        // --- 🛑 BUSCA REFINADA: IDENTIFICANDO O ID DA UNIDADE ---
+        // Buscamos na lista_conferencia para pegar o unidade_id real vinculado ao material
+        const listaDoc = await db.collection('listas_conferencia').doc(localId).get();
+        if (!listaDoc.exists) throw new Error("Viatura/Lista não encontrada no banco.");
+        
+        const listaData = listaDoc.data();
+        const unidadeIdOrigem = listaData.unidade_id; // ✅ Captura o ID real (ex: unid_01)
+        const nomeAmigavelLocal = `${listaData.posto_nome || ''} - ${listaData.local || localId}`;
+        // ----------------------------------------------------
+
+        const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
+        const emitenteNome = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
+        const dataAtual = new Date().toLocaleString('pt-BR');
+
+        const novaCautela = {
+            cautela_id: cautelaId,
+            emitente_uid: firebase.auth().currentUser.uid,
+            emitente: emitenteNome,
+            destinatario_original_uid: destinatarioUid,
+            destinatario_original_nome: destinatarioNome,
+            destinatario_uid: destinatarioUid,
+            local_origem_id: localId,
+            local_origem: nomeAmigavelLocal,
+            
+            // ✅ MUDANÇA CRÍTICA: Gravamos o ID para a query de Gestor funcionar
+            unidade_origem: unidadeIdOrigem, 
+            
+            status: 'ABERTA',
+            timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
+            observacoes_emissao: obsEmissao,
+            itens: cautelaItensSelecionados
+        };
+
+        // ... resto da transação (o bloco transaction permanece igual)
+        await db.runTransaction(async (transaction) => {
+             // Seu código de transaction aqui...
+             // (Mantenha o mapeamento do mItem.historico_vida e mItem.cautelas como está)
+             
+             // Apenas certifique-se de usar a variável 'listaData.list' que já buscamos acima se quiser otimizar
+             let list = listaData.list; 
+
+             // Processamento dos itens...
+             list = list.map(setor => ({
+                ...setor,
+                itens: setor.itens.map(mItem => {
+                    const selecoes = cautelaItensSelecionados.filter(c => c.id_base === mItem.id);
+                    if (selecoes.length > 0) {
+                        if (!mItem.historico_vida) mItem.historico_vida = [];
+                        selecoes.forEach(sel => {
+                            const carimbo = {
+                                id: cautelaId,
+                                destinatario: destinatarioNome,
+                                data: dataAtual,
+                                quantidade: Number(sel.quantidade) || 1
+                            };
+                            mItem.historico_vida.push({
+                                evento: "SAIDA_CAUTELA", id_doc: cautelaId, quem: emitenteNome, data: dataAtual,
+                                detalhes: `Saída de ${carimbo.quantidade}un para ${destinatarioNome}`
+                            });
+                            if (mItem.tipo === 'multi' && sel.tombamento) {
+                                mItem.tombamentos = mItem.tombamentos.map(t => {
+                                    if (t.tomb === sel.tombamento) t.cautela = carimbo;
+                                    return t;
+                                });
+                            } else {
+                                if (!mItem.cautelas) mItem.cautelas = [];
+                                mItem.cautelas.push(carimbo);
+                            }
+                        });
+                    }
+                    return mItem;
+                })
+            }));
+
+            transaction.set(db.collection('cautelas_abertas').doc(cautelaId), novaCautela);
+            transaction.update(db.collection('listas_conferencia').doc(localId), { list });
+        });
+
+        // ✅ SUCESSO COM SWEETALERT
+        Swal.fire('Sucesso!', `Cautela ${cautelaId} enviada para ${destinatarioNome}.`, 'success')
+            .then(() => location.reload());
+
+    } catch (e) {
+        console.error(e);
+        alert("Erro ao emitir cautela: " + e.message);
+        btn.disabled = false;
+        btn.textContent = "Enviar Cautela";
+    }
+}
+
+//=== Carrega os usuários para o campo de busca (destinatário), com exclusão do próprio usuário e preparação para o Autocomplete ===//
+async function loadUsersForSearch() {
+    // 1. BUSCA IRRESTRITA E EXCLUSÃO DO PRÓPRIO USUÁRIO
+    let userQuery = db.collection('usuarios');
+    const militarLogadoCompleto = currentUserData.nome_militar_completo;
+
+    try {
+        const usersSnapshot = await userQuery.get();
+        // Zera o array global antes de popular
+        allTargetUsers = [];
+
+        usersSnapshot.forEach(doc => {
+            const user = doc.data();
+            const nomeCompleto = user.nome_militar_completo;
+
+            // Excluir o próprio usuário logado
+            if (nomeCompleto && nomeCompleto !== militarLogadoCompleto) {
+                // Salva o objeto completo no array (com ID e nome)
+                allTargetUsers.push({
+                    id: doc.id, // 🛑 CRÍTICO: Este é o UID
+                    nome: nomeCompleto
+                });
+            }
+        });
+
+        // 2. CONFIGURA LISTENERS APÓS CARREGAR DADOS
+        setupCautelaDestinatarioListener();
+
+    } catch (error) {
+        console.error("Erro ao carregar usuários para a busca:", error);
+    }
+}
+
+//=== Configura o Autocomplete do campo Destinatário, com destaque de texto, seleção e validação ===//
+function setupCautelaDestinatarioListener() {
+    // Referências dos elementos
+    const input = document.getElementById('cautela-destinatario');
+    const suggestionsBox = document.getElementById('cautela-suggestions-box');
+    const suggestionsList = document.getElementById('cautela-suggestions-list');
+    const uidInput = document.getElementById('cautela-destinatario-uid');
+
+    if (!input || !suggestionsBox || !suggestionsList || !uidInput) {
+        console.error("Elementos do Autocomplete de Cautela não encontrados. Não é possível configurar o listener.");
+        return;
+    }
+
+    // 🛑 0. CORREÇÃO CRÍTICA DO BLUR/CLICK (MOUSEDOWN)
+    // Previne que o campo perca o foco (blur) quando o usuário clica na lista.
+    suggestionsBox.addEventListener('mousedown', (event) => {
+        if (event.target.closest('li')) {
+            event.preventDefault(); // Impede o 'blur' do input, permitindo que o 'click' seja processado.
+            // console.log("MOUSEDOWN - BLUR do input temporariamente prevenido.");
+        }
+    });
+
+    // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
+    input.addEventListener('input', () => {
+        const searchTerm = input.value.trim(); 
+        suggestionsList.innerHTML = '';
+
+        // Limpa o UID e a cor do border ao digitar qualquer coisa nova
+        uidInput.value = '';
+        input.style.borderColor = '#ccc';
+
+        if (searchTerm.length < 3) {
+            suggestionsBox.style.display = 'none';
+            return;
+        }
+
+        const searchTermUpper = searchTerm.toUpperCase(); // Termo em caixa alta para a busca
+
+        const filteredUsers = allTargetUsers.filter(user =>
+            user.nome.toUpperCase().includes(searchTermUpper)
+        ).sort((a, b) => a.nome.localeCompare(b.nome));
+
+        if (filteredUsers.length > 0) {
+            // CRIA A EXPRESSÃO REGULAR PARA O DESTAQUE
+            const regex = new RegExp(`(${searchTerm})`, 'gi');
+
+            let html = '';
+            filteredUsers.forEach(user => {
+                const fullUserName = user.nome;
+                const safeName = fullUserName.replace(/'/g, "&#39;");
+
+                // Destaca o termo digitado no nome
+                const highlightedName = fullUserName.replace(regex, '<strong>$1</strong>');
+
+                html += `<li data-user-name="${safeName}" data-uid="${user.id}" style="cursor: pointer; padding: 10px; border-bottom: 1px solid #f1f5f9;">
+                             <span style="color: #800020;">${highlightedName}</span>
+                         </li>`;
+            });
+
+            suggestionsList.innerHTML = html;
+            suggestionsBox.style.display = 'block';
+        } else {
+            // EXIBE MENSAGEM DE USUÁRIO NÃO CADASTRADO
+            suggestionsList.innerHTML = `
+                <li style="padding: 15px; color: #64748b; font-style: italic; text-align: center; background: #fff5f5; border-radius: 8px;">
+                    <i class="fas fa-user-slash" style="color: #d90f23; margin-bottom: 8px; display: block; font-size: 1.2em;"></i>
+                    Usuário não cadastrado no sistema
+                </li>`;
+            suggestionsBox.style.display = 'block';
+        }
+    });
+
+    // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
+    suggestionsList.addEventListener('click', (event) => {
+        const listItem = event.target.closest('li');
+
+        if (listItem) {
+            const selectedNameRaw = listItem.getAttribute('data-user-name');
+            const selectedUid = listItem.getAttribute('data-uid');
+            const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
+
+            // console.log("SELEÇÃO CLIQUE - Capturado. UID:", selectedUid, " Nome:", selectedName);
+
+            if (selectedName && selectedUid) {
+
+                // Preenche os valores
+                input.value = selectedName;
+                uidInput.value = selectedUid;
+                input.style.borderColor = '#1b8a3e';
+                suggestionsBox.style.display = 'none';
+
+                // Força o foco de volta para o input (complemento do mousedown)
+                input.focus();
+
+                // Dispara o change para revalidação
+                input.dispatchEvent(new Event('change'));
+
+            } else {
+                console.warn("Falha na Captura do Item da Lista: UID ou Nome ausente.");
+                uidInput.value = '';
+                input.style.borderColor = 'red';
+            }
+        }
+    });
+
+    // 3. LÓGICA DE VALIDAÇÃO NO BLUR (Perda de Foco)
+    input.addEventListener('blur', () => {
+
+        setTimeout(() => {
+            suggestionsBox.style.display = 'none';
+
+            const finalName = input.value.trim();
+
+            // console.log("BLUR VALIDATION - Final Name:", finalName, " UID:", uidInput.value);
+
+            if (finalName.length > 0 && !uidInput.value) {
+
+                const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
+
+                if (!isNameValid) {
+                    input.value = '';
+                    input.style.borderColor = 'red';
+                    uidInput.value = '';
+                    // console.warn("BLUR - Inválido/Não selecionado. Campo Limpo.");
+                } else {
+                    // Fallback
+                    const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
+                    if (validUser) {
+                        uidInput.value = validUser.id;
+                        input.style.borderColor = '#1b8a3e';
+                        // console.log("BLUR - UID preenchido por fallback de nome válido.");
+                    } else {
+                        input.value = '';
+                        input.style.borderColor = 'red';
+                        uidInput.value = '';
+                    }
+                }
+            } else if (finalName.length === 0) {
+                // Campo vazio, garantir que o UID esteja vazio e resetar a cor
+                uidInput.value = '';
+                input.style.borderColor = '#ccc';
+                // console.log("BLUR - Campo Vazio. Resetado.");
+            }
+
+        }, 100);
+    });
+
+    // 4. Garante que a caixa reapareça ao focar se houver texto
+    input.addEventListener('focus', () => {
+        if (input.value.length >= 3) {
+            input.dispatchEvent(new Event('input'));
+        }
+    });
+}
+
+//======================================//
+//--- BLOCO: ATIVAS E MONITORAMENTO ---//
+//=====================================//
+
+//=== Exibe as diferentes visões de Cautelas (Ativas, a Receber, Histórico), com layout atualizado e chamadas para carregamento de dados ===//
 function showCautelasDashboard(type) {
     const menuContainer = document.getElementById('cautelas-options-container');
     const contentArea = document.getElementById('cautelas-content');
@@ -185,413 +487,196 @@ function showCautelasDashboard(type) {
     }
 }
 
-//--- FUNÇÃO PRINCIPAL: Carrega os usuários para o campo de busca (destinatário), com exclusão do próprio usuário e preparação para o Autocomplete ---//
-async function loadUsersForSearch() {
-    // 1. BUSCA IRRESTRITA E EXCLUSÃO DO PRÓPRIO USUÁRIO
-    let userQuery = db.collection('usuarios');
-    const militarLogadoCompleto = currentUserData.nome_militar_completo;
+//=== Busca e exibe as cautelas ativas|Exibe todas as cautelas da unidade  ===//
+//=== para Gestores/Admin, e apenas as emitidas para/pelo usuário logado para Operacionais. ===//
+
+async function loadActiveCautelas() {
+    const tbody = document.getElementById('cautelas-ativas-body');
+    const loading = document.getElementById('loading-cautelas');
+    const table = document.getElementById('cautelas-ativas-table');
+    if (!tbody || !loading || !table) return;
+
+    const role = currentUserData.role || 'operacional';
+    const user = currentUserData;
+
+    tbody.innerHTML = '';
+    loading.style.display = 'block';
+    table.style.display = 'none';
 
     try {
-        const usersSnapshot = await userQuery.get();
-        // Zera o array global antes de popular
-        allTargetUsers = [];
+        const grupos = {
+            custodiaAtiva: { title: 'Custódia Ativa (Itens sob sua responsabilidade)', data: [] },
+            rastreioPessoal: { title: 'Meus Envios em Trânsito (Acompanhamento)', data: [] },
+            monitoramento: { title: 'Monitoramento Gerencial/Global', data: [] },
+        };
 
-        usersSnapshot.forEach(doc => {
-            const user = doc.data();
-            const nomeCompleto = user.nome_militar_completo;
+        const renderedIds = new Set();
+        const militarUid = firebase.auth().currentUser.uid;
 
-            // Excluir o próprio usuário logado
-            if (nomeCompleto && nomeCompleto !== militarLogadoCompleto) {
-                // Salva o objeto completo no array (com ID e nome)
-                allTargetUsers.push({
-                    id: doc.id, // 🛑 CRÍTICO: Este é o UID
-                    nome: nomeCompleto
+        // --- 1. BUSCAS PESSOAIS (Operacional e Gestor vendo suas próprias cautelas) ---
+        if (role === 'operacional' || role === 'gestor') {
+            // A. Custódia Ativa: Itens que ele RECEBEU e estão com ele
+            grupos.custodiaAtiva.data = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
+            grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.id));
+
+            // B. Rastreio: Itens que ele EMITIU ou DEVOLVEU (estão em trânsito)
+            const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
+            const rastreioReversor = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
+
+            const uniqueRastreio = new Map();
+            [...rastreioEmitente, ...rastreioReversor].forEach(c => uniqueRastreio.set(c.id, c));
+            
+            // Filtra para não repetir o que já está na Custódia Ativa
+            grupos.rastreioPessoal.data = Array.from(uniqueRastreio.values()).filter(c => !renderedIds.has(c.id));
+            grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.id));
+        }
+
+        // --- 2. BUSCA GERENCIAL (Gestor e Admin monitorando a Unidade ou Geral) ---
+        if (role === 'gestor' || role === 'admin') {
+            const scope = (role === 'admin') ? 'personal' : 'unit'; // Admin vê global, Gestor vê Unidade
+            
+            // ✅ AGORA CHAMA A QUERY DIRETA PELA UNIDADE (Sem getUnitListIds)
+            const monitoramentoRaw = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, null, scope);
+
+            // Filtra para não repetir cautelas que o gestor já viu na lista pessoal dele
+            grupos.monitoramento.data = monitoramentoRaw.filter(c => !renderedIds.has(c.id));
+            grupos.monitoramento.title = (role === 'admin') ? 'Monitoramento Global (ADMIN)' : 'Monitoramento da Unidade';
+        }
+
+        // --- 3. RENDERIZAÇÃO ---
+        let htmlContent = '';
+        let totalCautelas = 0;
+
+        [grupos.custodiaAtiva, grupos.rastreioPessoal, grupos.monitoramento].forEach(group => {
+            if (group.data.length > 0) {
+                totalCautelas += group.data.length;
+                htmlContent += `
+                    <tr class="group-header">
+                        <td colspan="6" class="group-title-cell">
+                            <i class="fas fa-folder-open"></i> <strong>${group.title}</strong> (${group.data.length})
+                        </td>
+                    </tr>
+                `;
+                group.data.forEach(cautela => {
+                    htmlContent += renderCautelaRow(cautela);
                 });
             }
         });
 
-        // 2. CONFIGURA LISTENERS APÓS CARREGAR DADOS
-        setupCautelaDestinatarioListener();
+        tbody.innerHTML = totalCautelas === 0 
+            ? `<tr><td colspan="6" style="text-align:center; padding:60px; color:#64748b;">Nenhuma cautela ativa.</td></tr>`
+            : htmlContent;
 
-    } catch (error) {
-        console.error("Erro ao carregar usuários para a busca:", error);
-    }
-}
+        loading.style.display = 'none';
+        table.style.display = 'table';
 
-//--- FUNÇÃO PRINCIPAL: Configura o Autocomplete do campo Destinatário, com destaque de texto, seleção e validação ---//
-function setupCautelaDestinatarioListener() {
-    // Referências dos elementos
-    const input = document.getElementById('cautela-destinatario');
-    const suggestionsBox = document.getElementById('cautela-suggestions-box');
-    const suggestionsList = document.getElementById('cautela-suggestions-list');
-    const uidInput = document.getElementById('cautela-destinatario-uid');
-
-    if (!input || !suggestionsBox || !suggestionsList || !uidInput) {
-        console.error("Elementos do Autocomplete de Cautela não encontrados. Não é possível configurar o listener.");
-        return;
-    }
-
-    // 🛑 0. CORREÇÃO CRÍTICA DO BLUR/CLICK (MOUSEDOWN)
-    // Previne que o campo perca o foco (blur) quando o usuário clica na lista.
-    suggestionsBox.addEventListener('mousedown', (event) => {
-        if (event.target.closest('li')) {
-            event.preventDefault(); // Impede o 'blur' do input, permitindo que o 'click' seja processado.
-            // console.log("MOUSEDOWN - BLUR do input temporariamente prevenido.");
-        }
-    });
-
-    // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
-    input.addEventListener('input', () => {
-        const searchTerm = input.value.trim(); // Não converte para UPPERCASE aqui para usar na RegExp
-        suggestionsList.innerHTML = '';
-
-        // Limpa o UID e a cor do border ao digitar qualquer coisa nova
-        uidInput.value = '';
-        input.style.borderColor = '#ccc';
-
-        if (searchTerm.length < 3) {
-            suggestionsBox.style.display = 'none';
-            return;
-        }
-
-        const searchTermUpper = searchTerm.toUpperCase(); // Termo em caixa alta para a busca
-
-        const filteredUsers = allTargetUsers.filter(user =>
-            user.nome.toUpperCase().includes(searchTermUpper)
-        ).sort((a, b) => a.nome.localeCompare(b.nome));
-
-        if (filteredUsers.length > 0) {
-
-            // 🛑 CRIA A EXPRESSÃO REGULAR PARA O DESTAQUE
-            // 'gi' = global (todas as ocorrências) e case-insensitive (ignora caixa alta/baixa)
-            const regex = new RegExp(`(${searchTerm})`, 'gi');
-
-            let html = '';
-            filteredUsers.forEach(user => {
-                const fullUserName = user.nome;
-                const safeName = fullUserName.replace(/'/g, "&#39;");
-
-                // 🛑 CORREÇÃO: Usa a regex para substituir a ocorrência do termo de busca
-                // pelo termo envolvido em tags <strong>.
-                const highlightedName = fullUserName.replace(regex, '<strong>$1</strong>');
-
-                // O layout visual anterior (separando posto/quadro) foi removido
-                // para simplificar e garantir que o destaque funcione em qualquer parte do nome.
-
-                html += `<li data-user-name="${safeName}" data-uid="${user.id}">
-                             <span style="color: #800020;">${highlightedName}</span>
-                         </li>`;
-            });
-
-            suggestionsList.innerHTML = html;
-            suggestionsBox.style.display = 'block';
-        } else {
-            suggestionsBox.style.display = 'none';
-        }
-    });
-
-    // 2. LISTENER DE SELEÇÃO (Preenche o Input e Esconde a Lista)
-    suggestionsList.addEventListener('click', (event) => {
-        const listItem = event.target.closest('li');
-
-        if (listItem) {
-            const selectedNameRaw = listItem.getAttribute('data-user-name');
-            const selectedUid = listItem.getAttribute('data-uid');
-            const selectedName = selectedNameRaw ? selectedNameRaw.replace(/&#39;/g, "'") : '';
-
-            // console.log("SELEÇÃO CLIQUE - Capturado. UID:", selectedUid, " Nome:", selectedName);
-
-            if (selectedName && selectedUid) {
-
-                // Preenche os valores
-                input.value = selectedName;
-                uidInput.value = selectedUid;
-                input.style.borderColor = '#1b8a3e';
-                suggestionsBox.style.display = 'none';
-
-                // Força o foco de volta para o input (complemento do mousedown)
-                input.focus();
-
-                // Dispara o change para revalidação
-                input.dispatchEvent(new Event('change'));
-
-            } else {
-                console.warn("Falha na Captura do Item da Lista: UID ou Nome ausente.");
-                uidInput.value = '';
-                input.style.borderColor = 'red';
-            }
-        }
-    });
-
-    // 3. LÓGICA DE VALIDAÇÃO NO BLUR (Perda de Foco)
-    input.addEventListener('blur', () => {
-
-        setTimeout(() => {
-            suggestionsBox.style.display = 'none';
-
-            const finalName = input.value.trim();
-
-            // console.log("BLUR VALIDATION - Final Name:", finalName, " UID:", uidInput.value);
-
-            if (finalName.length > 0 && !uidInput.value) {
-
-                const isNameValid = allTargetUsers.some(user => user.nome.trim() === finalName);
-
-                if (!isNameValid) {
-                    input.value = '';
-                    input.style.borderColor = 'red';
-                    uidInput.value = '';
-                    // console.warn("BLUR - Inválido/Não selecionado. Campo Limpo.");
-                } else {
-                    // Fallback
-                    const validUser = allTargetUsers.find(user => user.nome.trim() === finalName);
-                    if (validUser) {
-                        uidInput.value = validUser.id;
-                        input.style.borderColor = '#1b8a3e';
-                        // console.log("BLUR - UID preenchido por fallback de nome válido.");
-                    } else {
-                        input.value = '';
-                        input.style.borderColor = 'red';
-                        uidInput.value = '';
-                    }
-                }
-            } else if (finalName.length === 0) {
-                // Campo vazio, garantir que o UID esteja vazio e resetar a cor
-                uidInput.value = '';
-                input.style.borderColor = '#ccc';
-                // console.log("BLUR - Campo Vazio. Resetado.");
-            }
-
-        }, 100);
-    });
-
-    // 4. Garante que a caixa reapareça ao focar se houver texto
-    input.addEventListener('focus', () => {
-        if (input.value.length >= 3) {
-            input.dispatchEvent(new Event('input'));
-        }
-    });
-}
-
-//--- FUNÇÃO PRINCIPAL: Carrega os locais sob custódia do militar logado e popula o dropdown, com tratamento de erros e mensagens de feedback ---//
-async function loadCustodiaLocais() {
-    const selectLocal = document.getElementById('cautela-local-origem');
-    const militarUid = firebase.auth().currentUser.uid;
-
-    if (!selectLocal || !militarUid) {
-        const fallbackNome = currentUserData.nome_militar_completo || 'Usuário Desconhecido';
-        selectLocal.innerHTML = `<option value="" disabled selected>Erro: Usuário (${fallbackNome}) não identificado.</option>`;
-        return;
-    }
-
-    selectLocal.disabled = true;
-    selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
-
-    try {
-        // Busca na coleção 'custodia_atual' as listas onde o militar logado é o conferente
-        const custodyRef = db.collection('custodia_atual');
-        const resultsSnapshot = await custodyRef
-            .where('conferente_uid', '==', militarUid)
-            .get();
-
-        // Usamos um Map para garantir que não haja duplicidade de IDs de lista
-        const locaisMap = new Map();
-
-        resultsSnapshot.forEach(doc => {
-            const data = doc.data();
-            const idRealDaLista = data.lista_id; // "alfa_abt17"
-            const nomeExibicao = data.local_nome; // "ALFA - ABT-17"
-
-            if (idRealDaLista && nomeExibicao) {
-                locaisMap.set(idRealDaLista, nomeExibicao);
-            }
-        });
-
-        let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
-
-        if (locaisMap.size === 0) {
-            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia.</option>';
-        } else {
-            // Converte o Map em Array e ordena pelo Nome legível
-            const listaOrdenada = Array.from(locaisMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-
-            listaOrdenada.forEach(([id, nome]) => {
-                // 🛑 CORREÇÃO: O 'value' agora é o ID (alfa_abt17) e o texto é o Nome (ALFA - ABT-17)
-                optionsHtml += `<option value="${id}">${nome}</option>`;
-            });
-        }
-
-        selectLocal.innerHTML = optionsHtml;
-        selectLocal.disabled = false;
-
-    } catch (error) {
-        console.error("Erro ao carregar locais sob custódia:", error);
-        selectLocal.disabled = false;
-        selectLocal.innerHTML = '<option value="" disabled selected>Erro ao carregar locais.</option>';
-    }
-}
-
-//--- FUNÇÃO PRINCIPAL: Carrega os itens disponíveis para a lista selecionada, com cálculo de disponibilidade e renderização dinâmica ---//
-async function loadCustodiaItens() {
-    const selectLocal = document.getElementById('cautela-local-origem');
-    const listaId = selectLocal.value;
-
-    const itemListContainer = document.getElementById('itens-custodia-list');
-    const btnIniciar = document.getElementById('btn-iniciar-cautela');
-
-    itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
-    if (btnIniciar) btnIniciar.disabled = true;
-
-    if (!listaId) {
-        itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #999;">Por favor, selecione um Local de Origem.</p>';
-        return;
-    }
-
-    try {
-        const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
-
-        if (!listaDoc.exists) {
-            itemListContainer.innerHTML = `<p style="color:red; text-align:center;">Erro: Documento da lista (${listaId}) não encontrado.</p>`;
-            return;
-        }
-
-        const listaMestra = listaDoc.data().list || [];
-        let htmlContent = '<div class="inventory-accordion-container">';
-        let totalGeralDisponivel = 0;
-        let isFirst = true;
-
-        listaMestra.forEach(setor => {
-            const setorItems = (setor.itens || []);
-
-            // 🛑 CÁLCULO UNIFICADO DE DISPONIBILIDADE (Igual ao App de Conferência)
-            const setorTotal = setorItems.reduce((acc, item) => {
-                if (item.tipo === 'single') {
-                    const esperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
-                    const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                    // ⬇️ NOVA LÓGICA: Abate também pendências de conferência não resolvidas
-                    const pendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-
-                    const saldo = esperado - cautelado - pendente;
-                    return acc + (saldo > 0 ? saldo : 0);
-                } else if (item.tipo === 'multi') {
-                    // ⬇️ NOVA LÓGICA: Só conta se não tiver cautela E não tiver pendências de conferência no tombamento
-                    return acc + (item.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
-                }
-                return acc;
-            }, 0);
-
-            if (setorTotal <= 0) return;
-            totalGeralDisponivel += setorTotal;
-
-            const contentId = `content-${setor.id}`;
-            htmlContent += `
-                <div class="${isFirst ? 'accordion-header active' : 'accordion-header'}" onclick="toggleAccordion(this, '${contentId}')">
-                    <span>${setor.nome} (${setorTotal} disponíveis)</span>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-                <div class="accordion-content" id="${contentId}" style="${isFirst ? 'max-height: 1500px;' : ''}">
-                    <div class="items-card-grid">`;
-
-            setorItems.forEach(item => {
-                if (item.tipo === 'single') {
-                    const totalEsperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
-                    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                    // ⬇️ Abatimento de pendências para o saldo individual do card
-                    const totalPendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-
-                    const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
-
-                    if (saldoDisponivel > 0) {
-                        htmlContent += `
-                            <div class="item-selection-card" data-item-id="${item.id}">
-                                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
-                                <div class="qtd-control-wrapper">
-                                    <label>
-                                        <input type="checkbox" name="cautela-item-base" 
-                                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
-                                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
-                                    </label>
-                                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
-                                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
-                                </div>
-                                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
-                            </div>`;
-                    }
-                } else if (item.tipo === 'multi' && item.tombamentos?.length > 0) {
-                    // ⬇️ Filtra tombamentos que possuem pendências ativas (carimbos vermelhos)
-                    const tags = (item.tombamentos || []).map(t => {
-                        const isC = !!t.cautela;
-                        const hasP = (t.pendencias_ids && t.pendencias_ids.length > 0);
-                        const bloqueado = isC || hasP;
-                        const motivoBloqueio = isC ? 'Cautelado' : (hasP ? 'Com Pendência' : 'Livre');
-
-                        return `
-                            <div class="tombamento-tag ${bloqueado ? 'cautelado' : ''}" title="${motivoBloqueio}">
-                                <input type="checkbox" name="cautela-item-multi" 
-                                       data-id="${item.id}-${t.tomb}" data-id-base="${item.id}" data-tombamento="${t.tomb}" 
-                                       data-nome="${item.nome}" data-tipo="multi" 
-                                       onchange="updateCautelaItemCount();" ${bloqueado ? 'disabled' : ''}>
-                                ${t.tomb} ${bloqueado ? `<i class="fas fa-lock" style="color: ${hasP ? '#d90f23' : '#800020'};"></i>` : ''}
-                            </div>`;
-                    }).join('');
-
-                    // Só renderiza o card se houver algum tombamento não bloqueado
-                    if (tags.includes('type="checkbox"')) {
-                        htmlContent += `
-                            <div class="item-selection-card">
-                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
-                                <div class="tombamento-tag-list">${tags}</div>
-                            </div>`;
-                    }
-                }
-            });
-            htmlContent += '</div></div>';
-            isFirst = false;
-        });
-
-        if (totalGeralDisponivel === 0) {
-            itemListContainer.innerHTML = '<p style="color:green; padding:20px; text-align:center;">✅ Nenhum material disponível para cautela (itens com pendência ou cautelados).</p>';
-        } else {
-            itemListContainer.innerHTML = htmlContent + '</div>';
-            document.querySelectorAll('.input-qtd-cautela').forEach(el => {
-                el.addEventListener('input', updateCautelaItemCount);
-            });
-            updateCautelaItemCount();
-        }
-
-    } catch (error) {
-        console.error("Erro ao carregar itens:", error);
-        itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar materiais.</p>';
-    }
-}
-
-/*--- RESPONSÁVEL POR CONTAR CAUTELAS A RECEBER (ABERTAS + DEVOLUÇÕES) ---*/
-async function getCautelasAReceberCount() {
-    if (!currentUserData) return 0;
-    const militarUid = firebase.auth().currentUser.uid;
-
-    try {
-        // Cautelas NOVAS (Alvo Original)
-        const snapNovas = await db.collection('cautelas_abertas')
-            .where('destinatario_original_uid', '==', militarUid)
-            .where('status', '==', 'ABERTA')
-            .get();
-
-        // DEVOLUÇÕES para conferir (Destinatário Atual)
-        const snapDevolucoes = await db.collection('cautelas_abertas')
-            .where('destinatario_uid', '==', militarUid)
-            .where('status', '==', 'DEVOLUÇÃO')
-            .get();
-
-        // Usamos um Set para garantir que se uma cautela cair em ambos, conte apenas uma vez
-        const totalIds = new Set();
-        snapNovas.forEach(doc => totalIds.add(doc.id));
-        snapDevolucoes.forEach(doc => totalIds.add(doc.id));
-
-        return totalIds.size;
     } catch (e) {
-        console.error("Erro ao contar cautelas:", e);
-        return 0;
+        console.error("Erro ao carregar cautelas:", e);
+        loading.style.display = 'none';
+    }
+}
+
+//=== Identifica cautelas com avarias relatadas e cria o card de alerta no Dashboard ===/
+async function loadCautelaPendencies() {
+    const container = document.getElementById('admin-gestor-cards-container');
+    if (!container || !currentUserData) return;
+
+    try {
+        console.log("🚀 [Gestão] Buscando pendências de cautela via unidade_id...");
+
+        const isAdmin = currentUserData.role === 'admin' || currentUserData.role === 'gestor_geral';
+        const gestorUnidadeId = currentUserData.unidade_id;
+
+        // 1. Iniciamos a query básica
+        let query = db.collection('cautelas_abertas')
+            .where('status', 'in', ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO']);
+
+        // 2. 🔥 A MUDANÇA: Se não for admin, filtra direto pela Unidade Origem no Firebase
+        if (!isAdmin) {
+            if (!gestorUnidadeId) {
+                console.warn("⚠️ Gestor sem unidade_id definido. Abortando busca.");
+                return;
+            }
+            query = query.where('unidade_origem', '==', gestorUnidadeId);
+        }
+
+        const snap = await query.get();
+        let totalPendenciasTroca = 0;
+        let cautelasComPendencia = [];
+
+        snap.forEach(doc => {
+            const data = doc.data();
+            
+            // Verificação extra de segurança: só processa se houver pendências ativas
+            if (data.pendencias_ativas && data.pendencias_ativas.length > 0) {
+
+                // --- RASTREABILIDADE DE MILITAR ---
+                const pendenciasComRastreabilidade = data.pendencias_ativas.map(p => {
+                    const nomeReal = data.destinatario_original_nome || p.solicitante_nome || "Militar";
+                    const uidReal = data.destinatario_uid || p.solicitante_uid || "";
+
+                    return {
+                        ...p,
+                        gestor_alvo_nome: nomeReal, 
+                        gestor_alvo_uid: uidReal,
+                        cautelaId: doc.id,
+                        localId: data.local_origem_id,
+                        itemNome: p.item_nome || p.itemNome || "Item"
+                    };
+                });
+
+                if (pendenciasComRastreabilidade.length > 0) {
+                    totalPendenciasTroca += pendenciasComRastreabilidade.length;
+                    cautelasComPendencia.push({
+                        id: doc.id,
+                        ...data,
+                        pendencias: pendenciasComRastreabilidade
+                    });
+                }
+            }
+        });
+
+        // ATUALIZA O CACHE GLOBAL PARA O MODAL DE GESTÃO
+        cachePendenciasCautela = cautelasComPendencia;
+
+        const cardExistente = document.getElementById('card-pendencia-cautela-ativa');
+
+        // Se resolveu tudo, remove o card de alerta
+        if (totalPendenciasTroca === 0) {
+            if (cardExistente) cardExistente.remove();
+            return;
+        }
+
+        // 3. MONTAGEM DO CARD VISUAL (Dashboard do Gestor)
+        let cardHtml = `
+            <div id="card-pendencia-cautela-ativa" class="sector-card status-alert" 
+                 style="border-left: 5px solid #f57c00; background-color: #fff3e0; margin-bottom: 20px; flex: 1 1 100%; cursor: pointer; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
+                 onclick="abrirGestaoPendenciasCautela()">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <h3 style="color: #e65100; margin: 0; font-size: 1.1em;">
+                            <i class="fas fa-exclamation-circle"></i> Pendências em TRUGs
+                        </h3>
+                        <p style="margin: 5px 0 0 0; font-size: 0.85em; color: #666;">
+                            Itens em posse pessoal aguardando substituição/sanções.
+                        </p>
+                    </div>
+                    <div class="count-value" style="color: #e65100; font-size: 2em; font-weight: bold;">${totalPendenciasTroca}</div>
+                </div>
+                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(230, 81, 0, 0.2); color: #e65100; font-size: 0.8em; font-weight: bold; text-transform: uppercase; display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-gavel"></i> Clique para gerenciar
+                </div>
+            </div>
+        `;
+
+        if (cardExistente) {
+            cardExistente.outerHTML = cardHtml;
+        } else {
+            container.insertAdjacentHTML('afterbegin', cardHtml);
+        }
+
+    } catch (e) {
+        console.error("❌ Erro ao carregar pendências de cautela:", e);
     }
 }
 
@@ -638,392 +723,11 @@ async function countActiveCautelas() {
     return countedIds.size;
 }
 
-/**
- * Lógica do Acordeão: Mostra ou esconde o conteúdo do setor.
- * @param {HTMLElement} header - O cabeçalho clicado.
- * @param {string} contentId - O ID do conteúdo a ser expandido/colapsado.
- */
-function toggleAccordion(header, contentId) {
-    const content = document.getElementById(contentId);
-
-    // 1. Alterna a classe 'active' no cabeçalho
-    header.classList.toggle('active');
-
-    // 2. Controla o max-height para animação de acordeão
-    if (content.style.maxHeight !== '0px' && content.style.maxHeight !== '') {
-        content.style.maxHeight = '0px';
-    } else {
-        // Define uma altura suficientemente grande para conter o conteúdo
-        content.style.maxHeight = content.scrollHeight + 50 + 'px';
-    }
-}
-
-/**
- * Atualiza o texto do botão de iniciar cautela com a contagem de itens selecionados.
- */
-function updateCautelaItemCount() {
-    let selectedCount = 0;
-    // REINICIALIZA O ARRAY GLOBAL (Garante que a função de envio veja os dados novos)
-    cautelaItensSelecionados = [];
-
-    // 1. Processar itens com Tombamento (tipo 'multi')
-    document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
-        const idBase = chk.getAttribute('data-id-base');
-        const tombamento = chk.getAttribute('data-tombamento');
-        const nomeCompleto = chk.getAttribute('data-nome') || "";
-
-        // Remove "(Tomb: ...)" do nome se ele já existir, para não salvar duplicado
-        const nomeLimpo = nomeCompleto.replace(/\s\(Tomb:\s[^\)]+\)/i, '').trim();
-
-        if (idBase && tombamento) {
-            cautelaItensSelecionados.push({
-                id: `${idBase}-${tombamento}`,
-                id_base: idBase,
-                nome: nomeLimpo,
-                tombamento: tombamento,
-                quantidade: 1,
-                tipo: 'multi'
-            });
-            selectedCount++;
-        }
-    });
-
-    // 2. Processar itens Únicos (tipo 'single')
-    document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
-        const card = chk.closest('.item-selection-card');
-        if (!card) return;
-
-        const inputQtd = card.querySelector('.input-qtd-cautela');
-        const id = chk.getAttribute('data-id');
-        const nome = chk.getAttribute('data-nome');
-
-        let qtd = 1;
-        if (inputQtd && !inputQtd.disabled) {
-            qtd = parseInt(inputQtd.value) || 0;
-            const max = parseInt(inputQtd.getAttribute('max')) || 0;
-
-            if (qtd > max) {
-                alert(`A quantidade máxima disponível para ${nome} é ${max}.`);
-                inputQtd.value = max;
-                qtd = max;
-            }
-
-            if (qtd < 1) {
-                chk.checked = false;
-                inputQtd.disabled = true;
-                return;
-            }
-        }
-
-        if (id) {
-            cautelaItensSelecionados.push({
-                id: id,
-                id_base: id,
-                nome: nome,
-                quantidade: qtd,
-                tipo: 'single'
-            });
-            selectedCount += qtd;
-        }
-    });
-
-    // 3. Atualizar Interface do Botão
-    const btnIniciar = document.getElementById('btn-iniciar-cautela');
-    if (btnIniciar) {
-        btnIniciar.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Cautela (${selectedCount} itens)`;
-        // O botão só habilita se houver itens no array global
-        btnIniciar.disabled = (selectedCount <= 0);
-    }
-}
-function toggleItemQuantity(checkbox) {
-    // 🛑 CORREÇÃO: Usar .item-selection-card como elemento pai mais próximo 🛑
-    const card = checkbox.closest('.item-selection-card');
-    if (!card) return; // Se o card não for encontrado (segurança)
-
-    const inputQtd = card.querySelector('.input-qtd-cautela');
-
-    if (inputQtd) {
-        inputQtd.disabled = !checkbox.checked;
-
-        // Garante que o valor seja pelo menos 1 quando marcado
-        if (checkbox.checked) {
-            if (parseInt(inputQtd.value) < 1 || isNaN(parseInt(inputQtd.value))) {
-                inputQtd.value = 1;
-            }
-        } else {
-            // Se desmarcado, reseta o valor para o máximo (ou outro valor de reset)
-            inputQtd.value = inputQtd.getAttribute('max');
-        }
-    }
-}
-
-async function iniciarCautelaProcesso() {
-    const localId = document.getElementById('cautela-local-origem').value;
-    const destinatarioUid = document.getElementById('cautela-destinatario-uid').value;
-    const destinatarioNome = document.getElementById('cautela-destinatario').value;
-    const obsEmissao = document.getElementById('cautela-obs')?.value || "";
-
-    if (!localId || !destinatarioUid || cautelaItensSelecionados.length === 0) {
-        alert("Preencha todos os campos e selecione ao menos um item.");
-        return;
-    }
-
-    const btn = document.getElementById('btn-iniciar-cautela');
-    btn.disabled = true; btn.textContent = "Processando...";
-
-    try {
-        // --- 🛑 BUSCA CIRÚRGICA NA ROTA PARA NOME AMIGÁVEL ---
-        const rotasDoc = await db.collection('config_geral').doc('rotas').get();
-        const rotas = rotasDoc.data() || {};
-        const rotaInfo = rotas[localId];
-
-        // Monta o nome amigável no padrão "POSTO - NOME"
-        const nomeAmigavelLocal = rotaInfo ? `${rotaInfo.posto} - ${rotaInfo.nome}` : "Local N/D";
-        const unidadeOrigem = rotaInfo ? rotaInfo.unidade : "";
-        // ----------------------------------------------------
-
-        const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
-        const emitenteNome = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
-        const dataAtual = new Date().toLocaleString('pt-BR');
-
-        const novaCautela = {
-            cautela_id: cautelaId,
-            emitente_uid: firebase.auth().currentUser.uid,
-            emitente: emitenteNome,
-            destinatario_original_uid: destinatarioUid,
-            destinatario_original_nome: destinatarioNome,
-            destinatario_uid: destinatarioUid, // Define destinatário atual inicial
-            local_origem_id: localId,
-            local_origem: nomeAmigavelLocal, // ⬅️ AGORA SALVA O NOME AMIGÁVEL VIA ROTA
-            unidade_origem: unidadeOrigem,   // ⬅️ SALVA A UNIDADE PARA GESTÃO
-            status: 'ABERTA',
-            timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
-            observacoes_emissao: obsEmissao,
-            itens: cautelaItensSelecionados
-        };
-
-        const listaRef = db.collection('listas_conferencia').doc(localId);
-
-        await db.runTransaction(async (transaction) => {
-            const listaDoc = await transaction.get(listaRef);
-            if (!listaDoc.exists) throw new Error("Lista não encontrada.");
-
-            let list = listaDoc.data().list;
-
-            list = list.map(setor => ({
-                ...setor,
-                itens: setor.itens.map(mItem => {
-                    const selecoes = cautelaItensSelecionados.filter(c => c.id_base === mItem.id);
-
-                    if (selecoes.length > 0) {
-                        if (!mItem.historico_vida) mItem.historico_vida = [];
-
-                        selecoes.forEach(sel => {
-                            const carimbo = {
-                                id: cautelaId,
-                                destinatario: destinatarioNome,
-                                data: dataAtual,
-                                quantidade: Number(sel.quantidade) || 1
-                            };
-
-                            mItem.historico_vida.push({
-                                evento: "SAIDA_CAUTELA", id_doc: cautelaId, quem: emitenteNome, data: dataAtual,
-                                detalhes: `Saída de ${carimbo.quantidade}un para ${destinatarioNome}`
-                            });
-
-                            if (mItem.tipo === 'multi' && sel.tombamento) {
-                                mItem.tombamentos = mItem.tombamentos.map(t => {
-                                    if (t.tomb === sel.tombamento) t.cautela = carimbo;
-                                    return t;
-                                });
-                            } else {
-                                if (!mItem.cautelas) mItem.cautelas = [];
-                                mItem.cautelas.push(carimbo);
-                            }
-                        });
-                    }
-                    return mItem;
-                })
-            }));
-
-            transaction.set(db.collection('cautelas_abertas').doc(cautelaId), novaCautela);
-            transaction.update(listaRef, { list });
-        });
-
-        alert(`✅ Cautela ${cautelaId} enviada com sucesso!`);
-        location.reload();
-
-    } catch (e) {
-        console.error(e);
-        alert("Erro ao emitir cautela: " + e.message);
-        btn.disabled = false;
-        btn.textContent = "Enviar Cautela";
-    }
-}
-
-/**
- * Busca e exibe as cautelas ativas.
- * Exibe todas as cautelas da unidade para Gestores/Admin,
- * e apenas as emitidas para/pelo usuário logado para Operacionais.
- */
-// Localização: Função loadActiveCautelas (aprox. linha 1132)
-
-async function loadActiveCautelas() {
-    const tbody = document.getElementById('cautelas-ativas-body');
-    const loading = document.getElementById('loading-cautelas');
-    const table = document.getElementById('cautelas-ativas-table');
-    if (!tbody || !loading || !table) return;
-    const role = currentUserData.role || 'operacional';
-
-    tbody.innerHTML = '';
-    loading.style.display = 'block';
-    table.style.display = 'none';
-
-    try {
-        const user = currentUserData;
-
-        // Estrutura para os subgrupos
-        const grupos = {
-            custodiaAtiva: { title: 'Custódia Ativa (Itens sob sua responsabilidade)', data: [] },
-            rastreioPessoal: { title: 'Meus Envios em Trânsito (Acompanhamento)', data: [] },
-            monitoramento: { title: 'Monitoramento Gerencial/Global', data: [] },
-        };
-
-        const renderedIds = new Set();
-
-        // --- 1. CONFIGURAÇÃO E EXECUÇÃO DAS BUSCAS ---
-
-        // A. Pessoal: Custódia Ativa (RECEBIDA como destinatário)
-        if (role === 'operacional' || role === 'gestor') {
-            const militarCompleto = currentUserData.nome_militar_completo;
-
-            // --- 1. GRUPO CUSTÓDIA ATIVA (APENAS POSSE ATIVA) ---
-
-            // A. CUSTÓDIA ATIVA: RECEBIDA (Destinatário)
-            // Somente itens que estão sob POSSE ATIVA.
-            grupos.custodiaAtiva.data = await queryCautelas(['RECEBIDA'], role, user, 'destinatario', 'personal');
-            grupos.custodiaAtiva.data.forEach(c => renderedIds.add(c.cautela_id));
-
-            // --- 2. GRUPO RASTREIO PESSOAL (REMETENTE E REVERSOR) ---
-
-            // B. RASTREIO PESSOAL - PARTE 1: Emitente (ABERTA, RECEBIDA, DEVOLUÇÃO)
-            // Rastreamento para itens que ele EMITIU.
-            const rastreioEmitente = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, 'emitente', 'personal');
-
-            // C. RASTREIO PESSOAL - PARTE 2: Reversor (DEVOLUÇÃO)
-            // Rastreamento para itens que ele DEVOLVEU (e precisa acompanhar o retorno).
-            const rastreioReversor = await queryCautelas(['DEVOLUÇÃO'], role, user, 'militar_completo_reversor', 'personal');
-
-            // Concatena as duas listas de rastreio
-            let rastreioRaw = [...rastreioEmitente, ...rastreioReversor];
-
-            // 🛑 CORREÇÃO: Desduplica o array rastreioRaw internamente, usando Map 🛑
-            const uniqueRastreio = new Map();
-            rastreioRaw.forEach(c => uniqueRastreio.set(c.cautela_id, c));
-            const rastreioDesduplicado = Array.from(uniqueRastreio.values());
-
-            // Remove itens que já estão na Custódia Ativa (filtro contra o outro grupo)
-            grupos.rastreioPessoal.data = rastreioDesduplicado.filter(c => !renderedIds.has(c.cautela_id));
-            grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.cautela_id));
-        }
-
-        // C. Gerencial/Admin: Monitoramento da Unidade/Global
-        if (role === 'gestor' || role === 'admin') {
-
-            if (role === 'gestor') {
-                // 🛑 CORREÇÃO CRÍTICA PARA GESTOR (Evitar duplo 'in') 🛑
-                const unitListIds = await getUnitListIds();
-                let monitoramentoRaw = [];
-                const statuses = ['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'];
-
-                grupos.monitoramento.title = 'Monitoramento da Unidade (Material sob sua gestão)';
-
-                // Verifica se há IDs de lista e se estamos dentro do limite de 10 do 'in'
-                if (unitListIds.length > 0 && unitListIds.length <= 10) {
-
-                    // 1. Executa a consulta APENAS com o filtro 'local_origem_id' ('in')
-                    let queryRef = db.collection('cautelas_abertas')
-                        .where('local_origem_id', 'in', unitListIds)
-                        .orderBy('timestamp_emissao', 'desc');
-
-                    const snapshot = await queryRef.get();
-                    snapshot.forEach(doc => {
-                        const cautela = { id: doc.id, ...doc.data() };
-
-                        // 2. Filtra por status ABERTA, RECEBIDA, DEVOLUÇÃO na MEMÓRIA
-                        if (statuses.includes(cautela.status)) {
-                            monitoramentoRaw.push(cautela);
-                        }
-                    });
-
-                } else if (unitListIds.length > 10) {
-                    console.error("ALERTA: Gestor tem mais de 10 Listas. Filtro de unidade está incompleto.");
-                } else {
-                    // Nenhum ID de lista, Monitoramento vazio.
-                }
-
-                grupos.monitoramento.data = monitoramentoRaw;
-
-            } else { // role === 'admin'
-                grupos.monitoramento.title = 'Monitoramento Global (ADMIN)';
-                // Admin pode usar o 'in' para status, pois não usa o 'in' para local_origem_id
-                grupos.monitoramento.data = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, null, 'unit');
-            }
-
-            // Remove itens que já foram vistos nos grupos pessoais (APÓS A BUSCA)
-            grupos.monitoramento.data = grupos.monitoramento.data.filter(c => !renderedIds.has(c.cautela_id));
-        }
-
-        // --- 2. CONSOLIDAÇÃO E RENDERIZAÇÃO NA TABELA ---
-        let htmlContent = '';
-        const allGroups = [grupos.custodiaAtiva, grupos.rastreioPessoal, grupos.monitoramento];
-        let totalCautelas = 0;
-
-        allGroups.forEach(group => {
-            if (group.data.length > 0) {
-                totalCautelas += group.data.length;
-
-                // Adiciona o cabeçalho do subgrupo (usando colspan para mesclar a linha)
-                htmlContent += `
-                    <tr class="group-header">
-                        <td colspan="6" class="group-title-cell" data-label="">
-                            <i class="fas fa-folder-open"></i> <strong>${group.title}</strong> (${group.data.length})
-                        </td>
-                    </tr>
-                `;
-
-                // Renderiza as linhas de dados (usando a nova função auxiliar)
-                group.data.forEach(cautela => {
-                    htmlContent += renderCautelaRow(cautela);
-                });
-            }
-        });
-
-        // --- 3. EXIBIÇÃO FINAL ---
-        if (totalCautelas === 0) {
-            tbody.innerHTML = `
-    <tr>
-        <td colspan="6" style="text-align:center; padding:60px; color:#64748b;">
-            <i class="fas fa-file-signature fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
-            <span style="font-weight:600; font-size:0.95em;">Nenhuma cautela ativa encontrada.</span>
-            <p style="font-size:0.8em; opacity:0.7; margin-top:5px;">No momento, não existem materiais sob sua responsabilidade direta.</p>
-        </td>
-    </tr>`;
-        } else {
-            tbody.innerHTML = htmlContent;
-        }
-
-        loading.style.display = 'none';
-        table.style.display = 'table';
-
-    } catch (e) {
-        console.error("Erro ao carregar cautelas ativas:", e);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
-        loading.style.display = 'none';
-        table.style.display = 'table';
-    }
-}
-
+//======================================//
+//--- BLOCO: A RECEBER E TRANSIÇÕES ---//
+//=====================================//
+
+//=== Lista TRUGs emitidos para o usuário que aguardam o aceite (conferência) ===//
 async function loadCautionsToReceive() {
     const tbody = document.getElementById('cautelas-receive-body');
     const loading = document.getElementById('loading-receive');
@@ -1081,6 +785,227 @@ async function loadCautionsToReceive() {
         table.style.display = 'table';
     }
 }
+
+//=== RESPONSÁVEL POR CONTAR CAUTELAS A RECEBER (ABERTAS + DEVOLUÇÕES) ===//
+async function getCautelasAReceberCount() {
+    if (!currentUserData) return 0;
+    const militarUid = firebase.auth().currentUser.uid;
+
+    try {
+        // Cautelas NOVAS (Alvo Original)
+        const snapNovas = await db.collection('cautelas_abertas')
+            .where('destinatario_original_uid', '==', militarUid)
+            .where('status', '==', 'ABERTA')
+            .get();
+
+        // DEVOLUÇÕES para conferir (Destinatário Atual)
+        const snapDevolucoes = await db.collection('cautelas_abertas')
+            .where('destinatario_uid', '==', militarUid)
+            .where('status', '==', 'DEVOLUÇÃO')
+            .get();
+
+        // Usamos um Set para garantir que se uma cautela cair em ambos, conte apenas uma vez
+        const totalIds = new Set();
+        snapNovas.forEach(doc => totalIds.add(doc.id));
+        snapDevolucoes.forEach(doc => totalIds.add(doc.id));
+
+        return totalIds.size;
+    } catch (e) {
+        console.error("Erro ao contar cautelas:", e);
+        return 0;
+    }
+}
+
+//=== Prepara a URL e abre o App de Conferência no modo de Aceite ===//
+function iniciarRecebimentoCautela(cautelaId) {
+    // 1. Fecha o modal de detalhes
+    document.getElementById('cautelaDetailsModal').style.display = 'none';
+
+    // 2. Coleta e codifica os dados do militar
+    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
+    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
+    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
+
+    // 3. Constrói a URL para a cautela. (Usa 'cautelaId')
+    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}`;
+
+    // 4. 🛑 LÓGICA DE ABERTURA DO IFRAME (REPLICADA DA CONFERÊNCIA NORMAL) 🛑
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+
+    if (!container || !iframe) {
+        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
+        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
+        return;
+    }
+
+    iframe.src = url;
+    container.style.display = 'block';
+
+    // 5. Oculta a área principal do dashboard (content-area) e a sidebar para dar foco total ao app
+    const contentArea = document.getElementById('content-area');
+    if (contentArea) {
+        contentArea.style.display = 'none';
+    }
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+        sidebar.style.display = 'none';
+    }
+
+    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
+    window.removeEventListener('message', handleIframeMessage);
+    window.addEventListener('message', handleIframeMessage);
+}
+
+//=== Inicia o fluxo de retorno do material, movendo o status para "DEVOLUÇÃO" ===//
+async function iniciarDevolucaoCautela(cautelaId, ultimoConferenteNome) {
+    const btnDevolver = document.getElementById('btn-devolver-cautela');
+
+    // 1. CONFIRMAÇÃO PREMIUM COM SWEETALERT2
+    const { isConfirmed } = await Swal.fire({
+        title: 'Confirmar Devolução?',
+        html: `O material será enviado para conferência de retorno de:<br><b>${ultimoConferenteNome}</b>`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#1b8a3e',
+        cancelButtonColor: '#800020',
+        confirmButtonText: 'Sim, enviar para devolução',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (!isConfirmed) return;
+
+    // Feedback visual imediato
+    if (btnDevolver) btnDevolver.disabled = true;
+    Swal.fire({ title: 'Processando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    try {
+        const militarCompleto = currentUserData.nome_militar_completo;
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
+
+        // Busca o UID do Usuário C (o novo recebedor)
+        const ucUid = await findUidByName(ultimoConferenteNome);
+
+        if (!ucUid) {
+            throw new Error(`Não foi possível localizar o ID de sistema para: ${ultimoConferenteNome}.`);
+        }
+
+        await db.runTransaction(async (transaction) => {
+            const cautelaDoc = await transaction.get(cautelaRef);
+            if (!cautelaDoc.exists) throw new Error("Documento de cautela não localizado.");
+
+            const data = cautelaDoc.data();
+
+            // --- 🛑 TRAVA DE SEGURANÇA: ITENS EM ANÁLISE ---
+            const pendencias = data.pendencias_ativas || [];
+            if (pendencias.length > 0) {
+                const listaItens = pendencias.map(p => p.itemNome).join(', ');
+                throw new Error(`BLOQUEIO: Existem itens em análise pelo Gestor: (${listaItens}). Responda ou aguarde a solução do gestor antes de devolver.`);
+            }
+
+            if (data.status !== 'RECEBIDA') {
+                throw new Error("Esta cautela não possui o status 'RECEBIDA'. Verifique sua posse.");
+            }
+
+            // --- 📝 PREPARAÇÃO DO LOG ---
+            const novoLog = {
+                data: new Date().toLocaleString('pt-BR'),
+                descricao: `Devolução iniciada: Material enviado por ${militarCompleto} para conferência de retorno de ${ultimoConferenteNome}.`,
+                militar: militarCompleto,
+                tipo: "TRANSICAO_DEVOLUCAO"
+            };
+
+            transaction.update(cautelaRef, {
+                status: 'DEVOLUÇÃO',
+                timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
+                reversor_uid: firebase.auth().currentUser.uid,
+                militar_completo_reversor: militarCompleto,
+                destinatario_uid: ucUid,
+                destinatario: ultimoConferenteNome,
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
+            });
+        });
+
+        // ✅ SUCESSO
+        await Swal.fire({
+            icon: 'success',
+            title: 'Enviado com Sucesso',
+            text: `A carga agora aguarda a conferência de ${ultimoConferenteNome}.`,
+            confirmButtonColor: '#1b8a3e'
+        });
+
+        // Fecha modais estáticos se houver
+        const modal = document.getElementById('cautelaDetailsModal');
+        if (modal) modal.style.display = 'none';
+
+        // Atualização de Interface
+        if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
+        
+        // Substituída a função obsoleta pela nova renderização
+        if (typeof renderOperacionalCards === 'function') {
+            renderOperacionalCards();
+        }
+
+    } catch (error) {
+        console.error("Erro ao iniciar devolução:", error);
+        Swal.fire({
+            icon: 'error',
+            title: 'Falha na Devolução',
+            text: error.message,
+            confirmButtonColor: '#800020'
+        });
+        if (btnDevolver) btnDevolver.disabled = false;
+    }
+}
+
+//=== Abre o App de Conferência para o dono do material conferir o que está voltando ===//
+function iniciarConferenciaDevolucao(cautelaId, destinatario) {
+    // 1. Fecha o modal de detalhes
+    document.getElementById('cautelaDetailsModal').style.display = 'none';
+
+    // 2. Coleta e codifica os dados do militar
+    // 🛑 CORREÇÃO AQUI: Alterando de 'posto_graduacao' para 'posto' (ou similar)
+    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
+
+    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
+    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
+
+    // 3. Constrói a URL CRÍTICA com o modo de devolução final
+    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&modo=devolucao_final&destinatarioDevolucao=${encodeURIComponent(destinatario)}`;
+
+    // 4. LÓGICA DE ABERTURA DO IFRAME (INLINE)
+    const container = document.getElementById('app-runner-container');
+    const iframe = document.getElementById('app-iframe');
+
+    if (!container || !iframe) {
+        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
+        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
+        return;
+    }
+
+    iframe.src = url;
+    container.style.display = 'block';
+
+    // 5. Oculta a área principal do dashboard (content-area) e a sidebar
+    const contentArea = document.getElementById('content-area');
+    if (contentArea) {
+        contentArea.style.display = 'none';
+    }
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+        sidebar.style.display = 'none';
+    }
+
+    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
+    window.removeEventListener('message', handleIframeMessage);
+    window.addEventListener('message', handleIframeMessage);
+}
+
+//=============================================================//
+//--- BLOCO: GESTÃO DE AVARIAS E SUBSTITUIÇÃO (Pós-Cautela) ---//
+//=============================================================//
+
+//=== Abre o modal com todos os dados de um TRUG e libera botões conforme o status ===//
 async function showCautelaDetails(cautelaId) {
     const modal = document.getElementById('cautelaDetailsModal');
     const btnReceber = document.getElementById('btn-receber-cautela');
@@ -1219,12 +1144,8 @@ async function showCautelaDetails(cautelaId) {
         console.error("Erro no modal:", e);
     }
 }
-// Função para mostrar/esconder campo de quantidade no modal de reporte
-function fecharModalReporte() {
-    document.getElementById('modalReportarItem').style.display = 'none';
-    showCautelaDetails(cautelaIdAtualParaReporte); // Reabre o detalhe ao cancelar
-}
 
+//=== Prepara a lista de itens da cautela para que o militar reporte danos ===//
 async function iniciarFluxoSubstituicao() {
     const cautelaId = document.getElementById('modal-cautela-id').textContent;
     cautelaIdAtualParaReporte = cautelaId;
@@ -1317,12 +1238,7 @@ async function iniciarFluxoSubstituicao() {
     }
 }
 
-function toggleObsInput(index) {
-    const div = document.getElementById(`div-obs-${index}`);
-    const isChecked = document.querySelector(`.check-item-reporte[data-index="${index}"]`).checked;
-    div.style.display = isChecked ? 'block' : 'none';
-}
-
+//=== Grava as pendências (avarias) relatadas pelo militar no documento da Cautela ===//
 async function salvarRelatosMultiplos() {
     const checks = document.querySelectorAll('.check-item-reporte:checked');
     const gestorUid = document.getElementById('select-gestor-alvo').value;
@@ -1388,194 +1304,621 @@ async function salvarRelatosMultiplos() {
     }
 }
 
-function iniciarRecebimentoCautela(cautelaId) {
-    // 1. Fecha o modal de detalhes
-    document.getElementById('cautelaDetailsModal').style.display = 'none';
+//=== Abre a tabela técnica para o Gestor decidir o que fazer com os itens avariados ===//
+async function abrirGestaoPendenciasCautela() {
+    const cautelas = cachePendenciasCautela;
+    const wrapper = document.getElementById('ca-table-wrapper');
+    const tbody = document.getElementById('ca-list-body');
+    if (!wrapper || !tbody) return;
 
-    // 2. Coleta e codifica os dados do militar
-    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
-    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
-    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
-
-    // 3. Constrói a URL para a cautela. (Usa 'cautelaId')
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}`;
-
-    // 4. 🛑 LÓGICA DE ABERTURA DO IFRAME (REPLICADA DA CONFERÊNCIA NORMAL) 🛑
-    const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
-
-    if (!container || !iframe) {
-        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
-        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
-        return;
+    // 1. AJUSTE DO CABEÇALHO DA TABELA
+    const thead = wrapper.querySelector('thead tr');
+    if (thead) {
+        thead.innerHTML = `
+            <th>Material</th>
+            <th>Cautela ID</th>
+            <th>Alteração</th>
+            <th>Conferente/Data</th>
+            <th>Ação</th>
+        `;
     }
 
-    iframe.src = url;
-    container.style.display = 'block';
+    document.getElementById('table-title').innerHTML = `<i class="fas fa-exchange-alt"></i> Substituições Pendentes`;
+    tbody.innerHTML = '';
+    wrapper.querySelector('table').style.display = 'table';
+    document.getElementById('no-issues-msg').style.display = 'none';
 
-    // 5. Oculta a área principal do dashboard (content-area) e a sidebar para dar foco total ao app
-    const contentArea = document.getElementById('content-area');
-    if (contentArea) {
-        contentArea.style.display = 'none';
-    }
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.style.display = 'none';
-    }
+    cautelas.forEach(cautela => {
+        cautela.pendencias.forEach(p => {
+            const tr = tbody.insertRow();
 
-    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
-    window.removeEventListener('message', handleIframeMessage);
-    window.addEventListener('message', handleIframeMessage);
+            // Coluna Material
+            const tdMaterial = tr.insertCell();
+            tdMaterial.innerHTML = `
+                <strong>${p.item_nome}</strong><br>
+                <small style="color:#800020">Origem: ${cautela.local_origem || 'Não especificado'}</small>
+            `;
+
+            // Coluna Cautela ID
+            const tdCautela = tr.insertCell();
+            tdCautela.innerHTML = `<span class="status-badge badge-cautela" style="font-family: monospace; font-size: 0.95em;">${cautela.id}</span>`;
+
+            // Coluna Alteração (Single vs Multi)
+            const tdAlteracao = tr.insertCell();
+            tdAlteracao.style.textAlign = "left";
+
+            const itemNome = (p.item_nome || "").trim().toUpperCase();
+            const itemTomb = (p.item_tombamento || "S/T").trim().toUpperCase();
+            const itemQtd = p.quantidade || 1;
+            const ehItemSingle = !p.item_tombamento || itemTomb === "S/T" || itemTomb === itemNome;
+
+            const labelIdentificador = ehItemSingle
+                ? `<b style="color:#666;">Qtd:</b> ${itemQtd} un.`
+                : `<b style="color:#666;">Tomb:</b> ${p.item_tombamento}`;
+
+            tdAlteracao.innerHTML = `
+                <div style="font-size:0.9em;">
+                    <b style="color:#d90f23;">Motivo:</b> ${p.motivo}<br>
+                    ${labelIdentificador}
+                </div>
+            `;
+
+            // Coluna Solicitante e Data
+            const tdMilitar = tr.insertCell();
+            let dataFormatada = "Data indisponível";
+            if (p.timestamp) {
+                const d = p.timestamp.seconds ? new Date(p.timestamp.seconds * 1000) : new Date(p.timestamp);
+                if (!isNaN(d.getTime())) dataFormatada = d.toLocaleString('pt-BR');
+            }
+            tdMilitar.innerHTML = `<small><b>${p.solicitante_nome}</b><br>${dataFormatada}</small>`;
+
+            // Preparação dos dados (btnData)
+            const idItemReal = p.id_item || "";
+            const idBaseReal = p.id_base || "";
+            const tombReal = p.item_tombamento || "";
+
+            const btnData = encodeURIComponent(JSON.stringify({
+                cautelaId: cautela.id,
+                solicitacaoId: p.id_solicitacao,
+                itemNome: p.item_nome,
+                itemTomb: tombReal,
+                localId: cautela.local_origem_id,
+                motivo: p.motivo,
+                uidItem: idItemReal || (idBaseReal ? `${idBaseReal}-${tombReal}` : ""),
+                solicitante_nome: p.solicitante_nome || "Militar",
+                gestor_alvo_nome: p.solicitante_nome || "Militar",
+                gestor_alvo_uid: p.solicitante_uid || "",
+                quantidade: itemQtd
+            }));
+
+            const tdAcao = tr.insertCell();
+            tdAcao.innerHTML = `
+                <button class="btn-modern-action" style="background-color: #f57c00; padding: 5px 10px; cursor:pointer; display: flex; align-items: center; gap: 8px;" 
+                    onclick="abrirDecisaoGestor('${btnData}')">
+                    <i class="fas fa-tools"></i> Resolver
+                </button>
+            `;
+        });
+    });
+
+    wrapper.style.display = 'block';
+    wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-function iniciarConferenciaDevolucao(cautelaId, destinatario) {
-    // 1. Fecha o modal de detalhes
-    document.getElementById('cautelaDetailsModal').style.display = 'none';
 
-    // 2. Coleta e codifica os dados do militar
-    // 🛑 CORREÇÃO AQUI: Alterando de 'posto_graduacao' para 'posto' (ou similar)
-    const pGradEncoded = currentUserData && currentUserData.posto ? encodeURIComponent(currentUserData.posto) : 'ND';
+//=== Modal de escolha: O Gestor decide entre Recolher o item ou Substituí-lo ===//
+function abrirDecisaoGestor(dataJson) {
+    try {
+        const data = JSON.parse(decodeURIComponent(dataJson));
 
-    const quadroEncoded = currentUserData && currentUserData.quadro ? encodeURIComponent(currentUserData.quadro) : 'ND';
-    const nomeGuerraEncoded = currentUserData && currentUserData.nome_guerra ? encodeURIComponent(currentUserData.nome_guerra) : 'ND';
+        // 1. NORMALIZAÇÃO DE RASTREABILIDADE
+        data.gestor_alvo_nome = data.solicitante_nome || data.gestor_alvo_nome || "Militar";
+        data.gestor_alvo_uid = data.solicitante_uid || data.gestor_alvo_uid || "";
+        data.itemNome = data.item_nome || data.itemNome || "Item sem nome";
+        data.motivo = data.motivo || "Avaria relatada";
 
-    // 3. Constrói a URL CRÍTICA com o modo de devolução final
-    const url = `conferencia_app.html?cautelaId=${cautelaId}&posto_grad=${pGradEncoded}&quadro_mil=${quadroEncoded}&nome_guerra=${nomeGuerraEncoded}&modo=devolucao_final&destinatarioDevolucao=${encodeURIComponent(destinatario)}`;
+        // 2. CORREÇÃO DE IDS ESPECÍFICOS
+        if (!data.uidItem || (data.uidItem && String(data.uidItem).includes('undefined'))) {
+            const nomeUpper = data.itemNome.toUpperCase();
+            if (nomeUpper.includes("PÉ DE CABRA")) {
+                data.uidItem = "56911524-65986249";
+                data.id_base = "56911524-65986249";
+            } else if (nomeUpper.includes("EPR SCOTT")) {
+                data.uidItem = "56911524-64012364-" + (data.itemTomb || data.item_tombamento || "S/T");
+                data.id_base = "56911524-64012364";
+            }
+        }
 
-    // 4. LÓGICA DE ABERTURA DO IFRAME (INLINE)
-    const container = document.getElementById('app-runner-container');
-    const iframe = document.getElementById('app-iframe');
+        data.quantidade = Number(data.quantidade || data.itemQtd || 1);
+        pendenciaSendoResolvida = data;
 
-    if (!container || !iframe) {
-        console.error("Erro CRÍTICO: Componentes de execução (app-runner-container ou app-iframe) não encontrados.");
-        alert("Erro ao iniciar a conferência. Componentes de UI faltando.");
-        return;
+        // 3. PREPARAÇÃO DA INTERFACE DO MODAL
+        const tombReal = data.itemTomb || data.item_tombamento || "";
+        const ehItemSingle = !tombReal || tombReal === "S/T" || tombReal.trim().toUpperCase() === data.itemNome.trim().toUpperCase();
+
+        const identificadorHtml = ehItemSingle
+            ? `<b>Quantidade relatada:</b> <span style="color:#d90f23; font-weight:bold;">${data.quantidade} un.</span>`
+            : `<b>Tombamento:</b> <span style="color:#800020; font-weight:bold;">${tombReal}</span>`;
+
+        const infoBox = document.getElementById('info-item-decisao');
+        if (infoBox) {
+            infoBox.innerHTML = `
+                <div style="line-height: 1.6; text-align: left; background: #fff; padding: 12px; border-radius: 4px; border: 1px solid #ddd; border-left: 5px solid #800020;">
+                    <b style="color: #800020; font-size: 1.1em; text-transform: uppercase;">${data.itemNome}</b><br>
+                    <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 8px; font-size: 0.95em;">
+                        ${identificadorHtml}<br>
+                        <b>Relatado por:</b> <span style="color: #2c7399; font-weight: bold;">${data.gestor_alvo_nome}</span><br>
+                        <b>Motivo:</b> <span style="color:#333;">${data.motivo}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        const modal = document.getElementById('modalDecisaoGestor');
+        if (modal) modal.style.display = 'flex';
+
+    } catch (e) {
+        console.error("Erro crítico ao abrir modal de decisão:", e);
+        alert("Erro ao processar dados da pendência.");
     }
-
-    iframe.src = url;
-    container.style.display = 'block';
-
-    // 5. Oculta a área principal do dashboard (content-area) e a sidebar
-    const contentArea = document.getElementById('content-area');
-    if (contentArea) {
-        contentArea.style.display = 'none';
-    }
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.style.display = 'none';
-    }
-
-    // 6. Configura o listener para lidar com o retorno do app (ao finalizar)
-    window.removeEventListener('message', handleIframeMessage);
-    window.addEventListener('message', handleIframeMessage);
 }
 
-// Localização: Linha ~1594
-function handleIframeMessage(event) {
-    if (event.origin !== window.location.origin) return;
+//=== Remove o item da carga do militar e devolve ao estoque como pendência técnica ===//
+async function executarRecolhimentoApenas() {
+    if (!pendenciaSendoResolvida) return;
 
-    if (event.data && event.data.type === 'SIGMA_FINISHED') {
-        // Removi o alert comum e sugiro um Toast do Swal se quiser algo mais profissional
-        Swal.fire({
-            icon: 'success',
-            title: 'Operação Finalizada',
-            timer: 2000,
-            showConfirmButton: false
+    const p = pendenciaSendoResolvida;
+    const confirmacao = confirm(`Deseja confirmar o recolhimento de "${p.itemNome}"?\n\nO item sairá da carga do militar e retornará ao estoque com carimbo de PENDÊNCIA.`);
+    if (!confirmacao) return;
+
+    try {
+        const cautelaRef = db.collection('cautelas_abertas').doc(p.cautelaId);
+        const listaRef = db.collection('listas_conferencia').doc(p.localId);
+
+        const [docCautela, docLista] = await Promise.all([
+            cautelaRef.get(),
+            listaRef.get()
+        ]);
+
+        if (!docCautela.exists || !docLista.exists) return alert("Erro: Documentos não localizados.");
+
+        const dataCautela = docCautela.data();
+        const dataRegistro = new Date().toLocaleString('pt-BR');
+        const dataSimples = new Date().toLocaleDateString('pt-BR');
+        const nomeLimpo = (p.itemNome || "").trim().toUpperCase();
+
+        // Identifica o Gestor logado para o histórico (Posto + Nome de Guerra)
+        let nomeGestorLogado = "Gestor";
+        if (typeof currentUserData !== 'undefined' && currentUserData.nome_militar_completo) {
+            nomeGestorLogado = currentUserData.nome_militar_completo;
+        }
+
+        // 1. ATUALIZAÇÃO DA CARGA DO MILITAR (CAUTELA) - CORREÇÃO CIRÚRGICA DE QUANTIDADE
+        const pendenciasRestantes = (dataCautela.pendencias_ativas || []).filter(item =>
+            String(item.id_solicitacao) !== String(p.solicitacaoId)
+        );
+
+        const qtdBaixa = Number(p.quantidade) || 1;
+        let novosItensCautela = [];
+
+        // Lógica para detectar se é item de estoque (Single)
+        const itemTombReal = (p.itemTomb || "S/T").trim().toUpperCase();
+        const ehItemSingle = !p.itemTomb || itemTombReal === "S/T" || itemTombReal === nomeLimpo;
+
+        if (!ehItemSingle) {
+            // ITEM MULTI: Remove o objeto pelo tombamento específico
+            novosItensCautela = (dataCautela.itens || []).filter(it => it.tombamento !== p.itemTomb);
+        } else {
+            // ITEM SINGLE: Subtrai apenas a quantidade reportada, preservando o restante
+            novosItensCautela = (dataCautela.itens || []).map(it => {
+                const isMesmoItem = it.id === p.id_base || it.id === p.uidItem || it.nome.trim().toUpperCase() === nomeLimpo;
+
+                if (isMesmoItem) {
+                    const novaQtd = (Number(it.quantidade) || 0) - qtdBaixa;
+                    return novaQtd > 0 ? { ...it, quantidade: novaQtd } : null;
+                }
+                return it;
+            }).filter(it => it !== null);
+        }
+
+        // 2. ATUALIZAÇÃO DO ESTOQUE (LISTA MESTRA) - CONVERSÃO DE CARIMBOS
+        const novaListaMestra = docLista.data().list.map(setor => ({
+            ...setor,
+            itens: (setor.itens || []).map(it => {
+                if (it.nome.trim().toUpperCase() === nomeLimpo || it.id === p.id_base) {
+
+                    const novoIdPendencia = "PEND-" + Date.now();
+                    const descricaoPadrao = `${p.motivo} (RECOLHIDO DE ${p.cautelaId})`;
+
+                    // A. TRATA ITENS MULTI (Tombamentos)
+                    if (it.tipo === 'multi' && it.tombamentos) {
+                        it.tombamentos = it.tombamentos.map(t => {
+                            if (t.tomb === p.itemTomb) {
+                                delete t.cautela; // Remove carimbo LARANJA
+                                t.status = 'pending';
+
+                                if (!t.pendencias_ids) t.pendencias_ids = [];
+                                t.pendencias_ids.push({
+                                    id: novoIdPendencia,
+                                    quantidade: 1,
+                                    descricao: descricaoPadrao,
+                                    data_criacao: dataSimples,
+                                    status_gestao: "PENDENTE",
+                                    tipo: "PENDENCIA",
+                                    autor_nome: p.gestor_alvo_nome || "Militar"
+                                });
+                            }
+                            return t;
+                        });
+                    }
+
+                    // B. TRATA ITENS SINGLE (Redução de carimbo laranja no estoque)
+                    if (it.tipo === 'single' && it.cautelas) {
+                        it.cautelas = it.cautelas.map(c => {
+                            if (c.id === p.cautelaId) {
+                                const novaQtdC = (Number(c.quantidade) || 0) - qtdBaixa;
+                                return novaQtdC > 0 ? { ...c, quantidade: novaQtdC } : null;
+                            }
+                            return c;
+                        }).filter(c => c !== null);
+                    }
+
+                    // C. CARIMBO DE PENDÊNCIA GERAL (Vermelho)
+                    if (!it.pendencias_ids) it.pendencias_ids = [];
+                    it.pendencias_ids.push({
+                        id: novoIdPendencia,
+                        quantidade: qtdBaixa,
+                        descricao: descricaoPadrao,
+                        data_criacao: dataSimples,
+                        status_gestao: "PENDENTE",
+                        tipo: "PENDENCIA",
+                        autor_nome: p.gestor_alvo_nome || "Militar"
+                    });
+
+                    // D. HISTÓRICO DE VIDA DO ITEM
+                    if (!it.historico_vida) it.historico_vida = [];
+                    it.historico_vida.push({
+                        data: dataRegistro,
+                        evento: "RECOLHIMENTO_AVARIA",
+                        detalhes: `Recolhimento de ${qtdBaixa}un. Item saiu da carga de ${p.gestor_alvo_nome} e retornou como pendência.`,
+                        quem: nomeGestorLogado
+                    });
+                }
+                return it;
+            })
+        }));
+
+        // --- PREPARAÇÃO DO TEXTO DO HISTÓRICO DA CAUTELA ---
+        const prefixoDescricao = ehItemSingle ? `${qtdBaixa}un de ` : "Item ";
+
+        const batch = db.batch();
+
+        // Update Cautela com menção à quantidade
+        batch.update(cautelaRef, {
+            itens: novosItensCautela,
+            pendencias_ativas: pendenciasRestantes,
+            historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
+                data: dataRegistro,
+                descricao: `📥Recolhimento: ${prefixoDescricao}${p.itemNome} removido da carga. Motivo: ${p.motivo}`,
+                militar: nomeGestorLogado
+            })
         });
 
-        // 1. Limpeza do Iframe
-        const container = document.getElementById('app-runner-container');
-        if (container) {
-            container.style.display = 'none';
-            document.getElementById('app-iframe').src = 'about:blank';
-        }
+        // Update Lista Mestra
+        batch.update(listaRef, {
+            list: novaListaMestra,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
 
-        // 2. Restaura Interface
-        const contentArea = document.getElementById('content-area');
-        if (contentArea) contentArea.style.display = 'block';
-        
-        const sidebar = document.getElementById('sidebar') || document.getElementById('main-sidebar');
-        if (sidebar) sidebar.style.display = 'block';
+        await batch.commit();
+        alert(`✅ Recolhimento concluído!\nSaldo atualizado na carga do militar.`);
 
-        // 3. Atualização Inteligente de Dados
-        loadCautionsToReceive(); 
-        loadActiveCautelas();    
+        if (document.getElementById('modalDecisaoGestor')) document.getElementById('modalDecisaoGestor').style.display = 'none';
+        if (typeof fecharTabela === 'function') fecharTabela();
+        if (typeof loadCaaData === 'function') await loadCaaData();
 
-        // ✅ CORREÇÃO: Chama a renderização nova baseada no cargo do usuário
-        const role = currentUserData ? currentUserData.role : 'operacional';
-        
-        if (role === 'operacional') {
-            if (typeof renderOperacionalCards === 'function') {
-                renderOperacionalCards();
-            }
-        } else {
-            // Se for gestor e terminou algo no iframe, atualiza o painel de controle
-            if (typeof loadCaaData === 'function') {
-                loadCaaData();
-            }
-        }
-
-        // 4. Navegação de retorno
-        switchView('cautelas');
-        if (typeof showCautelasDashboard === 'function') {
-            showCautelasDashboard('Cautelas Ativas');
-        }
+    } catch (e) {
+        console.error("Erro fatal no recolhimento:", e);
+        alert("❌ Erro ao processar recolhimento: " + e.message);
     }
 }
-/**
- * Busca cautelas com status ABERTA e RECEBIDA para Gestores (filtradas por Unidade).
- * @param {string} unidade - A unidade do Gestor.
- * @returns {Array} Lista combinada de cautelas.
- */
-async function getCautelasForGestor(unidade) {
-    // Consulta 1: ABERTAS na Unidade
-    const queryAberta = db.collection('cautelas_abertas')
-        .where('unidade_destino', '==', unidade)
-        .where('status', '==', 'ABERTA');
 
-    // Consulta 2: RECEBIDAS na Unidade
-    const queryRecebida = db.collection('cautelas_abertas')
-        .where('unidade_destino', '==', unidade)
-        .where('status', '==', 'RECEBIDA');
+//=== Busca em todas as viaturas da unidade um item igual e livre para substituir o quebrado ===//
+async function prepararSubstituicaoFisica() {
+    if (!pendenciaSendoResolvida) return;
+    const p = pendenciaSendoResolvida;
+    const modalSeletor = document.getElementById('modalSeletorEstoque');
+    const container = document.getElementById('listaEstoqueDisponivel');
 
-    const [snapAberta, snapRecebida] = await Promise.all([
-        queryAberta.get(),
-        queryRecebida.get()
-    ]);
+    document.getElementById('modalDecisaoGestor').style.display = 'none';
+    modalSeletor.style.display = 'flex';
+    container.innerHTML = `<div style="text-align:center; padding:30px;"><i class="fas fa-sync fa-spin"></i> Buscando itens compatíveis no estoque...</div>`;
 
-    let cautelas = [...snapAberta.docs.map(doc => doc.data()), ...snapRecebida.docs.map(doc => doc.data())];
+    try {
+        const idReferencia = p.uidItem || p.idItem || p.id_base || "";
+        const partes = idReferencia.split('-');
+        let dnaBusca = partes.length > 2 ? partes.slice(0, 2).join('-') : idReferencia;
 
-    // Ordena a lista combinada por timestamp_emissao (mais recente primeiro)
-    cautelas.sort((a, b) => (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0));
+        const motivoMilitar = (p.motivo || "Avaria reportada").replace(/'/g, "\\'");
+        const uidResponsavel = p.gestor_alvo_uid || "";
+        const nomeResponsavel = (p.gestor_alvo_nome || "Militar").replace(/'/g, "\\'");
+        const nomeEscapado = p.itemNome.replace(/'/g, "\\'");
 
-    return cautelas;
+        const snapshot = await db.collection('listas_conferencia').get();
+        let htmlAcumulado = '';
+        let totalEncontrado = 0;
+
+        snapshot.forEach(docLista => {
+            const dadosLista = docLista.data();
+            const nomeLocal = dadosLista.nome_local || docLista.id.toUpperCase();
+
+            if (dadosLista.list) {
+                dadosLista.list.forEach(setor => {
+                    setor.itens.forEach(item => {
+                        if (item.id && item.id.startsWith(dnaBusca)) {
+
+                            // --- LÓGICA PARA ITEM SINGLE ---
+                            if (item.tipo === 'single' || !item.tombamentos || item.tombamentos.length === 0) {
+                                const qtdCautelada = (item.cautelas || []).reduce((acc, c) => acc + (Number(c.quantidade) || 0), 0);
+                                const qtdPendente = (item.pendencias_ids || []).reduce((acc, pen) => acc + (Number(pen.quantidade) || 0), 0);
+                                const saldoDisponivel = (Number(item.quantidadeEsperada) || 0) - qtdCautelada - qtdPendente;
+
+                                if (saldoDisponivel > 0) {
+                                    totalEncontrado++;
+                                    const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (ESTOQUE LOCAL)` : nomeLocal;
+
+                                    htmlAcumulado += `
+                                        <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+                                            <div style="flex: 1;">
+                                                <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
+                                                <b style="color: #333; font-size: 1.1em;">${item.nome}</b><br>
+                                                <small style="color: #666;">Saldo disponível: <b>${saldoDisponivel} un</b></small>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 15px;">
+                                                <div style="display: flex; flex-direction: column; align-items: center;">
+                                                    <label style="font-size: 0.7em; font-weight: bold; color: #555; margin-bottom: 4px; text-transform: uppercase;">Qtd</label>
+                                                    <input type="number" id="qtd_subst_${item.id}_${docLista.id}" 
+                                                        value="1" min="1" max="${saldoDisponivel}" 
+                                                        style="width: 55px; padding: 8px; border: 1px solid #1b8a3e; border-radius: 5px; text-align: center; font-weight: bold;">
+                                                </div>
+                                                <button class="btn-resolver" style="height: 42px; padding: 0 20px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight: bold;" 
+                                                    onclick="confirmarTrocaCruzada('${item.id}', '${docLista.id}', '${item.nome}', '${p.cautelaId}', '${p.localId}', '${p.id_base || p.uidItem}', '${nomeEscapado}', '${motivoMilitar}', '${uidResponsavel}', '${nomeResponsavel}')">
+                                                    Selecionar
+                                                </button>
+                                            </div>
+                                        </div>`;
+                                }
+                            }
+                            // --- LÓGICA PARA ITEM MULTI ---
+                            else {
+                                item.tombamentos.forEach(t => {
+                                    const idCompleto = `${item.id}-${t.tomb}`;
+                                    const temPendenciaAtiva = (t.pendencias_ids && t.pendencias_ids.length > 0);
+                                    const disponivel = !t.cautela && !temPendenciaAtiva && t.situacao !== 'AVARIADO';
+
+                                    if (disponivel && idCompleto !== idReferencia) {
+                                        totalEncontrado++;
+                                        const etiquetaLocal = docLista.id === p.localId ? `${nomeLocal} (RESERVA)` : nomeLocal;
+
+                                        htmlAcumulado += `
+                                            <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 15px; border-radius: 10px; background: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                                <div>
+                                                    <small style="color: #1b8a3e; font-weight: bold;"><i class="fas fa-map-marker-alt"></i> ${etiquetaLocal}</small><br>
+                                                    <b style="color: #333;">Tombamento: ${t.tomb}</b><br>
+                                                    <small style="color: #666;">${item.nome}</small>
+                                                </div>
+                                                <button class="btn-resolver" style="width:auto; padding: 10px 15px; background: #1b8a3e; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;" 
+                                                    onclick="confirmarTrocaCruzada('${idCompleto}', '${docLista.id}', '${t.tomb}', '${p.cautelaId}', '${p.localId}', '${p.id_base || p.uidItem}', '${nomeEscapado}', '${motivoMilitar}', '${uidResponsavel}', '${nomeResponsavel}')">
+                                                    Selecionar
+                                                </button>
+                                            </div>`;
+                                    }
+                                });
+                            }
+                        }
+                    });
+                });
+            }
+        });
+
+        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `<div style="text-align:center; padding:20px; color:#666;">Nenhum item compatível livre encontrado.</div>`;
+
+    } catch (e) {
+        console.error("Erro na busca global:", e);
+        container.innerHTML = `<div style="color:red; padding:20px; text-align:center;">Erro: ${e.message}</div>`;
+    }
 }
 
-/**
- * Busca todas as cautelas com status ABERTA e RECEBIDA para Admin.
- * @returns {Array} Lista combinada de cautelas.
- */
-async function getCautelasForAdmin() {
-    // Consulta 1: Todas ABERTAS
-    const queryAberta = db.collection('cautelas_abertas')
-        .where('status', '==', 'ABERTA');
+//=== Quando um militar reporta que um item cautelado estragou, o Gestor aciona esta função para encontrar um substituto imediato. ===//
+async function abrirSeletorGlobalSubstituicao() {
+    if (!pendenciaSendoResolvida) return;
+    const p = pendenciaSendoResolvida;
+    const modal = document.getElementById('modalSeletorEstoque');
+    const container = document.getElementById('listaEstoqueDisponivel');
 
-    // Consulta 2: Todas RECEBIDAS
-    const queryRecebida = db.collection('cautelas_abertas')
-        .where('status', '==', 'RECEBIDA');
+    // Identifica o "DNA" (prefixo do UID) - Ex: de 'EPR-01-511527' para 'EPR-01'
+    const partesId = p.uidItem.split('-');
+    partesId.pop(); // Remove o sufixo (tombamento)
+    const dnaBusca = partesId.join('-');
 
-    const [snapAberta, snapRecebida] = await Promise.all([
-        queryAberta.get(),
-        queryRecebida.get()
-    ]);
+    container.innerHTML = `<div class="loader-p">Buscando ${p.itemNome} em todas as suas ftr/setores...</div>`;
+    modal.style.display = 'block';
 
-    let cautelas = [...snapAberta.docs.map(doc => doc.data()), ...snapRecebida.docs.map(doc => doc.data())];
+    try {
+        // Busca TODAS as listas de conferência (Jurisdição do Gestor)
+        const snapshot = await db.collection('listas_conferencia').get();
+        let htmlAcumulado = '';
+        let totalEncontrado = 0;
 
-    // Ordena a lista combinada por timestamp_emissao (mais recente primeiro)
-    cautelas.sort((a, b) => (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0));
+        snapshot.forEach(docLista => {
+            const nomeLista = docLista.id.toUpperCase();
+            const dados = docLista.data();
 
-    return cautelas;
+            if (dados.list) {
+                dados.list.forEach(setor => {
+                    setor.itens.forEach(item => {
+
+                        // Função interna para validar e montar o HTML do card
+                        const validarEExibir = (entidade, idReal) => {
+                            // Verifica se o ID começa com o DNA e se está DISPONÍVEL
+                            if (idReal.startsWith(dnaBusca) && !entidade.cautela && entidade.situacao !== 'AVARIADO' && idReal !== p.uidItem) {
+                                totalEncontrado++;
+                                htmlAcumulado += `
+                                    <div class="item-selecao-global" style="border: 1px solid #ddd; padding: 12px; margin-bottom: 8px; border-radius: 8px; background: white;">
+                                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                                            <div>
+                                                <small style="color: #666; font-weight: bold;">ORIGEM: ${nomeLista}</small><br>
+                                                <b>Tombamento: ${entidade.tomb || entidade.tombamento}</b>
+                                            </div>
+                                            <button class="btn-resolver" style="width:auto; padding: 5px 15px;" 
+                                                onclick="confirmarTrocaCruzada('${idReal}', '${docLista.id}', '${entidade.tomb || entidade.tombamento}')">
+                                                Selecionar
+                                            </button>
+                                        </div>
+                                    </div>`;
+                            }
+                        };
+
+                        if (item.tipo === 'multi' && item.tombamentos) {
+                            item.tombamentos.forEach(t => validarEExibir(t, `${item.id}-${t.tomb}`));
+                        } else {
+                            validarEExibir(item, item.id);
+                        }
+                    });
+                });
+            }
+        });
+
+        container.innerHTML = totalEncontrado > 0 ? htmlAcumulado : `<p style="text-align:center; padding:20px;">Nenhum item reserva do tipo <b>${p.itemNome}</b> disponível em suas listas.</p>`;
+
+    } catch (e) {
+        console.error(e);
+        container.innerHTML = "<p>Erro ao processar busca global.</p>";
+    }
 }
 
+//=== Realiza a troca: dá baixa no item ruim, entrega o novo e atualiza os históricos ===//
+async function confirmarTrocaCruzada(uidNovo, listaOrigemNovo, tombamentoNovo, cautelaId, localIdOrigem, idBaseOrigem, nomeItemOrigem, motivoMilitar, uidResponsavel, nomeResponsavel) {
+    const dataFormatada = new Date().toLocaleString('pt-BR');
+    const dataSimples = new Date().toLocaleDateString('pt-BR');
+    const nomeLimpo = (nomeItemOrigem || "").trim().toUpperCase();
+    const nomeMilitarRelator = nomeResponsavel || "Militar";
+    const uidMilitarRelator = uidResponsavel || "";
+
+    // 🛑 BUSCA O NOME REAL DO GESTOR LOGADO NO DASHBOARD
+    let nomeGestorLogado = "Gestor";
+    if (typeof currentUserData !== 'undefined' && currentUserData.nome_militar_completo) {
+        nomeGestorLogado = currentUserData.nome_militar_completo;
+    }
+
+    try {
+        const batch = db.batch();
+        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
+        const listaOrigemRef = db.collection('listas_conferencia').doc(localIdOrigem);
+
+        // 1. ATUALIZAÇÃO DA CAUTELA (CARGA DO MILITAR)
+        const docC = await cautelaRef.get();
+        if (docC.exists) {
+            const d = docC.data();
+            const pAtivas = (d.pendencias_ativas || []).filter(pa => (pa.item_nome || "").trim().toUpperCase() !== nomeLimpo);
+
+            // Identifica se o novo item é multi ou single para formatar a descrição do histórico
+            const ehMulti = tombamentoNovo && tombamentoNovo !== "" && tombamentoNovo !== nomeItemOrigem;
+            const identificadorNovo = ehMulti ? `tombamento ${tombamentoNovo}` : `${uidNovo.split('-').pop()} unidades`;
+
+            const itensC = (d.itens || []).map(it => {
+                if (it.nome.trim().toUpperCase() === nomeLimpo) {
+                    return { ...it, id: uidNovo, tombamento: tombamentoNovo || "" };
+                }
+                return it;
+            });
+
+            batch.update(cautelaRef, {
+                pendencias_ativas: pAtivas,
+                itens: itensC,
+                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion({
+                    data: dataFormatada,
+                    // ✅ MUDANÇA: "🔄Substituição:" e correção do texto de identificação
+                    descricao: `🔄Substituição: Item ${nomeItemOrigem} substituído por ${identificadorNovo}.`,
+                    militar: nomeGestorLogado // ✅ MUDANÇA: Agora aparece CAP QPCBM VIDO (ou quem estiver logado)
+                })
+            });
+        }
+
+        // 2. ATUALIZAÇÃO DO ESTOQUE (ITENS SINGLE E MULTI)
+        const docL = await listaOrigemRef.get();
+        if (docL.exists) {
+            const listData = docL.data().list.map(setor => ({
+                ...setor,
+                itens: (setor.itens || []).map(it => {
+                    if (it.id === idBaseOrigem || it.nome.trim().toUpperCase() === nomeLimpo) {
+
+                        let objetoCautelaParaMover = null;
+                        const novoIdPendencia = "PEND-" + Date.now();
+                        // Aqui mantivemos o padrão solicitado anteriormente para o carimbo vermelho
+                        const descricaoPadrao = `${motivoMilitar} (IDENTIFICADO EM: ${cautelaId})`;
+
+                        if (it.tipo === "multi" && it.tombamentos) {
+                            it.tombamentos = it.tombamentos.map(t => {
+                                if (t.cautela && t.cautela.id === cautelaId) {
+                                    objetoCautelaParaMover = t.cautela;
+                                    delete t.cautela;
+                                    if (!t.pendencias_ids) t.pendencias_ids = [];
+                                    t.pendencias_ids.push({
+                                        id: novoIdPendencia,
+                                        quantidade: 1,
+                                        descricao: descricaoPadrao,
+                                        data_criacao: dataSimples,
+                                        status_gestao: "PENDENTE",
+                                        tipo: "PENDENCIA",
+                                        autor_nome: nomeMilitarRelator
+                                    });
+                                }
+                                return t;
+                            }).map(t => {
+                                if (t.tomb === tombamentoNovo) t.cautela = objetoCautelaParaMover;
+                                return t;
+                            });
+                        }
+
+                        if (!it.pendencias_ids) it.pendencias_ids = [];
+                        it.pendencias_ids.push({
+                            id: novoIdPendencia,
+                            quantidade: 1,
+                            descricao: descricaoPadrao,
+                            data_criacao: dataSimples,
+                            status_gestao: "PENDENTE",
+                            tipo: "PENDENCIA",
+                            autor_nome: nomeMilitarRelator
+                        });
+
+                        if (!it.historico_vida) it.historico_vida = [];
+                        it.historico_vida.push({
+                            data: dataFormatada,
+                            evento: "RETORNO_TROCA",
+                            detalhes: `🔄Substituição efetuada por ${nomeGestorLogado}.`,
+                            quem: nomeGestorLogado
+                        });
+                    }
+                    return it;
+                })
+            }));
+            batch.update(listaOrigemRef, { list: listData, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        }
+
+        await batch.commit();
+        alert(`✅ Substituição concluída!\nRegistrado por: ${nomeGestorLogado}`);
+        location.reload();
+    } catch (e) {
+        console.error(e);
+        alert("Erro: " + e.message);
+    }
+}
+
+//======================================//
+//--- BLOCO: HISTÓRICO (Finalizadas) ---//
+//=====================================//
+
+//=== Carrega a visão de histórico para Gestores (Tabela única da unidade) ===//
 async function loadHistoricalCautelas() {
     const loading = document.getElementById('loading-historico');
     const historicoContentContainer = document.getElementById('historico-content-container');
@@ -1671,110 +2014,7 @@ async function loadHistoricalCautelas() {
     }
 }
 
-async function iniciarDevolucaoCautela(cautelaId, ultimoConferenteNome) {
-    const btnDevolver = document.getElementById('btn-devolver-cautela');
-
-    // 1. CONFIRMAÇÃO PREMIUM COM SWEETALERT2
-    const { isConfirmed } = await Swal.fire({
-        title: 'Confirmar Devolução?',
-        html: `O material será enviado para conferência de retorno de:<br><b>${ultimoConferenteNome}</b>`,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#1b8a3e',
-        cancelButtonColor: '#800020',
-        confirmButtonText: 'Sim, enviar para devolução',
-        cancelButtonText: 'Cancelar'
-    });
-
-    if (!isConfirmed) return;
-
-    // Feedback visual imediato
-    if (btnDevolver) btnDevolver.disabled = true;
-    Swal.fire({ title: 'Processando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-
-    try {
-        const militarCompleto = currentUserData.nome_militar_completo;
-        const cautelaRef = db.collection('cautelas_abertas').doc(cautelaId);
-
-        // Busca o UID do Usuário C (o novo recebedor)
-        const ucUid = await findUidByName(ultimoConferenteNome);
-
-        if (!ucUid) {
-            throw new Error(`Não foi possível localizar o ID de sistema para: ${ultimoConferenteNome}.`);
-        }
-
-        await db.runTransaction(async (transaction) => {
-            const cautelaDoc = await transaction.get(cautelaRef);
-            if (!cautelaDoc.exists) throw new Error("Documento de cautela não localizado.");
-
-            const data = cautelaDoc.data();
-
-            // --- 🛑 TRAVA DE SEGURANÇA: ITENS EM ANÁLISE ---
-            const pendencias = data.pendencias_ativas || [];
-            if (pendencias.length > 0) {
-                const listaItens = pendencias.map(p => p.itemNome).join(', ');
-                throw new Error(`BLOQUEIO: Existem itens em análise pelo Gestor: (${listaItens}). Responda ou aguarde a solução do gestor antes de devolver.`);
-            }
-
-            if (data.status !== 'RECEBIDA') {
-                throw new Error("Esta cautela não possui o status 'RECEBIDA'. Verifique sua posse.");
-            }
-
-            // --- 📝 PREPARAÇÃO DO LOG ---
-            const novoLog = {
-                data: new Date().toLocaleString('pt-BR'),
-                descricao: `Devolução iniciada: Material enviado por ${militarCompleto} para conferência de retorno de ${ultimoConferenteNome}.`,
-                militar: militarCompleto,
-                tipo: "TRANSICAO_DEVOLUCAO"
-            };
-
-            transaction.update(cautelaRef, {
-                status: 'DEVOLUÇÃO',
-                timestamp_devolucao_iniciada: firebase.firestore.FieldValue.serverTimestamp(),
-                reversor_uid: firebase.auth().currentUser.uid,
-                militar_completo_reversor: militarCompleto,
-                destinatario_uid: ucUid,
-                destinatario: ultimoConferenteNome,
-                historico_movimentacoes: firebase.firestore.FieldValue.arrayUnion(novoLog)
-            });
-        });
-
-        // ✅ SUCESSO
-        await Swal.fire({
-            icon: 'success',
-            title: 'Enviado com Sucesso',
-            text: `A carga agora aguarda a conferência de ${ultimoConferenteNome}.`,
-            confirmButtonColor: '#1b8a3e'
-        });
-
-        // Fecha modais estáticos se houver
-        const modal = document.getElementById('cautelaDetailsModal');
-        if (modal) modal.style.display = 'none';
-
-        // Atualização de Interface
-        if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
-        
-        // Substituída a função obsoleta pela nova renderização
-        if (typeof renderOperacionalCards === 'function') {
-            renderOperacionalCards();
-        }
-
-    } catch (error) {
-        console.error("Erro ao iniciar devolução:", error);
-        Swal.fire({
-            icon: 'error',
-            title: 'Falha na Devolução',
-            text: error.message,
-            confirmButtonColor: '#800020'
-        });
-        if (btnDevolver) btnDevolver.disabled = false;
-    }
-}
-/**
-* Alterna a aba do Histórico e dispara o carregamento da função correspondente.
-*/
-// Localização: Função loadHistorico (Aproximadamente linha 1504)
-
+//=== Controla as abas de histórico operacional (Minhas, Devoluções, Emitidas) ===//
 function loadHistorico(tabName) {
     const role = currentUserData.role || 'operacional';
 
@@ -1815,7 +2055,8 @@ function loadHistorico(tabName) {
         loadHistoricoEmitidas();
     }
 }
-// Função auxiliar para renderizar a tabela, minimizando a repetição
+
+//=== Função de renderização para as tabelas de cautelas já concluídas ===//
 function renderHistoricoTable(containerId, cautelas) {
     const container = document.getElementById(containerId);
     const loading = document.getElementById('loading-historico');
@@ -1871,14 +2112,7 @@ function renderHistoricoTable(containerId, cautelas) {
     container.innerHTML = html;
 }
 
-// -------------------------------------------------------------
-// FUNÇÕES ESPECÍFICAS DE CARREGAMENTO POR ABA
-// -------------------------------------------------------------
-
-/**
- * Aba 1: MINHAS (Destinatário Original)
- * Filtro: destinatario_original == militarCompleto E status == CONCLUÍDA
- */
+//=== Carrega as cautelas concluídas onde o militar logado é o destinatário original ===//
 async function loadHistoricoMinhas() {
     const militarCompleto = currentUserData.nome_militar_completo;
 
@@ -1895,10 +2129,7 @@ async function loadHistoricoMinhas() {
     }
 }
 
-/**
- * Aba 2: DEVOLUÇÃO (Recebidas de volta, como Dono Provisório)
- * Filtro: receptor_final_completo == militarCompleto E status == CONCLUÍDA
- */
+//=== Carrega as cautelas concluídas onde o militar logado é o receptor final (devoluções) ===//
 async function loadHistoricoDevolucao() {
     const militarCompleto = currentUserData.nome_militar_completo;
 
@@ -1915,10 +2146,7 @@ async function loadHistoricoDevolucao() {
     }
 }
 
-/**
- * Aba 3: EMITIDAS POR MIM
- * Filtro: emitente == militarCompleto E status == CONCLUÍDA
- */
+//=== Carrega as cautelas concluídas onde o militar logado é o emitente (cautelas emitidas) ===//
 async function loadHistoricoEmitidas() {
     const militarCompleto = currentUserData.nome_militar_completo;
 
@@ -1933,4 +2161,428 @@ async function loadHistoricoEmitidas() {
     } catch (e) {
         document.getElementById('content-emitidas').innerHTML = `<p style="color:red;">Erro ao carregar histórico: ${e.message}</p>`;
     }
+}
+
+//=========================================//
+//--- BLOCO: AUXILIARES E LÓGICA DE UI ---//
+//========================================//
+
+//=== Motor central de buscas: aplica filtros de UID, Unidade e Status de forma unificada ===//
+async function queryCautelas(statusArray, role, user, field = null, type = 'personal') {
+    let query = db.collection('cautelas_abertas');
+
+    // 1. Filtro de Status (Sempre aplicado para simplificar a query)
+    if (statusArray.length > 0) {
+        query = query.where('status', 'in', statusArray);
+    } else {
+        return [];
+    }
+
+    const militarUid = firebase.auth().currentUser.uid;
+    const militarCompleto = user.nome_militar_completo;
+
+    // --- 🔐 BLOCO CORRIGIDO: VISÃO DO GESTOR POR UNIDADE ---
+    if (role === 'gestor' && type === 'unit') {
+        const gestorUnidadeId = user.unidade_id; // Pega o ID da unidade do gestor logado
+        
+        if (!gestorUnidadeId) {
+            console.warn("Gestor sem unidade_id definido.");
+            return [];
+        }
+
+        // Em vez de buscar IDs de listas, filtramos direto pela unidade vinculada à cautela
+        query = query.where('unidade_origem', '==', gestorUnidadeId);
+        
+    } 
+    // --- 👤 VISÃO PESSOAL (OPERACIONAL OU GESTOR VENDO SUAS COISAS) ---
+    else if (type === 'personal') {
+        if (field === 'destinatario') {
+            // Mantém a consulta dupla (SnapOriginal + SnapAtual) para transições
+            const [snapOriginal, snapAtual] = await Promise.all([
+                db.collection('cautelas_abertas')
+                    .where('destinatario_original_uid', '==', militarUid)
+                    .where('status', 'in', statusArray)
+                    .get(),
+                db.collection('cautelas_abertas')
+                    .where('destinatario_uid', '==', militarUid)
+                    .where('status', 'in', statusArray)
+                    .get()
+            ]);
+
+            let mapResult = new Map();
+            snapOriginal.forEach(doc => mapResult.set(doc.id, { id: doc.id, ...doc.data() }));
+            snapAtual.forEach(doc => mapResult.set(doc.id, { id: doc.id, ...doc.data() }));
+
+            return Array.from(mapResult.values()).sort((a, b) =>
+                (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0)
+            );
+
+        } else if (field === 'emitente') {
+            query = query.where('emitente_uid', '==', militarUid);
+        } else if (field === 'militar_completo_reversor') {
+            query = query.where('militar_completo_reversor', '==', militarCompleto);
+        }
+        // ... outros filtros de campo se necessário
+    }
+
+    // Execução da Query Final
+    try {
+        const snapshot = await query.orderBy('timestamp_emissao', 'desc').get();
+        let cautelas = [];
+        snapshot.forEach(doc => {
+            cautelas.push({ id: doc.id, ...doc.data() });
+        });
+        return cautelas;
+    } catch (error) {
+        console.error("Erro na consulta de cautelas:", error);
+        throw error;
+    }
+}
+
+//=== Gera o código HTML das linhas das tabelas (com cores por status) ===//
+function renderCautelaRow(cautela) {
+    const clickAction = `showCautelaDetails('${cautela.cautela_id}')`;
+    const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
+
+    // 🛑 INDICADOR DE PENDÊNCIA NA LINHA
+    const temPendencia = cautela.pendencias_ativas && cautela.pendencias_ativas.length > 0;
+    const alertaCaa = temPendencia ? `<i class="fas fa-exclamation-circle" style="color: #f57c00;" title="Possui itens em análise"></i> ` : "";
+
+    const dataEmissao = cautela.timestamp_emissao && typeof cautela.timestamp_emissao.toDate === 'function'
+        ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR')
+        : 'N/A';
+
+    const status = cautela.status || 'N/A';
+    let badgeClass = 'badge-cautela';
+    let badgeText = 'N/D';
+
+    if (status === 'RECEBIDA') { badgeClass = 'badge-solucao'; badgeText = 'RECEBIDA'; }
+    else if (status === 'ABERTA') { badgeClass = 'badge-cautela'; badgeText = 'ABERTA'; }
+    else if (status === 'DEVOLUÇÃO') { badgeClass = 'badge-pendente'; badgeText = 'EM DEVOLUÇÃO'; }
+    else if (status === 'CONCLUÍDA') { badgeClass = 'badge-concluida'; badgeText = 'CONCLUÍDA'; }
+
+    return `
+        <tr onclick="${clickAction}" style="${temPendencia ? 'background-color: #fff9f0;' : ''}">
+            <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
+            <td data-label="Destinatário">${cautela.destinatario || cautela.destinatario_original_nome || 'Aguardando...'}</td>
+            <td data-label="Emissão">${dataEmissao}</td>
+            <td data-label="Origem">${cautela.local_origem}</td>
+            <td data-label="Itens">${alertaCaa}${itensCount} itens</td>
+            <td data-label="Status"><span class="status-badge ${badgeClass}">${badgeText}</span></td>
+        </tr>
+    `;
+}
+
+//=== Consulta a custódia atual do militar para nova cautela ===//
+async function loadCustodiaLocais() {
+    const selectLocal = document.getElementById('cautela-local-origem');
+    const militarUid = firebase.auth().currentUser.uid;
+
+    if (!selectLocal || !militarUid) {
+        const fallbackNome = currentUserData.nome_militar_completo || 'Usuário Desconhecido';
+        selectLocal.innerHTML = `<option value="" disabled selected>Erro: Usuário (${fallbackNome}) não identificado.</option>`;
+        return;
+    }
+
+    selectLocal.disabled = true;
+    selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
+
+    try {
+        // Busca na coleção 'custodia_atual' as listas onde o militar logado é o conferente
+        const custodyRef = db.collection('custodia_atual');
+        const resultsSnapshot = await custodyRef
+            .where('conferente_uid', '==', militarUid)
+            .get();
+
+        // Usamos um Map para garantir que não haja duplicidade de IDs de lista
+        const locaisMap = new Map();
+
+        resultsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const idRealDaLista = data.lista_id; // "alfa_abt17"
+            const nomeExibicao = data.local_nome; // "ALFA - ABT-17"
+
+            if (idRealDaLista && nomeExibicao) {
+                locaisMap.set(idRealDaLista, nomeExibicao);
+            }
+        });
+
+        let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
+
+        if (locaisMap.size === 0) {
+            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia.</option>';
+        } else {
+            // Converte o Map em Array e ordena pelo Nome legível
+            const listaOrdenada = Array.from(locaisMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+
+            listaOrdenada.forEach(([id, nome]) => {
+                // 🛑 CORREÇÃO: O 'value' agora é o ID (alfa_abt17) e o texto é o Nome (ALFA - ABT-17)
+                optionsHtml += `<option value="${id}">${nome}</option>`;
+            });
+        }
+
+        selectLocal.innerHTML = optionsHtml;
+        selectLocal.disabled = false;
+
+    } catch (error) {
+        console.error("Erro ao carregar locais sob custódia:", error);
+        selectLocal.disabled = false;
+        selectLocal.innerHTML = '<option value="" disabled selected>Erro ao carregar locais.</option>';
+    }
+}
+
+//=== Lê a lista mestra para verificar o que "existe" fisicamente para ser cautelado, com base na custódia do militar logado (conferente) ====//
+async function loadCustodiaItens() {
+    const selectLocal = document.getElementById('cautela-local-origem');
+    const listaId = selectLocal.value;
+
+    const itemListContainer = document.getElementById('itens-custodia-list');
+    const btnIniciar = document.getElementById('btn-iniciar-cautela');
+
+    itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
+    if (btnIniciar) btnIniciar.disabled = true;
+
+    if (!listaId) {
+        itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #999;">Por favor, selecione um Local de Origem.</p>';
+        return;
+    }
+
+    try {
+        const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
+
+        if (!listaDoc.exists) {
+            itemListContainer.innerHTML = `<p style="color:red; text-align:center;">Erro: Documento da lista (${listaId}) não encontrado.</p>`;
+            return;
+        }
+
+        const listaMestra = listaDoc.data().list || [];
+        let htmlContent = '<div class="inventory-accordion-container">';
+        let totalGeralDisponivel = 0;
+        let isFirst = true;
+
+        listaMestra.forEach(setor => {
+            const setorItems = (setor.itens || []);
+
+            // 🛑 CÁLCULO UNIFICADO DE DISPONIBILIDADE (Igual ao App de Conferência)
+            const setorTotal = setorItems.reduce((acc, item) => {
+                if (item.tipo === 'single') {
+                    const esperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
+                    const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                    // ⬇️ NOVA LÓGICA: Abate também pendências de conferência não resolvidas
+                    const pendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+
+                    const saldo = esperado - cautelado - pendente;
+                    return acc + (saldo > 0 ? saldo : 0);
+                } else if (item.tipo === 'multi') {
+                    // ⬇️ NOVA LÓGICA: Só conta se não tiver cautela E não tiver pendências de conferência no tombamento
+                    return acc + (item.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
+                }
+                return acc;
+            }, 0);
+
+            if (setorTotal <= 0) return;
+            totalGeralDisponivel += setorTotal;
+
+            const contentId = `content-${setor.id}`;
+            htmlContent += `
+                <div class="${isFirst ? 'accordion-header active' : 'accordion-header'}" onclick="toggleAccordion(this, '${contentId}')">
+                    <span>${setor.nome} (${setorTotal} disponíveis)</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="accordion-content" id="${contentId}" style="${isFirst ? 'max-height: 1500px;' : ''}">
+                    <div class="items-card-grid">`;
+
+            setorItems.forEach(item => {
+                if (item.tipo === 'single') {
+                    const totalEsperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
+                    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
+                    // ⬇️ Abatimento de pendências para o saldo individual do card
+                    const totalPendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+
+                    const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
+
+                    if (saldoDisponivel > 0) {
+                        htmlContent += `
+                            <div class="item-selection-card" data-item-id="${item.id}">
+                                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
+                                <div class="qtd-control-wrapper">
+                                    <label>
+                                        <input type="checkbox" name="cautela-item-base" 
+                                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
+                                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
+                                    </label>
+                                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
+                                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
+                                </div>
+                                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
+                            </div>`;
+                    }
+                } else if (item.tipo === 'multi' && item.tombamentos?.length > 0) {
+                    // ⬇️ Filtra tombamentos que possuem pendências ativas (carimbos vermelhos)
+                    const tags = (item.tombamentos || []).map(t => {
+                        const isC = !!t.cautela;
+                        const hasP = (t.pendencias_ids && t.pendencias_ids.length > 0);
+                        const bloqueado = isC || hasP;
+                        const motivoBloqueio = isC ? 'Cautelado' : (hasP ? 'Com Pendência' : 'Livre');
+
+                        return `
+                            <div class="tombamento-tag ${bloqueado ? 'cautelado' : ''}" title="${motivoBloqueio}">
+                                <input type="checkbox" name="cautela-item-multi" 
+                                       data-id="${item.id}-${t.tomb}" data-id-base="${item.id}" data-tombamento="${t.tomb}" 
+                                       data-nome="${item.nome}" data-tipo="multi" 
+                                       onchange="updateCautelaItemCount();" ${bloqueado ? 'disabled' : ''}>
+                                ${t.tomb} ${bloqueado ? `<i class="fas fa-lock" style="color: ${hasP ? '#d90f23' : '#800020'};"></i>` : ''}
+                            </div>`;
+                    }).join('');
+
+                    // Só renderiza o card se houver algum tombamento não bloqueado
+                    if (tags.includes('type="checkbox"')) {
+                        htmlContent += `
+                            <div class="item-selection-card">
+                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
+                                <div class="tombamento-tag-list">${tags}</div>
+                            </div>`;
+                    }
+                }
+            });
+            htmlContent += '</div></div>';
+            isFirst = false;
+        });
+
+        if (totalGeralDisponivel === 0) {
+            itemListContainer.innerHTML = '<p style="color:green; padding:20px; text-align:center;">✅ Nenhum material disponível para cautela (itens com pendência ou cautelados).</p>';
+        } else {
+            itemListContainer.innerHTML = htmlContent + '</div>';
+            document.querySelectorAll('.input-qtd-cautela').forEach(el => {
+                el.addEventListener('input', updateCautelaItemCount);
+            });
+            updateCautelaItemCount();
+        }
+
+    } catch (error) {
+        console.error("Erro ao carregar itens:", error);
+        itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar materiais.</p>';
+    }
+}
+
+//=== Gerencia a animação de abrir/fechar dos setores no formulário ===//
+function toggleAccordion(header, contentId) {
+    const content = document.getElementById(contentId);
+
+    // 1. Alterna a classe 'active' no cabeçalho
+    header.classList.toggle('active');
+
+    // 2. Controla o max-height para animação de acordeão
+    if (content.style.maxHeight !== '0px' && content.style.maxHeight !== '') {
+        content.style.maxHeight = '0px';
+    } else {
+        // Define uma altura suficientemente grande para conter o conteúdo
+        content.style.maxHeight = content.scrollHeight + 50 + 'px';
+    }
+}
+
+//=== Monitora a seleção de checkboxes e atualiza o botão de envio ===//
+function updateCautelaItemCount() {
+    let selectedCount = 0;
+    // REINICIALIZA O ARRAY GLOBAL (Garante que a função de envio veja os dados novos)
+    cautelaItensSelecionados = [];
+
+    // 1. Processar itens com Tombamento (tipo 'multi')
+    document.querySelectorAll('input[name="cautela-item-multi"]:checked').forEach(chk => {
+        const idBase = chk.getAttribute('data-id-base');
+        const tombamento = chk.getAttribute('data-tombamento');
+        const nomeCompleto = chk.getAttribute('data-nome') || "";
+
+        // Remove "(Tomb: ...)" do nome se ele já existir, para não salvar duplicado
+        const nomeLimpo = nomeCompleto.replace(/\s\(Tomb:\s[^\)]+\)/i, '').trim();
+
+        if (idBase && tombamento) {
+            cautelaItensSelecionados.push({
+                id: `${idBase}-${tombamento}`,
+                id_base: idBase,
+                nome: nomeLimpo,
+                tombamento: tombamento,
+                quantidade: 1,
+                tipo: 'multi'
+            });
+            selectedCount++;
+        }
+    });
+
+    // 2. Processar itens Únicos (tipo 'single')
+    document.querySelectorAll('input[name="cautela-item-base"]:checked').forEach(chk => {
+        const card = chk.closest('.item-selection-card');
+        if (!card) return;
+
+        const inputQtd = card.querySelector('.input-qtd-cautela');
+        const id = chk.getAttribute('data-id');
+        const nome = chk.getAttribute('data-nome');
+
+        let qtd = 1;
+        if (inputQtd && !inputQtd.disabled) {
+            qtd = parseInt(inputQtd.value) || 0;
+            const max = parseInt(inputQtd.getAttribute('max')) || 0;
+
+            if (qtd > max) {
+                alert(`A quantidade máxima disponível para ${nome} é ${max}.`);
+                inputQtd.value = max;
+                qtd = max;
+            }
+
+            if (qtd < 1) {
+                chk.checked = false;
+                inputQtd.disabled = true;
+                return;
+            }
+        }
+
+        if (id) {
+            cautelaItensSelecionados.push({
+                id: id,
+                id_base: id,
+                nome: nome,
+                quantidade: qtd,
+                tipo: 'single'
+            });
+            selectedCount += qtd;
+        }
+    });
+
+    // 3. Atualizar Interface do Botão
+    const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    if (btnIniciar) {
+        btnIniciar.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Cautela (${selectedCount} itens)`;
+        // O botão só habilita se houver itens no array global
+        btnIniciar.disabled = (selectedCount <= 0);
+    }
+}
+
+//=== Habilita ou desabilita campos numéricos ao marcar um item ===//
+function toggleItemQuantity(checkbox) {
+    // 🛑 CORREÇÃO: Usar .item-selection-card como elemento pai mais próximo 🛑
+    const card = checkbox.closest('.item-selection-card');
+    if (!card) return; // Se o card não for encontrado (segurança)
+
+    const inputQtd = card.querySelector('.input-qtd-cautela');
+
+    if (inputQtd) {
+        inputQtd.disabled = !checkbox.checked;
+
+        // Garante que o valor seja pelo menos 1 quando marcado
+        if (checkbox.checked) {
+            if (parseInt(inputQtd.value) < 1 || isNaN(parseInt(inputQtd.value))) {
+                inputQtd.value = 1;
+            }
+        } else {
+            // Se desmarcado, reseta o valor para o máximo (ou outro valor de reset)
+            inputQtd.value = inputQtd.getAttribute('max');
+        }
+    }
+}
+
+// === Mostra campo de texto apenas para itens marcados no reporte de avarias ===//
+function toggleObsInput(index) {
+    const div = document.getElementById(`div-obs-${index}`);
+    const isChecked = document.querySelector(`.check-item-reporte[data-index="${index}"]`).checked;
+    div.style.display = isChecked ? 'block' : 'none';
 }
