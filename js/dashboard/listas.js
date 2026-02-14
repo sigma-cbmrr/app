@@ -2,7 +2,7 @@
 //--- BLOCO 1: Gestão de Cabeçalhos e Listagem ---//
 //===============================================//
 
-//=== 1. ABRE O FORMULÁRIO PARA CRIAR OU EDITAR O CABEÇALHO DA LISTA (VTR, UNIDADE, POSTO) ===//
+//=== 1.1. ABRE O FORMULÁRIO PARA CRIAR OU EDITAR O CABEÇALHO DA LISTA (VTR, UNIDADE, POSTO) ===//
 async function abrirFormularioLista(dadosEdicao = null) {
     const isEdit = !!dadosEdicao;
 
@@ -95,7 +95,7 @@ async function abrirFormularioLista(dadosEdicao = null) {
     }
 }
 
-//=== 2. GRAVA OS DADOS BÁSICOS DA LISTA NO FIRESTORE E DECIDE SE ABRE O EDITOR DE ITENS ===//
+//=== 1.2. GRAVA OS DADOS BÁSICOS DA LISTA NO FIRESTORE E DECIDE SE ABRE O EDITOR DE ITENS ===//
 async function gravarCabecalhoListaV3(abrirEditor, uidExistente, dados) {
     Swal.fire({ title: 'Salvando...', didOpen: () => Swal.showLoading() });
 
@@ -132,7 +132,7 @@ async function gravarCabecalhoListaV3(abrirEditor, uidExistente, dados) {
     }
 }
 
-//=== 3. BUSCA E RENDERIZA OS CARDS DE TODAS AS LISTAS EXISTENTES PARA O GESTOR ===//
+//=== 1.3. BUSCA E RENDERIZA OS CARDS DE TODAS AS LISTAS EXISTENTES PARA O GESTOR ===//
 async function carregarCardsListasExistentes() {
     const container = document.getElementById('container-cards-listas');
     if (!container) return;
@@ -148,118 +148,429 @@ async function carregarCardsListasExistentes() {
         const minhaUnidadeId = currentUserData?.unidade_id;
         const isAdminGeral = (role === 'admin' || role === 'gestor_geral');
 
-        // 1. Definição da Query Base
         let query = db.collection('listas_conferencia')
-            .where('ativo', '==', true)
             .where('tipo', '==', 'conferencia_materiais');
 
-        // ✅ FILTRO DE UNIDADE: Se não for Admin Geral, filtra obrigatoriamente pela unidade do Gestor
         if (!isAdminGeral) {
-            if (!minhaUnidadeId) {
-                console.warn("⚠️ Unidade do gestor não identificada no perfil.");
-                container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">Erro: Sua unidade não está vinculada ao seu perfil.</div>`;
-                return;
-            }
             query = query.where('unidade_id', '==', minhaUnidadeId);
         }
 
         const snap = await query.get();
 
         if (snap.empty) {
-            const msgVazio = isAdminGeral ? "Nenhuma lista localizada no sistema." : "Nenhuma lista localizada para sua unidade.";
-            container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">${msgVazio}</div>`;
+            container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:50px; color:#94a3b8;">Nenhuma lista localizada.</div>`;
             return;
         }
 
-        let html = '';
+        let htmlAtivas = '';
+        let htmlInativas = '';
+
         snap.forEach(doc => {
             const lista = doc.data();
+            const isAtiva = lista.ativo !== false;
             const qtdItens = (lista.list || []).reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0);
+            const listaJson = JSON.stringify({ uid: doc.id, ...lista }).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 
-            // Prepara o objeto para edição e sanitiza o JSON para o atributo onclick
-            const listaParaEditar = { uid: doc.id, ...lista };
-            const listaJson = JSON.stringify(listaParaEditar).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
-
-            // ✅ RESTRIÇÃO DE EXCLUSÃO: Apenas Admin/Gestor Geral vê o botão de lixeira
-            const btnDelete = isAdminGeral ? `
-                <button class="v3-btn-action" title="Excluir Lista" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')">
-                    <i class="fas fa-trash-alt"></i>
-                </button>` : '';
-
-            html += `
-                <div class="v3-posto-card" style="border-top: 6px solid #2c7399; cursor:pointer;" 
+            // ✅ CORREÇÃO: Iniciando a Div do Card (v3-posto-card)
+            const cardHtml = `
+                <div class="v3-posto-card" 
+                     style="border-top: 6px solid ${isAtiva ? '#2c7399' : '#94a3b8'}; cursor:pointer; position:relative; ${isAtiva ? '' : 'filter: grayscale(1); opacity: 0.6; background: #f8fafc;'}" 
                      onclick="abrirModalEditorItens('${doc.id}', '${lista.ativo_nome}')">
                     
-                    <div class="v3-posto-actions">
-                        <button class="v3-btn-action" title="Editar Informações" onclick="event.stopPropagation(); abrirFormularioLista(JSON.parse('${listaJson}'))">
-                            <i class="fas fa-pencil-alt"></i>
+                    <div class="v3-card-menu-container" style="position: absolute; top: 10px; right: 10px; z-index: 10;">
+                        <button class="v3-menu-btn" onclick="event.stopPropagation(); toggleCardMenu(this)" 
+                                style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 5px; font-size: 1.2em;">
+                            <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        ${btnDelete}
+                        
+                        <div class="v3-card-dropdown" style="display: none; position: absolute; right: 0; top: 35px; background: white; border-radius: 8px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid #f1f5f9; width: 180px; overflow: hidden; text-align: left;">
+                            
+                            <div class="v3-dd-item" onclick="event.stopPropagation(); abrirFormularioLista(JSON.parse('${listaJson}'))" 
+                                 style="padding: 10px 15px; font-size: 0.85em; color: #475569; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                <i class="fas fa-pencil-alt" style="width: 15px;"></i> Editar Informações
+                            </div>
+
+                            ${isAtiva ? `
+                                <div class="v3-dd-item" onclick="event.stopPropagation(); gerenciarInativacaoLista('${doc.id}', '${lista.ativo_nome}')" 
+                                     style="padding: 10px 15px; font-size: 0.85em; color: #f59e0b; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <i class="fas fa-eye-slash" style="width: 15px;"></i> Inativar
+                                </div>
+                            ` : `
+                                <div class="v3-dd-item" onclick="event.stopPropagation(); reativarLista('${doc.id}', '${lista.ativo_nome}')" 
+                                     style="padding: 10px 15px; font-size: 0.85em; color: #1b8a3e; display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                                    <i class="fas fa-eye" style="width: 15px;"></i> Reativar
+                                </div>
+                            `}
+
+                            ${isAdminGeral ? `
+                                <div class="v3-dd-item" onclick="event.stopPropagation(); deletarListaInteira('${doc.id}', '${lista.ativo_nome}')" 
+                                     style="padding: 10px 15px; font-size: 0.85em; color: #ef4444; display: flex; align-items: center; gap: 10px; border-top: 1px solid #f1f5f9; cursor: pointer;">
+                                    <i class="fas fa-trash-alt" style="width: 15px;"></i> Excluir Permanente
+                                </div>
+                            ` : ''}
+                        </div>
                     </div>
                     
                     <div style="padding: 20px; display: flex; flex-direction: column; align-items: center; text-align: center; flex-grow: 1;">
-                        <div class="v3-icon-box" style="background: rgba(44, 115, 153, 0.1); color: #2c7399; width: 60px; height: 60px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.6em; margin-bottom: 15px;">
+                        <div class="v3-icon-box" style="background: ${isAtiva ? 'rgba(44, 115, 153, 0.1)' : '#e2e8f0'}; color: ${isAtiva ? '#2c7399' : '#64748b'}; width: 60px; height: 60px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.6em; margin-bottom: 15px;">
                             <i class="fa-solid fa-clipboard-list"></i>
                         </div>
-
                         <div style="margin-bottom: 10px;">
                             <span style="display:block; font-weight:900; font-size:1.2em; color:#1e293b; letter-spacing:-0.5px;">${lista.ativo_nome}</span>
-                            <span class="v3-vtr-badge v3-status-pronto" style="margin-top: 5px; display: inline-block; background: #e0f2fe; color: #0369a1;">
-                                ${qtdItens} ITENS NO INVENTÁRIO
+                            <span class="v3-vtr-badge" style="margin-top: 5px; display: inline-block; background: ${isAtiva ? '#e0f2fe' : '#f1f5f9'}; color: ${isAtiva ? '#0369a1' : '#64748b'};">
+                                ${isAtiva ? `${qtdItens} ITENS NO INVENTÁRIO` : 'LISTA ARQUIVADA'}
                             </span>
                         </div>
-
                         <div style="width: 100%; border-top: 1px solid #f1f5f9; padding-top: 12px; margin-top: auto; text-align: left;">
-                            <small style="display:block; font-size:0.6em; font-weight:800; color:#94a3b8; text-transform:uppercase; margin-bottom:4px;">Localização & Gestão</small>
                             <div style="display:flex; align-items:center; gap:6px;">
-                                <i class="fas fa-map-marker-alt" style="color:#2c7399; font-size:0.75em;"></i>
-                                <span style="font-size:0.8em; font-weight:700; color:#475569;">${lista.posto_nome || 'N/D'} | ${lista.unidade_sigla || 'N/D'}</span>
+                                <i class="fas fa-map-marker-alt" style="color:#94a3b8; font-size:0.75em;"></i>
+                                <span style="font-size:0.8em; font-weight:700; color:#64748b;">${lista.posto_nome || 'N/D'} | ${lista.unidade_sigla || 'N/D'}</span>
                             </div>
                         </div>
                     </div>
-                </div>`;
+                </div>`; // ✅ FECHAMENTO DA DIV PRINCIPAL
+
+            if (isAtiva) htmlAtivas += cardHtml;
+            else htmlInativas += cardHtml;
         });
 
-        container.innerHTML = html;
+        container.innerHTML = `
+            <div style="grid-column: 1/-1; margin-bottom: 10px;"><h3 style="color:#1e293b; font-size:1em;">LISTAS ATIVAS</h3></div>
+            ${htmlAtivas || '<div style="grid-column:1/-1; color:#94a3b8; padding:20px;">Nenhuma lista ativa.</div>'}
+            
+            <div style="grid-column: 1/-1; margin-top:40px; padding-top:20px; border-top: 2px dashed #e2e8f0;">
+                <h3 style="color:#64748b; font-size:0.9em; text-transform:uppercase;">LISTAS INATIVAS</h3>
+            </div>
+            ${htmlInativas || '<div style="grid-column:1/-1; color:#94a3b8; padding:20px; font-size:0.8em;">Nenhuma lista arquivada.</div>'}
+        `;
+
         if (window.FontAwesome) FontAwesome.dom.i2svg();
 
     } catch (e) {
-        console.error("❌ Erro ao carregar listas da unidade:", e);
-        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao sincronizar inventários.</p>`;
+        console.error(e);
+        container.innerHTML = `<p style="color:red; text-align:center; padding:40px;">Erro ao carregar inventários.</p>`;
     }
 }
 
-//=== 4. FILTRO DINÂMICO DE BUSCA NA TELA DE CARDS ===//
+//=== 1.4. FILTRA OS CARDS DAS LISTAS (ACESAS E APAGADAS) EM TEMPO REAL ===//
 function filtrarCardsListas() {
     const termo = document.getElementById('filter-lista-busca').value.toUpperCase();
-    const cards = document.querySelectorAll('#container-cards-listas .v3-posto-card');
+    const container = document.getElementById('container-cards-listas');
+    if (!container) return;
+
+    // 1. Filtra todos os cards
+    const cards = container.querySelectorAll('.v3-posto-card');
     cards.forEach(card => {
-        card.style.display = card.innerText.toUpperCase().includes(termo) ? "flex" : "none";
+        const textoCard = card.innerText.toUpperCase();
+        card.style.display = textoCard.includes(termo) ? "flex" : "none";
+    });
+
+    // 2. Inteligência Visual: Esconde os títulos (h3) se o grupo ficar vazio no filtro
+    const grupos = container.querySelectorAll('div[style*="grid-column: 1/-1"]');
+    grupos.forEach(grupo => {
+        const titulo = grupo.querySelector('h3');
+        if (titulo) {
+            // Verifica se existe algum card visível após este título até o próximo grupo
+            let proximoElemento = grupo.nextElementSibling;
+            let temCorrespondente = false;
+
+            while (proximoElemento && !proximoElemento.style.gridColumn.includes('1/-1')) {
+                if (proximoElemento.classList.contains('v3-posto-card') && proximoElemento.style.display !== 'none') {
+                    temCorrespondente = true;
+                    break;
+                }
+                proximoElemento = proximoElemento.nextElementSibling;
+            }
+            
+            // Se não houver nenhum card visível no bloco, esconde o título do grupo
+            grupo.style.display = temCorrespondente ? "block" : "none";
+        }
     });
 }
 
-//=== 5. EXCLUI DEFINITIVAMENTE UMA LISTA E SEU INVENTÁRIO DO BANCO ===//
+//=== 1.5. EXCLUI DEFINITIVAMENTE UMA LISTA E SEU INVENTÁRIO DO BANCO ===//
 async function deletarListaInteira(listaUid, nomeAtivo) {
-    if (!confirm(`⚠️ ATENÇÃO: Isso apagará permanentemente o inventário de materiais do ${nomeAtivo}. Confirma?`)) return;
+    const firestore = firebase.firestore();
+    
+    // Mostra um loading rápido enquanto verifica o conteúdo da lista
+    Swal.fire({
+        title: 'Verificando inventário...',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+    });
 
     try {
-        const batch = db.batch();
+        const docSnap = await firestore.collection('listas_conferencia').doc(listaUid).get();
+        
+        if (!docSnap.exists) {
+            Swal.fire('Erro', 'Lista não localizada no banco de dados.', 'error');
+            return;
+        }
 
-        // 1. Remove a lista (Operação principal)
-        batch.delete(db.collection('listas_conferencia').doc(listaUid));
+        const dadosLista = docSnap.data();
+        const arquitetura = dadosLista.list || [];
+        
+        // Calcula o total de itens (somando itens de todos os setores)
+        const totalItens = arquitetura.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0);
+        const temItens = totalItens > 0;
 
-        // 🗑️ REMOVIDO: Bloco que tentava atualizar config_geral/rotas
-        // A limpeza do legado agora é automática, pois não dependemos mais desse índice.
+        // 1. DEFINIÇÃO DINÂMICA DO ALERTA
+        const configAlerta = temItens ? {
+            title: '⚠️ ESTORNO E EXCLUSÃO',
+            html: `Esta lista contém <b>${totalItens} itens</b> alocados.<br><br>Ao confirmar, todos os materiais retornarão automaticamente ao estoque da unidade antes da exclusão.`,
+            icon: 'warning',
+            confirmButtonText: 'Sim, Estornar e Apagar',
+            confirmButtonColor: '#d33'
+        } : {
+            title: 'Excluir Lista?',
+            html: `A lista do <b>${nomeAtivo}</b> está vazia. Deseja removê-la?`,
+            icon: 'question',
+            confirmButtonText: 'Sim, excluir',
+            confirmButtonColor: '#2c7399'
+        };
+
+        const confirmacao = await Swal.fire({
+            ...configAlerta,
+            showCancelButton: true,
+            cancelButtonColor: '#64748b',
+            cancelButtonText: 'Cancelar'
+        });
+
+        if (!confirmacao.isConfirmed) return;
+
+        // Início do processo de gravação
+        Swal.fire({
+            title: temItens ? 'Processando Estorno...' : 'Excluindo...',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        const batch = firestore.batch();
+        const unidadeId = currentUserData.unidade_id;
+
+        // 2. SE TIVER ITENS, PREPARA O ESTORNO
+        if (temItens) {
+            itensParaEstorno = [];
+            arquitetura.forEach(setor => {
+                (setor.itens || []).forEach(item => {
+                    if (item.uid_global === "ITEM_VISTORIA_LIVRE") return;
+                    itensParaEstorno.push({ ...item, setorOrigem: setor.nome });
+                });
+            });
+
+            if (itensParaEstorno.length > 0) {
+                const justificativa = `Exclusão da lista: ${nomeAtivo}`;
+                await processarEstornoLote(batch, unidadeId, justificativa);
+            }
+        }
+
+        // 3. EXCLUSÃO DO DOCUMENTO
+        batch.delete(firestore.collection('listas_conferencia').doc(listaUid));
 
         await batch.commit();
-        alert("Lista removida com sucesso.");
+        itensParaEstorno = []; // Limpa cache
+
+        await Swal.fire({
+            icon: 'success',
+            title: temItens ? 'Estornado e Excluído!' : 'Excluído!',
+            text: temItens ? 'Os materiais voltaram ao almoxarifado com sucesso.' : 'A lista foi removida.',
+            timer: 2000,
+            showConfirmButton: false
+        });
+
         carregarCardsListasExistentes();
 
     } catch (e) {
         console.error("Erro ao deletar lista:", e);
-        alert("Erro ao excluir lista.");
+        Swal.fire('Erro Crítico', e.message, 'error');
     }
 }
+
+//=== 1.6. INATIVA A LISTA (APAGA O CARD) PERGUNTANDO SE DEVE ESTORNAR OS ITENS OU MANTER A CARGA ===//
+async function gerenciarInativacaoLista(listaUid, nomeAtivo) {
+    const firestore = firebase.firestore();
+    
+    // 1. Loading de verificação (Rápido)
+    Swal.fire({
+        title: 'Verificando inventário...',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+    });
+
+    try {
+        const listaRef = firestore.collection('listas_conferencia').doc(listaUid);
+        const docSnap = await listaRef.get();
+        
+        if (!docSnap.exists) {
+            Swal.fire('Erro', 'Lista não localizada.', 'error');
+            return;
+        }
+
+        const dadosLista = docSnap.data();
+        const arquitetura = dadosLista.list || [];
+        const totalItens = arquitetura.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0);
+        const temItens = totalItens > 0;
+
+        // 2. CONFIGURAÇÃO DINÂMICA DO MODAL
+        let configModal;
+
+        if (temItens) {
+            // Caso tenha itens: Alerta Médio/Alto (Laranja/Vermelho)
+            configModal = {
+                title: 'Apagar Card (Inativar)?',
+                html: `A lista <b>${nomeAtivo}</b> contém ${totalItens} itens.<br><br>Escolha o destino dos materiais:`,
+                icon: 'warning',
+                showDenyButton: true,
+                confirmButtonText: 'Manter Carga e Inativar',
+                denyButtonText: 'Estornar e Inativar',
+                confirmButtonColor: '#f59e0b',
+                denyButtonColor: '#d33',
+                width: '550px'
+            };
+        } else {
+            // Caso esteja vazia: Alerta Baixo (Azul/Informativo)
+            configModal = {
+                title: 'Inativar Lista?',
+                html: `A lista <b>${nomeAtivo}</b> está vazia. Ela será movida para o grupo de inativas.`,
+                icon: 'question',
+                showDenyButton: false, // Não precisa de botão de estorno
+                confirmButtonText: 'Confirmar Inativação',
+                confirmButtonColor: '#2c7399'
+            };
+        }
+
+        const { isConfirmed, isDenied } = await Swal.fire({
+            ...configModal,
+            showCancelButton: true,
+            cancelButtonColor: '#64748b',
+            cancelButtonText: 'Voltar'
+        });
+
+        if (!isConfirmed && !isDenied) return;
+
+        // 3. PROCESSAMENTO
+        Swal.fire({
+            title: 'Processando...',
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        const batch = firestore.batch();
+        const realizarEstorno = isDenied; // Só será verdadeiro se clicou no botão vermelho
+
+        if (realizarEstorno && temItens) {
+            itensParaEstorno = [];
+            arquitetura.forEach(setor => {
+                (setor.itens || []).forEach(item => {
+                    if (item.uid_global !== "ITEM_VISTORIA_LIVRE") {
+                        itensParaEstorno.push({ ...item, setorOrigem: setor.nome });
+                    }
+                });
+            });
+
+            if (itensParaEstorno.length > 0) {
+                await processarEstornoLote(batch, currentUserData.unidade_id, `Inativação com Estorno: ${nomeAtivo}`);
+            }
+        }
+
+        // Atualiza para inativo
+        batch.update(listaRef, { 
+            ativo: false,
+            inativado_em: firebase.firestore.FieldValue.serverTimestamp(),
+            inativado_por: currentUserData.nome_militar_completo
+        });
+
+        await batch.commit();
+        itensParaEstorno = []; // Limpa cache
+
+        await Swal.fire({
+            icon: 'success',
+            title: temItens ? 'Inventário Arquivado!' : 'Lista inativada!',
+            text: `A lista ${nomeAtivo} foi movida para o arquivo.`,
+            timer: 2000,
+            showConfirmButton: false
+        });
+
+        carregarCardsListasExistentes();
+
+    } catch (e) {
+        console.error("Erro na inativação:", e);
+        Swal.fire('Erro', 'Falha ao processar: ' + e.message, 'error');
+    }
+}
+
+//=== 1.7. REATIVA A LISTA (ACENDE O CARD) TRAZENDO-A DE VOLTA PARA O GRID DE OPERAÇÃO ===//
+async function reativarLista(listaUid, nomeAtivo) {
+    const confirm = await Swal.fire({
+        title: 'Reativar Lista?',
+        text: `A lista do ${nomeAtivo} voltará para o grid principal de operação.`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#1b8a3e',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Sim, Reativar',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (!confirm.isConfirmed) return;
+
+    // Loading rápido para feedback
+    Swal.fire({ title: 'Reativando...', didOpen: () => Swal.showLoading() });
+
+    try {
+        const firestore = firebase.firestore();
+        
+        await firestore.collection('listas_conferencia').doc(listaUid).update({ 
+            ativo: true,
+            reativado_em: firebase.firestore.FieldValue.serverTimestamp(),
+            reativado_por: currentUserData.nome_militar_completo
+        });
+
+        await Swal.fire({
+            icon: 'success',
+            title: 'Lista Ativa!',
+            text: `O card do ${nomeAtivo} foi aceso com sucesso.`,
+            timer: 2000,
+            showConfirmButton: false
+        });
+
+        // Recarrega o grid para a lista "subir" para o grupo principal
+        carregarCardsListasExistentes();
+
+    } catch (e) {
+        console.error("Erro ao reativar lista:", e);
+        Swal.fire('Erro', 'Não foi possível reativar: ' + e.message, 'error');
+    }
+}
+
+//=== 1.8. CONTROLE DO MENU DROPDOWN DO CARD ===//
+function toggleCardMenu(btn) {
+    // 1. Localiza o menu específico deste botão
+    const menu = btn.nextElementSibling;
+
+    // 2. Fecha todos os outros menus abertos (menos o atual)
+    document.querySelectorAll('.v3-card-dropdown').forEach(dd => {
+        if (dd !== menu) dd.style.display = 'none';
+    });
+
+    // 3. Alterna o estado do menu atual
+    const isVisible = menu.style.display === 'block';
+    menu.style.display = isVisible ? 'none' : 'block';
+
+    // 4. Bloqueia o clique de se propagar para o card pai (IMPORTANTE)
+    // Se o evento não for interrompido, o card vai disparar o 'onclick' dele.
+    if (window.event) window.event.stopPropagation();
+}
+
+//=== 1.8.1. AUXILIAR: Fecha o menu se clicar em qualquer lugar da tela ===//
+document.addEventListener('click', function(event) {
+    const isClickInsideMenu = event.target.closest('.v3-card-menu-container');
+    
+    if (!isClickInsideMenu) {
+        document.querySelectorAll('.v3-card-dropdown').forEach(dd => {
+            dd.style.display = 'none';
+        });
+    }
+});
 
 //==================================================================//
 //--- BLOCO 2: Motor do Editor de Arquitetura (Setores e Itens) ---//
