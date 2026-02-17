@@ -1,15 +1,12 @@
 /* --- Carrega os dados remotos do Firestore conforme parâmetros da URL ---*/
 async function carregarDadosRemotos() {
-    // 1. CAPTURA IMEDIATA E HIGIENIZAÇÃO DE PARÂMETROS
     const urlParamsLocal = new URLSearchParams(window.location.search);
     const idUrl = urlParamsLocal.get('id');
     const cautelaIdUrl = urlParamsLocal.get('cautelaId');
     const modoUrl = urlParamsLocal.get('modo');
     const transferenciaIdUrl = urlParamsLocal.get('transferenciaId');
 
-    // 2. DEFINIÇÃO DO MODO E ID ALVO
     let ID_ALVO = transferenciaIdUrl || cautelaIdUrl || idUrl;
-
     if (modoUrl === 'checklist_vtr' && ID_ALVO && !ID_ALVO.startsWith('CHECKLIST_VTR_')) {
         ID_ALVO = 'CHECKLIST_VTR_' + ID_ALVO;
     }
@@ -25,9 +22,6 @@ async function carregarDadosRemotos() {
     try {
         let docData = null;
         let colecaoEncontrada = "";
-
-        // --- 3. MOTOR DE BUSCA AUTÔNOMO (DNA V3) ---
-        // Resolve o erro de 'modo null' procurando o ID em todas as gavetas possíveis
         const colecoesParaTestar = ['listas_checklist', 'listas_conferencia', 'cautelas_abertas', 'transferencias_pendentes'];
 
         for (const colecao of colecoesParaTestar) {
@@ -41,7 +35,6 @@ async function carregarDadosRemotos() {
 
         if (!docData) throw new Error(`Documento ${ID_ALVO} não localizado no banco.`);
 
-        // --- 4. IDENTIFICAÇÃO AUTOMÁTICA DE MODO ---
         window.isModoChecklist = (colecaoEncontrada === 'listas_checklist' || docData.tipo === 'checklist_viatura');
         const isRecebimentoCarga = (colecaoEncontrada === 'transferencias_pendentes');
         const isCautelaLocal = (colecaoEncontrada === 'cautelas_abertas');
@@ -49,28 +42,36 @@ async function carregarDadosRemotos() {
 
         if (isRecebimentoCarga) window.dadosTransferencia = docData;
 
-        // --- 5. IDENTIDADE DO CONFERENTE (BACK-END) ---
         userInfo.postoGraduacao = urlParamsLocal.get('posto_grad') || "ND";
         userInfo.quadro = urlParamsLocal.get('quadro') || "ND";
         userInfo.nomeGuerra = urlParamsLocal.get('nome_guerra') || "ND";
         userInfo.uid = urlParamsLocal.get('user_uid') || "ND";
 
-        // --- 6. BUSCA REVERSA: HERANÇA DE PENDÊNCIAS (CRÍTICO) ---
+        // --- 6. BUSCA REVERSA: HERANÇA DE PENDÊNCIAS (DNA V3 ATUALIZADO) ---
         let pendenciasHerdadas = {};
         if (!isCautelaLocal && !isRecebimentoCarga) {
             const colecaoResultados = window.isModoChecklist ? 'resultados_checklist' : 'resultados_conferencias';
             const ultimaConfQuery = await db.collection(colecaoResultados)
                 .where('lista_id', '==', ID_ALVO)
                 .orderBy('timestamp', 'desc')
-                .limit(1)
-                .get();
+                .limit(1).get();
 
             if (!ultimaConfQuery.empty) {
                 const ultimoResultado = ultimaConfQuery.docs[0].data();
                 (ultimoResultado.itensRelatorio || []).forEach(itemRel => {
-                    const idBusca = itemRel.id || itemRel.uid_global;
-                    if (itemRel.status === 'C/A' && itemRel.pendencias_ids && idBusca) {
-                        pendenciasHerdadas[idBusca] = itemRel.pendencias_ids;
+                    // ✅ CAPTURA PAI
+                    if (itemRel.status === 'C/A' && itemRel.pendencias_ids) {
+                        pendenciasHerdadas[itemRel.id] = itemRel.pendencias_ids;
+                    }
+                    // ✅ CAPTURA FILHOS (Kits)
+                    if (itemRel.acessorios_vinculados) {
+                        itemRel.acessorios_vinculados.forEach((ac, idx) => {
+                            if (ac.status === 'C/A' && ac.pendencias_ids) {
+                                // O ID do filho na memória status é sempre PAI_ac_IDX
+                                const idFilhoStatus = `${itemRel.id}_ac_${idx}`;
+                                pendenciasHerdadas[idFilhoStatus] = ac.pendencias_ids;
+                            }
+                        });
                     }
                 });
             }
@@ -84,10 +85,35 @@ async function carregarDadosRemotos() {
             dadosConferencia = listaBruta.map(setor => ({
                 ...setor,
                 itens: (setor.itens || []).map(item => {
-                    if (!item.id) item.id = item.uid_global;
-                    item.pendencias_ids = pendenciasHerdadas[item.id] || [];
+                    const uidMestre = item.uid_instancia || item.uid_global || item.id;
+                    item.id = uidMestre;
+
+                    // Injeta pendência no Pai
+                    item.pendencias_ids = pendenciasHerdadas[uidMestre] || [];
                     item.quantidadeEsperada = Number(item.quantidadeEsperada || item.quantidade || 0);
                     item._ocultarCarimbo = isDevolucaoFinal;
+
+                    // ✅ ALIMENTAÇÃO DA RAM (window.itemStatus) PARA ACENDER OS CARDS
+                    if (item.pendencias_ids.length > 0) {
+                        window.itemStatus[uidMestre] = { status: 'C/A', interacao_humana: false };
+                    }
+
+                    // ✅ MAPEAMENTO PROFUNDO DE ACESSÓRIOS (FILHOS)
+                    const acessorios = item.acessorios_vinculados || item.acessorios_acoplados || [];
+                    acessorios.forEach((ac, idx) => {
+                        const idFilho = `${uidMestre}_ac_${idx}`;
+                        const pndsFilho = pendenciasHerdadas[idFilho] || [];
+                        if (pndsFilho.length > 0) {
+                            // Se o filho tem problema, garante que ele e o pai acendam na tela
+                            window.itemStatus[idFilho] = {
+                                status: 'C/A',
+                                pendencias_temporarias: pndsFilho, // Injetamos como temporária para re-exibir o carimbo
+                                interacao_humana: false
+                            };
+                            window.itemStatus[uidMestre] = { status: 'C/A', interacao_humana: false };
+                        }
+                    });
+
                     return item;
                 })
             }));
@@ -95,16 +121,13 @@ async function carregarDadosRemotos() {
 
         window.dadosConferencia = dadosConferencia;
 
-        // --- 8. CONFIGURAÇÃO DO HUD PROFISSIONAL (FOCO NO ATIVO) ---
+        // --- 8. CONFIGURAÇÃO DO HUD ---
         const localNome = isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (docData.ativo_nome || docData.nome_local || "Lista");
         const postoNome = isCautelaLocal ? "" : (docData.posto_nome || docData.unidade_sigla || "Geral");
-
-        // Alimenta a global para a updateHeaderInfo formatar com Data/Hora
         infoLocal = { nome: localNome, posto: postoNome };
-
         if (typeof updateHeaderInfo === "function") updateHeaderInfo();
 
-        // --- 9. CONFIGURAÇÃO VISUAL DO TÍTULO E BOTÃO FINALIZAR ---
+        // --- 9. CONFIGURAÇÃO VISUAL ---
         const tituloPrincipal = document.getElementById('titulo-conferencia');
         if (tituloPrincipal) {
             if (window.isModoChecklist) {
@@ -124,7 +147,6 @@ async function carregarDadosRemotos() {
             btnFinalizar.disabled = false;
             const corBotao = window.isModoChecklist ? "#2c3e50" : (isRecebimentoCarga ? "#000000" : "#800020");
             btnFinalizar.style.backgroundColor = corBotao;
-
             if (isDevolucaoFinal) {
                 btnFinalizar.innerText = "FINALIZAR DEVOLUÇÃO";
                 btnFinalizar.onclick = () => finalizarRecebimentoDevolucao(docData);
@@ -143,13 +165,9 @@ async function carregarDadosRemotos() {
         // --- 10. ATIVAÇÃO DA INTERFACE V3 ---
         renderizarConferencia();
         if (typeof updateOverallStatus === "function") updateOverallStatus();
-
         if (loadingMsg) loadingMsg.style.display = 'none';
-
         const mainViewport = document.getElementById('main-viewport');
-        if (mainViewport) {
-            mainViewport.style.display = 'flex';
-        }
+        if (mainViewport) mainViewport.style.display = 'flex';
 
     } catch (e) {
         console.error("V3 Critical Error:", e);
@@ -196,7 +214,7 @@ function adaptarCautelaParaRender(cautelaData) {
     return [setorCautela];
 }
 
-/* --- FINALIZAÇÃO DA CONFERÊNCIA (DNA V3) --- */
+/* --- FINALIZAÇÃO DA CONFERÊNCIA (DNA V3 - COMPLETA E ATUALIZADA) --- */
 async function finalizarConferencia() {
     const btn = document.getElementById('btn-finalizar');
     if (btn.disabled && btn.textContent.includes("SALVANDO")) return;
@@ -218,7 +236,7 @@ async function finalizarConferencia() {
     btn.style.opacity = "0.7";
 
     try {
-        // ✅ AJUSTE CIRÚRGICO: Assinatura extraída da global userInfo (independente do HUD)
+        // ✅ ASSINATURA: Extraída da global userInfo
         const p = {
             uid: userInfo?.uid || "S_UID",
             postoGraduacao: userInfo?.postoGraduacao || "ND",
@@ -227,7 +245,6 @@ async function finalizarConferencia() {
         };
 
         const conferenteCompleto = `${p.postoGraduacao} ${p.quadro} ${p.nomeGuerra}`;
-
         const localNome = isChecklist ? `VISTORIA: ${infoLocal.nome}` : `${infoLocal.posto} - ${infoLocal.nome}`;
         const timestampAgora = firebase.firestore.Timestamp.now();
         const dataAtualLog = new Date().toLocaleString('pt-BR');
@@ -238,7 +255,6 @@ async function finalizarConferencia() {
         const kmEntrada = urlParams.get('km') || "0";
         const combustivelEntrada = urlParams.get('combustivel') || "N/D";
 
-        // Em vistorias, as observações podem vir de um campo específico se houver
         const obsGeraisEl = document.getElementById('obs-geral-vistoria');
         const obsGeraisTexto = obsGeraisEl ? obsGeraisEl.value.trim() : "";
 
@@ -247,39 +263,52 @@ async function finalizarConferencia() {
         let totalCaa = 0;
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
-        // --- PROCESSAMENTO DA ÁRVORE DE DADOS (Mantendo suas regras de saldo/histórico) ---
+        // --- 1. PROCESSAMENTO DA ÁRVORE DE DADOS (DNA V3 - CORREÇÃO DE HIERARQUIA E MANUTENÇÃO) ---
         const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
                 itens: setor.itens.map(item => {
-                    const processarEntidade = (entidade, uid, nomeParaRelatorio) => {
-                        const statusLocal = window.itemStatus[uid];
+
+                    const processarEntidade = (entidade, uid, nomeParaRelatorio, uidPai = null) => {
+                        // ✅ AJUSTE V3: Localiza status na memória usando o Anfitrião (Pai) ou o próprio UID
+                        const idAnfitriao = uidPai || uid;
+                        const statusLocal = window.itemStatus[idAnfitriao];
+
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
+                        // 1.1 Atualização de situação se resolvido
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
-                        // Se não houve interação, assume o estado atual (visto como OK se não houver pendência)
-                        if (!statusLocal || statusLocal.status === 'pending') {
+                        // ✅ 1.2 CAPTURA DE PENDÊNCIAS MANTIDAS
+                        if (statusLocal?.pendencias_originais_mantidas) {
+                            statusLocal.pendencias_originais_mantidas.forEach(pMantida => {
+                                const jaExiste = entidade.pendencias_ids.some(p => String(p.id) === String(pMantida.id));
+                                if (!jaExiste) entidade.pendencias_ids.push(pMantida);
+                            });
+                        }
+
+                        if (!statusLocal || (statusLocal.status === 'pending' && (!statusLocal.pendencias_originais_mantidas || statusLocal.pendencias_originais_mantidas.length === 0))) {
                             const qtdFix = entidade.quantidadeEsperada || entidade.quantidade || 1;
-                            itensRelatorio.push({
+                            const dRelBasico = {
                                 id: String(uid || entidade.uid_global || ""),
-                                uid_global: String(item.uid_global || ""),
+                                uid_global: String(entidade.uid_global || item.uid_global || ""),
                                 nomeCompleto: String(nomeParaRelatorio || ""),
-                                status: 'S/A',
+                                status: (entidade.pendencias_ids.length > 0) ? 'C/A' : 'S/A',
                                 situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                                 quantidade: qtdFix,
                                 setor: String(setor.nome || ""),
-                                obs: ""
-                            });
-                            return entidade;
+                                pendencias_ids: entidade.pendencias_ids.filter(p => p.status_gestao !== 'RESOLVIDO'),
+                                obs: entidade.pendencias_ids.filter(p => p.status_gestao !== 'RESOLVIDO').map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
+                            };
+                            return { entidade, dRel: dRelBasico };
                         }
 
-                        // Lógica de Resolução de Pendências
+                        // 1.4 Lógica de Resolução
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(pnd => String(pnd.id) === String(res.id));
@@ -306,10 +335,23 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // Conversão de TEMP para PEND (DNA Permanente)
-                        entidade.pendencias_ids = entidade.pendencias_ids.map(p => {
-                            if (p.id && String(p.id).startsWith('TEMP-')) {
-                                const novoId = p.id.replace('TEMP-', 'PEND-');
+                        // ✅ 1.5 CONVERSÃO DE TEMP PARA PEND (DNA V3 - BUSCA NO PAI)
+                        const statusAnfitriao = window.itemStatus[idAnfitriao] || {};
+                        const novosRelatosDestaEntidade = (statusAnfitriao.pendencias_temporarias || [])
+                            .filter(p => String(p.uid_alvo_direto) === String(uid));
+
+                        const todosNovosRelatos = novosRelatosDestaEntidade.concat(
+                            entidade.pendencias_ids.filter(p => String(p.id).startsWith('TEMP-') && String(p.uid_alvo_direto) === String(uid))
+                        );
+
+                        const relatosUnicos = Array.from(new Set(todosNovosRelatos.map(a => a.id)))
+                            .map(id => todosNovosRelatos.find(a => a.id === id));
+
+                        entidade.pendencias_ids = entidade.pendencias_ids.filter(p => !String(p.id).startsWith('TEMP-'));
+
+                        relatosUnicos.forEach(p => {
+                            const novoId = p.id.replace('TEMP-', 'PEND-');
+                            if (!entidade.pendencias_ids.some(x => x.id === novoId)) {
                                 entidade.historico_vida.push({
                                     evento: isChecklist ? "ALTERACAO_VISTORIA" : "NOVA_PENDENCIA",
                                     id_pendencia: novoId,
@@ -317,14 +359,11 @@ async function finalizarConferencia() {
                                     data: dataAtualLog,
                                     detalhes: `${p.quantidade}un - ${p.descricao || ""}`
                                 });
-                                return { ...p, id: novoId };
+                                entidade.pendencias_ids.push({ ...p, id: novoId });
                             }
-                            return p;
                         });
 
-                        // Consolida alertas para o Relatório Final
                         let pendenciasParaRelatorio = [...entidade.pendencias_ids];
-
                         if (entidade.cautelas && Array.isArray(entidade.cautelas)) {
                             entidade.cautelas.forEach(c => {
                                 pendenciasParaRelatorio.push({
@@ -337,41 +376,71 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        const temAlteracao = pendenciasParaRelatorio.length > 0 || entidade.situacao === 'AVARIADO' || statusLocal.status === 'C/A';
-                        const statusFinal = temAlteracao ? 'C/A' : 'S/A';
+                        const pendenciasAtivas = pendenciasParaRelatorio.filter(p => {
+                            const isResolvida = p.status_gestao === 'RESOLVIDO';
+                            const ehParaEsteAlvo = !p.uid_alvo_direto || String(p.uid_alvo_direto) === String(uid);
+                            return !isResolvida && ehParaEsteAlvo;
+                        });
+
+                        const temAlteracaoAtiva = pendenciasAtivas.length > 0 || entidade.situacao === 'AVARIADO';
+                        const statusFinal = temAlteracaoAtiva ? 'C/A' : 'S/A';
                         const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
 
                         const dRel = {
                             id: String(uid || entidade.uid_global || ""),
-                            uid_global: String(item.uid_global || ""),
+                            uid_global: String(entidade.uid_global || item.uid_global || ""),
                             nomeCompleto: String(nomeParaRelatorio || ""),
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
-                            pendencias_ids: pendenciasParaRelatorio,
+                            pendencias_ids: pendenciasAtivas,
                             quantidade: quantidadeReal,
                             setor: String(setor.nome || ""),
-                            obs: pendenciasParaRelatorio.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
+                            obs: pendenciasAtivas.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
 
-                        itensRelatorio.push(dRel);
-                        if (temAlteracao) { itensCaa.push(dRel); totalCaa++; }
-                        return entidade;
+                        return { entidade, dRel };
                     };
 
+                    const acessoriosRaiz = item.acessorios_vinculados || item.acessorios_acoplados || [];
+
                     if (item.tipo === 'multi' && item.tombamentos) {
-                        item.tombamentos = item.tombamentos.map(t => processarEntidade(t, `${item.id}-${t.tomb}`, `${item.nome} (${t.tomb})`));
+                        item.tombamentos = item.tombamentos.map(t => {
+                            const uidInstancia = item.uid_instancia || `${item.uid_global || item.id}-${t.tomb}`;
+                            const res = processarEntidade(t, uidInstancia, `${item.nome} (${t.tomb})`);
+
+                            // ✅ CORREÇÃO: Passando uidInstancia como o 4º parâmetro (uidPai)
+                            res.dRel.acessorios_vinculados = acessoriosRaiz.map((ac, idx) => {
+                                const uidFilho = `${uidInstancia}_ac_${idx}`;
+                                return processarEntidade(ac, uidFilho, ac.nome, uidInstancia).dRel;
+                            });
+
+                            itensRelatorio.push(res.dRel);
+                            if (res.dRel.status === 'C/A') itensCaa.push(res.dRel);
+                            return res.entidade;
+                        });
                     } else {
-                        item = processarEntidade(item, item.id, item.nome);
+                        const uidMestre = item.uid_instancia || item.uid_global || item.id;
+                        const res = processarEntidade(item, uidMestre, item.nome);
+
+                        // ✅ CORREÇÃO: Passando uidMestre como o 4º parâmetro (uidPai)
+                        res.dRel.acessorios_vinculados = acessoriosRaiz.map((ac, idx) => {
+                            const uidFilho = `${uidMestre}_ac_${idx}`;
+                            return processarEntidade(ac, uidFilho, ac.nome, uidMestre).dRel;
+                        });
+
+                        itensRelatorio.push(res.dRel);
+                        if (res.dRel.status === 'C/A') itensCaa.push(res.dRel);
+                        item = res.entidade;
                     }
                     return item;
                 })
             };
         });
 
-        // ✅ INICIO DO BATCH (OPERAÇÃO ATÔMICA NO FIREBASE)
+        // --- 2. GRAVAÇÃO EM BATCH (FIREBASE) ---
         const batch = db.batch();
+        totalCaa = itensCaa.length;
 
-        // Limpeza de campos temporários para salvar na lista mestra
         const listaLimpaParaArquitetura = novaListaMestra.map(setor => ({
             ...setor,
             itens: setor.itens.map(item => {
@@ -414,79 +483,127 @@ async function finalizarConferencia() {
             obs_gerais_vistoria: String(obsGeraisTexto || "")
         });
 
-        // ✅ ATUALIZAÇÃO DE INVENTÁRIO (Saldos e Históricos)
-        for (const itemAlterado of itensCaa) {
-            const uidGlobal = itemAlterado.uid_global;
-            if (!uidGlobal) continue;
+        // --- 3. ATUALIZAÇÃO DE INVENTÁRIO GLOBAL (DNA V3 - TRADUÇÃO DE INSTÂNCIA PARA GLOBAL) ---
+        let pendenciasParaInventario = [];
+        itensRelatorio.forEach(ir => {
+            // Coleta pendências do Pai
+            if (ir.pendencias_ids) {
+                pendenciasParaInventario.push(...ir.pendencias_ids.filter(p => String(p.id).startsWith('PEND-')));
+            }
+            // Coleta pendências dos Filhos
+            if (ir.acessorios_vinculados) {
+                ir.acessorios_vinculados.forEach(ac => {
+                    if (ac.pendencias_ids) {
+                        pendenciasParaInventario.push(...ac.pendencias_ids.filter(p => String(p.id).startsWith('PEND-')));
+                    }
+                });
+            }
+        });
 
-            const itemRef = db.collection('inventario').doc(uidGlobal);
-            const ehMulti = itemAlterado.id.includes('-') && itemAlterado.id !== uidGlobal;
+        for (const pend of pendenciasParaInventario) {
+            let uidAlvoRaw = pend.uid_alvo_direto;
+            if (!uidAlvoRaw) continue;
 
-            if (ehMulti) {
-                const partesId = itemAlterado.id.split('-');
-                const tombamentoAlvo = partesId[partesId.length - 1];
-                const tombRef = itemRef.collection('tombamentos').doc(tombamentoAlvo);
+            // ✅ TRADUÇÃO DE DNA: Se o ID contém "_ac_", precisamos achar o UID Global real do componente
+            let uidGlobalFinal = uidAlvoRaw;
 
-                const novosLogs = (itemAlterado.pendencias_ids || [])
-                    .filter(pend => pend.id && String(pend.id).startsWith('PEND-'))
-                    .map(pend => ({
-                        data: dataAtualLog,
-                        evento: isChecklist ? "ALERTA_VISTORIA" : "ALERTA_CONFERENCIA",
-                        quem: conferenteCompleto,
-                        detalhes: `⚠️ Alteração em ${localNome}: ${pend.descricao}`,
-                        uid_pendencia: pend.id,
-                        lista_origem_id: LISTA_ID
-                    }));
+            if (uidAlvoRaw.includes('_ac_')) {
+                const [idPai, resto] = uidAlvoRaw.split('_ac_');
+                const indexAcessorio = parseInt(resto);
 
-                novosLogs.forEach((log, idx) => {
-                    batch.set(tombRef.collection('historico_vida').doc("EVT-P-" + Date.now() + idx), log);
+                // Busca na fonte de dados o material real que ocupa essa posição
+                let materialReal = null;
+                fonteDeDados.forEach(setor => {
+                    setor.itens.forEach(it => {
+                        const idMestre = String(it.uid_instancia || it.uid_global || it.id);
+                        // Se o Pai for um tombamento (ex: 517)
+                        if (it.tombamentos) {
+                            it.tombamentos.forEach(t => {
+                                const idTomb = `${it.uid_global || it.id}-${t.tomb}`;
+                                if (idTomb === idPai) materialReal = (t.acessorios_vinculados || it.acessorios_vinculados)[indexAcessorio];
+                            });
+                        }
+                        // Se o Pai for um item simples
+                        if (idMestre === idPai) {
+                            materialReal = (it.acessorios_vinculados || it.acessorios_acoplados)[indexAcessorio];
+                        }
+                    });
+                });
+
+                if (materialReal) {
+                    uidGlobalFinal = materialReal.uid_global || materialReal.id;
+                }
+            }
+
+            // ✅ LÓGICA DE DESPACHO FIREBASE (USANDO O UID GLOBAL TRADUZIDO)
+            const partes = uidGlobalFinal.split('-');
+            const ehPatrimonio = partes.length > 4;
+            const docIdInventario = ehPatrimonio ? partes.slice(0, -1).join('-') : uidGlobalFinal;
+            const itemRef = db.collection('inventario').doc(docIdInventario);
+
+            if (ehPatrimonio) {
+                const tombamentoID = partes[partes.length - 1];
+                const tombRef = itemRef.collection('tombamentos').doc(tombamentoID);
+
+                batch.set(tombRef.collection('historico_vida').doc("EVT-P-" + Date.now()), {
+                    data: dataAtualLog,
+                    evento: "ALERTA_VIA_ANFITRIAO",
+                    quem: conferenteCompleto,
+                    detalhes: `⚠️ Relatado em campo: ${pend.descricao}`,
+                    uid_pendencia: pend.id,
+                    lista_origem_id: LISTA_ID
                 });
                 batch.update(tombRef, { situacao_atual: "PENDENTE" });
             } else {
                 const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
-                const novasPendencias = (itemAlterado.pendencias_ids || []).filter(pend => pend.id && String(pend.id).startsWith('PEND-'));
+                const updateData = isChecklist ?
+                    { qtd_pend: firebase.firestore.FieldValue.increment(pend.quantidade), last_update: dataAtualLog } :
+                    {
+                        qtd_disp: firebase.firestore.FieldValue.increment(-pend.quantidade),
+                        qtd_pend: firebase.firestore.FieldValue.increment(pend.quantidade),
+                        last_update: dataAtualLog
+                    };
 
-                if (novasPendencias.length > 0) {
-                    const qtdPendenteTotal = novasPendencias.reduce((sum, pend) => sum + (Number(pend.quantidade) || 0), 0);
-
-                    // Blindagem de Saldo Físico: Se não for checklist, move de DISP para PEND
-                    if (!isChecklist) {
-                        batch.update(saldoRef, {
-                            qtd_disp: firebase.firestore.FieldValue.increment(-qtdPendenteTotal),
-                            qtd_pend: firebase.firestore.FieldValue.increment(qtdPendenteTotal),
-                            last_update: dataAtualLog
-                        });
-                    } else {
-                        batch.update(saldoRef, {
-                            qtd_pend: firebase.firestore.FieldValue.increment(qtdPendenteTotal),
-                            last_update: dataAtualLog
-                        });
-                    }
-
-                    novasPendencias.forEach((pend, idx) => {
-                        batch.set(saldoRef.collection('historico_vida').doc("EVT-S-P-" + Date.now() + idx), {
-                            data: dataAtualLog,
-                            evento: "PENDENCIA_RELATADA",
-                            quem: conferenteCompleto,
-                            detalhes: `⚠️ Alteração em ${localNome}: ${pend.descricao}`,
-                            quantidade: pend.quantidade,
-                            uid_pendencia: pend.id,
-                            lista_origem_id: LISTA_ID,
-                            local_sigla: infoLocal.nome || "N/D"
-                        });
-                    });
-                }
+                batch.update(saldoRef, updateData);
+                batch.set(saldoRef.collection('historico_vida').doc("EVT-S-P-" + Date.now()), {
+                    data: dataAtualLog,
+                    evento: "PENDENCIA_RELATADA",
+                    quem: conferenteCompleto,
+                    detalhes: `⚠️ Relatado em campo: ${pend.descricao}`,
+                    quantidade: pend.quantidade,
+                    uid_pendencia: pend.id,
+                    lista_origem_id: LISTA_ID,
+                    local_sigla: infoLocal.nome || "N/D"
+                });
             }
         }
 
         await batch.commit();
 
-        alert(isChecklist ? "✅ Vistoria Finalizada com Sucesso!" : "✅ Conferência Finalizada com Sucesso!");
-        window.top.location.href = "sigma_dashboard.html";
+        // ✅ MODAL ELEGANTE DE FINALIZAÇÃO
+        Swal.fire({
+            title: '<span style="color:#1b8a3e; font-weight:900;">CONFERÊNCIA SALVA!</span>',
+            html: `
+                <div style="text-align:center; font-family:'Inter', sans-serif;">
+                    <i class="fas fa-check-circle" style="font-size:4em; color:#1b8a3e; margin-bottom:15px;"></i>
+                    <p style="color:#475569; font-size:0.95em;">Os dados foram sincronizados com sucesso e o inventário atualizado.</p>
+                    <div style="background:#f1f5f9; padding:15px; border-radius:12px; margin-top:10px;">
+                        <small style="display:block; color:#64748b; text-transform:uppercase; font-weight:800; font-size:0.7em;">Resumo do Despacho</small>
+                        <b style="font-size:1.1em; color:#1e293b;">${totalCaa} itens com alteração</b>
+                    </div>
+                </div>
+            `,
+            confirmButtonText: '<i class="fas fa-chart-line"></i> IR PARA DASHBOARD',
+            confirmButtonColor: '#1b8a3e',
+            allowOutsideClick: false,
+            customClass: { popup: 'v3-popup-radius' }
+        }).then(() => {
+            window.top.location.href = "sigma_dashboard.html";
+        });
 
     } catch (e) {
         console.error("V3 Critical Error:", e);
-        alert("❌ Erro fatal ao gravar dados: " + e.message);
+        Swal.fire("Erro de Gravação", "Não foi possível sincronizar os dados: " + e.message, "error");
         btn.disabled = false;
         btn.innerHTML = isChecklist ? "FINALIZAR VISTORIA" : "FINALIZAR CONFERÊNCIA";
     }
@@ -888,48 +1005,37 @@ async function finalizarRecebimentoDevolucao(cautela) {
 }
 
 function verificarFluxoSetor(uidAtual) {
-    // ✅ TRAVA DE SEGURANÇA V3: Se o usuário está com um modal aberto (Gerenciar, Editar, etc)
-    // a navegação automática é abortada para não causar a troca de tela fantasma.
+    // ✅ NORMALIZAÇÃO: Garante que estamos olhando para o card físico
+    const uidCardNoDom = uidAtual.includes('_ac_') ? uidAtual.split('_ac_')[0] : uidAtual;
+    const rowAtual = document.getElementById(`item-row-${uidCardNoDom}`);
+
+    // Se o modal ainda estiver fechando, damos um tempo extra em vez de abortar
     if (Swal.isVisible()) {
-        console.log("🚦 Fluxo suspenso: Usuário interagindo com Modal.");
+        setTimeout(() => verificarFluxoSetor(uidAtual), 200);
         return;
     }
 
-    const rowAtual = document.getElementById(`item-row-${uidAtual}`);
-    const nextRow = rowAtual ? rowAtual.nextElementSibling : null;
+    const rows = Array.from(document.querySelectorAll('.v3-item-row'));
+    const index = rows.findIndex(r => r.id === `item-row-${uidCardNoDom}`);
+    const nextRow = rows[index + 1];
 
-    if (nextRow && nextRow.classList.contains('v3-item-row')) {
+    if (nextRow) {
         // AINDA HÁ ITENS: Rola para o próximo
-        setTimeout(() => {
-            // Verifica novamente se um modal foi aberto nesse intervalo de 300ms
-            if (Swal.isVisible()) return;
-
-            nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Efeito visual de foco no próximo
-            nextRow.style.backgroundColor = "#f0f9ff";
-            setTimeout(() => nextRow.style.backgroundColor = "", 1000);
-        }, 300);
+        nextRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        nextRow.style.backgroundColor = "#f0f9ff";
+        setTimeout(() => nextRow.style.background = "", 1000);
     } else {
-        // FIM DO SETOR: Feedback de sucesso e volta para a Tela 1
+        // ✅ FIM DO SETOR: Redirecionamento Garantido
         const Toast = Swal.mixin({
-            toast: true,
-            position: 'top',
-            showConfirmButton: false,
-            timer: 2000,
-            timerProgressBar: true
+            toast: true, position: 'top', showConfirmButton: false, timer: 2000
         });
-
-        Toast.fire({
-            icon: 'success',
-            title: 'Setor Concluído!'
-        });
+        Toast.fire({ icon: 'success', title: 'Setor Concluído!' });
 
         setTimeout(() => {
-            // ✅ Verificação final: Só volta para setores se o usuário não abriu um modal no último segundo
-            if (!Swal.isVisible()) {
-                navegarParaSetores(); // Volta para a lista de setores (Tela 1)
+            if (typeof navegarParaSetores === 'function') {
+                navegarParaSetores();
             }
-        }, 1500);
+        }, 1200);
     }
 }
 
