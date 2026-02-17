@@ -109,7 +109,7 @@ async function iniciarCautelaProcesso() {
         // Buscamos na lista_conferencia para pegar o unidade_id real vinculado ao material
         const listaDoc = await db.collection('listas_conferencia').doc(localId).get();
         if (!listaDoc.exists) throw new Error("Viatura/Lista não encontrada no banco.");
-        
+
         const listaData = listaDoc.data();
         const unidadeIdOrigem = listaData.unidade_id; // ✅ Captura o ID real (ex: unid_01)
         const nomeAmigavelLocal = `${listaData.posto_nome || ''} - ${listaData.local || localId}`;
@@ -128,10 +128,10 @@ async function iniciarCautelaProcesso() {
             destinatario_uid: destinatarioUid,
             local_origem_id: localId,
             local_origem: nomeAmigavelLocal,
-            
+
             // ✅ MUDANÇA CRÍTICA: Gravamos o ID para a query de Gestor funcionar
-            unidade_origem: unidadeIdOrigem, 
-            
+            unidade_origem: unidadeIdOrigem,
+
             status: 'ABERTA',
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             observacoes_emissao: obsEmissao,
@@ -140,14 +140,14 @@ async function iniciarCautelaProcesso() {
 
         // ... resto da transação (o bloco transaction permanece igual)
         await db.runTransaction(async (transaction) => {
-             // Seu código de transaction aqui...
-             // (Mantenha o mapeamento do mItem.historico_vida e mItem.cautelas como está)
-             
-             // Apenas certifique-se de usar a variável 'listaData.list' que já buscamos acima se quiser otimizar
-             let list = listaData.list; 
+            // Seu código de transaction aqui...
+            // (Mantenha o mapeamento do mItem.historico_vida e mItem.cautelas como está)
 
-             // Processamento dos itens...
-             list = list.map(setor => ({
+            // Apenas certifique-se de usar a variável 'listaData.list' que já buscamos acima se quiser otimizar
+            let list = listaData.list;
+
+            // Processamento dos itens...
+            list = list.map(setor => ({
                 ...setor,
                 itens: setor.itens.map(mItem => {
                     const selecoes = cautelaItensSelecionados.filter(c => c.id_base === mItem.id);
@@ -252,7 +252,7 @@ function setupCautelaDestinatarioListener() {
 
     // 1. LISTENER DE DIGITAÇÃO (Filtra e Renderiza)
     input.addEventListener('input', () => {
-        const searchTerm = input.value.trim(); 
+        const searchTerm = input.value.trim();
         suggestionsList.innerHTML = '';
 
         // Limpa o UID e a cor do border ao digitar qualquer coisa nova
@@ -525,7 +525,7 @@ async function loadActiveCautelas() {
 
             const uniqueRastreio = new Map();
             [...rastreioEmitente, ...rastreioReversor].forEach(c => uniqueRastreio.set(c.id, c));
-            
+
             // Filtra para não repetir o que já está na Custódia Ativa
             grupos.rastreioPessoal.data = Array.from(uniqueRastreio.values()).filter(c => !renderedIds.has(c.id));
             grupos.rastreioPessoal.data.forEach(c => renderedIds.add(c.id));
@@ -534,7 +534,7 @@ async function loadActiveCautelas() {
         // --- 2. BUSCA GERENCIAL (Gestor e Admin monitorando a Unidade ou Geral) ---
         if (role === 'gestor' || role === 'admin') {
             const scope = (role === 'admin') ? 'personal' : 'unit'; // Admin vê global, Gestor vê Unidade
-            
+
             // ✅ AGORA CHAMA A QUERY DIRETA PELA UNIDADE (Sem getUnitListIds)
             const monitoramentoRaw = await queryCautelas(['ABERTA', 'RECEBIDA', 'DEVOLUÇÃO'], role, user, null, scope);
 
@@ -563,7 +563,7 @@ async function loadActiveCautelas() {
             }
         });
 
-        tbody.innerHTML = totalCautelas === 0 
+        tbody.innerHTML = totalCautelas === 0
             ? `<tr><td colspan="6" style="text-align:center; padding:60px; color:#64748b;">Nenhuma cautela ativa.</td></tr>`
             : htmlContent;
 
@@ -606,7 +606,7 @@ async function loadCautelaPendencies() {
 
         snap.forEach(doc => {
             const data = doc.data();
-            
+
             // Verificação extra de segurança: só processa se houver pendências ativas
             if (data.pendencias_ativas && data.pendencias_ativas.length > 0) {
 
@@ -617,7 +617,7 @@ async function loadCautelaPendencies() {
 
                     return {
                         ...p,
-                        gestor_alvo_nome: nomeReal, 
+                        gestor_alvo_nome: nomeReal,
                         gestor_alvo_uid: uidReal,
                         cautelaId: doc.id,
                         localId: data.local_origem_id,
@@ -940,7 +940,7 @@ async function iniciarDevolucaoCautela(cautelaId, ultimoConferenteNome) {
 
         // Atualização de Interface
         if (typeof loadActiveCautelas === 'function') loadActiveCautelas();
-        
+
         // Substituída a função obsoleta pela nova renderização
         if (typeof renderOperacionalCards === 'function') {
             renderOperacionalCards();
@@ -2184,7 +2184,7 @@ async function queryCautelas(statusArray, role, user, field = null, type = 'pers
     // --- 🔐 BLOCO CORRIGIDO: VISÃO DO GESTOR POR UNIDADE ---
     if (role === 'gestor' && type === 'unit') {
         const gestorUnidadeId = user.unidade_id; // Pega o ID da unidade do gestor logado
-        
+
         if (!gestorUnidadeId) {
             console.warn("Gestor sem unidade_id definido.");
             return [];
@@ -2192,8 +2192,8 @@ async function queryCautelas(statusArray, role, user, field = null, type = 'pers
 
         // Em vez de buscar IDs de listas, filtramos direto pela unidade vinculada à cautela
         query = query.where('unidade_origem', '==', gestorUnidadeId);
-        
-    } 
+
+    }
     // --- 👤 VISÃO PESSOAL (OPERACIONAL OU GESTOR VENDO SUAS COISAS) ---
     else if (type === 'personal') {
         if (field === 'destinatario') {
