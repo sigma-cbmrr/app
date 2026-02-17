@@ -84,11 +84,36 @@ const gerarHtmlVisualApp = (pendencia, autorAtual, dataAtual) => {
 function buscarDadosItemPeloUid(uid) {
     const fonte = window.dadosConferencia || [];
     let result = null;
+    const uidStr = String(uid);
+
     fonte.forEach(s => s.itens.forEach(it => {
-        if (it.id === uid || it.uid_global === uid) result = { nome: it.nome, tipo: it.tipo, saldo: it.quantidadeEsperada };
-        if (it.tombamentos) it.tombamentos.forEach(t => {
-            if (`${it.uid_global || it.id}-${t.tomb}` === uid) result = { nome: `${it.nome} (${t.tomb})`, tipo: it.tipo, saldo: 0 };
-        });
+        const idPrincipal = it.uid_global || it.id;
+
+        // 1. Verifica se é o item principal ou UID global
+        if (it.id === uid || it.uid_global === uid) {
+            result = { nome: it.nome, tipo: it.tipo, saldo: it.quantidadeEsperada };
+        }
+
+        // 2. Verifica se é um acessório de Kit (_ac_)
+        if (!result && uidStr.includes(`${idPrincipal}_ac_`)) {
+            const indexAc = parseInt(uidStr.split('_ac_')[1]);
+            if (it.acessorios_acoplados && it.acessorios_acoplados[indexAc]) {
+                result = {
+                    nome: it.acessorios_acoplados[indexAc].nome,
+                    tipo: 'single',
+                    saldo: it.acessorios_acoplados[indexAc].quantidade
+                };
+            }
+        }
+
+        // 3. Verifica nos tombamentos (Item Multi)
+        if (!result && it.tombamentos) {
+            it.tombamentos.forEach(t => {
+                if (`${idPrincipal}-${t.tomb}` === uid) {
+                    result = { nome: `${it.nome} (${t.tomb})`, tipo: it.tipo, saldo: 0 };
+                }
+            });
+        }
     }));
     return result;
 }
