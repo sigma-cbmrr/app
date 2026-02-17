@@ -58,7 +58,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
 
     // Exibe o contêiner de cards
     containerPai.style.setProperty('display', 'block', 'important');
-    
+
     // Carrega os dados (cards)
     loadCaaData();
 }
@@ -230,7 +230,7 @@ async function renderCards(map) {
         const unitHeader = document.createElement('h3');
         unitHeader.className = 'unit-header';
         unitHeader.style.cssText = 'display: block; width: 100%; color: #800020; border-bottom: 2px solid rgba(0,0,0,0.05); padding-bottom: 10px; margin-top: 25px; margin-bottom: 15px; font-size: 1.1em; font-weight: 800; text-transform: uppercase;';
-        
+
         const icon = (unit === 'OUTROS' || unit === 'GERAL') ? 'fa-folder-open' : 'fa-building';
         unitHeader.innerHTML = `<div class="unit-flex-title"><i class="fas ${icon}"></i> <span>${unit}</span></div>`;
         container.appendChild(unitHeader);
@@ -249,7 +249,7 @@ async function renderCards(map) {
             const div = document.createElement('div');
             // Mantemos a classe base e adicionamos uma classe de estado se necessário
             div.className = `sigma-v3-floating-card ${temAlteracao ? 'has-issue' : 'is-ok'}`;
-            
+
             // Aplica borda lateral colorida dinamicamente
             div.style.borderLeft = `6px solid ${corPrimaria}`;
 
@@ -458,7 +458,7 @@ function fecharTabela() {
     if (masterContainer) {
         masterContainer.classList.remove('split-view');
         // Removemos qualquer trava de display que o JS possa ter colocado
-        masterContainer.style.removeProperty('display'); 
+        masterContainer.style.removeProperty('display');
     }
 
     // 2. ESCONDE A COLUNA DE DETALHES COMPLETAMENTE
