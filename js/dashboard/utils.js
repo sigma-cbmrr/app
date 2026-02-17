@@ -49,56 +49,40 @@ function reimprimirPDF(data) {
         const doc = new jsPDF('p', 'mm', 'a4');
         const MARGIN = 14, PG_W = 210, LOGO_S = 15;
 
-        // ✅ Identificação de Modo e Identidade Visual (Adicionado TRANSFERENCIA)
         const isChecklist = data.modo === 'CHECKLIST_VISTORIA';
         const isTransferencia = data.modo === 'TRANSFERENCIA_CARGA';
 
-        // Cores: Bordô para Relatórios, Azul Petróleo para Vistorias, Cinza Grafite para Transferências
         const COR_PRIMARIA = isChecklist ? [44, 62, 80] : (isTransferencia ? [33, 37, 41] : [128, 0, 32]);
         const TITULO_DOC = isChecklist ? "RELATÓRIO DE VISTORIA DE VIATURA" : (isTransferencia ? "TERMO DE TRANSFERÊNCIA DE CARGA" : "RELATÓRIO DE CONFERÊNCIA");
 
         const logoDraw = (domId, x) => {
-    // ✅ CORREÇÃO: Busca apenas a imagem que possui a classe .header-icon
-    // Isso garante que o JS use a logo de 32px do Header como referência.
-    const el = document.querySelector(`.header-icon[src*="${domId}"]`) || 
-               document.querySelector(`img[src*="${domId}"]`);
-    
-    if (el) {
-        try {
-            // Se a imagem capturada for a intrusa grande, nós a forçamos a não aparecer
-            if (el.naturalWidth > 100 && !el.classList.contains('header-icon')) {
-                el.style.display = 'none';
-                return;
+            const el = document.querySelector(`.header-icon[src*="${domId}"]`) || document.querySelector(`img[src*="${domId}"]`);
+            if (el) {
+                try {
+                    const c = document.createElement('canvas');
+                    c.width = 160; c.height = 160;
+                    c.getContext('2d').drawImage(el, 0, 0, 160, 160);
+                    doc.addImage(c.toDataURL('image/png'), 'PNG', x, 10, LOGO_S, LOGO_S);
+                } catch (e) { console.warn(`Logo erro: ${domId}`); }
             }
-
-            const c = document.createElement('canvas');
-            c.width = 160; c.height = 160;
-            c.getContext('2d').drawImage(el, 0, 0, 160, 160);
-            doc.addImage(c.toDataURL('image/png'), 'PNG', x, 10, LOGO_S, LOGO_S);
-        } catch (e) { console.warn(`Logo erro: ${domId}`); }
-    }
-};
+        };
 
         logoDraw('cbmrr.png', MARGIN);
         logoDraw('logo_sigma.png', PG_W - MARGIN - LOGO_S);
 
-        // Cabeçalho Institucional
-        doc.setFontSize(10).setTextColor(51).setFont('helvetica', 'bold');
+        doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(51);
         doc.text('GOVERNO DE RORAIMA', PG_W / 2, 15, { align: 'center' });
         doc.setTextColor(217, 15, 35).text('CORPO DE BOMBEIROS MILITAR DE RORAIMA', PG_W / 2, 20, { align: 'center' });
         doc.setTextColor(51).setFont('helvetica', 'italic').text('"Amazônia: patrimônio dos brasileiros"', PG_W / 2, 25, { align: 'center' });
 
-        // Título Dinâmico
         doc.setFontSize(14).setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]).setFont('helvetica', 'bold').text(TITULO_DOC, PG_W / 2, 35, { align: 'center' });
 
-        // ✅ Container de Informações Adaptável (Box Cinza)
         const boxHeight = (isChecklist || isTransferencia) ? 32 : 25;
         doc.setFillColor(240, 240, 240).setDrawColor(200, 200, 200).roundedRect(MARGIN, 40, PG_W - (MARGIN * 2), boxHeight, 2, 2, 'FD');
 
         const dataTimestamp = data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000) : new Date();
 
         if (isTransferencia) {
-            // Layout Específico para Transferência (Origem vs Destino)
             doc.setFontSize(9).setTextColor(50).setFont('helvetica', 'bold').text('GUIA Nº:', MARGIN + 5, 46);
             doc.setFont('helvetica', 'normal').text(data.id_amigavel || data.id, MARGIN + 35, 46);
             doc.setFont('helvetica', 'bold').text('ORIGEM:', MARGIN + 5, 52);
@@ -108,7 +92,6 @@ function reimprimirPDF(data) {
             doc.setFont('helvetica', 'bold').text('DATA REC:', MARGIN + 5, 64);
             doc.setFont('helvetica', 'normal').text(dataTimestamp.toLocaleString('pt-BR'), MARGIN + 35, 64);
         } else {
-            // Layout Original (Checklist/Conferência)
             doc.setFontSize(9).setTextColor(50).setFont('helvetica', 'bold').text(isChecklist ? 'Viatura:' : 'Local:', MARGIN + 5, 46);
             doc.setFont('helvetica', 'normal').text(data.local || '', MARGIN + 35, 46);
             doc.setFont('helvetica', 'bold').text('Conferente:', MARGIN + 5, 52);
@@ -126,7 +109,7 @@ function reimprimirPDF(data) {
 
         doc.setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]).text(`ITENS: ${data.totalItensConferidos || 0} | C/A: ${data.totalCaa || 0}`, PG_W - MARGIN - 5, 46, { align: 'right' });
 
-        // Montagem da Tabela
+        // --- MONTAGEM DA TABELA (ESPELHO V3 ATUALIZADO) ---
         let tableBody = [];
         const RED_FILL = [217, 15, 35], GREEN_FILL = [27, 138, 62], SECTOR_BG = (isChecklist || isTransferencia) ? COR_PRIMARIA : [60, 60, 60];
         let listaParaImprimir = data.itensRelatorio || data.itensCaa || [];
@@ -137,31 +120,43 @@ function reimprimirPDF(data) {
                 const nomeSetor = (item.setor || "").toUpperCase();
                 if (isChecklist && (nomeSetor.includes("FOTO") || nomeSetor.includes("OBSERVAÇ"))) return;
 
-                let setorItem = item.setor || "ITENS GERAIS";
-                if (setorItem !== currentSector) {
-                    tableBody.push([{ content: setorItem.toUpperCase(), colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
-                    currentSector = setorItem;
+                if (nomeSetor !== currentSector) {
+                    tableBody.push([{ content: nomeSetor || "ITENS GERAIS", colSpan: 4, styles: { fillColor: SECTOR_BG, textColor: 255, fontStyle: 'bold', halign: 'left' } }]);
+                    currentSector = nomeSetor;
                 }
 
-                let finalObs = '-';
-                if (item.pendencias_ids && item.pendencias_ids.length > 0) {
-                    // ✅ AJUSTE CIRÚRGICO: Inclusão da data e formatação padrão SIGMA
-                    finalObs = item.pendencias_ids.map(p => {
+                // Função auxiliar para formatar observações de pendências
+                const formatarPendencias = (pndArray) => {
+                    if (!pndArray || pndArray.length === 0) return '-';
+                    return pndArray.map(p => {
                         const dataP = p.data_criacao || "";
-                        return `\u2022 Por ${p.autor_nome}${dataP ? ' em ' + dataP : ''}: ${p.descricao}`;
+                        const qtdRelatada = p.quantidade > 0 ? `${p.quantidade} UN ` : "";
+                        return `\u2022 Por ${p.autor_nome}${dataP ? ' em ' + dataP : ''}: ${qtdRelatada}${p.descricao}`;
                     }).join('\n');
-                } else if (item.obs) {
-                    finalObs = item.obs;
-                }
+                };
 
-                let bgStatus = (item.status === 'C/A') ? RED_FILL : GREEN_FILL;
-
+                // Linha Principal do Item (Pai)
+                let bgStatusPai = (item.status === 'C/A') ? RED_FILL : GREEN_FILL;
                 tableBody.push([
                     item.nomeCompleto || 'Item',
                     { content: `${item.quantidade || 1} un.`, styles: { halign: 'center' } },
-                    { content: item.status || 'S/A', styles: { fillColor: bgStatus, textColor: 255, fontStyle: 'bold', halign: 'center' } },
-                    { content: finalObs, styles: { halign: 'left', fontSize: 7 } }
+                    { content: item.status || 'S/A', styles: { fillColor: bgStatusPai, textColor: 255, fontStyle: 'bold', halign: 'center' } },
+                    { content: formatarPendencias(item.pendencias_ids), styles: { halign: 'left', fontSize: 7 } }
                 ]);
+
+                // ✅ DESENHO DOS FILHOS (ACESSÓRIOS DO ANFITRIÃO)
+                if (item.acessorios_vinculados && item.acessorios_vinculados.length > 0) {
+                    item.acessorios_vinculados.forEach(ac => {
+                        let bgStatusFilho = (ac.status === 'C/A') ? RED_FILL : GREEN_FILL;
+
+                        tableBody.push([
+                            { content: `      > ${ac.nomeCompleto || ac.nome}`, styles: { textColor: [80, 80, 80], fontStyle: 'italic' } },
+                            { content: `${ac.quantidade || 1} un.`, styles: { halign: 'center', textColor: [80, 80, 80] } },
+                            { content: ac.status || 'S/A', styles: { fillColor: bgStatusFilho, textColor: 255, fontStyle: 'bold', halign: 'center', fontSize: 7 } },
+                            { content: formatarPendencias(ac.pendencias_ids), styles: { halign: 'left', fontSize: 6.5, textColor: [80, 80, 80] } }
+                        ]);
+                    });
+                }
             });
         }
 
@@ -177,7 +172,6 @@ function reimprimirPDF(data) {
 
         let finalY = doc.lastAutoTable.finalY + 10;
 
-        // ✅ SEÇÃO ORIGINAL PRESERVADA: Considerações Gerais
         if (isChecklist && data.obs_gerais_vistoria) {
             if (finalY > 250) { doc.addPage(); finalY = 20; }
             doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]);
@@ -188,57 +182,37 @@ function reimprimirPDF(data) {
             finalY += (splitObs.length * 5) + 12;
         }
 
-        // ✅ SEÇÃO ORIGINAL PRESERVADA: Registro Fotográfico
         if (isChecklist) {
             if (finalY > 230) { doc.addPage(); finalY = 20; }
             doc.setFontSize(10).setFont('helvetica', 'bold').setTextColor(COR_PRIMARIA[0], COR_PRIMARIA[1], COR_PRIMARIA[2]);
             doc.text("EVIDÊNCIAS FOTOGRÁFICAS (ANEXOS):", MARGIN, finalY);
-
             const boxW = 55, boxH = 40, spacing = 5;
             for (let i = 0; i < 5; i++) {
                 const col = i % 3;
                 const row = Math.floor(i / 3);
                 const xPos = MARGIN + (col * (boxW + spacing));
                 const yPos = finalY + 5 + (row * (boxH + spacing));
-
                 doc.setDrawColor(200).setFillColor(245).rect(xPos, yPos, boxW, boxH, 'F');
                 doc.setFontSize(7).setTextColor(150).text(`FOTO ${i + 1}`, xPos + boxW / 2, yPos + boxH / 2, { align: 'center' });
-                doc.text("(Aguardando Integração Storage)", xPos + boxW / 2, yPos + boxH / 2 + 4, { align: 'center' });
             }
         }
 
-        // Rodapé Institucional + Autenticidade Digital
         const totalPages = doc.internal.getNumberOfPages();
         for (let i = 1; i <= totalPages; i++) {
             doc.setPage(i);
             doc.setFontSize(8).setTextColor(100).setFont('helvetica', 'normal');
-
-            // Texto original
             doc.text('SIGMA - Sistema Integrado de Gestão de Materiais e Vistorias', MARGIN, doc.internal.pageSize.height - 10);
             doc.text(`Pág. ${i} de ${totalPages}`, PG_W - MARGIN, doc.internal.pageSize.height - 10, { align: 'right' });
-
-            // ✅ NOVO: Hash de Autenticidade (Selo de segurança)
             const hashSimples = btoa(`${data.id}-${data.conferente}`).substring(0, 20).toUpperCase();
             doc.setFontSize(7).setTextColor(150).setFont('courier', 'normal');
             doc.text(`CHAVE DE AUTENTICIDADE: ${hashSimples}`, MARGIN, doc.internal.pageSize.height - 15);
         }
 
-        const dataIso = dataTimestamp.toISOString().split('T')[0];
-        const prefixo = isTransferencia ? 'Termo_Carga' : (isChecklist ? 'Vistoria' : 'Relatorio');
-        const nomeArquivo = `${prefixo}_${(data.local || 'Conf').replace(/[^a-zA-Z0-9]/g, '')}_${dataIso}.pdf`;
-
-        // Gera os dados binários (Blob) e cria a URL temporária
         const pdfBlob = doc.output('blob');
         const pdfUrl = URL.createObjectURL(pdfBlob);
-
-        // Alimenta o Modal Sigma V3
         document.getElementById('sigma-v3-pdf-frame').src = pdfUrl;
-        document.getElementById('pdf-modal-filename').textContent = nomeArquivo;
         document.getElementById('modal-pdf-viewer').style.display = 'flex';
-
-        // Salva globalmente para as funções de Imprimir/Compartilhar
         window.currentPdfBlob = pdfBlob;
-        window.currentPdfName = nomeArquivo;
 
     } catch (e) {
         console.error("Erro PDF Unificado:", e);
