@@ -547,7 +547,7 @@ async function sincronizarAlmoxarifado() {
             const data = doc.data().list || [];
             data.forEach(setor => {
                 (setor.itens || []).forEach(item => {
-                    const uidGlobal = item.uid_global; 
+                    const uidGlobal = item.uid_global;
                     if (!uidGlobal) return;
 
                     if (!inventarioCalculado[uidGlobal]) {
@@ -576,7 +576,7 @@ async function sincronizarAlmoxarifado() {
 
         for (const [uidGlobal, dados] of Object.entries(inventarioCalculado)) {
             const saldoRef = db.collection('inventario').doc(uidGlobal)
-                               .collection('saldos_unidades').doc(minhaUnidadeId);
+                .collection('saldos_unidades').doc(minhaUnidadeId);
 
             if (dados.tipo === 'single') {
                 batch.update(saldoRef, {
@@ -1207,7 +1207,7 @@ async function prepararMovimentacao(docId, operacao, tombamento = null, viaturaI
     });
 }
 
-// Adicionado o parâmetro setorDestinoIdx para saber onde inserir ao confirmar
+/* --- Gerencia a montagem de kits, permitindo vincular acessórios (itens single) a um anfitrião (item multi) --- */
 async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = null, setorDestinoIdx = null) {
     const minhaUnidadeId = currentUserData.unidade_id;
     const componentesRegra = itemData.componentes_regra || [];
@@ -1246,6 +1246,7 @@ async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = 
             }
 
             for (const regra of componentesRegra) {
+                // Busca itens que pertençam à família definida na regra
                 const snapEstoque = await db.collection('inventario')
                     .where(firebase.firestore.FieldPath.documentId(), '>=', regra.familia_uid)
                     .where(firebase.firestore.FieldPath.documentId(), '<=', regra.familia_uid + '\uf8ff')
@@ -1272,7 +1273,7 @@ async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = 
                         <label style="display:block; font-weight:800; font-size:0.7em; color:#64748b; text-transform:uppercase; margin-bottom:8px;">${regra.nome_familia}</label>
                         <div style="display:flex; gap:10px;">
                             <select class="swal2-select select-item-acoplar" style="flex:2; margin:0; font-size:0.85em; height: 42px;">
-                                ${temDisponivel ? optionsItens : `<option value="">Sem saldo em ${currentUserData.unidade}</option>`}
+                                ${temDisponivel ? optionsItens : `<option value="">Sem saldo em ${currentUserData.unidade_sigla || 'Unidade'}</option>`}
                             </select>
                             <input type="number" class="swal2-input input-qtd-acoplar" value="${temDisponivel ? regra.qtd_sugerida : 0}" min="1" style="flex:0.5; margin:0; height:42px; font-size:0.9em; text-align:center;" ${!temDisponivel ? 'disabled' : ''}>
                         </div>
@@ -1291,8 +1292,10 @@ async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = 
                 if (select && select.value) {
                     acoplados.push({
                         uid_global: select.value,
-                        nome: select.options[select.selectedIndex].text.split(' (Disp:')[0],
-                        quantidade: parseInt(input.value) || 0
+                        id: select.value, // ✅ Mantém compatibilidade com ID raiz
+                        nome: select.options[select.selectedIndex].text.split(' (Disp:')[0].toUpperCase(),
+                        quantidade: parseInt(input.value) || 0,
+                        tipo_controle: 'single' // Indica que é controlado por saldo matemático
                     });
                 }
             });
@@ -1303,17 +1306,17 @@ async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = 
             const acopladosConfirmados = result.value || [];
 
             if (isNoEditor) {
+                // ✅ PADRONIZAÇÃO: Agora usamos 'acessorios_vinculados' no objeto temporário
                 itemSelecionadoTemp = {
                     ...itemData,
                     id_almox: docId,
                     tombamentoExibicao: tombamentoAlvo,
-                    acessorios_acoplados: acopladosConfirmados,
+                    acessorios_vinculados: acopladosConfirmados, // Nova nomenclatura
                     acessorios_ja_montados: true
                 };
 
-                exibirDraftCard(`${itemData.nome} [TOMB: ${tombamentoAlvo}] + ${acopladosConfirmados.length} acessórios`);
+                exibirDraftCard(`${itemData.nome} [TOMB: ${tombamentoAlvo}] + ${acopladosConfirmados.length} componentes`);
 
-                // ✅ AJUSTE AQUI: Chama a gravação final diretamente
                 if (setorDestinoIdx !== null) {
                     executarInsercaoNoSetor(setorDestinoIdx);
                 } else {
@@ -1327,13 +1330,13 @@ async function abrirModalAcoplamentoAnfitriao(docId, itemData, tombamentoAlvo = 
                 }
 
             } else {
+                // Fluxo fora do editor (Envio direto do almoxarifado)
                 executarMovimentacaoAnfitriao(docId, 'ENVIO', {
                     tombamento: tombamentoAlvo,
                     acessorios: acopladosConfirmados
                 });
             }
         } else {
-            // Se cancelar, reseta o select para o usuário não achar que o item foi adicionado
             const selectSetor = document.getElementById('select-setor-destino');
             if (selectSetor) selectSetor.value = "";
         }
@@ -1344,32 +1347,45 @@ function executarInsercaoNoSetor(setorIdx) {
     const selectSetor = document.getElementById('select-setor-destino');
     const inputBusca = document.getElementById('input-busca-estoque');
 
+    // ✅ 1. IDENTIDADE ÚNICA (A Chave Mestra)
+    // Se for multi, o UID de Instância já carrega o tombamento para facilitar o match nos modais
+    const uidBase = itemSelecionadoTemp.uid_global || itemSelecionadoTemp.id_almox;
+    const tombamento = itemSelecionadoTemp.tombamentoExibicao;
+    const uidInstancia = itemSelecionadoTemp.tipo === 'multi' ? `${uidBase}-${tombamento}` : uidBase;
+
     const novoItem = {
-        uid_global: itemSelecionadoTemp.uid_global || itemSelecionadoTemp.id_almox,
+        id: uidBase, // ID raiz para o banco
+        uid_global: uidBase,
+        uid_instancia: uidInstancia, // ✅ Chave para match de interface e modais
         nome: itemSelecionadoTemp.nome,
         tipo: itemSelecionadoTemp.tipo,
         quantidadeEsperada: 0,
         is_anfitriao: itemSelecionadoTemp.is_anfitriao || false
     };
 
-    // Recupera os acessórios (se houver)
+    // ✅ 2. PADRONIZAÇÃO DE ACESSÓRIOS (acessorios_vinculados)
     const acessorios = itemSelecionadoTemp.acessorios_acoplados || itemSelecionadoTemp.acessoriosEscolhidos;
     if (novoItem.is_anfitriao && acessorios) {
-        novoItem.acessorios_acoplados = JSON.parse(JSON.stringify(acessorios));
+        // Mapeamos para garantir que a nomenclatura seja 'acessorios_vinculados' em toda a cadeia
+        novoItem.acessorios_vinculados = JSON.parse(JSON.stringify(acessorios)).map(ac => ({
+            ...ac,
+            uid_global: ac.uid_global || ac.id // Garante o vínculo com o item Single original
+        }));
     }
 
-    // Define Saldos/Tombamentos
+    // 3. DEFINE SALDOS/TOMBAMENTOS
     if (itemSelecionadoTemp.tipo === 'single') {
         novoItem.quantidadeEsperada = itemSelecionadoTemp.quantidadeEscolhida || 1;
     } else {
         novoItem.tombamentos = [{
-            tomb: itemSelecionadoTemp.tombamentoExibicao,
-            situacao: "EM CARGA"
+            tomb: tombamento,
+            situacao: "EM CARGA",
+            uid_global: uidBase // DNA de origem no tombamento
         }];
         novoItem.quantidadeEsperada = 1;
     }
 
-    // Inserção na Arquitetura Ativa
+    // 4. INSERÇÃO NA ARQUITETURA ATIVA
     if (!arquiteturaAtiva[setorIdx].itens) arquiteturaAtiva[setorIdx].itens = [];
     arquiteturaAtiva[setorIdx].itens.push(novoItem);
 
@@ -1381,7 +1397,7 @@ function executarInsercaoNoSetor(setorIdx) {
         selectSetor.style.border = "1px solid #cbd5e1";
     }
 
-    // Só mescla se NÃO for kit
+    // Só mescla se NÃO for kit (Kits devem ser mantidos íntegros para não misturar acessórios)
     if (!novoItem.is_anfitriao) {
         processarMesclagemAutomatica(setorIdx);
     }
