@@ -1,72 +1,107 @@
-/* --- A central de comando do item; exibe todas as pendências ativas de um material e oferece as opções de manter, resolver ou relatar um novo problema --- */
+/* --- central de comando do item; exibe todas as pendências ativas de um material e oferece as opções de manter, resolver ou relatar um novo problema --- */
 async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPai = null) {
     const isChecklist = window.isModoChecklist;
     const corPrimaria = isChecklist ? "#2c3e50" : "#800020";
     const nomeLimpo = nomeItem.replace(/\\'/g, "'");
 
-    const fonteDados = window.dadosConferencia || dadosConferencia;
+    const fonteDados = window.dadosConferencia || [];
     let pendencias = [];
     let acessoriosDoKit = [];
 
-    // 1. LOCALIZA DADOS, PENDÊNCIAS E COMPONENTES DO KIT
+    // ✅ 1. LOCALIZAÇÃO E COLETA HIERÁRQUICA (DNA V3)
+    let todasAsPendenciasBrutas = [];
+
     fonteDados.forEach(setor => {
         setor.itens.forEach(it => {
-            const isMatch = (it.uid_global === uid || it.id === uid);
-            
+            const idMestre = String(it.uid_instancia || it.uid_global || it.id || "");
+            const isMatch = (idMestre === String(uid));
+
             if (isMatch) {
-                if (it.pendencias_ids) pendencias = [...it.pendencias_ids];
-                // ✅ CAPTURA COMPONENTES SE FOR UM KIT
-                if (it.acessorios_acoplados) acessoriosDoKit = it.acessorios_acoplados;
+                // Coleta do PAI
+                if (it.pendencias_ids) todasAsPendenciasBrutas.push(...it.pendencias_ids);
+
+                // Coleta dos FILHOS (Acessórios)
+                const filhos = it.acessorios_vinculados || it.acessorios_acoplados || [];
+                filhos.forEach(ac => {
+                    if (ac.pendencias_ids) todasAsPendenciasBrutas.push(...ac.pendencias_ids);
+                });
+
+                acessoriosDoKit = filhos;
             }
 
+            // Tratamento para Tombamentos
             if (it.tombamentos) {
                 it.tombamentos.forEach(t => {
                     const uidComp = `${it.uid_global || it.id}-${t.tomb}`;
-                    if (uidComp === uid && t.pendencias_ids) pendencias = [...t.pendencias_ids];
+                    if (uidComp === uid) {
+                        if (t.pendencias_ids) todasAsPendenciasBrutas.push(...t.pendencias_ids);
+                        const filhosT = t.acessorios_vinculados || it.acessorios_vinculados || [];
+                        filhosT.forEach(ac => {
+                            if (ac.pendencias_ids) todasAsPendenciasBrutas.push(...ac.pendencias_ids);
+                        });
+                        acessoriosDoKit = t.acessorios_vinculados || acessoriosDoKit;
+                    }
                 });
-            }
-
-            if (uidPai && (it.uid_global === uidPai || it.id === uidPai)) {
-                const statusLocal = window.itemStatus[uid];
-                if (statusLocal && statusLocal.pendencias_temporarias) {
-                    pendencias = [...statusLocal.pendencias_temporarias];
-                }
             }
         });
     });
 
+    // 1.2 MERGE DE MEMÓRIA (Relatos da Sessão Atual)
+    const statusAnfitriao = window.itemStatus[uid];
+    if (statusAnfitriao && statusAnfitriao.pendencias_temporarias) {
+        statusAnfitriao.pendencias_temporarias.forEach(pt => {
+            if (String(pt.uid_alvo_direto).startsWith(uid)) {
+                todasAsPendenciasBrutas.push(pt);
+            }
+        });
+    }
+
+    // ✅ 1.3 FILTRO DE UNICIDADE (Elimina Duplicados pelo ID)
+    const mapUnico = new Map();
+    todasAsPendenciasBrutas.forEach(p => {
+        if (!mapUnico.has(String(p.id))) {
+            mapUnico.set(String(p.id), p);
+        }
+    });
+
+    // Esta é a lista final, limpa e única
+    pendencias = Array.from(mapUnico.values());
+
     // 2. CONSTRUÇÃO DINÂMICA DOS CARDS DE PENDÊNCIA
     let htmlPendencias = "";
+    pendencias.sort((a, b) => String(b.id).includes('TEMP') ? 1 : -1);
+
     pendencias.forEach((p, index) => {
         const isTemp = String(p.id).startsWith('TEMP-');
         const isMantido = window.itemStatus[uid]?.ids_mantidos?.includes(String(p.id));
         const isResolvido = p.status_gestao === 'RESOLVIDO';
 
+        const labelAlvo = p.nome_item_alvo ? p.nome_item_alvo : nomeLimpo;
+
         htmlPendencias += `
             <div class="v3-manage-card" style="background:${isResolvido ? '#f0fdf4' : (isTemp ? '#f0f9ff' : '#fff5f5')}; 
                  border:1px solid ${isResolvido ? '#bbf7d0' : (isTemp ? '#bae6fd' : '#ffcccc')}; 
-                 padding:15px; border-radius:12px; margin-bottom:12px; position:relative; width: 100%; box-sizing: border-box; transition: 0.3s;
-                 ${isResolvido ? 'opacity: 0.9;' : ''}">
+                 padding:15px; border-radius:12px; margin-bottom:12px; position:relative; width: 100%; box-sizing: border-box;">
                 
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                     <div style="display:flex; flex-direction: column; gap:2px;">
-                        <small style="color:${isResolvido ? '#166534' : '#64748b'}; font-weight:800; font-size:0.6em; text-transform:uppercase; letter-spacing:0.5px;">
-                            ${isResolvido ? '✅ SOLUÇÃO REGISTRADA' : (isTemp ? '✨ RELATO ATUAL' : '📜 RELATO ANTERIOR')}
+                        <small style="color:${isResolvido ? '#166534' : (isTemp ? '#0369a1' : '#64748b')}; font-weight:800; font-size:0.6em; text-transform:uppercase;">
+                            ${isResolvido ? '✅ SOLUÇÃO REGISTRADA' : (isTemp ? '✨ NOVO RELATO' : '📜 RELATO ANTERIOR')}
                         </small>
-                        <span style="font-size: 0.65em; font-weight: 900; color: ${isResolvido ? '#166534' : corPrimaria}; opacity: 0.8;">
-                            ${p.quantidade} UNIDADE(S)
+                        <span style="font-size: 0.65em; font-weight: 900; color: ${corPrimaria};">
+                            ${p.quantidade} UNIDADE(S) • <span style="color:#e20b0b">${labelAlvo.toUpperCase()}</span>
                         </span>
                     </div>
                     <div style="display:flex; gap:10px;">
                         ${isResolvido ? '' : `
                             ${isTemp ? `
-                                <button onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao.replace(/'/g, "\\'")}')" class="v3-mini-btn" title="Editar"><i class="fas fa-pen"></i></button>
                                 <button onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" class="v3-mini-btn delete" title="Excluir"><i class="fas fa-trash"></i></button>
+                                <button onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao}')" class="v3-mini-btn edit" title="Editar"><i class="fas fa-edit"></i></button>
                             ` : `
-                                <button id="btn-manter-${index}" onclick="manterID('${p.id}', '${uid}', ${index})" class="v3-action-icon ${isMantido ? 'active' : ''}" title="Manter Alteração">
+                                <button id="btn-manter-${index}" onclick="manterID('${p.id}', '${uid}', ${index})" class="v3-action-icon ${isMantido ? 'active' : ''}">
                                     <i class="fas ${isMantido ? 'fa-check-double' : 'fa-thumbtack'}"></i>
                                 </button>
-                                <button onclick="abrirFormularioResolucaoV3(${JSON.stringify(p).replace(/"/g, '&quot;')}, '${uid}')" class="v3-action-icon resolver" title="Resolver">
+                                <button onclick="abrirFormularioResolucaoV3(${JSON.stringify(p).replace(/"/g, '&quot;')}, '${uid}')" class="v3-action-icon resolver">
                                     <i class="fas fa-wrench"></i>
                                 </button>
                             `}
@@ -74,119 +109,172 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
                     </div>
                 </div>
 
-                <div style="font-weight:700; color:${isResolvido ? '#166534' : '#1e293b'}; font-size:0.95em; line-height:1.4; margin-bottom:10px; word-wrap: break-word; text-transform: uppercase; ${isResolvido ? 'text-decoration: line-through; opacity: 0.7;' : ''}">
+                <div style="font-weight:700; color:#1e293b; font-size:0.95em; line-height:1.4; text-transform: uppercase;">
                     ${p.descricao}
                 </div>
-
-                ${isResolvido ? `
-                    <div style="font-size: 0.7em; color: #15803d; background: rgba(22, 101, 52, 0.05); padding: 8px; border-radius: 6px; border-left: 3px solid #166534;">
-                        <b>SOLUÇÃO:</b> ${p.justificativa_solucao}
-                    </div>
-                ` : `
-                    <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid rgba(0,0,0,0.05); padding-top:8px;">
-                        <span style="font-size:0.65em; color:#94a3b8; font-weight:600; text-transform: uppercase;">${p.autor_nome} • ${p.data_criacao}</span>
-                    </div>
-                `}
-            </div>
-        `;
+                <div style="font-size:0.65em; color:#94a3b8; margin-top:8px; font-weight:600;">
+                    ${p.autor_nome} • ${p.data_criacao}
+                </div>
+            </div>`;
     });
 
-    // 3. SELETOR DE ALVO (KIT) - Define em qual item do conjunto a pendência será lançada
-    let htmlSeletorKit = "";
+    // ✅ 3. LISTAGEM DE COMPONENTES (RASTREABILIDADE CIRÚRGICA)
+    let htmlListaComponentes = "";
     if (acessoriosDoKit.length > 0) {
-        htmlSeletorKit = `
-            <div style="background: #f8fafc; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
-                <label style="display:block; font-weight:800; font-size:0.65em; color:#64748b; text-transform:uppercase; margin-bottom:10px; text-align:center;">
-                    <i class="fas fa-bullseye"></i> Selecione o item com alteração:
-                </label>
-                <select id="swal-target-uid" class="swal2-select" style="width: 100%; margin: 0; font-size: 0.85em; font-weight: bold; text-transform: uppercase;">
-                    <option value="${uid}">${nomeLimpo} (KIT COMPLETO / ANFITRIÃO)</option>
-                    ${acessoriosDoKit.map((ac, idx) => `
-                        <option value="${uid}_ac_${idx}">${ac.nome}</option>
-                    `).join('')}
-                </select>
-            </div>
-        `;
+        htmlListaComponentes = `
+            <div style="margin-top: 5px; padding: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 15px;">
+                <small style="display:block; font-weight:800; font-size:0.65em; color:#64748b; text-transform:uppercase; margin-bottom:8px; text-align:center;">Componentes Vinculados ao Kit:</small>
+                <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">
+                    ${acessoriosDoKit.map((ac) => {
+            // Crucial: Captura o DNA real do componente (uid_global)
+            const uidGlobalReal = ac.uid_global || ac.id;
+            return `<button onclick="exibirModalInsercaoNovoRelato('${uidGlobalReal}', 'single', '${ac.nome.replace(/'/g, "")}', 1, '${corPrimaria}', '${uid}')" 
+                                style="font-size:0.55em; background:#fff; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1; font-weight:800; color:#334155; cursor:pointer; text-transform:uppercase;">
+                                <i class="fas fa-exclamation-circle" style="color:#e20b0b"></i> ${ac.nome}
+                                </button>`;
+        }).join('')}
+                </div>
+            </div>`;
     }
 
-    // 4. DISPARO DO MODAL CENTRAL
     return Swal.fire({
-        title: `<span style="color:${corPrimaria}; font-weight:700; letter-spacing:-0.5px;">GERENCIAR PENDÊNCIAS</span>`,
-        width: '95%',
+        showCloseButton: true,
+        allowOutsideClick: true,
+        title: `<span style="color:${corPrimaria}; font-weight:700;">GERENCIAR PENDÊNCIAS</span>`,
+        width: window.innerWidth > 600 ? '550px' : '95%',
         padding: '1.5em 1em',
         html: `
-            <div style="margin-bottom: 15px; text-align: center;">
-                <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em;">
-                    ${uidPai ? `<i class="fas fa-link"></i> ACESSÓRIO DE CONJUNTO: ` : ''} ${nomeLimpo}
-                </small>
+            <div style="margin-bottom: 10px; text-align: center;">
+                <b style="color: #1e293b; text-transform: uppercase; font-size: 0.9em;">${nomeLimpo}</b>
             </div>
-
-            ${htmlSeletorKit}
-
-            <div id="v3-modal-scroll" style="text-align:left; max-height:35vh; overflow-y:auto; padding-right:2px; width: 100%; box-sizing: border-box;">
+            ${htmlListaComponentes}
+            <div id="v3-modal-scroll" style="text-align:left; max-height:40vh; overflow-y:auto; padding-right:5px; width: 100%; box-sizing: border-box;">
                 ${htmlPendencias || '<p style="text-align:center; color:#94a3b8; padding:30px;">Nenhum relato encontrado.</p>'}
             </div>
-            
             <div style="display: flex; gap: 10px; margin-top: 25px; width: 100%;">
-                <button onclick="prepararNovoRelatoInteligente('${uid}', '${tipo}', '${nomeItem}', ${saldoDisponivel}, '${corPrimaria}', '${uidPai || ''}')" 
-                        style="flex: 1; background: #0284c7; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s;">
+                <button id="btn-novo-relato-v3" style="flex: 1; background: #0284c7; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
                     <i class="fas fa-plus-circle"></i> NOVO RELATO
                 </button>
-
-                <button onclick="Swal.clickConfirm()" 
-                        style="flex: 1; background: ${corPrimaria}; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: all 0.2s;">
-                    <i class="fas fa-check-circle"></i> CONCLUIR
+                <button onclick="Swal.clickConfirm()" style="flex: 1; background: ${corPrimaria}; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
+                    <i class="fas fa-check-double"></i> CONCLUIR
                 </button>
-            </div>
-        `,
+            </div>`,
         showConfirmButton: false,
-        allowOutsideClick: false,
+        customClass: { popup: 'v3-padrao-modal' },
+        didOpen: () => {
+            const btnNovo = document.getElementById('btn-novo-relato-v3');
+            if (btnNovo) {
+                btnNovo.onclick = () => {
+                    exibirModalInsercaoNovoRelato(uid, tipo, nomeLimpo, saldoDisponivel, corPrimaria, uid);
+                };
+            }
+        },
         preConfirm: () => {
             const status = window.itemStatus[uid];
             if (!status || !status.interacao_humana) {
                 Swal.showValidationMessage('Interaja com os relatos antes de concluir.');
                 return false;
             }
-            window.itemStatus[uid].status = 'C/A'; // Força status C/A se o modal de pendência foi usado
+            window.itemStatus[uid].status = 'C/A';
+            const row = document.getElementById(`item-row-${uid}`);
+            if (row) {
+                row.classList.add('status-alert');
+                row.style.setProperty('background-color', '#fff5f5', 'important');
+            }
             if (typeof updateOverallStatus === 'function') updateOverallStatus();
-            return { confirmado: true, uid: uid };
+            return { confirmado: true, uidPrincipal: uid };
         }
     }).then((result) => {
         if (result.isConfirmed) {
             setTimeout(() => {
-                const funcFluxo = window.verificarFluxoSetor || verificarFluxoSetor;
-                if (typeof funcFluxo === 'function') funcFluxo(uid);
-            }, 150);
+                if (typeof verificarFluxoSetor === 'function') verificarFluxoSetor(result.value.uidPrincipal);
+            }, 300);
         }
     });
 }
 
-// ✅ FUNÇÃO DE APOIO PARA LANÇAR RELATO NO ALVO SELECIONADO
-function prepararNovoRelatoInteligente(uidOriginal, tipo, nomeItem, saldo, cor, uidPai) {
+// ✅ FUNÇÃO DE APOIO PARA LANÇAR RELATO NO ALVO SELECIONADO (VERSÃO FINAL)
+function prepararNovoRelatoInteligente(uidOriginal, tipo, nomeItem, saldo, cor, uidPai = null, dadosAcessorios = []) {
     const selectTarget = document.getElementById('swal-target-uid');
-    const targetUid = selectTarget ? selectTarget.value : uidOriginal;
-    const targetNome = selectTarget ? selectTarget.options[selectTarget.selectedIndex].text : nomeItem;
 
-    // Chama sua função original de inserção com o alvo correto
-    exibirModalInsercaoNovoRelato(targetUid, tipo, targetNome, saldo, cor, uidPai || uidOriginal);
+    // 1. Define quem é o alvo (quem sofre a avaria)
+    const targetUid = selectTarget ? selectTarget.value : uidOriginal;
+
+    // 2. Limpa o nome para o histórico de vida (remove parênteses e extras)
+    let targetNome = nomeItem;
+    if (selectTarget) {
+        targetNome = selectTarget.options[selectTarget.selectedIndex].text.split('(')[0].trim();
+    }
+
+    // 3. Define quem é o dono do card (para reabrir o modal certo no final)
+    const idReferenciaPai = uidPai || uidOriginal;
+
+    console.log(`%c[INTELIGÊNCIA V3] Alvo: ${targetNome} | Referência Card: ${idReferenciaPai}`, "color: #0284c7; font-weight: bold;");
+
+    // ✅ O PULO DO GATO: Passamos os 'dadosAcessorios' adiante para o modal de inserção não ficar "cego"
+    exibirModalInsercaoNovoRelato(targetUid, tipo, targetNome, saldo, cor, idReferenciaPai, dadosAcessorios);
 }
 
-/* --- Abre o formulário para o militar descrever uma nova avaria ou falta, controlando a quantidade e a descrição técnica --- */
+/* --- Abre o formulário para o militar descrever uma nova avaria ou falta --- */
 async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponivel, corPrimaria, uidPai = null) {
     const isChecklist = window.isModoChecklist;
+    const fonteDados = window.dadosConferencia || [];
+    let acessoriosDoKit = [];
+
+    // ✅ 1. BUSCA PRECISA DO ITEM MESTRE (Para garantir que os acessórios existam no objeto)
+    const uidBusca = String(uidPai || uid);
+
+    fonteDados.forEach(setor => {
+        setor.itens.forEach(it => {
+            // Verifica no item ou nos seus tombamentos se o UID coincide
+            const idMestre = String(it.uid_instancia || it.uid_global || it.id || "");
+            let itemAlvo = null;
+
+            if (idMestre === uidBusca) {
+                itemAlvo = it;
+            } else if (it.tombamentos) {
+                // Se for um suporte multi, precisamos garantir que estamos olhando o material certo
+                const tFound = it.tombamentos.find(t => `${it.uid_global || it.id}-${t.tomb}` === uidBusca);
+                if (tFound) itemAlvo = it; // Pegamos o 'it' mestre porque os acessórios costumam estar na raiz
+            }
+
+            if (itemAlvo) {
+                acessoriosDoKit = itemAlvo.acessorios_vinculados || itemAlvo.acessorios_acoplados || [];
+            }
+        });
+    });
+
+    // ✅ 2. CONSTRUÇÃO DO SELETOR COM IDs DE INSTÂNCIA (DNA V3 FINAL)
+    let htmlSeletorAlvo = "";
+    if (acessoriosDoKit.length > 0) {
+        htmlSeletorAlvo = `
+        <div style="background: #f1f5f9; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+            <label style="display:block; font-weight:800; font-size:0.7em; color:#475569; text-transform:uppercase; margin-bottom:8px; text-align:center;">
+                <i class="fas fa-bullseye"></i> Confirmar alvo do problema:
+            </label>
+            <select id="swal-target-alvo" class="swal2-select" style="width: 100%; margin: 0; font-size: 0.85em; font-weight: bold; text-transform: uppercase; border: 1px solid #cbd5e1; border-radius: 8px;">
+                <option value="${uidPai || uid}" ${uid === (uidPai || uid) ? 'selected' : ''} data-nome="${nomeItem}">${nomeItem} (GERAL)</option>
+                ${acessoriosDoKit.map((ac, idx) => {
+            const uidInstanciaFilho = `${uidPai || uid}_ac_${idx}`;
+            // ✅ AUTO-SELEÇÃO: Se o UID clicado for este acessório, ele já vem marcado
+            const isSelected = (uid === uidInstanciaFilho || ac.uid_global === uid) ? 'selected' : '';
+            return `<option value="${uidInstanciaFilho}" ${isSelected} data-nome="${ac.nome}">${ac.nome.toUpperCase()}</option>`;
+        }).join('')}
+            </select>
+        </div>
+    `;
+    }
 
     const { value: formValues } = await Swal.fire({
         title: `<span style="color:${corPrimaria}; font-weight:900; letter-spacing:-0.5px;">RELATAR ALTERAÇÃO</span>`,
-        width: '95%',
+        width: window.innerWidth > 600 ? '550px' : '95%',
         padding: '1.5em 1em',
         html: `
             <div style="text-align:left; width: 100%; box-sizing: border-box; font-family: 'Inter', sans-serif;">
-                
                 <div style="margin-bottom: 20px; text-align: center;">
                     <b style="color: #475569; font-size: 0.9em; text-transform: uppercase;">${nomeItem}</b>
-                    ${uid.includes('_ac_') ? `<br><small style="color:#800020; font-weight:bold;">(COMPONENTE DO KIT)</small>` : ''}
                 </div>
-
+                ${htmlSeletorAlvo}
                 ${(tipo === 'single' && !isChecklist) ? `
                     <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 10px 15px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
                         <label style="font-size:0.8em; font-weight:800; color:#64748b; text-transform:uppercase;">Quantidade:</label>
@@ -194,7 +282,6 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
                                style="width: 70px; height: 35px; border-radius: 8px; border: 2px solid ${corPrimaria}; text-align: center; font-weight: 900; color: ${corPrimaria}; margin: 0;">
                     </div>
                 ` : ''}
-
                 <label style="font-size:0.75em; font-weight:800; color:#64748b; text-transform:uppercase; margin-left: 5px; display: block; margin-bottom: 8px;">
                     Descrição do Problema:
                 </label>
@@ -211,50 +298,39 @@ async function exibirModalInsercaoNovoRelato(uid, tipo, nomeItem, saldoDisponive
         didOpen: () => {
             const inputObs = document.getElementById('swal-obs');
             if (inputObs) inputObs.focus();
-
-            const inputQtd = document.getElementById('swal-qtd');
-            if (inputQtd) {
-                inputQtd.addEventListener('input', (e) => {
-                    if (parseInt(e.target.value) > saldoDisponivel) e.target.value = saldoDisponivel;
-                });
-            }
         },
         preConfirm: () => {
-            const obs = document.getElementById('swal-obs').value.trim();
-            const qtdInput = document.getElementById('swal-qtd');
-            const qtd = isChecklist ? 1 : (qtdInput ? parseInt(qtdInput.value) : 1);
+            // ✅ CAPTURA FORÇADA: Busca o elemento diretamente no popup ativo do SweetAlert
+            const popup = Swal.getPopup();
+            const selectAlvo = popup.querySelector('#swal-target-alvo');
+            const inputObs = popup.querySelector('#swal-obs');
+            const inputQtd = popup.querySelector('#swal-qtd');
+
+            const obs = inputObs ? inputObs.value.trim() : "";
+            const qtd = isChecklist ? 1 : (inputQtd ? parseInt(inputQtd.value) : 1);
+
+            // ✅ SEPARAÇÃO DE DNA: Se houver select, pegamos o valor dele. Se não, o ID do Pai.
+            const finalUid = selectAlvo ? selectAlvo.value : (uidPai || uid);
+            const finalNome = selectAlvo ? selectAlvo.options[selectAlvo.selectedIndex].getAttribute('data-nome') : nomeItem;
 
             if (obs.length < 5) return Swal.showValidationMessage("A descrição deve ser mais detalhada.");
-            if (!isChecklist && tipo === 'single' && (qtd < 1 || qtd > saldoDisponivel)) {
-                return Swal.showValidationMessage(`Saldo insuficiente (Máx: ${saldoDisponivel})`);
-            }
 
-            return { qtd, obs };
+            return { qtd, obs: obs.toUpperCase(), finalUid, finalNome };
         }
     });
 
     if (formValues) {
-        // 1. SALVAMENTO: Registra o novo ID (Pode ser do Pai ou ID virtual do Filho)
         if (typeof salvarNovoID === 'function') {
-            salvarNovoID(uid, formValues.qtd, tipo, formValues.obs, uidPai);
+            const anfitriao = uidPai || uid;
+
+            // ✅ LOG DE DEPURAÇÃO (Para você ver no console antes de salvar)
+            console.log(`🚀 DESPACHANDO: Alvo=${formValues.finalUid} | Pai=${anfitriao}`);
+
+            salvarNovoID(formValues.finalUid, formValues.qtd, tipo, formValues.obs, anfitriao, formValues.finalNome);
         }
 
-        // 2. RETORNO INTELIGENTE: 
-        // Se uidPai existir, reabrimos o modal de pendências do PAI (Anfitrião), 
-        // pois é lá que o seletor de alvos e a lista consolidada residem.
         setTimeout(() => {
-            const uidParaReabrir = uidPai || uid;
-            
-            // Precisamos localizar o nome original do Pai para o cabeçalho do modal
-            let nomeParaReabrir = nomeItem;
-            if (uidPai) {
-                const fonte = window.dadosConferencia || [];
-                fonte.forEach(s => s.itens.forEach(it => {
-                    if ((it.uid_global || it.id) === uidPai) nomeParaReabrir = it.nome;
-                }));
-            }
-
-            abrirModalPendenciaV3(uidParaReabrir, tipo, nomeParaReabrir, saldoDisponivel, null);
+            abrirModalPendenciaV3((uidPai || uid), tipo, nomeItem, saldoDisponivel, null);
         }, 350);
     }
 }
@@ -264,39 +340,47 @@ async function abrirFormularioResolucaoV3(pendencia, uid) {
     const isChecklist = window.isModoChecklist;
     const corSucesso = "#1b8a3e"; // Verde Sigma
     const corCancel = "#64748b"; // Cinza Slate
-    
-    // Captura dados do item para o retorno em caso de cancelamento
-    const itRef = buscarDadosItemPeloUid(uid);
-    const nomeItem = itRef ? itRef.nome : (pendencia.itemNome || "Material");
+
+    // ✅ 1. NORMALIZAÇÃO DE CONTEXTO: Garante que o PDF e os Modais falem do mesmo item
+    const uidAlvo = String(uid);
+    const itRef = typeof buscarDadosItemPeloUid === 'function' ? buscarDadosItemPeloUid(uidAlvo) : null;
+
+    // Identifica se o problema que estamos resolvendo é de um acessório específico
+    const nomeExibicao = pendencia.nome_item_alvo || (itRef ? itRef.nome : "Material");
 
     const { value: resolucao } = await Swal.fire({
-        title: `<span style="color: ${corSucesso}; font-weight: 800; letter-spacing: -0.5px;">RESOLVER ALTERAÇÃO</span>`,
-        width: '95%',
+        title: `<span style="color: ${corSucesso}; font-weight: 900; letter-spacing: -0.5px;">RESOLVER ALTERAÇÃO</span>`,
+        // ✅ PADRÃO DE TAMANHO V3: 500px para desktop, 95% para mobile
+        width: window.innerWidth > 600 ? '500px' : '95%',
         padding: '1.5em 1em',
         html: `
             <div style="text-align: center; margin-bottom: 20px;">
-                <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em; letter-spacing: 1px;">
-                    ${pendencia.descricao}
-                </small>
+                <p style="margin: 0; font-size: 0.8em; color: #475569; font-weight: 800; text-transform: uppercase;">${nomeExibicao}</p>
+                <div style="margin-top: 8px; background: #f1f5f9; padding: 10px; border-radius: 8px; border: 1px dashed #cbd5e1;">
+                    <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7em; line-height: 1.2;">
+                        <i class="fas fa-exclamation-triangle"></i> Problema Original:<br>
+                        "${pendencia.descricao}"
+                    </small>
+                </div>
             </div>
 
-            <div style="text-align: left; font-family: sans-serif;">
+            <div style="text-align: left; font-family: 'Inter', sans-serif;">
                 
-                ${!isChecklist ? `
+                ${(!isChecklist && pendencia.quantidade > 1) ? `
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
                     <label style="font-weight: 800; font-size: 0.75rem; color: #475569; text-transform: uppercase; margin: 0;">
-                        Unidades Resolvidas:
+                        Qtd a Resolver:
                     </label>
                     <input id="swal-res-qtd" type="number" value="${pendencia.quantidade}" min="1" max="${pendencia.quantidade}" 
-                           style="width: 70px; border: 2px solid ${corSucesso}; border-radius: 8px; padding: 5px; text-align: center; font-weight: 900; color: ${corSucesso}; outline: none;">
+                           style="width: 70px; height: 35px; border: 2px solid ${corSucesso}; border-radius: 8px; text-align: center; font-weight: 900; color: ${corSucesso}; outline: none;">
                 </div>
-                ` : ''}
+                ` : `<input id="swal-res-qtd" type="hidden" value="${pendencia.quantidade}">`}
 
                 <label style="display: block; font-weight: 800; font-size: 0.75rem; color: #475569; text-transform: uppercase; margin-bottom: 8px; margin-left: 5px;">
                     Justificativa da Solução:
                 </label>
                 <textarea id="swal-res-obs" placeholder="DESCREVA COMO O PROBLEMA FOI SANADO..." 
-                          style="width: 100%; height: 120px; border: 2px solid #cbd5e1; border-radius: 12px; padding: 12px; font-size: 0.9rem; text-transform: uppercase; box-sizing: border-box; outline: none; transition: border-color 0.3s;"></textarea>
+                          style="width: 100%; height: 130px; border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px; font-size: 0.9rem; text-transform: uppercase; box-sizing: border-box; outline: none; transition: all 0.3s;"></textarea>
             </div>
 
             <div style="display: flex; gap: 10px; margin-top: 25px; width: 100%;">
@@ -304,7 +388,7 @@ async function abrirFormularioResolucaoV3(pendencia, uid) {
                     <i class="fas fa-arrow-left"></i> VOLTAR
                 </button>
                 <button id="btn-confirmar-res" style="flex: 1; background: ${corSucesso}; color: white; border: none; padding: 15px; border-radius: 10px; font-weight: 800; font-size: 0.8rem; cursor: pointer; text-transform: uppercase; display: flex; align-items: center; justify-content: center; gap: 5px;">
-                    <i class="fas fa-check"></i> RESOLVER
+                    <i class="fas fa-check"></i> CONFIRMAR SOLUÇÃO
                 </button>
             </div>
         `,
@@ -315,16 +399,19 @@ async function abrirFormularioResolucaoV3(pendencia, uid) {
             popup: 'v3-popup-radius'
         },
         didOpen: () => {
-            // Foco automático na justificativa
             const textarea = document.getElementById('swal-res-obs');
-            if (textarea) textarea.focus();
+            if (textarea) {
+                textarea.focus();
+                // ✅ Efeito Focus Sigma
+                textarea.onfocus = () => textarea.style.borderColor = corSucesso;
+                textarea.onblur = () => textarea.style.borderColor = "#e2e8f0";
+            }
 
-            // Mapeamento dos botões customizados
             document.getElementById('btn-cancelar-res').onclick = () => Swal.close();
             document.getElementById('btn-confirmar-res').onclick = () => {
                 const obs = document.getElementById('swal-res-obs').value.trim();
                 if (obs.length < 5) {
-                    Swal.showValidationMessage("Descreva a solução (mín. 5 letras)");
+                    Swal.showValidationMessage("Descreva a solução detalhadamente.");
                     return;
                 }
                 Swal.clickConfirm();
@@ -333,21 +420,27 @@ async function abrirFormularioResolucaoV3(pendencia, uid) {
         preConfirm: () => {
             const obs = document.getElementById('swal-res-obs').value.trim();
             const qtdInput = document.getElementById('swal-res-qtd');
-            const qtd = isChecklist ? pendencia.quantidade : (qtdInput ? qtdInput.value : pendencia.quantidade);
 
             return {
-                qtd: parseInt(qtd),
+                qtd: parseInt(qtdInput.value),
                 obs: obs.toUpperCase()
             };
         }
     });
 
     if (resolucao) {
-        // Executa a lógica de banco
-        resolverID(pendencia.id, uid, resolucao.qtd, resolucao.obs);
+        // ✅ 2. PROCESSAMENTO TÉCNICO: Envia para o motor de baixa
+        resolverID(pendencia.id, uidAlvo, resolucao.qtd, resolucao.obs);
     } else {
-        // Se cancelar ou voltar, mantém o loop do Passo 3 reabrindo o modal pai
-        abrirModalPendenciaV3(uid, itRef ? itRef.tipo : 'single', nomeItem, itRef ? itRef.saldo : 0);
+        // ✅ 3. LOOP DE INTERFACE: Se o militar desistir, volta para o Gerenciador (Passo 3)
+        // Mantemos o tipo e saldo originais para não quebrar o modal pai
+        const tipoPai = itRef ? itRef.tipo : (uidAlvo.includes('_ac_') ? 'single' : 'single');
+        const saldoPai = itRef ? itRef.saldo : 0;
+        const nomePai = itRef ? itRef.nome : "Material";
+
+        if (typeof abrirModalPendenciaV3 === 'function') {
+            abrirModalPendenciaV3(uidAlvo, tipoPai, nomePai, saldoPai);
+        }
     }
 }
 
@@ -357,29 +450,44 @@ async function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
     const uidString = String(uid);
     const isChecklist = window.isModoChecklist;
 
-    // Buscamos o nome do item para manter o contexto no título/subtítulo
-    const dadosItem = buscarDadosItemPeloUid(uidString);
-    const nomeItem = dadosItem ? dadosItem.nome : "Item";
+    // ✅ BUSCA INTELIGENTE DE CONTEXTO V3
+    const dadosPai = buscarDadosItemPeloUid(uidString);
+
+    // Tentamos recuperar o nome específico do alvo (ex: "Cilindro") na memória de interação
+    // Se não houver (ex: erro no item principal), usamos o nome do Pai.
+    const statusLocal = window.itemStatus[uidString];
+    let nomeExibicao = dadosPai ? dadosPai.nome : "Item";
+
+    // Se o relato for temporário, o 'itemStatus' tem o nome exato do acessório que sofreu a alteração
+    if (statusLocal && statusLocal.pendencias_temporarias) {
+        const pnd = statusLocal.pendencias_temporarias.find(p => String(p.id) === String(pendenciaId));
+        if (pnd && pnd.nome_item_alvo) {
+            nomeExibicao = pnd.nome_item_alvo;
+        }
+    }
 
     const { value: formValues, dismiss } = await Swal.fire({
         title: `<span style="color: ${corEdicao}; font-size: 0.9em; font-weight: bold;"><i class="fas fa-edit"></i> Editar Relato</span>`,
-        width: '95%',
+        width: window.innerWidth > 600 ? '450px' : '95%',
         padding: '1em',
         html: `
             <div style="text-align: left; font-family: sans-serif; width: 100%; box-sizing: border-box;">
-                <p style="margin-bottom: 15px; font-size: 0.85em; color: #666; text-align: center;"><b>${nomeItem}</b></p>
+                <p style="margin-bottom: 15px; font-size: 0.85em; color: #64748b; text-align: center; text-transform: uppercase;">
+                    <small style="display:block; opacity:0.6; font-size:0.7em;">Alteração em:</small>
+                    <b>${nomeExibicao}</b>
+                </p>
                 
                 ${!isChecklist ? `
                 <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Quantidade:</label>
+                    <label style="display: block; font-weight: 800; font-size: 0.7em; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Quantidade:</label>
                     <input id="swal-input-qtd" type="number" class="swal2-input" value="${qtdAtual}" min="1" 
-                           style="width: 100%; margin: 5px 0 0 0; height: 40px; box-sizing: border-box;">
+                           style="width: 100%; margin: 0; height: 40px; border-radius: 8px; font-weight: bold;">
                 </div>
                 ` : ''}
 
-                <label style="display: block; font-weight: bold; font-size: 0.85em; color: #666;">Nova Descrição:</label>
+                <label style="display: block; font-weight: 800; font-size: 0.7em; color: #64748b; text-transform: uppercase; margin-bottom: 5px;">Descrição da Alteração:</label>
                 <textarea id="swal-input-obs" class="swal2-textarea" placeholder="Descreva a alteração..." 
-                          style="width: 100%; margin: 5px 0 0 0; min-height: 100px; text-transform: uppercase; font-size: 0.9em; box-sizing: border-box;">${descricaoAtual}</textarea>
+                          style="width: 100%; margin: 0; min-height: 120px; text-transform: uppercase; font-size: 0.9em; border-radius: 8px; padding: 10px;">${descricaoAtual}</textarea>
             </div>
         `,
         showCancelButton: true,
@@ -387,7 +495,7 @@ async function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
         cancelButtonText: 'VOLTAR',
         confirmButtonColor: corEdicao,
         reverseButtons: true,
-        backdrop: `rgba(15, 23, 42, 0.6)`, // Isola visualmente o modal de edição
+        backdrop: `rgba(15, 23, 42, 0.6)`,
         allowOutsideClick: false,
         didOpen: () => {
             const input = document.getElementById('swal-input-obs');
@@ -397,40 +505,39 @@ async function abrirModalEditar(pendenciaId, uid, qtdAtual, descricaoAtual) {
             }
         },
         preConfirm: () => {
-            const obs = document.getElementById('swal-input-obs').value;
+            const obs = document.getElementById('swal-input-obs').value.trim();
             const qtdInput = document.getElementById('swal-input-qtd');
-            const qtd = isChecklist ? 1 : (qtdInput ? qtdInput.value : 1);
+            const qtd = isChecklist ? 1 : (qtdInput ? parseInt(qtdInput.value) : 1);
 
-            if (!obs || obs.trim().length < 5) {
+            if (!obs || obs.length < 5) {
                 Swal.showValidationMessage('A descrição deve ter pelo menos 5 caracteres');
                 return false;
             }
-            return { qtd: parseInt(qtd), obs: obs.trim().toUpperCase() };
+            return { qtd, obs: obs.toUpperCase() };
         }
     });
 
-    // Se confirmou a edição
     if (formValues) {
         // Executa a edição na memória
         executarEdicaoRelato(pendenciaId, uidString, formValues.qtd, formValues.obs);
-        
-        // ✅ GARANTIA DE RETORNO APÓS EDIÇÃO
+
+        // Retorno ao modal principal (Passamos nomeExibicao para manter a coerência)
         setTimeout(() => {
-            abrirModalPendenciaV3(uidString, isChecklist ? 'single' : 'multi', nomeItem, (dadosItem ? dadosItem.saldo : 0));
-        }, 500); // Delay ligeiramente maior para o DOM respirar
-    } 
+            abrirModalPendenciaV3(uidString, isChecklist ? 'single' : 'multi', nomeExibicao, (dadosPai ? dadosPai.saldo : 0));
+        }, 300);
+    }
     else if (dismiss === Swal.DismissReason.cancel) {
-        // ✅ RETORNO AO CANCELAR
         setTimeout(() => {
-            abrirModalPendenciaV3(uidString, isChecklist ? 'single' : 'multi', nomeItem, (dadosItem ? dadosItem.saldo : 0));
+            abrirModalPendenciaV3(uidString, isChecklist ? 'single' : 'multi', nomeExibicao, (dadosPai ? dadosPai.saldo : 0));
         }, 100);
     }
 }
 
-/* --- Gera o alerta de segurança para deletar uma alteração recém-lançada --- */
+/* --- Gera o alerta de segurança para deletar uma alteração e limpa a memória do sistema --- */
 async function confirmarExclusaoRelato(pendenciaId, uid) {
     const uidAlvo = String(uid);
-    const itRef = buscarDadosItemPeloUid(uidAlvo);
+    // Busca dados do item para manter o contexto se precisar reabrir o modal
+    const itRef = typeof buscarDadosItemPeloUid === 'function' ? buscarDadosItemPeloUid(uidAlvo) : null;
 
     const result = await Swal.fire({
         title: 'Apagar Alteração?',
@@ -441,10 +548,9 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
         confirmButtonText: '<i class="fas fa-trash-alt"></i> SIM, APAGAR',
         cancelButtonText: 'CANCELAR',
         reverseButtons: true,
-        backdrop: `rgba(15, 23, 42, 0.6)` // Isolamento visual V3
+        backdrop: `rgba(15, 23, 42, 0.6)`
     });
 
-    // ✅ UX: Se cancelar, volta para o modal de gerenciamento mantendo o fluxo
     if (!result.isConfirmed) {
         if (itRef) {
             abrirModalPendenciaV3(uidAlvo, itRef.tipo, itRef.nome, itRef.saldo);
@@ -454,72 +560,104 @@ async function confirmarExclusaoRelato(pendenciaId, uid) {
 
     const fonteDados = window.dadosConferencia || [];
     let excluido = false;
-    let infoParaRetorno = { nome: itRef?.nome || "Item", tipo: itRef?.tipo || "single", saldo: 0, restantes: 0 };
+    let infoParaRetorno = {
+        nome: itRef?.nome || "Item",
+        tipo: itRef?.tipo || "single",
+        saldo: itRef?.saldo || 0,
+        restantes: 0
+    };
 
+    // ✅ 1. LIMPEZA NA FONTE DE DADOS (Persistência/Dataset)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            let alvos = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
-            alvos.forEach(alvo => {
-                const isMatch = (item.id === uidAlvo || item.uid_global === uidAlvo || `${item.id}-${alvo.tomb}` === uidAlvo || `${item.uid_global}-${alvo.tomb}` === uidAlvo);
-                
-                if (isMatch && alvo.pendencias_ids) {
-                    const index = alvo.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+            // Match prioritário por uid_instancia (DNA V3)
+            const idItemMestre = String(item.uid_instancia || item.uid_global || item.id);
+            const matchPrincipal = (idItemMestre === uidAlvo);
 
-                    if (index > -1) {
-                        alvo.pendencias_ids.splice(index, 1);
-                        excluido = true;
+            if (matchPrincipal && item.pendencias_ids) {
+                const index = item.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+                if (index > -1) {
+                    item.pendencias_ids.splice(index, 1);
+                    excluido = true;
+                }
+            }
 
-                        infoParaRetorno.restantes = alvo.pendencias_ids.length;
-                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
-                        const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
-                        infoParaRetorno.saldo = totalEsperado - totalLancado;
-
-                        // ✅ REGRA PASSO 3: Se apagou tudo, reseta a Interação Humana
-                        // O item volta a ser "pendente de conferência" real.
-                        if (alvo.pendencias_ids.length === 0) {
-                            delete window.itemStatus[uidAlvo];
-                            
-                            const elItem = document.getElementById(`item-row-${uidAlvo}`);
-                            if (elItem) {
-                                elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
-                                const btnAlert = elItem.querySelector('.btn-alert');
-                                const btnCheck = elItem.querySelector('.btn-check');
-                                if (btnAlert) btnAlert.classList.remove('active', 'v3-pulse-orange');
-                                if (btnCheck) btnCheck.classList.remove('active');
-                            }
+            // Busca profunda em tombamentos (Itens Multi não migrados ou sub-objetos)
+            if (item.tombamentos) {
+                item.tombamentos.forEach(t => {
+                    const uidComp = `${item.uid_global || item.id}-${t.tomb}`;
+                    if (uidComp === uidAlvo && t.pendencias_ids) {
+                        const indexT = t.pendencias_ids.findIndex(p => String(p.id) === String(pendenciaId));
+                        if (indexT > -1) {
+                            t.pendencias_ids.splice(indexT, 1);
+                            excluido = true;
                         }
                     }
-                }
-            });
+                });
+            }
         });
     });
 
-    if (excluido) {
-        updateOverallStatus();
+    // ✅ 2. LIMPEZA NA MEMÓRIA TEMPORÁRIA (pendencias_temporarias)
+    // Essencial para remover o carimbo azul "✨ NOVO RELATO"
+    const statusLocal = window.itemStatus[uidAlvo];
+    if (statusLocal && statusLocal.pendencias_temporarias) {
+        const indexTemp = statusLocal.pendencias_temporarias.findIndex(p => String(p.id) === String(pendenciaId));
+        if (indexTemp > -1) {
+            statusLocal.pendencias_temporarias.splice(indexTemp, 1);
+            excluido = true;
+        }
+    }
 
-        // ✅ FEEDBACK E RETORNO SINCRONIZADO
+    if (excluido) {
+        // ✅ 3. CONTROLE DE ESTADO: Calcula se o item ainda possui algum problema relatado
+        const pRestantesBanco = fonteDados.reduce((acc, setor) => {
+            const it = setor.itens.find(i => (i.uid_instancia || i.uid_global || i.id) === uidAlvo);
+            return acc + (it?.pendencias_ids?.length || 0);
+        }, 0);
+
+        const pRestantesTemp = window.itemStatus[uidAlvo]?.pendencias_temporarias?.length || 0;
+        infoParaRetorno.restantes = pRestantesBanco + pRestantesTemp;
+
+        // Se o item ficou "limpo", removemos o alerta visual da interface principal
+        if (infoParaRetorno.restantes === 0) {
+            delete window.itemStatus[uidAlvo];
+
+            const elItem = document.getElementById(`item-row-${uidAlvo}`);
+            if (elItem) {
+                elItem.classList.remove('status-alert', 'status-ok', 'has-carimbo');
+                elItem.style.backgroundColor = "";
+                elItem.style.borderLeft = "";
+                const btnAlert = elItem.querySelector('.btn-alert');
+                if (btnAlert) btnAlert.classList.remove('active', 'v3-pulse-orange');
+            }
+        }
+
+        // Sincroniza a barra de progresso global
+        if (typeof updateOverallStatus === 'function') updateOverallStatus();
+
+        // ✅ 4. FEEDBACK E REABERTURA
         const Toast = Swal.mixin({
             toast: true,
             position: 'top-end',
             showConfirmButton: false,
-            timer: 1500
+            timer: 1000
         });
 
         Toast.fire({ icon: 'success', title: 'Relato removido' });
 
-        // Espera o Toast e o modal de confirmação sumirem totalmente
         setTimeout(() => {
-            // Reabre o gerenciador se ainda houver o que gerenciar
-            // Se não houver mais nada, o sistema naturalmente volta para a tela de itens
+            // Reabre o gerenciador se ainda houver o que gerenciar (Passo 3)
             if (infoParaRetorno.restantes > 0) {
                 abrirModalPendenciaV3(uidAlvo, infoParaRetorno.tipo, infoParaRetorno.nome, infoParaRetorno.saldo);
             }
-        }, 600); 
+        }, 400);
     }
 }
 
 /* --- Função de apoio que gera o objeto de pendência (TEMP-...) com carimbo de autoria e insere na memória do sistema --- */
-function salvarNovoID(uid, qtd, tipo, obsModal = null, uidPai = null) {
+/* --- SALVAR NOVO RELATO (DNA V3 - RASTREABILIDADE TOTAL) --- */
+function salvarNovoID(uid, qtd, tipo, obsModal = null, uidPai = null, nomeItemAlvo = "") {
     const obsDigitada = obsModal ? obsModal.trim().toUpperCase() : "";
     const qtdInformada = parseInt(qtd) || 1;
     const militarInfoEl = document.getElementById('militar-info');
@@ -527,49 +665,44 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null, uidPai = null) {
     // 1. CAPTURA DE ASSINATURA SEGURA
     let nomeAssinatura = militarInfoEl ? militarInfoEl.innerText.split('\n')[0].replace('Conferente:', '').trim() : "";
     if (!nomeAssinatura) {
-        nomeAssinatura = `${window.userInfo.postoGraduacao} ${window.userInfo.quadro} ${window.userInfo.nomeGuerra}`;
+        nomeAssinatura = `${window.userInfo?.postoGraduacao || ""} ${window.userInfo?.quadro || ""} ${window.userInfo?.nomeGuerra || "SISTEMA"}`.trim();
     }
 
-    // 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA TEMPORÁRIA
+    // ✅ 2. CRIAÇÃO DO OBJETO DE PENDÊNCIA (Com metadados de rastreabilidade V3)
+    // O uid_alvo_direto agora é a chave para o histórico de vida individual
     const novoID = {
         id: "TEMP-" + Date.now(),
         tipo: "PENDENCIA",
         data_criacao: new Date().toLocaleDateString('pt-BR'),
-        autor_uid: String(window.userInfo.uid || "S_UID"),
+        autor_uid: String(window.userInfo?.uid || "S_UID"),
         autor_nome: nomeAssinatura,
         descricao: obsDigitada,
         quantidade: qtdInformada,
         status_gestao: "PENDENTE",
-        id_pai: uidPai // Vínculo hierárquico para Kits
+        id_pai: uidPai, // Chave do Anfitrião (Ex: Suporte Dorsal)
+        uid_alvo_direto: uid, // Chave do Componente Real (Ex: Cilindro)
+        nome_item_alvo: nomeItemAlvo.toUpperCase()
     };
 
     let itemEncontrado = false;
     const fonteDados = window.dadosConferencia || [];
+    const alvoBusca = String(uidPai || uid);
 
-    // 3. BUSCA E INSERÇÃO NO DATASET EM MEMÓRIA
+    // 3. BUSCA E INSERÇÃO NO DATASET (DNA V3)
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            const isChecklist = window.isModoChecklist;
-            const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
-            const matchesID = (String(idRealDoItem) === String(uid));
+            const idRealDoItem = String(item.uid_instancia || item.uid_global || item.id);
 
-            // Caso A: Item Single ou o próprio Anfitrião
-            if (['single', 'texto_livre', 'upload_foto'].includes(item.tipo) && matchesID) {
+            if (idRealDoItem === alvoBusca) {
                 if (!item.pendencias_ids) item.pendencias_ids = [];
                 item.pendencias_ids.push(novoID);
                 itemEncontrado = true;
             }
-            // Caso B: Registro em Acessório (Vincula a pendência ao array do Pai para persistência)
-            else if (uidPai && (String(idRealDoItem) === String(uidPai))) {
-                if (!item.pendencias_ids) item.pendencias_ids = [];
-                item.pendencias_ids.push(novoID);
-                itemEncontrado = true;
-            }
-            // Caso C: Item Multi (Tombamentos)
-            else if (item.tipo === 'multi' && item.tombamentos) {
+
+            if (!itemEncontrado && item.tombamentos) {
                 item.tombamentos.forEach(t => {
-                    const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
-                    if (String(uid) === uidComposto) {
+                    const uidComposto = String(`${item.uid_global || item.id}-${t.tomb}`);
+                    if (alvoBusca === uidComposto) {
                         if (!t.pendencias_ids) t.pendencias_ids = [];
                         t.pendencias_ids.push(novoID);
                         itemEncontrado = true;
@@ -580,71 +713,69 @@ function salvarNovoID(uid, qtd, tipo, obsModal = null, uidPai = null) {
     });
 
     if (itemEncontrado) {
-        // 4. ATUALIZAÇÃO DO STATUS DE INTERAÇÃO (DNA V3)
-        const uidStr = String(uid);
-        const uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
+        // 4. ATUALIZAÇÃO DO STATUS DE INTERAÇÃO (Interface V3)
+        const uidInteracao = alvoBusca;
 
-        window.itemStatus[uid] = {
-            ...window.itemStatus[uid],
+        if (!window.itemStatus[uidInteracao]) window.itemStatus[uidInteracao] = {};
+        if (!window.itemStatus[uidInteracao].pendencias_temporarias) {
+            window.itemStatus[uidInteracao].pendencias_temporarias = [];
+        }
+
+        window.itemStatus[uidInteracao].pendencias_temporarias.push(novoID);
+
+        window.itemStatus[uidInteracao] = {
+            ...window.itemStatus[uidInteracao],
             status: 'C/A',
             interacao_humana: true,
-            obs: obsDigitada,
-            quantidade: qtdInformada,
-            uid_global_ref: uidGlobalFull,
-            id_pai: uidPai 
+            ultimo_alvo_relatado: uid,
+            nome_alvo_relatado: nomeItemAlvo.toUpperCase()
         };
 
-        // 5. FEEDBACK VISUAL NO CARD (CIRÚRGICO)
-        // Se for um acessório, o card físico a ser alterado é o do PAI
-        const idCardParaProcurar = uidPai || uid;
-        const row = document.getElementById(`item-row-${idCardParaProcurar}`);
-        
+        // 5. PINTURA DO CARD NO DOM
+        const row = document.getElementById(`item-row-${uidInteracao}`);
         if (row) {
             row.classList.remove('status-ok');
             row.classList.add('status-alert');
+            row.style.setProperty('background-color', '#fff5f5', 'important');
+            row.style.setProperty('border-left', '6px solid #e20b0b', 'important');
 
             const btnAlert = row.querySelector('.btn-alert');
             const btnCheck = row.querySelector('.btn-check');
-            
-            if (btnAlert) {
-                btnAlert.classList.add('active');
-                btnAlert.classList.remove('v3-pulse-orange');
-                btnAlert.style.backgroundColor = "#f57c00"; // Cor de destaque manual para fixar o alerta
-            }
+
+            if (btnAlert) btnAlert.classList.add('active');
             if (btnCheck) btnCheck.classList.remove('active');
 
-            // Efeito flash para confirmar que o sistema processou o clique
             row.style.transition = "background 0.3s";
-            row.style.background = "rgba(245, 124, 0, 0.15)"; 
+            row.style.background = "rgba(226, 11, 11, 0.1)";
             setTimeout(() => row.style.background = "", 800);
         }
 
-        // 6. ATUALIZAÇÃO SÍNCRONA DE PROGRESSO
         if (typeof updateOverallStatus === 'function') updateOverallStatus();
-        console.log(`✅ Relato salvo com sucesso para: ${uid} ${uidPai ? '(Pai: ' + uidPai + ')' : ''}`);
+        console.log(`✅ [V3] Relato salvo para componente: ${nomeItemAlvo}`);
 
     } else {
-        console.error("V3 Error: Falha crítica ao vincular relato.", { uid, uidPai });
-        Swal.fire("Erro Interno", "Não foi possível localizar o item para salvar o relato.", "error");
+        console.error("❌ [V3] Erro: Item mestre não localizado para salvamento.", { alvoBusca });
+        Swal.fire("Erro de Sincronia", "Não localizamos o item pai na lista atual.", "error");
     }
 }
 
 /* --- Processa a baixa de uma pendência na memória, movendo o saldo de "pendente" para "ok" e registrando o histórico de solução --- */
-function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
+async function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
     const qtdResolvida = parseInt(qtdResolvidaModal) || 1;
     const justificativa = justificativaModal ? justificativaModal.trim().toUpperCase() : "";
-    const nomeResolutor = `${window.userInfo.postoGraduacao} ${window.userInfo.quadro} ${window.userInfo.nomeGuerra}`;
+    const nomeResolutor = `${window.userInfo?.postoGraduacao || ""} ${window.userInfo?.quadro || ""} ${window.userInfo?.nomeGuerra || "SISTEMA"}`.trim();
     const fonteDados = window.dadosConferencia || [];
-    const isChecklist = window.isModoChecklist;
     let acaoConcluida = false;
-    let pendenciasRestantes = 0;
-    let itemContexto = null; 
+    let itemContexto = null;
 
     const idProcurado = String(pendenciaId);
     const isResolvendoAvaria = idProcurado.startsWith('AVARIA-');
 
-    // --- LÓGICA DE BAIXA NO OBJETO (REVISADA) ---
+    // --- LÓGICA DE BAIXA NO OBJETO (REVISADA V3) ---
     function executarBaixaNoObjeto(obj) {
+        if (!obj) return false;
+
+        // Caso 1: Resolvendo Avaria de Cautela
         if (isResolvendoAvaria) {
             if (!obj.historico_vida) obj.historico_vida = [];
             obj.historico_vida.push({
@@ -661,6 +792,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
             return true;
         }
 
+        // Caso 2: Resolvendo Pendência Comum
         if (!obj.pendencias_ids) return false;
         const index = obj.pendencias_ids.findIndex(p => String(p.id) === idProcurado);
 
@@ -679,7 +811,7 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         };
 
         if (qtdResolvida >= pOriginal.quantidade) {
-            pOriginal.status_gestao = 'RESOLVIDO'; 
+            pOriginal.status_gestao = 'RESOLVIDO';
             pOriginal.justificativa_solucao = justificativa;
             pOriginal.data_solucao = new Date().toLocaleString('pt-BR');
             pOriginal.resolvido_por = nomeResolutor;
@@ -688,83 +820,107 @@ function resolverID(pendenciaId, uid, qtdResolvidaModal, justificativaModal) {
         }
 
         obj.historico_vida.push(registroHistorico);
-        pendenciasRestantes = obj.pendencias_ids.filter(p => p.status_gestao !== 'RESOLVIDO').length;
         return true;
     }
 
-    // --- BUSCA E APLICAÇÃO ---
+    // --- BUSCA RECURSIVA (DNA V3 - ESCANEAMENTO DE HIERARQUIA) ---
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
-            const idRealDoItem = isChecklist ? item.id : (item.uid_global || item.id);
-            const isMatch = (String(idRealDoItem) === String(uid));
+            const idMestre = String(item.uid_instancia || item.uid_global || item.id);
 
-            if (isMatch) {
-                itemContexto = item;
-                acaoConcluida = executarBaixaNoObjeto(item);
-            } else if (item.tombamentos) {
-                item.tombamentos.forEach(t => {
-                    const uidComposto = `${item.uid_global || item.id}-${t.tomb}`;
-                    if (String(uid) === uidComposto) {
+            // Verifica se o alvo é o item principal ou seus acessórios
+            if (idMestre === String(uid) || String(uid).startsWith(idMestre + "_ac_")) {
+
+                // Tenta resolver no Pai
+                if (executarBaixaNoObjeto(item)) {
+                    acaoConcluida = true;
+                    itemContexto = item;
+                }
+
+                // Tenta resolver nos Acessórios do Pai
+                const filhos = item.acessorios_vinculados || item.acessorios_acoplados || [];
+                filhos.forEach(ac => {
+                    if (executarBaixaNoObjeto(ac)) {
+                        acaoConcluida = true;
                         itemContexto = item;
-                        acaoConcluida = executarBaixaNoObjeto(t);
                     }
                 });
+
+                // Se for item multi, verifica tombamentos e seus respectivos acessórios
+                if (item.tombamentos) {
+                    item.tombamentos.forEach(t => {
+                        const uidTomb = `${item.uid_global || item.id}-${t.tomb}`;
+                        if (uidTomb === String(uid) || String(uid).startsWith(uidTomb + "_ac_")) {
+                            if (executarBaixaNoObjeto(t)) {
+                                acaoConcluida = true;
+                                itemContexto = item;
+                            }
+                            const filhosT = t.acessorios_vinculados || [];
+                            filhosT.forEach(acT => {
+                                if (executarBaixaNoObjeto(acT)) {
+                                    acaoConcluida = true;
+                                    itemContexto = item;
+                                }
+                            });
+                        }
+                    });
+                }
             }
         });
     });
 
     if (acaoConcluida) {
-        // ✅ REFORÇO DE MEMÓRIA: Sincronização prévia
+        // ✅ REFORÇO DE MEMÓRIA HIERÁRQUICA
         if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
-        
-        const uidStr = String(uid);
-        let uidGlobalFull = isChecklist ? "ITEM_VISTORIA_LIVRE" : (uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0]);
 
-        window.itemStatus[uid].status = 'C/A';
+        const checkAtivas = (obj) => (obj.pendencias_ids || []).some(p => p.status_gestao !== 'RESOLVIDO');
+
+        // Verifica se ainda resta algum problema no Pai ou em QUALQUER um dos seus Filhos
+        let aindaTemProblema = checkAtivas(itemContexto);
+        const todosFilhos = itemContexto.acessorios_vinculados || itemContexto.acessorios_acoplados || [];
+        if (todosFilhos.some(ac => checkAtivas(ac))) aindaTemProblema = true;
+
+        const temNovas = (window.itemStatus[uid].pendencias_temporarias || []).length > 0;
+
+        // Atualiza status visual e lógico
+        window.itemStatus[uid].status = (aindaTemProblema || temNovas) ? 'C/A' : 'ok';
         window.itemStatus[uid].interacao_humana = true;
-        window.itemStatus[uid].uid_global_ref = uidGlobalFull;
 
         if (window.itemStatus[uid].ids_mantidos) {
             window.itemStatus[uid].ids_mantidos = window.itemStatus[uid].ids_mantidos.filter(id => String(id) !== idProcurado);
         }
 
-        // Feedback visual na linha
         const row = document.getElementById(`item-row-${uid}`);
         if (row) {
             row.style.backgroundColor = "#dcfce7";
             setTimeout(() => row.style.backgroundColor = "", 1500);
         }
 
-        // ✅ FECHAMENTO LIMPO: Destruímos o modal de justificativa
         Swal.close();
 
-        // ✅ REABERTURA CONTROLADA: Aumentamos o delay para 500ms para estabilizar o DOM
+        // Reabre o modal atualizado
         setTimeout(async () => {
-            // Sincronizamos a barra antes de abrir o próximo modal
             if (typeof updateOverallStatus === 'function') updateOverallStatus();
 
-            const itRef = buscarDadosItemPeloUid(uid);
+            const itRef = typeof buscarDadosItemPeloUid === 'function' ? buscarDadosItemPeloUid(uid) : null;
             const nomeParaModal = itRef ? itRef.nome : (itemContexto ? itemContexto.nome : "Item");
             const saldoParaModal = itRef ? itRef.saldo : 0;
 
-            // Reabre o gerenciador (prioridade para o escopo window)
-            const abrirModal = window.abrirModalPendenciaV3 || abrirModalPendenciaV3;
-            if (typeof abrirModal === 'function') {
-                await abrirModal(uid, itemContexto.tipo, nomeParaModal, saldoParaModal);
+            if (typeof abrirModalPendenciaV3 === 'function') {
+                await abrirModalPendenciaV3(uid, itemContexto.tipo, nomeParaModal, saldoParaModal);
             }
-            
-            // Notificação de sucesso
-            Swal.mixin({ 
-                toast: true, 
-                position: 'top-end', 
-                showConfirmButton: false, 
-                timer: 2000 
+
+            Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 2000
             }).fire({ icon: 'success', title: 'Solução registrada!' });
 
-        }, 500); 
+        }, 500);
 
     } else {
-        Swal.fire('Erro', 'Não foi possível localizar o registro.', 'error');
+        Swal.fire('Erro de Sincronia', 'Não foi possível localizar o registro para baixa nesta hierarquia.', 'error');
     }
 }
 
@@ -775,47 +931,93 @@ function manterID(pendenciaId, uid, index) {
         window.itemStatus[uid] = {
             status: 'C/A',
             ids_mantidos: [],
+            pendencias_originais_mantidas: [],
             interacao_humana: true
         };
     }
 
     if (!window.itemStatus[uid].ids_mantidos) {
         window.itemStatus[uid].ids_mantidos = [];
+        window.itemStatus[uid].pendencias_originais_mantidas = [];
     }
 
-    // 2. REGISTRO DO ID MANTIDO (DNA SEGURO)
+    // 2. BUSCA E CAPTURA O OBJETO DA PENDÊNCIA (RASTREABILIDADE CIRÚRGICA)
     const idStr = String(pendenciaId);
+
+    // Se já foi mantido nesta sessão, não duplicamos
     if (!window.itemStatus[uid].ids_mantidos.includes(idStr)) {
         window.itemStatus[uid].ids_mantidos.push(idStr);
+
+        // ✅ BUSCA HIERÁRQUICA (DNA V3): Varre Pais, Filhos e Tombamentos
+        const fonte = window.dadosConferencia || [];
+        let objetoEncontrado = null;
+
+        fonte.forEach(setor => {
+            setor.itens.forEach(it => {
+                const idMestre = String(it.uid_instancia || it.uid_global || it.id);
+
+                // Só entra se o UID for relacionado a este conjunto (Pai ou Filho)
+                if (idMestre === String(uid) || String(uid).startsWith(idMestre + "_ac_")) {
+
+                    // A) Busca no Pai e nos Acessórios do Pai
+                    const subLista = [it, ...(it.acessorios_vinculados || []), ...(it.acessorios_acoplados || [])];
+                    subLista.forEach(ent => {
+                        if (ent.pendencias_ids && !objetoEncontrado) {
+                            const p = ent.pendencias_ids.find(pnd => String(pnd.id) === idStr);
+                            if (p) objetoEncontrado = p;
+                        }
+                    });
+
+                    // B) Busca em Tombamentos e seus respectivos acessórios (Caso 517/518)
+                    if (!objetoEncontrado && it.tombamentos) {
+                        it.tombamentos.forEach(t => {
+                            const uidComp = `${it.uid_global || it.id}-${t.tomb}`;
+                            if (uidComp === String(uid) || String(uid).startsWith(uidTomb + "_ac_")) {
+                                const subListaT = [t, ...(t.acessorios_vinculados || [])];
+                                subListaT.forEach(entT => {
+                                    if (entT.pendencias_ids && !objetoEncontrado) {
+                                        const pT = entT.pendencias_ids.find(pnd => String(pnd.id) === idStr);
+                                        if (pT) objetoEncontrado = pT;
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }
+            });
+        });
+
+        if (objetoEncontrado) {
+            // Guarda o objeto original para que o Bloco 1 do salvar saiba o que imprimir no PDF
+            window.itemStatus[uid].pendencias_originais_mantidas.push(objetoEncontrado);
+        }
     }
 
     // 3. ATUALIZAÇÃO DO ESTADO GLOBAL DO ITEM (DNA V3)
     window.itemStatus[uid].status = 'C/A';
     window.itemStatus[uid].interacao_humana = true;
 
-    // VÍNCULO COM O UID GLOBAL COMPLETO
+    // Normalização de UID Global para Inventário
     if (!window.itemStatus[uid].uid_global_ref) {
         const uidStr = String(uid);
-        const isChecklist = window.isModoChecklist;
-        const uidGlobalFull = isChecklist ? "ITEM_VISTORIA_LIVRE" : (uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0]);
+        const partes = uidStr.split('-');
+        const uidGlobalFull = partes.length > 4 ? partes.slice(0, -1).join('-') : uidStr;
         window.itemStatus[uid].uid_global_ref = uidGlobalFull;
     }
 
-    // ✅ 4. FEEDBACK VISUAL NO BOTÃO DENTRO DO MODAL
+    // 4. FEEDBACK VISUAL NO BOTÃO DENTRO DO MODAL
     const btnModal = document.getElementById(`btn-manter-${index}`);
     if (btnModal) {
-        btnModal.classList.add('active'); // Faz o botão "acender" (Verde via CSS)
+        btnModal.classList.add('active');
         const icon = btnModal.querySelector('i');
-        if (icon) {
-            icon.className = 'fas fa-check-double'; // Troca o ícone para check duplo
-        }
-        
-        // Pequena animação de "click" no botão do modal
-        btnModal.style.transform = "scale(1.2)";
+        if (icon) icon.className = 'fas fa-check-double';
+
+        btnModal.style.transform = "scale(1.15)";
+        btnModal.style.transition = "transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)";
         setTimeout(() => btnModal.style.transform = "scale(1)", 200);
     }
 
-    // 5. FEEDBACK VISUAL NA LINHA (TELA 2 AO FUNDO)
+    // 5. FEEDBACK VISUAL NA LINHA (TELA AO FUNDO)
     const row = document.getElementById(`item-row-${uid}`);
     if (row) {
         row.classList.remove('status-ok');
@@ -825,20 +1027,20 @@ function manterID(pendenciaId, uid, index) {
         if (btnAlert) {
             btnAlert.classList.add('active');
             btnAlert.classList.remove('v3-pulse-orange');
-            btnAlert.style.backgroundColor = ""; 
         }
 
         row.style.transition = "transform 0.2s ease, background-color 0.3s ease";
-        row.style.transform = "scale(1.02)";
-        row.style.backgroundColor = "rgba(245, 124, 0, 0.1)"; 
-        
+        row.style.transform = "scale(1.01)";
+        row.style.backgroundColor = "rgba(245, 124, 0, 0.05)";
+
         setTimeout(() => {
             row.style.transform = "scale(1)";
             row.style.backgroundColor = "";
         }, 300);
     }
 
-    console.log(`✅ Pendência ${idStr} mantida e interface atualizada.`);
+    if (typeof updateOverallStatus === 'function') updateOverallStatus();
+    console.log(`✅ [V3] Pendência ${idStr} mantida e capturada para o PDF em ${uid}.`);
 }
 
 /* --- Exibe um resumo rápido dos dados de emissão de uma cautela específica para consulta rápida durante o recebimento --- */
@@ -1001,77 +1203,111 @@ function processarAcaoFinalModal() {
     }
 }
 
+/* --- Processa a alteração de um relato na memória antes da publicação final --- */
 function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
-    const fonteDados = window.dadosConferencia || dadosConferencia;
-    let editado = false;
-    const idProcurado = String(pendenciaId);
+    const fonteDados = window.dadosConferencia || [];
     const uidAlvo = String(uid);
+    const idProcurado = String(pendenciaId);
+    let editado = false;
 
     // Variáveis para garantir a reabertura correta do modal
     let nomeParaModal = "";
     let tipoParaModal = "single";
     let saldoParaModal = 0;
 
-    fonteDados.forEach(setor => {
-        setor.itens.forEach(item => {
-            let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
+    // ✅ 1. BUSCA E EDIÇÃO NA MEMÓRIA TEMPORÁRIA (DNA V3)
+    // Verifica se o relato é um "TEMP-" recém-criado nesta sessão
+    const statusLocal = window.itemStatus[uidAlvo];
+    if (statusLocal && statusLocal.pendencias_temporarias) {
+        const pndTemp = statusLocal.pendencias_temporarias.find(p => String(p.id) === idProcurado);
+        if (pndTemp) {
+            pndTemp.quantidade = parseInt(novaQtd) || 0;
+            pndTemp.descricao = novaObs.trim().toUpperCase();
+            editado = true;
 
-            alvosParaVerificar.forEach(alvo => {
-                if (alvo.pendencias_ids && Array.isArray(alvo.pendencias_ids)) {
-                    const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
-                    if (p) {
-                        p.descricao = novaObs.trim().toUpperCase();
-                        p.quantidade = parseInt(novaQtd) || 0;
-                        editado = true;
+            // Metadados para reabertura (fallback caso não ache na fonte principal)
+            nomeParaModal = statusLocal.nome_alvo_relatado || "Item";
+        }
+    }
 
-                        // Captura metadados para o retorno exato
-                        nomeParaModal = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
-                        tipoParaModal = item.tipo;
+    // ✅ 2. BUSCA E EDIÇÃO NA FONTE DE DADOS (Persistência/Histórico)
+    if (!editado) {
+        fonteDados.forEach(setor => {
+            setor.itens.forEach(item => {
+                // Match resiliente: uid_instancia (Mestre) ou global
+                const isMatchItem = (item.uid_instancia === uidAlvo || item.uid_global === uidAlvo || item.id === uidAlvo);
 
-                        const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
-                        const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
-                        saldoParaModal = totalEsperado - totalLancado;
+                let alvosParaVerificar = (item.tipo === 'multi' && item.tombamentos) ? item.tombamentos : [item];
 
-                        if (window.itemStatus[uidAlvo]) {
-                            window.itemStatus[uidAlvo].obs = p.descricao;
-                            window.itemStatus[uidAlvo].quantidade = p.quantidade;
-                            window.itemStatus[uidAlvo].interacao_humana = true;
+                alvosParaVerificar.forEach(alvo => {
+                    // Se for multi, o uidAlvo deve bater com o composto ID-TOMB
+                    const uidComposto = item.tipo === 'multi' ? `${item.uid_global || item.id}-${alvo.tomb}` : (item.uid_instancia || item.uid_global || item.id);
+
+                    if (uidComposto === uidAlvo && alvo.pendencias_ids) {
+                        const p = alvo.pendencias_ids.find(pend => String(pend.id) === idProcurado);
+                        if (p) {
+                            p.descricao = novaObs.trim().toUpperCase();
+                            p.quantidade = parseInt(novaQtd) || 0;
+                            editado = true;
+
+                            // Captura metadados exatos do item pai
+                            nomeParaModal = item.nome + (item.tipo === 'multi' ? ` (${alvo.tomb})` : "");
+                            tipoParaModal = item.tipo;
+
+                            const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 1);
+                            const totalLancado = alvo.pendencias_ids.reduce((s, pnd) => s + (pnd.quantidade || 0), 0);
+                            saldoParaModal = totalEsperado - totalLancado;
+
+                            // Sincroniza o itemStatus para manter o card atualizado
+                            if (window.itemStatus[uidAlvo]) {
+                                window.itemStatus[uidAlvo].obs = p.descricao;
+                                window.itemStatus[uidAlvo].quantidade = p.quantidade;
+                                window.itemStatus[uidAlvo].interacao_humana = true;
+                            }
                         }
                     }
-                }
+                });
             });
         });
-    });
+    }
 
     if (editado) {
-        // Atualiza a interface de fundo
-        renderizarConferencia();
-        updateOverallStatus();
+        // Sincroniza UI de fundo
+        if (typeof renderizarConferencia === 'function') renderizarConferencia();
+        if (typeof updateOverallStatus === 'function') updateOverallStatus();
 
-        // ✅ CORREÇÃO CIRÚRGICA: Limpa o alerta de sucesso anterior e reabre o gerenciador
+        // ✅ FECHAMENTO E REABERTURA FLUIDA
         Swal.close();
 
         setTimeout(() => {
-            // Reabre o modal de gerenciamento com os dados atualizados
-            abrirModalPendenciaV3(uidAlvo, tipoParaModal, nomeParaModal, saldoParaModal);
+            // Busca dados atualizados para garantir que o saldo no modal esteja correto
+            const itRef = typeof buscarDadosItemPeloUid === 'function' ? buscarDadosItemPeloUid(uidAlvo) : null;
+            const finalNome = itRef ? itRef.nome : nomeParaModal;
+            const finalSaldo = itRef ? itRef.saldo : saldoParaModal;
 
-            // Toast de confirmação discreto sobreposto ao modal reaberto
-            const Toast = Swal.mixin({
+            // Reabre o gerenciador (Passo 3)
+            if (typeof abrirModalPendenciaV3 === 'function') {
+                abrirModalPendenciaV3(uidAlvo, tipoParaModal, finalNome, finalSaldo);
+            }
+
+            // Toast discreto de confirmação
+            Swal.fire({
                 toast: true,
                 position: 'top-end',
+                icon: 'success',
+                title: 'Relato atualizado!',
                 showConfirmButton: false,
-                timer: 2000,
+                timer: 1500,
                 timerProgressBar: true
             });
-            Toast.fire({ icon: 'success', title: 'Relato atualizado!' });
-        }, 150); // Delay reduzido para maior fluidez
+        }, 150);
 
     } else {
-        console.error("V3 Error: Pendência " + idProcurado + " não encontrada.");
+        console.error("❌ Erro V3: Pendência não localizada.", { idProcurado, uidAlvo });
         Swal.fire({
             icon: 'error',
             title: 'Erro ao salvar',
-            text: 'O registro original não foi localizado na memória.',
+            text: 'Não foi possível localizar o registro original na memória.',
             confirmButtonColor: '#800020'
         });
     }
@@ -1079,67 +1315,70 @@ function executarEdicaoRelato(pendenciaId, uid, novaQtd, novaObs) {
 
 function setItemStatusID(btn, status, uid) {
     // 1. GARANTIA DE OBJETO DE MEMÓRIA
+    if (!window.itemStatus) window.itemStatus = {};
     if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
 
     const isChecklist = window.isModoChecklist;
     const uidStr = String(uid);
 
-    // ✅ AJUSTE V3: Definição inteligente da referência global
-    // Se for checklist, a referência global é o ID genérico. Se não, extrai o ID do inventário.
-    let uidGlobalFull = "";
-    if (isChecklist) {
-        uidGlobalFull = "ITEM_VISTORIA_LIVRE";
-    } else {
-        uidGlobalFull = uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0];
-    }
+    // ✅ NORMALIZAÇÃO PARA UID GLOBAL (DNA do Banco): 
+    // Remove o sufixo de tombamento ou acessório para encontrar o ID da Família no inventário
+    let uidGlobalFull = isChecklist ? "ITEM_VISTORIA_LIVRE" :
+        (uidStr.includes('FAM-') ? uidStr.split('-').slice(0, 4).join('-') : uidStr.split('-')[0]);
 
-    // 2. LÓGICA DE ATUALIZAÇÃO POR STATUS
+    // 2. ATUALIZAÇÃO DO ESTADO EM MEMÓRIA
+    window.itemStatus[uid] = {
+        ...window.itemStatus[uid],
+        status: status,
+        interacao_humana: true,
+        uid_global_ref: uidGlobalFull
+    };
+
+    // ✅ 3. LOCALIZAÇÃO DO ALVO VISUAL (Fiel ao novo ID Único)
+    // Se vier de um acessório interno do Kit (_ac_), precisamos subir para o card pai.
+    // Se for o ID Único (Com tombamento), o document.getElementById vai direto ao ponto.
+    const uidCardFisico = uidStr.includes('_ac_') ? uidStr.split('_ac_')[0] : uidStr;
+    const row = document.getElementById(`item-row-${uidCardFisico}`);
+
+    // 4. LÓGICA DE ATUALIZAÇÃO VISUAL
     if (status === 'ok') {
-        window.itemStatus[uid] = {
-            ...window.itemStatus[uid],
-            status: 'ok',
-            interacao_humana: true,
-            uid_global_ref: uidGlobalFull
-        };
-
-        const row = document.getElementById(`item-row-${uid}`);
         if (row) {
+            // ✅ PINTURA ATÔMICA: Feedback visual instantâneo e garantido
             row.classList.remove('status-alert');
             row.classList.add('status-ok');
 
-            const btnCheck = row.querySelector('.btn-check');
-            const btnAlert = row.querySelector('.btn-alert');
-            if (btnCheck) btnCheck.classList.add('active');
-            if (btnAlert) btnAlert.classList.remove('active');
+            row.style.setProperty('background-color', '#f0fdf4', 'important');
+            row.style.setProperty('border-left', '6px solid #1b8a3e', 'important');
 
-            // Remove o fundo de alerta caso existisse
-            row.style.backgroundColor = "";
+            const bCheck = row.querySelector('.btn-check');
+            const bAlert = row.querySelector('.btn-alert');
+
+            if (bCheck) bCheck.classList.add('active');
+            if (bAlert) {
+                bAlert.classList.remove('active', 'v3-pulse-orange');
+                bAlert.style.backgroundColor = "";
+            }
+
+            // Sincroniza a barra neon superior
+            if (typeof updateOverallStatus === 'function') {
+                updateOverallStatus();
+            }
         }
 
-        verificarFluxoSetor(uid);
-
     } else if (status === 'cautela_ciente') {
-        window.itemStatus[uid] = {
-            ...window.itemStatus[uid],
-            status: 'cautela_ciente',
-            cautela_confirmada: true,
-            interacao_humana: true,
-            uid_global_ref: uidGlobalFull
-        };
-
-        btn.innerHTML = '<i class="fas fa-check-double"></i> Ciente registrado';
-        btn.disabled = true;
-        btn.style.opacity = "0.8";
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-check-double"></i> Ciente registrado';
+            btn.disabled = true;
+            btn.style.opacity = "0.8";
+        }
 
         setTimeout(() => {
-            renderizarConferencia();
-            updateOverallStatus();
-            verificarFluxoSetor(uid);
+            if (typeof renderizarConferencia === 'function') renderizarConferencia();
+            if (typeof updateOverallStatus === 'function') updateOverallStatus();
+            // Avança o fluxo usando o UID físico normalizado
+            if (typeof verificarFluxoSetor === 'function') verificarFluxoSetor(uidCardFisico);
         }, 400);
     }
-
-    // 3. ATUALIZAÇÃO DO PROGRESSO (Barra Neon e Badges da Tela 1)
-    updateOverallStatus();
 }
 
 // ✅ FUNÇÃO DE FEEDBACK PARA O MÓDULO DE FOTOS
