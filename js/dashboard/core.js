@@ -36,13 +36,13 @@ auth.onAuthStateChanged(async (user) => {
     if (user) {
         try {
             const doc = await db.collection('usuarios').doc(user.uid).get();
-            
+
             if (doc.exists) {
                 currentUserData = doc.data();
                 conferente = currentUserData.nome_militar_completo;
 
                 // --- 🛠️ INJEÇÃO DE DADOS NA INTERFACE (HEADER) ---
-                
+
                 // 1. Nome de Guerra ou Completo
                 const elNome = document.getElementById('user-name-top');
                 if (elNome) {
@@ -541,17 +541,17 @@ function handleIframeMessage(event) {
         // 2. Restaura Interface
         const contentArea = document.getElementById('content-area');
         if (contentArea) contentArea.style.display = 'block';
-        
+
         const sidebar = document.getElementById('sidebar') || document.getElementById('main-sidebar');
         if (sidebar) sidebar.style.display = 'block';
 
         // 3. Atualização Inteligente de Dados
-        loadCautionsToReceive(); 
-        loadActiveCautelas();    
+        loadCautionsToReceive();
+        loadActiveCautelas();
 
         // ✅ CORREÇÃO: Chama a renderização nova baseada no cargo do usuário
         const role = currentUserData ? currentUserData.role : 'operacional';
-        
+
         if (role === 'operacional') {
             if (typeof renderOperacionalCards === 'function') {
                 renderOperacionalCards();
