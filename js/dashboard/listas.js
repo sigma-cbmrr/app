@@ -281,7 +281,7 @@ function filtrarCardsListas() {
                 }
                 proximoElemento = proximoElemento.nextElementSibling;
             }
-            
+
             // Se não houver nenhum card visível no bloco, esconde o título do grupo
             grupo.style.display = temCorrespondente ? "block" : "none";
         }
@@ -291,7 +291,7 @@ function filtrarCardsListas() {
 //=== 1.5. EXCLUI DEFINITIVAMENTE UMA LISTA E SEU INVENTÁRIO DO BANCO ===//
 async function deletarListaInteira(listaUid, nomeAtivo) {
     const firestore = firebase.firestore();
-    
+
     // Mostra um loading rápido enquanto verifica o conteúdo da lista
     Swal.fire({
         title: 'Verificando inventário...',
@@ -301,7 +301,7 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 
     try {
         const docSnap = await firestore.collection('listas_conferencia').doc(listaUid).get();
-        
+
         if (!docSnap.exists) {
             Swal.fire('Erro', 'Lista não localizada no banco de dados.', 'error');
             return;
@@ -309,7 +309,7 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 
         const dadosLista = docSnap.data();
         const arquitetura = dadosLista.list || [];
-        
+
         // Calcula o total de itens (somando itens de todos os setores)
         const totalItens = arquitetura.reduce((acc, setor) => acc + (setor.itens ? setor.itens.length : 0), 0);
         const temItens = totalItens > 0;
@@ -389,7 +389,7 @@ async function deletarListaInteira(listaUid, nomeAtivo) {
 //=== 1.6. INATIVA A LISTA (APAGA O CARD) PERGUNTANDO SE DEVE ESTORNAR OS ITENS OU MANTER A CARGA ===//
 async function gerenciarInativacaoLista(listaUid, nomeAtivo) {
     const firestore = firebase.firestore();
-    
+
     // 1. Loading de verificação (Rápido)
     Swal.fire({
         title: 'Verificando inventário...',
@@ -400,7 +400,7 @@ async function gerenciarInativacaoLista(listaUid, nomeAtivo) {
     try {
         const listaRef = firestore.collection('listas_conferencia').doc(listaUid);
         const docSnap = await listaRef.get();
-        
+
         if (!docSnap.exists) {
             Swal.fire('Erro', 'Lista não localizada.', 'error');
             return;
@@ -473,7 +473,7 @@ async function gerenciarInativacaoLista(listaUid, nomeAtivo) {
         }
 
         // Atualiza para inativo
-        batch.update(listaRef, { 
+        batch.update(listaRef, {
             ativo: false,
             inativado_em: firebase.firestore.FieldValue.serverTimestamp(),
             inativado_por: currentUserData.nome_militar_completo
@@ -518,8 +518,8 @@ async function reativarLista(listaUid, nomeAtivo) {
 
     try {
         const firestore = firebase.firestore();
-        
-        await firestore.collection('listas_conferencia').doc(listaUid).update({ 
+
+        await firestore.collection('listas_conferencia').doc(listaUid).update({
             ativo: true,
             reativado_em: firebase.firestore.FieldValue.serverTimestamp(),
             reativado_por: currentUserData.nome_militar_completo
@@ -562,9 +562,9 @@ function toggleCardMenu(btn) {
 }
 
 //=== 1.8.1. AUXILIAR: Fecha o menu se clicar em qualquer lugar da tela ===//
-document.addEventListener('click', function(event) {
+document.addEventListener('click', function (event) {
     const isClickInsideMenu = event.target.closest('.v3-card-menu-container');
-    
+
     if (!isClickInsideMenu) {
         document.querySelectorAll('.v3-card-dropdown').forEach(dd => {
             dd.style.display = 'none';
@@ -709,6 +709,7 @@ function fecharEditorArquitetura() {
 }
 
 //=== 3. RENDERIZA A ESTRUTURA VISUAL DE SETORES E ITENS (SUPORTA DRAG & DROP) ===//
+/* --- Renderiza a estrutura visual de setores e itens no Editor, com suporte a Kits e Drag & Drop --- */
 function renderizarArquiteturaEditor() {
     const container = document.getElementById('setores-drag-container');
     if (!container) return;
@@ -742,78 +743,80 @@ function renderizarArquiteturaEditor() {
 
         (setor.itens || []).forEach((item, indexItem) => {
             const ehMulti = item.tipo === 'multi';
-            const ehAnfitriao = item.is_anfitriao || (item.acessorios_acoplados && item.acessorios_acoplados.length > 0);
 
-            // ✅ INÍCIO DO CARD DO ITEM
+            // ✅ MAPEAMENTO INTELIGENTE: Busca acessórios em ambas as chaves possíveis
+            const listaAcessorios = item.acessorios_vinculados || item.acessorios_acoplados || [];
+            const ehAnfitriao = item.is_anfitriao || listaAcessorios.length > 0;
+
             htmlItens += `
-    <div class="item-arquitetura-linha" data-item-index="${indexItem}" 
-         style="flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px; border-bottom: 1px solid #f1f5f9; position: relative; ${ehAnfitriao ? 'background: #fffcf5; border-left: 3px solid #f59e0b;' : ''}">
-        
-        <div class="item-arquitetura-info" style="width: 100%; display: flex; justify-content: space-between; align-items: flex-start;">
-            <div style="display: flex; flex-direction: column;">
-                <b style="color: #1e293b; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; font-family: 'Inter', sans-serif;">
-                    ${ehAnfitriao ? '<i class="fas fa-box-open" style="color:#f59e0b; margin-right:5px;"></i>' : ''}${item.nome}
-                </b>
-            </div>
-            
-            <button onclick="${ehMulti ? '' : `marcarParaEstorno(${indexSetor}, ${indexItem})`}" 
-                    style="${ehMulti ? 'display:none;' : 'background: #f1f5f9; border: none; color: #94a3b8; cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s;'}" 
-                    onmouseover="this.style.background='#fee2e2'; this.style.color='#ef4444'" 
-                    onmouseout="this.style.background='#f1f5f9'; this.style.color='#94a3b8'">
-                <i class="fas fa-times" style="font-size: 9px;"></i>
-            </button>
-        </div>
-        
-        <div class="lista-tombamentos-container" style="width: 100%; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
-            ${ehMulti ?
-                    (item.tombamentos || []).map((tData, tIndex) => `
-                    <div style="display: flex; align-items: center; background: #f8fafc; padding: 2px 2px 2px 8px; border-radius: 4px; border: 1px solid #e2e8f0; gap: 6px;">
-                        <span style="font-size: 11px; font-family: 'Inter', sans-serif; font-weight: 700; color: #475569; letter-spacing: -0.2px;">
-                            <i class="fas fa-tag" style="font-size: 9px; color: ${corTemaSetor}; margin-right: 3px;"></i>${tData.tomb || 'S/N'}
-                        </span>
-                        <button onclick="removerTombamentoIndividual(${indexSetor}, ${indexItem}, ${tIndex})" 
-                                style="background: #fee2e2; border: none; color: #b91c1c; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 9px;">
-                            <i class="fas fa-times"></i>
+                <div class="item-arquitetura-linha" data-item-index="${indexItem}" 
+                     style="flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px; border-bottom: 1px solid #f1f5f9; position: relative; ${ehAnfitriao ? 'background: #fffcf5; border-left: 4px solid #f59e0b;' : ''}">
+                    
+                    <div class="item-arquitetura-info" style="width: 100%; display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div style="display: flex; flex-direction: column;">
+                            <b style="color: #1e293b; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px; font-family: 'Inter', sans-serif;">
+                                ${ehAnfitriao ? '<i class="fas fa-box-open" style="color:#f59e0b; margin-right:5px;"></i>' : ''}${item.nome}
+                            </b>
+                            ${item.uid_instancia ? `<small style="font-size:0.6em; color:#94a3b8; font-weight:700;">ID: ${item.uid_instancia}</small>` : ''}
+                        </div>
+                        
+                        <button onclick="${ehMulti ? '' : `marcarParaEstorno(${indexSetor}, ${indexItem})`}" 
+                                style="${ehMulti ? 'display:none;' : 'background: #f1f5f9; border: none; color: #94a3b8; cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s;'}" 
+                                onmouseover="this.style.background='#fee2e2'; this.style.color='#ef4444'" 
+                                onmouseout="this.style.background='#f1f5f9'; this.style.color='#94a3b8'">
+                            <i class="fas fa-times" style="font-size: 9px;"></i>
                         </button>
-                    </div>`).join('')
+                    </div>
+                    
+                    <div class="lista-tombamentos-container" style="width: 100%; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+                        ${ehMulti ?
+                    (item.tombamentos || []).map((tData, tIndex) => `
+                                <div style="display: flex; align-items: center; background: #f8fafc; padding: 2px 2px 2px 8px; border-radius: 4px; border: 1px solid #e2e8f0; gap: 6px;">
+                                    <span style="font-size: 11px; font-family: 'Inter', sans-serif; font-weight: 700; color: #475569; letter-spacing: -0.2px;">
+                                        <i class="fas fa-tag" style="font-size: 9px; color: ${corTemaSetor}; margin-right: 3px;"></i>${tData.tomb || 'S/N'}
+                                    </span>
+                                    <button onclick="removerTombamentoIndividual(${indexSetor}, ${indexItem}, ${tIndex})" 
+                                            style="background: #fee2e2; border: none; color: #b91c1c; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 9px;">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>`).join('')
                     :
                     `<div style="font-size: 10px; font-weight: 800; color: #b45309; background: #fff7ed; padding: 2px 8px; border-radius: 4px; border: 1px solid #ffedd5; font-family: 'Inter', sans-serif; display: flex; align-items: center; gap: 4px;">
-                    <i class="fas fa-boxes" style="font-size: 9px; opacity: 0.7;"></i>
-                    QTD: ${item.quantidadeEsperada}
-                </div>`
+                                <i class="fas fa-boxes" style="font-size: 9px; opacity: 0.7;"></i>
+                                QTD: ${item.quantidadeEsperada}
+                            </div>`
                 }
-        </div>
-
-        ${item.acessorios_acoplados && item.acessorios_acoplados.length > 0 ? `
-            <div class="acessorios-vtr-container" style="width: 100%; margin-top: 8px; padding-left: 12px; border-left: 2px dashed #f59e0b; box-sizing: border-box;">
-                <small style="display:block; font-size: 0.6em; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px;">Acessórios Vinculados ao Kit:</small>
-                ${item.acessorios_acoplados.map((ac, indexAc) => `
-                    <div style="display: flex; justify-content: space-between; align-items: center; background: white; padding: 4px 8px; border-radius: 5px; border: 1px solid #f1f5f9; margin-bottom: 3px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
-                        <span style="font-size: 10px; font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
-                            <i class="fas fa-link" style="font-size: 8px; color: #f59e0b;"></i> ${ac.nome}
-                        </span>
-    
-                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-                            <b style="font-size: 10px; color: #1e293b;">${ac.quantidade} un.</b>
-                            <button onclick="removerAcessorioDeKit(${indexSetor}, ${indexItem}, ${indexAc})" 
-                                    title="Remover apenas este acessório"
-                                    style="background: #fff1f2; border: none; color: #e11d48; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 8px; transition: 0.2s;"
-                                    onmouseover="this.style.background='#ffe4e6'" onmouseout="this.style.background='#fff1f2'">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
                     </div>
-                `).join('')}
-            </div>
-        ` : ''}
-    </div>`;
+
+                    ${listaAcessorios.length > 0 ? `
+                        <div class="acessorios-vtr-container" style="width: 100%; margin-top: 8px; padding-left: 12px; border-left: 2px dashed #f59e0b; box-sizing: border-box;">
+                            <small style="display:block; font-size: 0.6em; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 5px;">Componentes Vinculados:</small>
+                            ${listaAcessorios.map((ac, indexAc) => `
+                                <div style="display: flex; justify-content: space-between; align-items: center; background: white; padding: 4px 8px; border-radius: 5px; border: 1px solid #f1f5f9; margin-bottom: 3px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+                                    <span style="font-size: 10px; font-weight: 600; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+                                        <i class="fas fa-link" style="font-size: 8px; color: #f59e0b;"></i> ${ac.nome}
+                                    </span>
+                
+                                    <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                                        <b style="font-size: 10px; color: #1e293b;">${ac.quantidade} un.</b>
+                                        <button onclick="removerAcessorioDeKit(${indexSetor}, ${indexItem}, ${indexAc})" 
+                                                title="Remover acessório"
+                                                style="background: #fff1f2; border: none; color: #e11d48; cursor: pointer; border-radius: 3px; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 8px;">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                </div>`;
         });
 
         htmlItens += `</div>`;
         setorDiv.innerHTML = htmlHeader + htmlItens;
         container.appendChild(setorDiv);
 
-        // Configuração do Drag and Drop para itens
+        // Sortable Setup
         new Sortable(setorDiv.querySelector('.setor-arquitetura-body'), {
             group: 'itens_viatura',
             animation: 150,
@@ -830,7 +833,6 @@ function renderizarArquiteturaEditor() {
         });
     });
 
-    // Configuração do Drag and Drop para setores
     new Sortable(container, {
         animation: 150,
         handle: '.setor-arquitetura-header',
@@ -847,9 +849,10 @@ function renderizarArquiteturaEditor() {
 //=== 4. CACHEIA O ESTOQUE DISPONÍVEL DA UNIDADE PARA AGILIZAR A BUSCA NO EDITOR ===//
 async function carregarEstoqueParaEditor(unidadeId) {
     try {
-        console.log("🚀 INICIANDO CARGA DE ESTOQUE PARA UNIDADE:", unidadeId);
+        console.log("🚀 [SIGMA V3] INICIANDO CARGA DE ESTOQUE PARA UNIDADE:", unidadeId);
         estoqueGestorLocal = [];
 
+        // Busca a coleção raiz de inventário
         const snapItens = await db.collection('inventario').get();
 
         for (const doc of snapItens.docs) {
@@ -857,47 +860,59 @@ async function carregarEstoqueParaEditor(unidadeId) {
             const ehMulti = itemGlobal.tipo === 'multi';
             const uidItem = doc.id;
 
-            // 1. BUSCA DE TOMBAMENTOS (Para itens Multi)
+            // 1. BUSCA DE TOMBAMENTOS (Para itens Multi/Patrimônio)
             let tombamentosDaUnidade = [];
+            let qtdDisponivelMulti = 0;
+
             if (ehMulti) {
                 const snapTombs = await db.collection('inventario').doc(uidItem)
                     .collection('tombamentos')
                     .where('local_id', '==', unidadeId)
                     .get();
 
-                tombamentosDaUnidade = snapTombs.docs.map(t => t.data());
+                tombamentosDaUnidade = snapTombs.docs.map(t => {
+                    const data = t.data();
+                    // ✅ Contabiliza apenas os que não estão em nenhuma viatura (disponíveis no almox)
+                    if (!data.viatura_id || data.situacao_atual === 'DISPONÍVEL') {
+                        qtdDisponivelMulti++;
+                    }
+                    return data;
+                });
             }
 
-            // 2. BUSCA DE SALDO (Para itens Single)
+            // 2. BUSCA DE SALDO (Para itens Single/Consumo)
             const saldoDoc = await doc.ref.collection('saldos_unidades').doc(unidadeId).get();
-            const temSaldoSingle = saldoDoc.exists && (Number(saldoDoc.data().qtd_total) > 0);
+            const dadosSaldo = saldoDoc.exists ? saldoDoc.data() : null;
+            const temSaldoNaUnidade = dadosSaldo && (Number(dadosSaldo.qtd_total) > 0);
 
-            // ✅ CORREÇÃO CRÍTICA: Se o item estiver no estoque da unidade, montamos o objeto de busca
-            if (tombamentosDaUnidade.length > 0 || temSaldoSingle) {
+            // ✅ FILTRO DE VISIBILIDADE: Só entra no cache se a unidade possuir o item fisicamente
+            if (tombamentosDaUnidade.length > 0 || temSaldoNaUnidade) {
 
                 const objetoParaBusca = {
                     id_almox: uidItem,
                     uid_global: uidItem,
-                    nome: itemGlobal.nome || "Item sem nome",
+                    nome: (itemGlobal.nome || "Item sem nome").toUpperCase(),
                     tipo: itemGlobal.tipo,
                     categoria: itemGlobal.categoria || "OUTROS",
                     unidade_id: unidadeId,
                     tombamentos: tombamentosDaUnidade,
-                    disponivel: ehMulti ? tombamentosDaUnidade.length : (Number(saldoDoc.data().qtd_disp) || 0),
-                    
-                    // 🔥 A PEÇA QUE FALTA: Injeta as regras de KIT no rascunho de busca
+                    // ✅ Lógica de disponibilidade real para o buscador
+                    disponivel: ehMulti ? qtdDisponivelMulti : (Number(dadosSaldo.qtd_disp) || 0),
+
+                    // 🔥 ATRIBUTOS DE KIT: Essencial para acionar os modais de acoplamento
                     is_anfitriao: itemGlobal.is_anfitriao || false,
-                    componentes_regra: itemGlobal.componentes_regra || [] 
+                    componentes_regra: itemGlobal.componentes_regra || []
                 };
 
                 estoqueGestorLocal.push(objetoParaBusca);
             }
         }
 
-        console.log("🏁 CACHE FINALIZADO. Itens com regras de kit mapeados:", estoqueGestorLocal.length);
+        console.log(`🏁 [SIGMA V3] CACHE FINALIZADO: ${estoqueGestorLocal.length} itens mapeados para busca.`);
 
     } catch (e) {
         console.error("❌ ERRO CRÍTICO NA CARGA DO ESTOQUE:", e);
+        Swal.fire('Erro de Sincronia', 'Não foi possível carregar os dados do inventário.', 'error');
     }
 }
 
@@ -1474,7 +1489,7 @@ function removerAcessorioDeKit(setorIdx, itemPaiIdx, acessorioIdx) {
     // 2. Atualiza a interface
     const badge = document.getElementById('badge-estorno-count');
     // Note: O badge de estorno só deve pulsar se houver itens na caixa de saída (geralmente itens MULTI)
-    
+
     atualizarInterfaceEstorno();
     renderizarArquiteturaEditor();
     marcarAlteracao();
@@ -1655,7 +1670,7 @@ function marcarAlteracao() {
 
 //=== 5.2. FUNÇÃO MESTRA: SINCRONIZA TUDO NO FIREBASE (ESTRUTURA, SALDOS E PATRIMÔNIOS) ===//
 async function confirmarPublicacaoLista() {
-    // 1. CONFIRMAÇÃO MODERNA (Substitui o confirm nativo)
+    // 1. CONFIRMAÇÃO MODERNA
     const resultConfirm = await Swal.fire({
         title: 'Publicar Alterações?',
         text: "O inventário será atualizado e os itens removidos retornarão ao estoque da sua unidade.",
@@ -1675,10 +1690,9 @@ async function confirmarPublicacaoLista() {
     const justificativa = document.getElementById('justificativa-estorno-global').value.trim();
     const unidadeGestoraId = currentUserData.unidade_id;
 
-    // Filtra apenas estornos que precisam de processamento manual (Geralmente itens MULTI/Patrimônio)
     const estornosReais = itensParaEstorno.filter(i => i.uid_global !== "ITEM_VISTORIA_LIVRE");
 
-    // 2. VALIDAÇÃO MODERNA
+    // 2. VALIDAÇÃO DE JUSTIFICATIVA
     if (estornosReais.length > 0 && !justificativa) {
         await Swal.fire({
             icon: 'warning',
@@ -1694,7 +1708,6 @@ async function confirmarPublicacaoLista() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Publicando...';
 
-    // Mostra o loading de processamento
     Swal.fire({
         title: 'Sincronizando Banco de Dados',
         html: 'Aguarde enquanto processamos os saldos e patrimônios...',
@@ -1708,16 +1721,20 @@ async function confirmarPublicacaoLista() {
         const snapLista = await listaRef.get();
         const listaAnterior = snapLista.exists ? (snapLista.data().list || []) : [];
 
-        // --- 1. MAPEAMENTO HIERÁRQUICO (DNA DO KIT) ---
+        // ✅ 3. MAPEAMENTO HIERÁRQUICO ATUALIZADO (Suporta transição de nomenclatura)
         const mapearSaldos = (arquitetura) => {
             const mapa = {};
             arquitetura.forEach(setor => {
                 (setor.itens || []).forEach(it => {
                     if (it.uid_global === "ITEM_VISTORIA_LIVRE") return;
+
+                    // Soma saldo do item principal
                     mapa[it.uid_global] = (mapa[it.uid_global] || 0) + (Number(it.quantidadeEsperada) || 0);
-                    
-                    if (it.acessorios_acoplados) {
-                        it.acessorios_acoplados.forEach(ac => {
+
+                    // ✅ Busca acessórios em ambas as chaves para não perder saldo no estorno
+                    const acessorios = it.acessorios_vinculados || it.acessorios_acoplados;
+                    if (acessorios) {
+                        acessorios.forEach(ac => {
                             mapa[ac.uid_global] = (mapa[ac.uid_global] || 0) + (Number(ac.quantidade) || 0);
                         });
                     }
@@ -1729,7 +1746,7 @@ async function confirmarPublicacaoLista() {
         const mapaAnterior = mapearSaldos(listaAnterior);
         const mapaAtual = mapearSaldos(arquiteturaAtiva);
 
-        // --- 2. ATUALIZAÇÃO DA ESTRUTURA DA LISTA ---
+        // --- 4. ATUALIZAÇÃO DA ESTRUTURA DA LISTA ---
         batch.update(listaRef, {
             list: arquiteturaAtiva,
             ultima_edicao_arquitetura: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1738,8 +1755,7 @@ async function confirmarPublicacaoLista() {
 
         const dataReg = new Date().toLocaleString('pt-BR');
 
-        // --- 3. LOGÍSTICA DE INVENTÁRIO (ITENS SINGLE / ACESSÓRIOS / DESVINCULADOS) ---
-        // Aqui é onde o saldo do acessório removido do kit é devolvido (Uma única vez)
+        // --- 5. LOGÍSTICA DE INVENTÁRIO (ITENS SINGLE / ACESSÓRIOS) ---
         const todosUids = new Set([...Object.keys(mapaAnterior), ...Object.keys(mapaAtual)]);
 
         for (const uid of todosUids) {
@@ -1749,9 +1765,9 @@ async function confirmarPublicacaoLista() {
 
             if (diferenca !== 0) {
                 const saldoRef = firestore.collection('inventario').doc(uid).collection('saldos_unidades').doc(unidadeGestoraId);
-                
+
                 batch.set(saldoRef, {
-                    unidade_sigla: currentUserData.unidade || "N/D",
+                    unidade_sigla: currentUserData.unidade_sigla || "N/D",
                     qtd_disp: firebase.firestore.FieldValue.increment(-diferenca),
                     qtd_em_carga: firebase.firestore.FieldValue.increment(diferenca),
                     last_update: dataReg
@@ -1767,39 +1783,41 @@ async function confirmarPublicacaoLista() {
             }
         }
 
-        // --- 4. PROCESSA ITENS MULTI (TOMBAMENTOS) ---
+        // ✅ 6. PROCESSA ITENS MULTI (TOMBAMENTOS) COM NOVA CHAVE uid_instancia
         arquiteturaAtiva.forEach(setor => {
             (setor.itens || []).forEach(item => {
                 if (item.tipo === 'multi' && item.uid_global !== "ITEM_VISTORIA_LIVRE") {
                     (item.tombamentos || []).forEach(t => {
                         const tombRef = firestore.collection('inventario').doc(item.uid_global).collection('tombamentos').doc(t.tomb);
+
+                        // Atualiza o documento individual do patrimônio
                         batch.update(tombRef, {
                             situacao_atual: "EM CARGA",
                             viatura_id: idListaSendoEditada,
                             sub_local: setor.nome,
-                            acessorios_vinculados: item.acessorios_acoplados || []
+                            // ✅ Grava sempre na nova nomenclatura
+                            acessorios_vinculados: item.acessorios_vinculados || item.acessorios_acoplados || []
                         });
                     });
                 }
             });
         });
 
-        // --- 5. CHAMADA DA INTELIGÊNCIA DE ESTORNO EM LOTE ---
-        // Processa as atualizações de documento dos itens MULTI na Caixa de Saída
+        // --- 7. CHAMADA DA INTELIGÊNCIA DE ESTORNO EM LOTE ---
         if (estornosReais.length > 0) {
             await processarEstornoLote(batch, unidadeGestoraId, justificativa);
         }
 
-        // --- 6. EXECUÇÃO DO BATCH ---
+        // --- 8. EXECUÇÃO DO BATCH ---
         await batch.commit();
 
         itensParaEstorno = [];
-        await Swal.fire({ 
-            icon: 'success', 
-            title: 'Publicado!', 
-            text: 'O inventário e os kits foram atualizados com sucesso.', 
-            timer: 2000, 
-            showConfirmButton: false 
+        await Swal.fire({
+            icon: 'success',
+            title: 'Publicado!',
+            text: 'O inventário e os kits foram atualizados com sucesso.',
+            timer: 2000,
+            showConfirmButton: false
         });
         location.reload();
 
@@ -1822,11 +1840,11 @@ async function processarEstornoLote(batch, unidadeId, justificativa) {
 
     const dataReg = new Date().toLocaleString('pt-BR');
     const invRef = firebase.firestore().collection('inventario');
-    
+
     // Identifica a origem (Viatura/Lista) através do DOM
     const elNome = document.getElementById('edit-vtr-nome');
     const nomeVtrOrigem = elNome ? (elNome.innerText || elNome.textContent).split('\n').pop().trim() : "Lista";
-    
+
     // Identifica a sigla da unidade do gestor para um log mais preciso
     const siglaUnidade = currentUserData.unidade_sigla || "Unidade Gestora";
 
@@ -1841,7 +1859,7 @@ async function processarEstornoLote(batch, unidadeId, justificativa) {
             if (item.tombamentos && item.tombamentos.length > 0) {
                 item.tombamentos.forEach(t => {
                     const tombRef = itemDocRef.collection('tombamentos').doc(t.tomb);
-                    
+
                     batch.update(tombRef, {
                         situacao_atual: "DISPONÍVEL",
                         viatura_id: null,
