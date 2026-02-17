@@ -31,9 +31,9 @@ function switchAtividadesTab(tab) {
 
         // ✅ GATILHOS DE SEGURANÇA E FILTRO
         // Carrega os filtros baseados na Unidade do Gestor antes de listar o histórico
-        carregarLocaisFiltroHistorico(); 
+        carregarLocaisFiltroHistorico();
         carregarUsuariosFiltro();
-        
+
         loadGlobalHistory(); // Recarrega os dados da unidade
     }
 }
@@ -317,14 +317,14 @@ async function carregarLocaisFiltroHistorico() {
         snap.forEach(doc => {
             const data = doc.data();
             const opt = document.createElement('option');
-            
+
             // O value deve ser o ID do documento (ex: alfa_abt18) para bater com o histórico
-            opt.value = doc.id; 
+            opt.value = doc.id;
 
             // Rótulo: "ABT-18 (BIOMA)" ou "Mucajaí - Apiaú (BIOMA)"
             const identificador = data.ativo_nome || data.prefixo || doc.id;
             const posto = data.posto_nome ? ` (${data.posto_nome})` : "";
-            
+
             opt.textContent = `${identificador}${posto}`.toUpperCase();
             selectLocal.appendChild(opt);
         });
@@ -392,4 +392,3 @@ function criarItemHistoricoHTML(data) {
         </div>
     `;
 }
-
