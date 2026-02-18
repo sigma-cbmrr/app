@@ -309,47 +309,30 @@ function fecharVisualizadorPdf() {
 // 3. IMPRIMIR: Foca no documento e dispara a impressora
 function imprimirPdfInterno() {
     if (!window.currentPdfBlob) {
-        return Swal.fire('Erro', 'Documento não encontrado para impressão.', 'error');
+        return Swal.fire('Erro', 'Documento não encontrado.', 'error');
     }
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    // Como agora é só Desktop, o uso de iframe oculto é 100% funcional
     const fileURL = URL.createObjectURL(window.currentPdfBlob);
+    const printFrame = document.createElement('iframe');
+    printFrame.style.display = 'none';
+    printFrame.src = fileURL;
 
-    try {
-        // Criamos um iframe invisível para carregar o PDF e disparar a impressão
-        const printFrame = document.createElement('iframe');
-        printFrame.style.display = 'none';
-        printFrame.src = fileURL;
+    document.body.appendChild(printFrame);
 
-        document.body.appendChild(printFrame);
-
-        printFrame.onload = function() {
-            try {
-                // Foca e dispara a impressão nativa
-                printFrame.contentWindow.focus();
-                printFrame.contentWindow.print();
-                
-                // Limpeza: remove o iframe após o diálogo de impressão fechar
-                // (SetTimeout ajuda a não travar o processo de impressão no iOS)
-                setTimeout(() => {
-                    document.body.removeChild(printFrame);
-                    URL.revokeObjectURL(fileURL);
-                }, 1000);
-
-            } catch (e) {
-                console.warn("Falha no print direto, tentando fallback...", e);
-                // Fallback: Se o print direto falhar (comum em alguns Androids), abre na aba
-                window.open(fileURL, '_blank');
-            }
-        };
-
-    } catch (err) {
-        Swal.fire({
-            icon: 'error',
-            title: 'Falha na Impressão',
-            text: 'Seu dispositivo bloqueou a impressão automática. Tente compartilhar o arquivo.'
-        });
-    }
+    printFrame.onload = function() {
+        try {
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+            setTimeout(() => {
+                document.body.removeChild(printFrame);
+                URL.revokeObjectURL(fileURL);
+            }, 1000);
+        } catch (e) {
+            // Se falhar no PC, ainda temos o fallback de nova aba
+            window.open(fileURL, '_blank');
+        }
+    };
 }
 
 // 4. COMPARTILHAR: Integração nativa com Android/iOS (WhatsApp, etc)
@@ -411,4 +394,3 @@ function gerarLogMovimentacao(itemObj, evento, detalhes) {
 
     return itemObj.historico_vida;
 }
-
