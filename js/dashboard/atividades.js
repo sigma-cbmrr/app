@@ -341,7 +341,20 @@ async function carregarLocaisFiltroHistorico() {
 //=== CRIA OS CARDS DE HISTÓRICO (CONFERÊNCIAS, CHECKLISTS E TRANSFERÊNCIAS) ===//
 function criarItemHistoricoHTML(data) {
     const dataHora = data.timestamp.toDate().toLocaleString('pt-BR');
-    const temAlteracao = (data.itensRelatorio && data.itensRelatorio.some(i => i.status !== 'S/A')) || (!data.itensRelatorio && data.totalCaa > 0);
+    
+    // ✅ CORREÇÃO V3: Varredura profunda para detectar pendências em Pais e Filhos (Acessórios)
+    // Primeiro verifica o totalCaa (campo consolidado), depois faz o fallback para o some() profundo
+    const temAlteracao = (Number(data.totalCaa) > 0) || (data.itensRelatorio && data.itensRelatorio.some(item => {
+        // 1. Verifica se o item pai (anfitrião) tem alteração
+        if (item.status !== 'S/A') return true;
+        
+        // 2. Verifica se existe algum acessório vinculado com alteração
+        if (item.acessorios_vinculados && Array.isArray(item.acessorios_vinculados)) {
+            return item.acessorios_vinculados.some(ac => ac.status !== 'S/A');
+        }
+        
+        return false;
+    }));
 
     // ✅ DEFINIÇÃO DE IDENTIDADE VISUAL POR MODO
     let iconClass = 'fa-file-alt';
