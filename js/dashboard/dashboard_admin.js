@@ -63,7 +63,7 @@ function renderAdminGestorCards(canViewDashboardCards) {
     loadCaaData();
 }
 
-/*--- FUNÇÃO PRINCIPAL DE CARGA DE DADOS DE PENDÊNCIAS DAS CONFERÊNCIAS ---*/
+
 /*---FUNÇÃO PRINCIPAL DE CARGA DE DADOS DE PENDÊNCIAS DAS CONFERÊNCIAS---*/
 async function loadCaaData() {
     const container = document.getElementById('cards-container');
@@ -118,28 +118,26 @@ async function loadCaaData() {
             const podeVer = isAdmin || bateUnidade;
 
             if (podeVer) {
-                // ✅ O PULO DO GATO: Se é a primeira vez que vemos esta lista no loop, 
-                // ela é a conferência mais recente (devido ao orderBy timestamp desc).
-                // Portanto, definimos o rodapé com estes dados.
                 if (!map[lId]) {
                     map[lId] = {
                         docId: doc.id,
                         lista_id: lId,
                         local: d.local,
-                        conferente: d.conferente, // Aqui será o 3º SGT JHONATH
+                        conferente: d.conferente,
                         date: d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D',
                         unidade_sigla: siglaVinculada,
                         items: []
                     };
                 }
 
-                // Agora, independente de quem conferiu, acumulamos as pendências ativas
+                // Acumulamos as pendências ativas
                 const fonte = d.itensRelatorio || d.itensCaa || [];
+                
                 fonte.forEach(it => {
+                    // --- 1. VERIFICA PENDÊNCIAS NO ITEM PAI ---
                     if (it.status === 'C/A' && it.pendencias_ids) {
                         it.pendencias_ids.forEach(p => {
                             if (p.status_gestao !== 'RESOLVIDO') {
-                                // Evita duplicar a mesma pendência se ela aparecer em vários logs
                                 const jaExiste = map[lId].items.some(existente => existente.id === p.id);
                                 if (!jaExiste) {
                                     map[lId].items.push({
@@ -152,12 +150,33 @@ async function loadCaaData() {
                             }
                         });
                     }
+
+                    // --- 2. VERIFICA PENDÊNCIAS NOS ITENS FILHOS (ACESSÓRIOS) ---
+                    if (it.acessorios_vinculados && it.acessorios_vinculados.length > 0) {
+                        it.acessorios_vinculados.forEach(ac => {
+                            if (ac.status === 'C/A' && ac.pendencias_ids) {
+                                ac.pendencias_ids.forEach(pFilho => {
+                                    if (pFilho.status_gestao !== 'RESOLVIDO') {
+                                        const jaExisteFilho = map[lId].items.some(existente => existente.id === pFilho.id);
+                                        if (!jaExisteFilho) {
+                                            map[lId].items.push({
+                                                ...pFilho,
+                                                itemNome: ac.nomeCompleto || ac.nome, // Nome do filho
+                                                itemId: ac.id || ac.uid_global,      // ID do filho
+                                                id_pai: it.id || it.uid_global,       // Referência ao pai (útil para gestão)
+                                                tipoRegistro: 'PENDENCIA'
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
                 });
             }
         }
 
         // --- 2. COMPLEMENTO DE LISTAS VAZIAS (S/A) ---
-        // Se for gestor, garante que listas que não tiveram conferência recente no snap também apareçam
         if (!isAdmin && gestorUnidadeId) {
             const snapMestras = await db.collection('listas_conferencia')
                 .where('unidade_id', '==', gestorUnidadeId)
@@ -312,6 +331,7 @@ function mostrarTabela(data) {
     // ✅ GARANTE QUE O LAYOUT MUDE PARA DUAS COLUNAS
     if (masterContainer) masterContainer.classList.add('split-view');
     if (detailColumn) detailColumn.style.setProperty('display', 'block', 'important');
+    
     const wrapper = document.getElementById('ca-table-wrapper');
     const gridContainer = document.getElementById('sigma-v3-dynamic-grid');
     const msgNoIssues = document.getElementById('no-issues-msg');
@@ -326,7 +346,7 @@ function mostrarTabela(data) {
         placeholder.style.setProperty('display', 'none', 'important');
     }
 
-    // ✅ CORREÇÃO 1: Ativa o fundo cinza de contraste APENAS agora que há dados
+    // ✅ CORREÇÃO 1: Ativa o fundo cinza de contraste
     if (detailsWrapper) {
         detailsWrapper.style.setProperty('background', '#f1f5f9', 'important');
         detailsWrapper.style.setProperty('padding', '20px', 'important');
@@ -336,7 +356,7 @@ function mostrarTabela(data) {
     wrapper.style.setProperty('display', 'block', 'important');
     wrapper.style.setProperty('height', 'auto', 'important');
 
-    // 1. CABEÇALHO PREMIUM COM BOTÃO FECHAR ESTILIZADO
+    // 1. CABEÇALHO COM BOTÃO FECHAR
     if (tableTitle) {
         tableTitle.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px;">
@@ -383,11 +403,11 @@ function mostrarTabela(data) {
             const iconRef = ehCautela ? 'fa-hand-holding' : 'fa-exclamation-triangle';
             const nomeAutorCompleto = p.autor_nome || "Militar não identificado";
 
-            // ✅ OBJETO FORMATADO PARA O NOVO dashboard_admin.js
+            // ✅ CORREÇÃO: Mapeamento de dados para o Gerenciador (Pai e Filho)
             const btnData = {
                 docId: data.docId,
                 pendId: p.id,
-                idPai: p.id_pai || null, // Captura vínculo de conjunto se existir
+                idPai: p.id_pai || null, // Se for filho, aqui terá o ID do anfitrião
                 item: {
                     id: p.itemId,
                     uid_global: p.itemId,
@@ -399,11 +419,14 @@ function mostrarTabela(data) {
                 }
             };
 
-            // Escapa aspas para evitar quebra no atributo onclick
             const btnJson = JSON.stringify(btnData).replace(/'/g, "\\'");
 
             const card = document.createElement('div');
             card.className = 'sigma-v3-card-item';
+            
+            // Adiciona uma marcação visual se for um item filho (acessório)
+            const prefixoFilho = p.id_pai ? `<span style="font-size: 0.65em; color: #800020; font-weight: 800; display: block; margin-bottom: 4px;"><i class="fas fa-paperclip"></i> ACESSÓRIO DE KIT</span>` : '';
+
             card.innerHTML = `
                 <div class="sigma-v3-card-header">
                     <span class="sigma-v3-badge" style="background: ${badgeBg}; color: ${colorRef};">
@@ -413,6 +436,7 @@ function mostrarTabela(data) {
                         <i class="far fa-calendar-alt"></i> ${p.data_criacao || data.date.split(',')[0]}
                     </span>
                 </div>
+                ${prefixoFilho}
                 <h4>${p.itemNome}</h4>
                 <div style="display: flex; gap: 10px; font-size: 0.75em; font-weight: 800; text-transform: uppercase;">
                     ${p.tombamento ?
@@ -587,7 +611,7 @@ async function abrirGestaoPendencia(data) {
     });
 }
 
-/*--- Ação principal para processar a decisão do gestor ---*/
+/*--- Ação principal para processar a decisão do gestor (Sincronizada para Pai/Filho) ---*/
 async function executarAcaoGestao(data) {
     const { docId, item, pendId, idPai, status, obs, qtd, novoTomb } = data;
     const batch = db.batch();
@@ -600,19 +624,42 @@ async function executarAcaoGestao(data) {
 
         const resRef = db.collection('resultados_conferencias').doc(docId);
         const resSnap = await resRef.get();
+        if (!resSnap.exists) throw new Error("Documento de conferência não encontrado.");
+        
         let { itensRelatorio } = resSnap.data();
 
-        // Localiza o item no relatório
+        // 1. LOCALIZAÇÃO DO ALVO (Pai ou Filho)
+        // Se idPai existir, o alvo é um acessório dentro de um kit. Se não, é um item comum.
         const idBusca = idPai || item.id || item.uid_global;
-        const itemRes = itensRelatorio.find(i => i.id === idBusca || i.uid_global === idBusca);
-        const pIdx = itemRes.pendencias_ids.findIndex(p => p.id === pendId);
+        const itemPai = itensRelatorio.find(i => i.id === idBusca || i.uid_global === idBusca);
+        
+        if (!itemPai) throw new Error("Item anfitrião não localizado no relatório.");
+
+        let alvoParaRemover; // Referência de onde a pendência será extraída
+        let pendenciaEncontrada;
+
+        if (idPai) {
+            // O alvo é um FILHO. Vamos buscar dentro dos acessórios do pai.
+            const acessorio = itemPai.acessorios_vinculados.find(ac => (ac.id || ac.uid_global) === (item.id || item.uid_global));
+            if (!acessorio) throw new Error("Acessório não localizado dentro do kit.");
+            alvoParaRemover = acessorio;
+        } else {
+            // O alvo é o próprio PAI.
+            alvoParaRemover = itemPai;
+        }
+
+        const pIdx = alvoParaRemover.pendencias_ids.findIndex(p => p.id === pendId);
+        if (pIdx === -1) throw new Error("Pendência específica não localizada no registro.");
 
         // --- CASO 1: SANEAMENTO (SOLUCIONADO) ---
         if (status === 'Solucionado') {
-            itemRes.pendencias_ids.splice(pIdx, 1);
-            if (itemRes.pendencias_ids.length === 0) itemRes.status = 'S/A';
+            alvoParaRemover.pendencias_ids.splice(pIdx, 1);
+            
+            // Se limpou todas as pendências do item (seja ele pai ou filho), volta para S/A
+            if (alvoParaRemover.pendencias_ids.length === 0) {
+                alvoParaRemover.status = 'S/A';
+            }
 
-            // Ajusta saldo: De Pendente para Disponível
             const saldoRef = db.collection('inventario').doc(item.id || item.uid_global).collection('saldos_unidades').doc(unidadeId);
             batch.update(saldoRef, {
                 qtd_disp: firebase.firestore.FieldValue.increment(qtd),
@@ -621,33 +668,29 @@ async function executarAcaoGestao(data) {
             registrarHistoricoVida(batch, item.id, "SANEAMENTO", `✅ Pendência resolvida. Despacho: ${obs}`, qtd);
         }
 
-        // --- CASO 2: SUBSTITUIÇÃO (A LÓGICA NOVA) ---
+        // --- CASO 2: SUBSTITUIÇÃO ---
         else if (status === 'Substituir') {
             const saldoRef = db.collection('inventario').doc(item.id || item.uid_global).collection('saldos_unidades').doc(unidadeId);
-
-            // 🔍 Busca o saldo atual em tempo real (fora do batch para decisão lógica)
             const saldoAtual = await buscarSaldoEstoqueGestor(item.id || item.uid_global);
 
             if (saldoAtual.total <= 0) {
-                // 🛑 CASO 1: ESTOQUE ZERADO - APENAS RECOLHIMENTO
-                itemRes.pendencias_ids.splice(pIdx, 1);
-                itemRes.status = 'RECOLHIDO/PENDENTE'; // Sinaliza a saída do item sem reposição
+                // ESTOQUE ZERADO - RECOLHIMENTO
+                alvoParaRemover.pendencias_ids.splice(pIdx, 1);
+                alvoParaRemover.status = 'RECOLHIDO/PENDENTE';
 
                 batch.update(saldoRef, {
                     qtd_pend: firebase.firestore.FieldValue.increment(1),
                     last_update: dataHora
                 });
-
-                registrarHistoricoVida(batch, item.id, "RECOLHIMENTO_AVULSO", `⚠️ Sem estoque para troca. Item recolhido da viatura para o almoxarifado como pendente. Despacho: ${obs}`, 1);
-            }
+                registrarHistoricoVida(batch, item.id, "RECOLHIMENTO_AVULSO", `⚠️ Sem estoque para troca. Item recolhido da viatura como pendente. Despacho: ${obs}`, 1);
+            } 
             else {
-                // ✅ CASO 2: HÁ ESTOQUE - SUBSTITUIÇÃO NORMAL
+                // HÁ ESTOQUE - SUBSTITUIÇÃO
                 if (item.tipo_controle === 'multi') {
-                    // Lógica Multi: Troca tombamento na lista
                     const tombOriginal = item.tombamento;
-                    itemRes.tombamento = novoTomb;
-                    itemRes.pendencias_ids.splice(pIdx, 1);
-                    itemRes.status = 'S/A';
+                    alvoParaRemover.tombamento = novoTomb;
+                    alvoParaRemover.pendencias_ids.splice(pIdx, 1);
+                    alvoParaRemover.status = 'S/A';
 
                     batch.update(saldoRef, {
                         tombamentos_disponiveis: firebase.firestore.FieldValue.arrayRemove(novoTomb),
@@ -656,35 +699,35 @@ async function executarAcaoGestao(data) {
                     });
                     registrarHistoricoVida(batch, item.id, "SUBSTITUICAO_MULTI", `♻️ Substituído tombamento ${tombOriginal} por ${novoTomb}. Motivo: ${obs}`, 1);
                 } else {
-                    // Lógica Single: Saneia a lista e ajusta saldos numéricos
-                    itemRes.pendencias_ids.splice(pIdx, 1);
-                    itemRes.status = 'S/A';
+                    alvoParaRemover.pendencias_ids.splice(pIdx, 1);
+                    alvoParaRemover.status = 'S/A';
 
                     batch.update(saldoRef, {
-                        qtd_disp: firebase.firestore.FieldValue.increment(-1), // Sai um bom do estoque
-                        qtd_pend: firebase.firestore.FieldValue.increment(1),  // Entra um ruim no estoque
+                        qtd_disp: firebase.firestore.FieldValue.increment(-1),
+                        qtd_pend: firebase.firestore.FieldValue.increment(1),
                         last_update: dataHora
                     });
-                    registrarHistoricoVida(batch, item.id, "SUBSTITUICAO_SINGLE", `♻️ Item substituído por um novo do estoque. Original recolhido como pendente. Despacho: ${obs}`, 1);
+                    registrarHistoricoVida(batch, item.id, "SUBSTITUICAO_SINGLE", `♻️ Item substituído por estoque novo. Original recolhido. Despacho: ${obs}`, 1);
                 }
             }
         }
 
         // --- CASO 3: EM SOLUÇÃO ---
         else if (status === 'Em solução') {
-            itemRes.pendencias_ids[pIdx].status_gestao = 'EM SOLUÇÃO';
-            itemRes.pendencias_ids[pIdx].descricao += `\n[GESTÃO ${dataHora}]: ${obs}`;
+            alvoParaRemover.pendencias_ids[pIdx].status_gestao = 'EM SOLUÇÃO';
+            alvoParaRemover.pendencias_ids[pIdx].descricao += `\n[GESTÃO ${dataHora}]: ${obs}`;
             registrarHistoricoVida(batch, item.id, "ACOMPANHAMENTO", `⏳ Gestor marcou como 'Em Solução'. Obs: ${obs}`, 0);
         }
 
+        // Atualiza o documento principal com a nova estrutura modificada
         batch.update(resRef, { itensRelatorio });
         await batch.commit();
 
-        Swal.fire('Sucesso!', 'Ação registrada com sucesso no sistema e no histórico de vida.', 'success');
+        Swal.fire('Sucesso!', 'Ação registrada com sucesso. A lista foi atualizada.', 'success');
         if (typeof loadCaaData === 'function') loadCaaData();
 
     } catch (e) {
-        console.error(e);
+        console.error("Erro na gestão:", e);
         Swal.fire('Erro', 'Falha ao processar ação: ' + e.message, 'error');
     }
 }
