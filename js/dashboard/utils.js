@@ -312,24 +312,48 @@ function imprimirPdfInterno() {
         return Swal.fire('Erro', 'Documento não encontrado.', 'error');
     }
 
-    // Como agora é só Desktop, o uso de iframe oculto é 100% funcional
+    // Criamos a URL do Blob
     const fileURL = URL.createObjectURL(window.currentPdfBlob);
+    
+    // Criamos um frame temporário com ID único
+    const frameId = 'print-frame-' + Date.now();
     const printFrame = document.createElement('iframe');
-    printFrame.style.display = 'none';
+    
+    printFrame.id = frameId;
+    printFrame.style.position = 'fixed';
+    printFrame.style.bottom = '0';
+    printFrame.style.right = '0';
+    printFrame.style.width = '1px';
+    printFrame.style.height = '1px';
+    printFrame.style.border = 'none';
+    printFrame.style.visibility = 'hidden'; // Esconde mas mantém no DOM
+    
     printFrame.src = fileURL;
 
     document.body.appendChild(printFrame);
 
     printFrame.onload = function() {
         try {
+            // Focamos no frame carregado
             printFrame.contentWindow.focus();
-            printFrame.contentWindow.print();
-            setTimeout(() => {
-                document.body.removeChild(printFrame);
-                URL.revokeObjectURL(fileURL);
-            }, 1000);
+            
+            // Disparamos a impressão
+            const printed = printFrame.contentWindow.print();
+
+            // O SEGREDO: Só removemos o frame quando o foco voltar para a janela principal
+            // ou após um tempo longo o suficiente para o spooler de impressão receber os dados.
+            window.addEventListener('focus', function handler() {
+                setTimeout(() => {
+                    if (document.getElementById(frameId)) {
+                        document.body.removeChild(printFrame);
+                        URL.revokeObjectURL(fileURL);
+                    }
+                }, 1000);
+                window.removeEventListener('focus', handler);
+            }, { once: true });
+
         } catch (e) {
-            // Se falhar no PC, ainda temos o fallback de nova aba
+            console.warn("Erro no print direto, abrindo fallback...", e);
             window.open(fileURL, '_blank');
         }
     };
