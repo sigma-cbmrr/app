@@ -214,6 +214,9 @@ function reimprimirPDF(data) {
         // 2. ARMAZENAMENTO GLOBAL (Para as funções de Imprimir/Compartilhar)
         window.currentPdfBlob = pdfBlob;
         window.currentPdfName = `${TITULO_DOC.replace(/\s+/g, '_')}_${data.id || 'export'}.pdf`;
+        // Atualiza o nome do arquivo no topo do modal
+        const fileNameLabel = document.getElementById('pdf-modal-filename');
+        if (fileNameLabel) fileNameLabel.textContent = window.currentPdfName;
 
         // 3. ACIONAMENTO DO MOTOR DE RENDERIZAÇÃO V3 (Canvas)
         // Chamamos a função que criamos anteriormente para desenhar o PDF na DIV
@@ -231,35 +234,30 @@ function reimprimirPDF(data) {
 
 /* --- FUNÇÕES DE CONTROLE DO VISUALIZADOR DE PDF SIGMA V3 --- */
 
-/**
- * Renderiza o PDF no Canvas para garantir 100% de compatibilidade mobile.
- * @param {Blob} pdfBlob - O arquivo binário gerado pelo jsPDF.
- */
+// 1. Renderiza o PDF no Canvas para garantir 100% de compatibilidade mobile.
 async function renderizarPdfV3(pdfBlob) {
-    // 1. Configurações iniciais do motor PDF.js
     const pdfjsLib = window['pdfjs-dist/build/pdf'];
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
     try {
-        // 2. Transforma o Blob em um array de dados que o motor consegue ler
         const arrayBuffer = await pdfBlob.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const pdf = await loadingTask.promise;
 
-        // 3. Seleciona a primeira página (Geralmente relatórios de conferência focam na pág 1)
-        // Se precisar de mais páginas, podemos fazer um loop depois.
+        // Seleciona a primeira página
         const page = await pdf.getPage(1);
 
-        // 4. Prepara o Canvas (o quadro onde vamos pintar)
         const canvas = document.getElementById('pdf-render-canvas');
         const context = canvas.getContext('2d');
 
-        // 5. Ajusta a escala para ficar nítido no mobile (Retina Display)
+        // Limpa o canvas anterior para nova renderização
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Escala 1.5 para alta definição (Retina/Mobile)
         const viewport = page.getViewport({ scale: 1.5 });
         canvas.height = viewport.height;
         canvas.width = viewport.width;
 
-        // 6. COMANDO MESTRE: Pinta o PDF dentro do Canvas
         const renderContext = {
             canvasContext: context,
             viewport: viewport
@@ -267,93 +265,107 @@ async function renderizarPdfV3(pdfBlob) {
 
         await page.render(renderContext).promise;
         
-        // 7. Exibe o modal após a pintura estar pronta
+        // Exibe o modal
         document.getElementById('modal-pdf-viewer').style.display = 'flex';
-        
-        console.log("✅ PDF renderizado com sucesso via Canvas (Mobile Friendly)");
+        console.log("✅ [SIGMA V3] PDF renderizado via Canvas.");
 
     } catch (error) {
         console.error("Erro na renderização técnica:", error);
-        Swal.fire('Erro Visual', 'O navegador não conseguiu processar o desenho do PDF.', 'error');
+        Swal.fire('Erro Visual', 'Falha ao desenhar o PDF no sistema.', 'error');
     }
 }
 
-// 1. FECHAR: Limpa a memória e esconde o modal
+// 2. FECHAR: Limpa a memória e esconde o modal
 function fecharVisualizadorPdf() {
-    const frame = document.getElementById('sigma-v3-pdf-frame');
-    if (frame) frame.src = 'about:blank'; // Evita rastro do PDF anterior
+    const canvas = document.getElementById('pdf-render-canvas');
+    if (canvas) {
+        const context = canvas.getContext('2d');
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.width = 0; 
+        canvas.height = 0;
+    }
+    
+    // Esconde o overlay
     document.getElementById('modal-pdf-viewer').style.display = 'none';
+    
+    // Opcional: Liberar URL do blob se existir
+    if (window.currentPdfUrl) {
+        URL.revokeObjectURL(window.currentPdfUrl);
+        window.currentPdfUrl = null;
+    }
 }
 
-// 2. IMPRIMIR: Foca no documento e dispara a impressora
+// 3. IMPRIMIR: Foca no documento e dispara a impressora
 function imprimirPdfInterno() {
-    const frame = document.getElementById('sigma-v3-pdf-frame');
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (!window.currentPdfBlob) {
+        return Swal.fire('Erro', 'Documento não encontrado para impressão.', 'error');
+    }
 
     try {
-        if (isMobile && window.currentPdfBlob) {
-            // ✅ Estratégia Mobile: Abre em nova aba para usar o gestor de impressão nativo do sistema
-            const fileURL = URL.createObjectURL(window.currentPdfBlob);
-            const win = window.open(fileURL, '_blank');
-            
-            if (!win) {
-                throw new Error("O bloqueador de pop-ups impediu a abertura da impressão.");
-            }
+        const fileURL = URL.createObjectURL(window.currentPdfBlob);
+        window.currentPdfUrl = fileURL; // Salva para limpar depois
 
-            Swal.mixin({
-                toast: true,
-                position: 'bottom-end',
-                showConfirmButton: false,
-                timer: 3000,
-                timerProgressBar: true
-            }).fire({
-                icon: 'info',
-                title: 'Use o menu do navegador para imprimir ou salvar.'
-            });
-
-        } else if (frame && frame.contentWindow) {
-            // ✅ Estratégia Desktop: Impressão direta via iframe
-            frame.contentWindow.focus();
-            frame.contentWindow.print();
-        } else {
-            throw new Error("O documento não está carregado corretamente no visualizador.");
+        // No Mobile e no PC, a forma mais estável sem iframe é abrir a URL do Blob
+        // O navegador gerencia a impressão nativa de forma muito mais eficiente
+        const win = window.open(fileURL, '_blank');
+        
+        if (!win) {
+            throw new Error("O bloqueador de pop-ups impediu a janela de impressão.");
         }
+
+        // Feedback para o usuário
+        Swal.mixin({
+            toast: true,
+            position: 'bottom-end',
+            showConfirmButton: false,
+            timer: 3000
+        }).fire({
+            icon: 'info',
+            title: 'Use as ferramentas do navegador para imprimir.'
+        });
+
     } catch (err) {
-        // ✅ Substituição do alert estático por Swal elegante
         Swal.fire({
             icon: 'error',
             title: 'Falha na Impressão',
-            text: err.message,
-            confirmButtonColor: '#d33',
-            confirmButtonText: 'ENTENDIDO'
+            text: err.message
         });
     }
 }
 
-// 3. COMPARTILHAR: Integração nativa com Android/iOS (WhatsApp, etc)
+// 4. COMPARTILHAR: Integração nativa com Android/iOS (WhatsApp, etc)
 async function compartilharPdfInterno() {
-    if (!window.currentPdfBlob) return alert("Nenhum arquivo pronto para compartilhar.");
+    if (!window.currentPdfBlob) {
+        return Swal.fire('Atenção', 'Nenhum arquivo pronto para compartilhar.', 'warning');
+    }
 
-    const file = new File([window.currentPdfBlob], window.currentPdfName, { type: 'application/pdf' });
+    const fileName = window.currentPdfName || "relatorio_sigma.pdf";
+    const file = new File([window.currentPdfBlob], fileName, { type: 'application/pdf' });
 
-    // Verifica se o navegador suporta compartilhamento de arquivos (Mobile e Safari Desktop)
+    // Verifica suporte nativo (Android/iOS)
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
             await navigator.share({
                 title: 'SIGMA - Relatório',
-                text: 'Segue em anexo o relatório gerado pelo sistema SIGMA.',
+                text: 'Segue em anexo o relatório de conferência.',
                 files: [file]
             });
         } catch (err) {
-            console.log("Compartilhamento cancelado.");
+            console.log("Compartilhamento cancelado ou falhou silenciosamente.");
         }
     } else {
-        // Fallback: Se não suportar share, ele faz o download como segurança
+        // Fallback para PC ou Navegadores sem suporte a Share API: DOWNLOAD
         const link = document.createElement('a');
         link.href = URL.createObjectURL(window.currentPdfBlob);
-        link.download = window.currentPdfName;
+        link.download = fileName;
         link.click();
-        Swal.fire({ icon: 'info', title: 'Download realizado', text: 'Seu dispositivo não suporta compartilhamento direto, o arquivo foi baixado.', timer: 2000 });
+        
+        Swal.fire({ 
+            icon: 'info', 
+            title: 'Download Realizado', 
+            text: 'Seu navegador não suporta compartilhamento direto. O arquivo foi baixado para sua pasta de downloads.',
+            timer: 3000 
+        });
     }
 }
 
