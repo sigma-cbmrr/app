@@ -210,9 +210,21 @@ function reimprimirPDF(data) {
 
         const pdfBlob = doc.output('blob');
         const pdfUrl = URL.createObjectURL(pdfBlob);
-        document.getElementById('sigma-v3-pdf-frame').src = pdfUrl;
-        document.getElementById('modal-pdf-viewer').style.display = 'flex';
+        
+        // Armazenamos o blob e o nome para uso nas funções de controle
         window.currentPdfBlob = pdfBlob;
+        window.currentPdfName = `${TITULO_DOC.replace(/\s+/g, '_')}_${data.id || 'export'}.pdf`;
+
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+        if (isMobile) {
+            // ✅ FLUXO MOBILE: Abre direto na ferramenta nativa para garantir visualização
+            window.open(pdfUrl, '_blank');
+        } else {
+            // ✅ FLUXO PC: Mantém o modal elegante com iframe
+            document.getElementById('sigma-v3-pdf-frame').src = pdfUrl;
+            document.getElementById('modal-pdf-viewer').style.display = 'flex';
+        }
 
     } catch (e) {
         console.error("Erro PDF Unificado:", e);
@@ -290,3 +302,4 @@ function gerarLogMovimentacao(itemObj, evento, detalhes) {
 
     return itemObj.historico_vida;
 }
+
