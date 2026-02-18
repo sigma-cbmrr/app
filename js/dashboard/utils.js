@@ -208,31 +208,75 @@ function reimprimirPDF(data) {
             doc.text(`CHAVE DE AUTENTICIDADE: ${hashSimples}`, MARGIN, doc.internal.pageSize.height - 15);
         }
 
+        // 1. GERAÇÃO DO BINÁRIO (BLOB)
         const pdfBlob = doc.output('blob');
-        const pdfUrl = URL.createObjectURL(pdfBlob);
         
-        // Armazenamos o blob e o nome para uso nas funções de controle
+        // 2. ARMAZENAMENTO GLOBAL (Para as funções de Imprimir/Compartilhar)
         window.currentPdfBlob = pdfBlob;
         window.currentPdfName = `${TITULO_DOC.replace(/\s+/g, '_')}_${data.id || 'export'}.pdf`;
 
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-        if (isMobile) {
-            // ✅ FLUXO MOBILE: Abre direto na ferramenta nativa para garantir visualização
-            window.open(pdfUrl, '_blank');
-        } else {
-            // ✅ FLUXO PC: Mantém o modal elegante com iframe
-            document.getElementById('sigma-v3-pdf-frame').src = pdfUrl;
-            document.getElementById('modal-pdf-viewer').style.display = 'flex';
-        }
+        // 3. ACIONAMENTO DO MOTOR DE RENDERIZAÇÃO V3 (Canvas)
+        // Chamamos a função que criamos anteriormente para desenhar o PDF na DIV
+        renderizarPdfV3(pdfBlob);
 
     } catch (e) {
         console.error("Erro PDF Unificado:", e);
-        alert("Erro ao gerar PDF: " + e.message);
+        Swal.fire({
+            icon: 'error',
+            title: 'Erro ao gerar documento',
+            text: e.message
+        });
     }
 }
 
 /* --- FUNÇÕES DE CONTROLE DO VISUALIZADOR DE PDF SIGMA V3 --- */
+
+/**
+ * Renderiza o PDF no Canvas para garantir 100% de compatibilidade mobile.
+ * @param {Blob} pdfBlob - O arquivo binário gerado pelo jsPDF.
+ */
+async function renderizarPdfV3(pdfBlob) {
+    // 1. Configurações iniciais do motor PDF.js
+    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+    try {
+        // 2. Transforma o Blob em um array de dados que o motor consegue ler
+        const arrayBuffer = await pdfBlob.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+
+        // 3. Seleciona a primeira página (Geralmente relatórios de conferência focam na pág 1)
+        // Se precisar de mais páginas, podemos fazer um loop depois.
+        const page = await pdf.getPage(1);
+
+        // 4. Prepara o Canvas (o quadro onde vamos pintar)
+        const canvas = document.getElementById('pdf-render-canvas');
+        const context = canvas.getContext('2d');
+
+        // 5. Ajusta a escala para ficar nítido no mobile (Retina Display)
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        // 6. COMANDO MESTRE: Pinta o PDF dentro do Canvas
+        const renderContext = {
+            canvasContext: context,
+            viewport: viewport
+        };
+
+        await page.render(renderContext).promise;
+        
+        // 7. Exibe o modal após a pintura estar pronta
+        document.getElementById('modal-pdf-viewer').style.display = 'flex';
+        
+        console.log("✅ PDF renderizado com sucesso via Canvas (Mobile Friendly)");
+
+    } catch (error) {
+        console.error("Erro na renderização técnica:", error);
+        Swal.fire('Erro Visual', 'O navegador não conseguiu processar o desenho do PDF.', 'error');
+    }
+}
 
 // 1. FECHAR: Limpa a memória e esconde o modal
 function fecharVisualizadorPdf() {
@@ -244,11 +288,45 @@ function fecharVisualizadorPdf() {
 // 2. IMPRIMIR: Foca no documento e dispara a impressora
 function imprimirPdfInterno() {
     const frame = document.getElementById('sigma-v3-pdf-frame');
-    if (frame && frame.contentWindow) {
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-    } else {
-        alert("Não foi possível acionar a impressora neste navegador.");
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    try {
+        if (isMobile && window.currentPdfBlob) {
+            // ✅ Estratégia Mobile: Abre em nova aba para usar o gestor de impressão nativo do sistema
+            const fileURL = URL.createObjectURL(window.currentPdfBlob);
+            const win = window.open(fileURL, '_blank');
+            
+            if (!win) {
+                throw new Error("O bloqueador de pop-ups impediu a abertura da impressão.");
+            }
+
+            Swal.mixin({
+                toast: true,
+                position: 'bottom-end',
+                showConfirmButton: false,
+                timer: 3000,
+                timerProgressBar: true
+            }).fire({
+                icon: 'info',
+                title: 'Use o menu do navegador para imprimir ou salvar.'
+            });
+
+        } else if (frame && frame.contentWindow) {
+            // ✅ Estratégia Desktop: Impressão direta via iframe
+            frame.contentWindow.focus();
+            frame.contentWindow.print();
+        } else {
+            throw new Error("O documento não está carregado corretamente no visualizador.");
+        }
+    } catch (err) {
+        // ✅ Substituição do alert estático por Swal elegante
+        Swal.fire({
+            icon: 'error',
+            title: 'Falha na Impressão',
+            text: err.message,
+            confirmButtonColor: '#d33',
+            confirmButtonText: 'ENTENDIDO'
+        });
     }
 }
 
@@ -302,4 +380,3 @@ function gerarLogMovimentacao(itemObj, evento, detalhes) {
 
     return itemObj.historico_vida;
 }
-
