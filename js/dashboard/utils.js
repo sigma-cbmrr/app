@@ -211,15 +211,26 @@ function reimprimirPDF(data) {
         // 1. GERAÇÃO DO BINÁRIO (BLOB)
         const pdfBlob = doc.output('blob');
         
+        // --- ATUALIZAÇÃO DO NOME: PADRÃO [LOCAL]_[DATA] ---
+        // Extrai o local (ex: BRAVO ABT-18) e limpa espaços
+        const nomeLocal = (data.local || "RELATORIO").replace(/\s+/g, '_').toUpperCase();
+        
+        // Formata a data do relatório (ou atual) para 18.02.2026
+        const dataDoc = data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000) : new Date();
+        const dataFormatada = dataDoc.toLocaleDateString('pt-BR').replace(/\//g, '.');
+        
+        // Define o nome final: BRAVO_ABT-18_18.02.2026.pdf
+        window.currentPdfName = `${nomeLocal}_${dataFormatada}.pdf`;
+        // --------------------------------------------------
+
         // 2. ARMAZENAMENTO GLOBAL (Para as funções de Imprimir/Compartilhar)
         window.currentPdfBlob = pdfBlob;
-        window.currentPdfName = `${TITULO_DOC.replace(/\s+/g, '_')}_${data.id || 'export'}.pdf`;
-        // Atualiza o nome do arquivo no topo do modal
+        
+        // Atualiza o nome do arquivo no topo do modal para o usuário ver
         const fileNameLabel = document.getElementById('pdf-modal-filename');
         if (fileNameLabel) fileNameLabel.textContent = window.currentPdfName;
 
         // 3. ACIONAMENTO DO MOTOR DE RENDERIZAÇÃO V3 (Canvas)
-        // Chamamos a função que criamos anteriormente para desenhar o PDF na DIV
         renderizarPdfV3(pdfBlob);
 
     } catch (e) {
@@ -301,34 +312,42 @@ function imprimirPdfInterno() {
         return Swal.fire('Erro', 'Documento não encontrado para impressão.', 'error');
     }
 
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const fileURL = URL.createObjectURL(window.currentPdfBlob);
+
     try {
-        const fileURL = URL.createObjectURL(window.currentPdfBlob);
-        window.currentPdfUrl = fileURL; // Salva para limpar depois
+        // Criamos um iframe invisível para carregar o PDF e disparar a impressão
+        const printFrame = document.createElement('iframe');
+        printFrame.style.display = 'none';
+        printFrame.src = fileURL;
 
-        // No Mobile e no PC, a forma mais estável sem iframe é abrir a URL do Blob
-        // O navegador gerencia a impressão nativa de forma muito mais eficiente
-        const win = window.open(fileURL, '_blank');
-        
-        if (!win) {
-            throw new Error("O bloqueador de pop-ups impediu a janela de impressão.");
-        }
+        document.body.appendChild(printFrame);
 
-        // Feedback para o usuário
-        Swal.mixin({
-            toast: true,
-            position: 'bottom-end',
-            showConfirmButton: false,
-            timer: 3000
-        }).fire({
-            icon: 'info',
-            title: 'Use as ferramentas do navegador para imprimir.'
-        });
+        printFrame.onload = function() {
+            try {
+                // Foca e dispara a impressão nativa
+                printFrame.contentWindow.focus();
+                printFrame.contentWindow.print();
+                
+                // Limpeza: remove o iframe após o diálogo de impressão fechar
+                // (SetTimeout ajuda a não travar o processo de impressão no iOS)
+                setTimeout(() => {
+                    document.body.removeChild(printFrame);
+                    URL.revokeObjectURL(fileURL);
+                }, 1000);
+
+            } catch (e) {
+                console.warn("Falha no print direto, tentando fallback...", e);
+                // Fallback: Se o print direto falhar (comum em alguns Androids), abre na aba
+                window.open(fileURL, '_blank');
+            }
+        };
 
     } catch (err) {
         Swal.fire({
             icon: 'error',
             title: 'Falha na Impressão',
-            text: err.message
+            text: 'Seu dispositivo bloqueou a impressão automática. Tente compartilhar o arquivo.'
         });
     }
 }
@@ -392,3 +411,4 @@ function gerarLogMovimentacao(itemObj, evento, detalhes) {
 
     return itemObj.historico_vida;
 }
+
