@@ -64,11 +64,94 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
         }
     });
 
-    // Esta é a lista final, limpa e única
+    // Esta é a lista final, limpa e única de avarias/faltas
     pendencias = Array.from(mapUnico.values());
+
+    // ✅ 1.4 NOVA LÓGICA V3: CAPTURA PROFUNDA DE CAUTELAS (SINGLE E MULTI)
+    let cautelasDoItem = [];
+    const mapCautelasUnicas = new Map();
+
+    fonteDados.forEach(setor => {
+        setor.itens.forEach(it => {
+            const idMestre = String(it.uid_instancia || it.uid_global || it.id || "");
+            
+            // Caso A: O Modal foi aberto a partir do card Mestre
+            if (idMestre === String(uid)) {
+                // Cautelas em item Single
+                if (it.cautelas && Array.isArray(it.cautelas)) {
+                    it.cautelas.forEach(c => {
+                        const key = c.id_cautela || c.id;
+                        if (!mapCautelasUnicas.has(key)) {
+                            mapCautelasUnicas.set(key, true);
+                            cautelasDoItem.push(c);
+                        }
+                    });
+                }
+                // Cautelas em item Multi (Varrer todos os tombamentos)
+                if (it.tombamentos && Array.isArray(it.tombamentos)) {
+                    it.tombamentos.forEach(t => {
+                        if (t.cautela) {
+                            const cObj = { ...t.cautela, ref_tomb: t.tomb };
+                            const key = `${cObj.id_cautela || cObj.id}-${t.tomb}`;
+                            if (!mapCautelasUnicas.has(key)) {
+                                mapCautelasUnicas.set(key, true);
+                                cautelasDoItem.push(cObj);
+                            }
+                        }
+                    });
+                }
+            } 
+            // Caso B: O Modal foi aberto com o UID composto de um tombamento específico
+            else if (it.tombamentos && Array.isArray(it.tombamentos)) {
+                it.tombamentos.forEach(t => {
+                    const uidComp = `${it.uid_global || it.id}-${t.tomb}`;
+                    if (uidComp === String(uid) && t.cautela) {
+                        const cObj = { ...t.cautela, ref_tomb: t.tomb };
+                        const key = `${cObj.id_cautela || cObj.id}-${t.tomb}`;
+                        if (!mapCautelasUnicas.has(key)) {
+                            mapCautelasUnicas.set(key, true);
+                            cautelasDoItem.push(cObj);
+                        }
+                    }
+                });
+            }
+        });
+    });
 
     // 2. CONSTRUÇÃO DINÂMICA DOS CARDS DE PENDÊNCIA
     let htmlPendencias = "";
+
+    // 🏆 INJETA O CARD DOURADO DE CAUTELA NO TOPO DA LISTA
+    cautelasDoItem.forEach(c => {
+        const isCiente = window.itemStatus[uid]?.cautela_confirmada;
+        
+        // Lógica visual: Apagado (Borda Cinza/Texto Cinza) -> Aceso (Fundo Verde/Texto Branco)
+        const btnBg = isCiente ? '#10b981' : 'transparent';
+        const btnBorder = isCiente ? '2px solid #10b981' : '2px solid #94a3b8';
+        const btnColor = isCiente ? 'white' : '#64748b';
+        const btnIcon = isCiente ? 'fa-check-double' : 'fa-check';
+        const btnText = isCiente ? 'CIENTE' : 'DAR CIENTE';
+
+        htmlPendencias += `
+            <div class="v3-manage-card" style="background:#fffbeb; border:1px solid #fcd34d; padding:15px; border-radius:12px; margin-bottom:12px; width: 100%; box-sizing: border-box;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <small style="color:#d97706; font-weight:900; font-size:0.65em; text-transform:uppercase;"><i class="fas fa-file-contract"></i> MATERIAL CAUTELADO (TRUG)</small><br>
+                        <span style="font-size: 0.85em; font-weight: 900; color: #92400e;">TRUG: ${c.id || c.id_cautela || 'N/D'}</span>
+                    </div>
+                    <button type="button" id="btn-ciente-${uid}" onclick="registrarCienteCautela('${uid}', event)" class="v3-action-icon" style="background:${btnBg}; border:${btnBorder}; color:${btnColor}; width:auto; padding:6px 15px; border-radius:8px; font-size:0.75em; font-weight: bold; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas ${btnIcon}"></i> ${btnText}
+                    </button>
+                </div>
+                <div style="font-weight:700; color:#1e293b; font-size:0.9em; margin-top:8px;">
+                    Destinatário: <span style="color:#800020;">${c.destinatario || 'N/D'}</span>
+                </div>
+                <div style="font-size:0.7em; color:#64748b; margin-top:4px; font-style:italic;">
+                    <i class="fas fa-info-circle"></i> Item sob responsabilidade de terceiros. Quantidade: ${c.quantidade || 1} un.
+                </div>
+            </div>`;
+    });
+
     pendencias.sort((a, b) => String(b.id).includes('TEMP') ? 1 : -1);
 
     pendencias.forEach((p, index) => {
@@ -95,13 +178,13 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
                     <div style="display:flex; gap:10px;">
                         ${isResolvido ? '' : `
                             ${isTemp ? `
-                                <button onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" class="v3-mini-btn delete" title="Excluir"><i class="fas fa-trash"></i></button>
-                                <button onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao}')" class="v3-mini-btn edit" title="Editar"><i class="fas fa-edit"></i></button>
+                                <button type="button" onclick="confirmarExclusaoRelato('${p.id}', '${uid}')" class="v3-mini-btn delete" title="Excluir"><i class="fas fa-trash"></i></button>
+                                <button type="button" onclick="abrirModalEditar('${p.id}', '${uid}', ${p.quantidade}, '${p.descricao}')" class="v3-mini-btn edit" title="Editar"><i class="fas fa-edit"></i></button>
                             ` : `
-                                <button id="btn-manter-${index}" onclick="manterID('${p.id}', '${uid}', ${index})" class="v3-action-icon ${isMantido ? 'active' : ''}">
+                                <button type="button" id="btn-manter-${index}" onclick="manterID('${p.id}', '${uid}', ${index})" class="v3-action-icon ${isMantido ? 'active' : ''}">
                                     <i class="fas ${isMantido ? 'fa-check-double' : 'fa-thumbtack'}"></i>
                                 </button>
-                                <button onclick="abrirFormularioResolucaoV3(${JSON.stringify(p).replace(/"/g, '&quot;')}, '${uid}')" class="v3-action-icon resolver">
+                                <button type="button" onclick="abrirFormularioResolucaoV3(${JSON.stringify(p).replace(/"/g, '&quot;')}, '${uid}')" class="v3-action-icon resolver">
                                     <i class="fas fa-wrench"></i>
                                 </button>
                             `}
@@ -126,9 +209,8 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
                 <small style="display:block; font-weight:800; font-size:0.65em; color:#64748b; text-transform:uppercase; margin-bottom:8px; text-align:center;">Componentes Vinculados ao Kit:</small>
                 <div style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center;">
                     ${acessoriosDoKit.map((ac) => {
-            // Crucial: Captura o DNA real do componente (uid_global)
             const uidGlobalReal = ac.uid_global || ac.id;
-            return `<button onclick="exibirModalInsercaoNovoRelato('${uidGlobalReal}', 'single', '${ac.nome.replace(/'/g, "")}', 1, '${corPrimaria}', '${uid}')" 
+            return `<button type="button" onclick="exibirModalInsercaoNovoRelato('${uidGlobalReal}', 'single', '${ac.nome.replace(/'/g, "")}', 1, '${corPrimaria}', '${uid}')" 
                                 style="font-size:0.55em; background:#fff; padding:4px 8px; border-radius:6px; border:1px solid #cbd5e1; font-weight:800; color:#334155; cursor:pointer; text-transform:uppercase;">
                                 <i class="fas fa-exclamation-circle" style="color:#e20b0b"></i> ${ac.nome}
                                 </button>`;
@@ -152,10 +234,10 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
                 ${htmlPendencias || '<p style="text-align:center; color:#94a3b8; padding:30px;">Nenhum relato encontrado.</p>'}
             </div>
             <div style="display: flex; gap: 10px; margin-top: 25px; width: 100%;">
-                <button id="btn-novo-relato-v3" style="flex: 1; background: #0284c7; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
+                <button type="button" id="btn-novo-relato-v3" style="flex: 1; background: #0284c7; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
                     <i class="fas fa-plus-circle"></i> NOVO RELATO
                 </button>
-                <button onclick="Swal.clickConfirm()" style="flex: 1; background: ${corPrimaria}; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
+                <button type="button" onclick="Swal.clickConfirm()" style="flex: 1; background: ${corPrimaria}; color: white; border: none; padding: 12px 5px; border-radius: 10px; font-weight: 800; font-size: 0.75rem; cursor: pointer;">
                     <i class="fas fa-check-double"></i> CONCLUIR
                 </button>
             </div>`,
@@ -175,12 +257,31 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
                 Swal.showValidationMessage('Interaja com os relatos antes de concluir.');
                 return false;
             }
-            window.itemStatus[uid].status = 'C/A';
-            const row = document.getElementById(`item-row-${uid}`);
-            if (row) {
-                row.classList.add('status-alert');
-                row.style.setProperty('background-color', '#fff5f5', 'important');
+            
+            // ✅ Lógica de Conclusão: Define o status final da linha de fundo
+            const temAvariaMantida = status.ids_mantidos && status.ids_mantidos.length > 0;
+            const temAvariaNova = status.pendencias_temporarias && status.pendencias_temporarias.length > 0;
+
+            if (status.cautela_confirmada && !temAvariaMantida && !temAvariaNova) {
+                 // Se tem Cautela Ativa, o usuário deu ciente e NÃO há outras avarias, a linha fica OK
+                 window.itemStatus[uid].status = 'ok';
+                 const row = document.getElementById(`item-row-${uid}`);
+                 if (row) {
+                     row.classList.remove('status-alert');
+                     row.classList.add('status-ok');
+                     row.style.setProperty('background-color', '#f0fdf4', 'important');
+                 }
+            } else {
+                 // Se tem qualquer avaria ativa, a linha continua em Alerta
+                 window.itemStatus[uid].status = 'C/A';
+                 const row = document.getElementById(`item-row-${uid}`);
+                 if (row) {
+                     row.classList.add('status-alert');
+                     row.classList.remove('status-ok');
+                     row.style.setProperty('background-color', '#fff5f5', 'important');
+                 }
             }
+
             if (typeof updateOverallStatus === 'function') updateOverallStatus();
             return { confirmado: true, uidPrincipal: uid };
         }
@@ -1437,4 +1538,38 @@ window.manterRelatoV3 = function (pendenciaId, uid, index) {
     }
 
     updateOverallStatus();
+};
+
+/* --- Registra que o conferente está ciente da Cautela (TRUG), liberando a conferência do item --- */
+window.registrarCienteCautela = function(uid, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    if (!window.itemStatus[uid]) window.itemStatus[uid] = {};
+    
+    // Marca a interação humana e a flag de confirmação na memória
+    window.itemStatus[uid].cautela_confirmada = true;
+    window.itemStatus[uid].interacao_humana = true;
+
+    // Atualiza visualmente o botão dentro do Modal (Muda de Apagado para Aceso)
+    const btn = document.getElementById(`btn-ciente-${uid}`);
+    if (btn) {
+        btn.style.background = '#10b981'; // Verde sucesso
+        btn.style.border = '2px solid #10b981';
+        btn.style.color = 'white';
+        btn.innerHTML = '<i class="fas fa-check-double"></i> CIENTE';
+        
+        // Efeito sutil de pulso ao clicar
+        btn.style.transform = "scale(0.95)";
+        setTimeout(() => btn.style.transform = "scale(1)", 150);
+    }
+
+    // Atualiza a barra neon de progresso ao fundo sem destruir o modal
+    if (typeof updateOverallStatus === 'function') {
+        updateOverallStatus();
+    }
+    
+    console.log(`✅ [V3] Ciente registrado para o TRUG no item ${uid}. Modal permanece aberto aguardando CONCLUIR.`);
 };

@@ -407,7 +407,7 @@ function renderizarConferencia() {
         }
 
         itens.forEach((item) => {
-            // ✅ AJUSTE SIGMA V3: Identidade Única via uid_instancia
+            // Identidade Única via uid_instancia
             const uid = item.uid_instancia || item.uid_global || item.id;
             const tombamentoReferencia = (item.tipo === 'multi' && item.tombamentos && item.tombamentos.length > 0)
                 ? item.tombamentos[0].tomb
@@ -416,8 +416,20 @@ function renderizarConferencia() {
             const statusLocal = window.itemStatus[uid] || {};
             const st = statusLocal.status;
 
+            // ✅ LÓGICA DE BLOQUEIO: Detecção de Exceções (Pendências ou Cautelas)
             const temPendenciaAnterior = item.pendencias_ids && item.pendencias_ids.length > 0;
-            const devePulsar = temPendenciaAnterior && !statusLocal.interacao_humana;
+            const temCautelaNoSingle = item.cautelas && item.cautelas.length > 0;
+
+            // Verifica se o tombamento específico deste card possui uma cautela ativa
+            const temCautelaNoMulti = item.tipo === 'multi' && item.tombamentos && item.tombamentos.some(t => t.tomb === tombamentoReferencia && t.cautela);
+
+            const temCautelaAtiva = temCautelaNoSingle || temCautelaNoMulti;
+
+            // 🛑 REGRA DE OURO: Se tem pendência ou cautela, não existe botão de Check (S/A)
+            const bloquearSA = temPendenciaAnterior || temCautelaAtiva;
+
+            // O alerta de exclamação DEVE pulsar se há bloqueio e o conferente ainda não auditou
+            const devePulsar = bloquearSA && !statusLocal.interacao_humana;
 
             const totalEsperado = Number(item.quantidadeEsperada || item.quantidade || 0);
             const totalCautelado = (item.cautelas || []).reduce((s, c) => s + (Number(c.quantidade) || 0), 0);
@@ -425,56 +437,57 @@ function renderizarConferencia() {
             const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
 
             const classeStatus = (st === 'ok') ? 'status-ok' : (st === 'C/A' ? 'status-alert' : '');
-            const classeCarimbo = (temPendenciaAnterior || (item.cautelas && item.cautelas.length > 0)) ? 'has-carimbo' : '';
+            const classeCarimbo = (bloquearSA) ? 'has-carimbo' : '';
             const nomeSanitizado = item.nome.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-            // ✅ AJUSTE SIGMA V3: Padronização para acessorios_vinculados
             const componentesKit = item.acessorios_vinculados || item.acessorios_acoplados || [];
             const temAcessorios = componentesKit.length > 0;
 
             let htmlKitContent = '';
             if (temAcessorios) {
                 htmlKitContent = `
-                <div class="v3-kit-internal-list" style="width: 100%; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
-                    <small style="display:block; color: #94a3b8; font-weight: 800; font-size: 0.65em; margin-bottom: 5px; text-transform: uppercase;">
-                        Componentes do Kit:
-                    </small>
-                    ${componentesKit.map(ac => `
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: #64748b; font-size: 0.8em;">
-                            <i class="fas fa-caret-right" style="font-size: 0.7em; color: #cbd5e1;"></i>
-                            <span style="font-weight: 600;">${ac.quantidade}x</span>
-                            <span style="text-transform: uppercase;">${ac.nome}</span>
-                        </div>
-                    `).join('')}
-                </div>`;
+            <div class="v3-kit-internal-list" style="width: 100%; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+                <small style="display:block; color: #94a3b8; font-weight: 800; font-size: 0.65em; margin-bottom: 5px; text-transform: uppercase;">
+                    Componentes do Kit:
+                </small>
+                ${componentesKit.map(ac => `
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: #64748b; font-size: 0.8em;">
+                        <i class="fas fa-caret-right" style="font-size: 0.7em; color: #cbd5e1;"></i>
+                        <span style="font-weight: 600;">${ac.quantidade}x</span>
+                        <span style="text-transform: uppercase;">${ac.nome}</span>
+                    </div>
+                `).join('')}
+            </div>`;
             }
 
             container.innerHTML += `
-            <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}" 
-                 style="display: flex; flex-direction: column; align-items: flex-start; gap: 0;">
-                
-                <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
-                    <div class="v3-item-main-info">
-                        <span class="v3-item-name">${item.nome} ${temAcessorios ? '<i class="fas fa-box-open" style="font-size: 0.8em; margin-left: 5px; color: #2c7399;"></i>' : ''}</span>
-                        ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
-                        ${tombamentoReferencia ? `<span class="v3-item-subtext">TOMB: <b>${tombamentoReferencia}</b></span>` : ''}
-                    </div>
+        <div class="v3-item-row ${classeStatus} ${classeCarimbo}" id="item-row-${uid}" 
+             style="display: flex; flex-direction: column; align-items: flex-start; gap: 0;">
+            
+            <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+                <div class="v3-item-main-info">
+                    <span class="v3-item-name">${item.nome} ${temAcessorios ? '<i class="fas fa-box-open" style="font-size: 0.8em; margin-left: 5px; color: #2c7399;"></i>' : ''}</span>
+                    ${!isChecklist ? `<span class="v3-item-subtext">DISPONÍVEL: <b>${saldoDisponivel}/${totalEsperado}</b></span>` : ''}
+                    ${tombamentoReferencia ? `<span class="v3-item-subtext">TOMB: <b>${tombamentoReferencia}</b></span>` : ''}
+                </div>
 
-                    <div class="v3-item-actions">
+                <div class="v3-item-actions">
+                    ${bloquearSA ? '' : `
                         <button class="v3-btn-circle btn-check ${st === 'ok' ? 'active' : ''}" 
                                 onclick="registrarCheckRapido(this, '${uid}', ${setorIndex})">
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="v3-btn-circle btn-alert ${st === 'C/A' ? 'active' : ''} ${devePulsar ? 'v3-pulse-orange' : ''}" 
-                                style="${devePulsar ? 'background-color: #f57c00 !important; color: white;' : ''}"
-                                onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
-                            <i class="fas fa-exclamation"></i>
-                        </button>
-                    </div>
+                    `}
+                    <button class="v3-btn-circle btn-alert ${st === 'C/A' || bloquearSA ? 'active' : ''} ${devePulsar ? 'v3-pulse-orange' : ''}" 
+                            style="${devePulsar ? 'background-color: #f57c00 !important; color: white;' : ''}"
+                            onclick="abrirModalPendenciaV3('${uid}', '${item.tipo}', '${nomeSanitizado}', ${saldoDisponivel})">
+                        <i class="fas fa-exclamation"></i>
+                    </button>
                 </div>
+            </div>
 
-                ${htmlKitContent}
-            </div>`;
+            ${htmlKitContent}
+        </div>`;
         });
 
         if (typeof atualizarContadorSetorInterno === 'function') {
@@ -894,37 +907,52 @@ function autoAdvanceSetor(currentSetorElement) {
 
 function injetarCautelasNaLista() {
     const fonteDados = window.dadosConferencia || dadosConferencia;
-    // Aqui simulamos a leitura da sua coleção cautelas_abertas
-    // No seu código real, você deve garantir que window.cautelasAbertas contenha os itens que você me enviou
     const cautelas = window.cautelasAbertas || [];
 
     fonteDados.forEach(setor => {
         setor.itens.forEach(item => {
             cautelas.forEach(cautelaDoc => {
                 cautelaDoc.itens.forEach(itemCautelado => {
-                    // Se o ID base coincide (Ex: 56911524-64012364)
-                    if (item.id === itemCautelado.id_base) {
 
+                    // Verifica se o ID do item da Viatura bate com o ID do item no TRUG
+                    const idItemViatura = item.uid_instancia || item.uid_global || item.id;
+                    const matchId = (item.id === itemCautelado.id_base || idItemViatura === itemCautelado.id_base);
+
+                    if (matchId) {
+                        // Padroniza os dados do TRUG lendo os campos corretos da coleção cautelas_abertas
+                        const objCautela = {
+                            id: cautelaDoc.cautela_id,
+                            destinatario: cautelaDoc.destinatario || cautelaDoc.destinatario_original_nome || "N/D",
+                            quantidade: Number(itemCautelado.quantidade) || 1,
+                            status: cautelaDoc.status
+                        };
+
+                        // Se for Multi, procura o Tombamento exato (Ex: 511.124)
                         if (item.tipo === 'multi' && item.tombamentos) {
-                            // Procura o tombamento específico (Ex: 511.524 ou 511.527)
                             const t = item.tombamentos.find(tomb => tomb.tomb === itemCautelado.tombamento);
                             if (t) {
-                                t.cautela = {
-                                    destinatario: cautelaDoc.destinatario_original_nome,
-                                    quantidade: 1,
-                                    id_cautela: cautelaDoc.cautela_id
-                                };
+                                t.cautela = objCautela;
+
+                                // ✅ ACENDE O ALERTA (Bloqueia o botão OK e força o Ciente)
+                                const uidTomb = `${item.uid_global || item.id}-${t.tomb}`;
+                                if (!window.itemStatus[uidTomb]) window.itemStatus[uidTomb] = {};
+                                window.itemStatus[uidTomb].status = 'C/A';
+                                window.itemStatus[uidTomb].interacao_humana = false;
                             }
-                        } else if (item.tipo === 'single') {
+                        }
+                        // Se for Single, injeta no array raiz
+                        else if (item.tipo === 'single') {
                             if (!item.cautelas) item.cautelas = [];
-                            // Evita duplicados
-                            if (!item.cautelas.find(c => c.id_cautela === cautelaDoc.cautela_id)) {
-                                item.cautelas.push({
-                                    destinatario: cautelaDoc.destinatario_original_nome,
-                                    quantidade: itemCautelado.quantidade,
-                                    id_cautela: cautelaDoc.cautela_id
-                                });
+
+                            // Evita duplicidade se o banco já tiver o carimbo
+                            if (!item.cautelas.find(c => c.id === cautelaDoc.cautela_id)) {
+                                item.cautelas.push(objCautela);
                             }
+
+                            // ✅ ACENDE O ALERTA 
+                            if (!window.itemStatus[idItemViatura]) window.itemStatus[idItemViatura] = {};
+                            window.itemStatus[idItemViatura].status = 'C/A';
+                            window.itemStatus[idItemViatura].interacao_humana = false;
                         }
                     }
                 });

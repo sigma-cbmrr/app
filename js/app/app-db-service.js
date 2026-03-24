@@ -94,8 +94,16 @@ async function carregarDadosRemotos() {
                     item._ocultarCarimbo = isDevolucaoFinal;
 
                     // ✅ ALIMENTAÇÃO DA RAM (window.itemStatus) PARA ACENDER OS CARDS
-                    if (item.pendencias_ids.length > 0) {
-                        window.itemStatus[uidMestre] = { status: 'C/A', interacao_humana: false };
+                    const temPendenciaNormal = item.pendencias_ids.length > 0;
+                    const temCautelaAtiva = (item.cautelas && item.cautelas.length > 0) || 
+                        (item.tipo === 'multi' && item.tombamentos && item.tombamentos.some(t => t.cautela));
+
+                    if (temPendenciaNormal || temCautelaAtiva) {
+                        window.itemStatus[uidMestre] = { 
+                            status: 'C/A', 
+                            interacao_humana: false,
+                            tem_cautela: temCautelaAtiva // Flag secreta para o modal
+                        };
                     }
 
                     // ✅ MAPEAMENTO PROFUNDO DE ACESSÓRIOS (FILHOS)
@@ -120,6 +128,29 @@ async function carregarDadosRemotos() {
         }
 
         window.dadosConferencia = dadosConferencia;
+
+        // --- BUSCA DINÂMICA DE CAUTELAS ATIVAS (TRUGs) ---
+        // Isso preenche a memória do sistema com os itens que saíram, mesmo que a lista esteja desatualizada
+        if (!isCautelaLocal && !isRecebimentoCarga) {
+            try {
+                const snapCautelas = await db.collection('cautelas_abertas')
+                    .where('local_origem_id', '==', ID_ALVO)
+                    .where('status', 'in', ['ABERTA', 'DEVOLUÇÃO'])
+                    .get();
+
+                window.cautelasAbertas = [];
+                snapCautelas.forEach(docCautela => {
+                    window.cautelasAbertas.push(docCautela.data());
+                });
+
+                // Executa a injeção forçada na árvore de itens da viatura
+                if (typeof injetarCautelasNaLista === 'function') {
+                    injetarCautelasNaLista();
+                }
+            } catch (err) {
+                console.error("SIGMA V3: Erro ao buscar TRUGs ativos para esta viatura.", err);
+            }
+        }
 
         // --- 8. CONFIGURAÇÃO DO HUD ---
         const localNome = isCautelaLocal ? `CAUTELA: ${ID_ALVO}` : (docData.ativo_nome || docData.nome_local || "Lista");
