@@ -557,13 +557,12 @@ function showCautelasDashboard(type) {
             htmlContent += `
                 <div class="sigma-v3-clean-card">
                     <div id="loading-cautelas" style="text-align: center; padding: 40px; color: #64748b;">
-                        <i class="fas fa-spinner fa-spin fa-2x"></i><br><span style="font-size:0.8em; font-weight:700; margin-top:10px; display:block;">SINCRONIZANDO REGISTROS...</span>
+                        <i class="fas fa-spinner fa-spin fa-2x"></i><br><span style="font-size:0.8em; font-weight:700; margin-top:10px; display:block;">BUSCANDO TRUG'S ATIVOS...</span>
                     </div>
                     <div class="table-responsive">
                         <table class="sigma-v3-table" id="cautelas-ativas-table" style="display: none; width:100%;">
                             <thead>
                                 <tr>
-                                    <th style="width:100px; text-align:center;">CONTEXTO</th>
                                     <th>ID</th><th>Destinatário</th><th>Emissão</th><th>Local Origem</th><th>Itens</th><th>Status</th>
                                 </tr>
                             </thead>
@@ -577,7 +576,7 @@ function showCautelasDashboard(type) {
             htmlContent += `
                 <div class="sigma-v3-clean-card">
                     <div id="loading-receive" style="text-align: center; padding: 40px; color: #64748b;">
-                        <i class="fas fa-spinner fa-spin fa-2x"></i><br><span style="font-size:0.8em; font-weight:700; margin-top:10px; display:block;">BUSCANDO PENDÊNCIAS...</span>
+                        <i class="fas fa-spinner fa-spin fa-2x"></i><br><span style="font-size:0.8em; font-weight:700; margin-top:10px; display:block;">BUSCANDO TRUG'S A RECEBER...</span>
                     </div>
                     <div class="table-responsive">
                         <table class="sigma-v3-table" id="cautelas-receive-table" style="display: none; width:100%;">
@@ -871,7 +870,6 @@ async function loadCautionsToReceive() {
         const user = currentUserData;
         const statusesToReceive = ['ABERTA', 'DEVOLUÇÃO'];
 
-        // 1. Busca as cautelas nominais (onde o UID dele é o destinatário)
         const personalCautions = await queryCautelas(
             statusesToReceive,
             role,
@@ -880,35 +878,48 @@ async function loadCautionsToReceive() {
             'personal'
         );
 
-        // 2. Busca se ele é dono provisório de algum local para identificar Cargas/Devoluções
         const snapCustodia = await db.collection('custodia_atual')
             .where('conferente_uid', '==', militarUid).get();
         
         const meusLocaisIds = [];
         snapCustodia.forEach(doc => meusLocaisIds.push(doc.id));
 
-        // 3. Unifica e identifica a natureza (Contexto)
         const mapFinal = new Map();
 
-        // Processa as Pessoais primeiro
+        // 1. Processa as Pessoais (Bloqueia o Emitente de ver)
         personalCautions.forEach(c => {
-            mapFinal.set(c.id, { ...c, contexto: 'PESSOAL' });
+            const souDestinatario = c.destinatario_uid === militarUid;
+            
+            // Lógica de Segurança: SÓ recebe se for destinatário da Abertura ou da Devolução
+            if (c.status === 'ABERTA' && souDestinatario) {
+                mapFinal.set(c.id, { ...c, contexto: 'PESSOAL' });
+            } else if (c.status === 'DEVOLUÇÃO') {
+                mapFinal.set(c.id, { ...c, contexto: 'PESSOAL' });
+            }
         });
 
-        // Se tiver locais, busca cautelas enviadas para esses locais (Carga Vtr)
+        // 2. Processa as Cargas (Viaturas)
         if (meusLocaisIds.length > 0) {
-            const snapLocais = await db.collection('cautelas_abertas')
-                .where('local_origem_id', 'in', meusLocaisIds)
-                .where('status', 'in', statusesToReceive).get();
+            for (let i = 0; i < meusLocaisIds.length; i += 10) {
+                const lote = meusLocaisIds.slice(i, i + 10);
+                const snapLocais = await db.collection('cautelas_abertas')
+                    .where('local_origem_id', 'in', lote)
+                    .get();
 
-            snapLocais.forEach(doc => {
-                const data = doc.data();
-                const id = doc.id;
-                // Se já existir no map como pessoal, o "PESSOAL" tem prioridade visual
-                if (!mapFinal.has(id)) {
-                    mapFinal.set(id, { id, ...data, contexto: 'DEVOLUÇÃO' });
-                }
-            });
+                snapLocais.forEach(doc => {
+                    const data = doc.data();
+                    const id = doc.id;
+                    
+                    // Lógica de Segurança de Viatura: 
+                    // A Viatura SÓ recebe algo se estiver voltando (DEVOLUÇÃO).
+                    // Se for ABERTA, significa que saiu da Viatura, então eu não devo "Receber" isso de novo.
+                    if (data.status === 'DEVOLUÇÃO') {
+                        if (!mapFinal.has(id)) {
+                            mapFinal.set(id, { id, ...data, contexto: 'DEVOLUÇÃO' });
+                        }
+                    }
+                });
+            }
         }
 
         const combinedResults = Array.from(mapFinal.values()).sort((a, b) => 
@@ -916,7 +927,6 @@ async function loadCautionsToReceive() {
         );
 
         // --- RENDERIZAÇÃO ---
-
         if (combinedResults.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -928,8 +938,8 @@ async function loadCautionsToReceive() {
         } else {
             let htmlContent = '';
             combinedResults.forEach(cautela => {
-                // ✅ Agora passamos o contexto identificado para a função de linha
-                htmlContent += renderCautelaRow(cautela);
+                // Passamos "true" para forçar a renderização do Badge e inverter a coluna para Emitente
+                htmlContent += renderCautelaRow(cautela, true);
             });
             tbody.innerHTML = htmlContent;
         }
@@ -2423,11 +2433,10 @@ async function queryCautelas(statusArray, role, user, field = null, type = 'pers
 }
 
 //=== Gera o código HTML das linhas das tabelas (com cores por status) ===//
-function renderCautelaRow(cautela) {
+function renderCautelaRow(cautela, isTelaReceber = false) {
     const clickAction = `showCautelaDetails('${cautela.cautela_id}')`;
     const itensCount = cautela.itens ? cautela.itens.reduce((sum, item) => sum + item.quantidade, 0) : 0;
 
-    // 🛑 INDICADOR DE PENDÊNCIA NA LINHA
     const temPendencia = cautela.pendencias_ativas && cautela.pendencias_ativas.length > 0;
     const alertaCaa = temPendencia ? `<i class="fas fa-exclamation-circle" style="color: #f57c00;" title="Possui itens em análise"></i> ` : "";
 
@@ -2439,24 +2448,23 @@ function renderCautelaRow(cautela) {
     let badgeClass = 'badge-cautela';
     let badgeText = 'N/D';
 
-    // ✅ LÓGICA DE CONTEXTO (Badge da 1ª Coluna)
-    // Se o objeto cautela trouxer o campo 'contexto' definido na busca, usamos ele.
-    const contexto = cautela.contexto || (status === 'RECEBIDA' ? 'PESSOAL' : 'CARGA');
-    let contextoHtml = '';
-
-    if (contexto === 'PESSOAL') {
-        contextoHtml = `<span style="background: #800020; color: white; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px;"><i class="fas fa-user"></i> PESSOAL</span>`;
-    } else {
-        contextoHtml = `<span style="background: #8e44ad; color: white; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px;"><i class="fas fa-truck-loading"></i> DEVOLUÇÃO</span>`;
+    // ✅ LÓGICA EXCLUSIVA PARA A ABA "A RECEBER"
+    let colunaHtmlBadge = '';
+    if (isTelaReceber) {
+        const contexto = cautela.contexto || 'PESSOAL';
+        if (contexto === 'PESSOAL') {
+            colunaHtmlBadge = `<td style="width: 100px; text-align: center;"><span style="background: #800020; color: white; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px;"><i class="fas fa-user"></i> PESSOAL</span></td>`;
+        } else {
+            colunaHtmlBadge = `<td style="width: 100px; text-align: center;"><span style="background: #8e44ad; color: white; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px;"><i class="fas fa-truck-loading"></i> DEVOLUÇÃO</span></td>`;
+        }
     }
 
-    // ✅ LÓGICA DE INVERSÃO DINÂMICA: 
-    const modoRecebimento = (status === 'ABERTA' || status === 'DEVOLUÇÃO');
-    const nomeMilitarExibicao = modoRecebimento 
+    // Se estiver na tela de A Receber, mostra o Emitente. Se estiver na tela Ativas, mostra o Destinatário.
+    const nomeMilitarExibicao = isTelaReceber 
         ? (cautela.emitente || "Não identificado") 
         : (cautela.destinatario || cautela.destinatario_original_nome || 'Aguardando...');
     
-    const labelColuna = modoRecebimento ? "Emitente" : "Destinatário";
+    const labelColuna = isTelaReceber ? "Emitente" : "Destinatário";
 
     if (status === 'RECEBIDA') { badgeClass = 'badge-solucao'; badgeText = 'RECEBIDA'; }
     else if (status === 'ABERTA') { badgeClass = 'badge-cautela'; badgeText = 'ABERTA'; }
@@ -2465,7 +2473,7 @@ function renderCautelaRow(cautela) {
 
     return `
         <tr onclick="${clickAction}" style="${temPendencia ? 'background-color: #fff9f0;' : ''}">
-            <td style="width: 100px; text-align: center;">${contextoHtml}</td>
+            ${colunaHtmlBadge}
             <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
             <td data-label="${labelColuna}">${nomeMilitarExibicao}</td>
             <td data-label="Emissão">${dataEmissao}</td>
