@@ -699,8 +699,15 @@ async function finalizarRecebimentoCautela(cautela) {
             if (!cautelaDoc.exists) throw new Error("Cautela não encontrada.");
 
             const cData = cautelaDoc.data();
-            if (cData.destinatario_original_uid !== meuUid) {
-                throw new Error("Apenas o destinatário original pode assinar este recebimento.");
+
+            // ✅ CORREÇÃO 1: Permite que o Destinatário Nominal OU o Recebedor do Local assine
+            // Buscamos a custódia atual para validar se o usuário é o dono provisório do local
+            const custodiaRef = db.collection('custodia_atual').doc(listaId);
+            const custodiaDoc = await transaction.get(custodiaRef);
+            const isDonoProvisorio = custodiaDoc.exists && custodiaDoc.data().conferente_uid === meuUid;
+
+            if (cData.destinatario_uid !== meuUid && !isDonoProvisorio) {
+                throw new Error("Você não tem permissão para assinar este recebimento.");
             }
 
             const listaMestraDoc = await transaction.get(listaMestraRef);
@@ -708,11 +715,11 @@ async function finalizarRecebimentoCautela(cautela) {
 
             let listaMestra = listaMestraDoc.data().list;
             const itensConferidos = [];
-
             let temQualquerAlteracao = false;
             let linhasExtrato = [];
 
-            cautela.itens.forEach((cItem, index) => {
+            // Processamento de itens
+            for (const cItem of cautela.itens) {
                 const uidBusca = cItem.tombamento ? `${cItem.id_base || cItem.id}-${cItem.tombamento}` : (cItem.id_base || cItem.id);
                 const statusLocal = window.itemStatus[uidBusca] || {};
 
@@ -729,8 +736,7 @@ async function finalizarRecebimentoCautela(cautela) {
                 });
 
                 const identificador = cItem.tombamento ? `(Tomb.: ${cItem.tombamento})` : `(QTD: ${cItem.quantidade}UN)`;
-                const relatoItem = isItemOk ? 'S/A' : (obsFinal || 'C/A sem obs.');
-                linhasExtrato.push(`${index + 1}. ${cItem.nome} ${identificador}: ${relatoItem}`);
+                linhasExtrato.push(`${cItem.nome} ${identificador}: ${isItemOk ? 'S/A' : obsFinal}`);
 
                 // --- ATUALIZAÇÃO DA LISTA MESTRA ---
                 listaMestra = listaMestra.map(setor => ({
@@ -740,43 +746,33 @@ async function finalizarRecebimentoCautela(cautela) {
                         const idCautelaItem = cItem.id_base || cItem.id;
 
                         if (idMestra === idCautelaItem) {
-                            // Registro no histórico de vida do item
-                            if (!mItem.historico_vida) mItem.historico_vida = [];
-                            mItem.historico_vida.push({
-                                evento: "CONFIRMAÇÃO_RECEBIMENTO",
-                                id_doc: CAUTELA_ID,
-                                quem: meuNomeCompleto,
-                                data: dataAtual,
-                                detalhes: statusFinal === 'C/A' ? `Avaria: ${obsFinal}` : "Recebido S/A."
-                            });
-
-                            const objetoCautelaAtualizado = {
+                            const carimboAceite = {
                                 id: CAUTELA_ID,
                                 emitente: cData.emitente || "N/D",
                                 destinatario: meuNomeCompleto,
-                                data: cData.timestamp_emissao ? cData.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : dataAtual,
+                                data: dataAtual,
                                 status_item: statusFinal,
                                 obs_item: obsFinal,
                                 quantidade: Number(cItem.quantidade) || 1
                             };
 
-                            // 🛑 CORREÇÃO PARA ITEM SINGLE: Atualiza o existente em vez de dar push
+                            // ✅ CORREÇÃO 2: Sincronismo com o Inventário (Rastreio Almoxarifado)
+                            // Atualiza o documento físico no inventário para o rastreio mostrar "Quem Recebeu"
+                            const tombRef = db.collection('inventario').doc(idMestra).collection('tombamentos').doc(cItem.tombamento || mItem.id);
+                            transaction.update(tombRef, {
+                                status_aceite: statusFinal,
+                                recebido_por: meuNomeCompleto,
+                                recebido_em: dataAtual,
+                                destinatario_uid: meuUid // Garante o novo dono da carga
+                            });
+
+                            // Atualiza os carimbos na lista da viatura
                             if (mItem.tipo === 'single' && mItem.cautelas) {
-                                const idxExistente = mItem.cautelas.findIndex(c => c.id === CAUTELA_ID);
-                                if (idxExistente !== -1) {
-                                    // Se já existe (carimbo de emissão), apenas atualizamos os dados
-                                    mItem.cautelas[idxExistente] = objetoCautelaAtualizado;
-                                } else {
-                                    // Se por algum motivo não existia, aí sim adicionamos
-                                    mItem.cautelas.push(objetoCautelaAtualizado);
-                                }
-                            }
-                            // PARA ITEM MULTI: A sobrescrita já é segura por natureza
-                            else if (mItem.tipo === 'multi' && mItem.tombamentos) {
+                                const idx = mItem.cautelas.findIndex(c => c.id === CAUTELA_ID);
+                                if (idx !== -1) mItem.cautelas[idx] = carimboAceite;
+                            } else if (mItem.tipo === 'multi' && mItem.tombamentos) {
                                 mItem.tombamentos = mItem.tombamentos.map(t => {
-                                    if (t.tomb === cItem.tombamento) {
-                                        t.cautela = objetoCautelaAtualizado;
-                                    }
+                                    if (t.tomb === cItem.tombamento) t.cautela = carimboAceite;
                                     return t;
                                 });
                             }
@@ -784,20 +780,20 @@ async function finalizarRecebimentoCautela(cautela) {
                         return mItem;
                     })
                 }));
-            });
-
-            const icone = temQualquerAlteracao ? '⚠️' : '✅';
-            const tituloLog = `${icone} Recebido ${temQualquerAlteracao ? 'C/A' : 'S/A'} pelo destinatário: ${meuNomeCompleto}`;
-            const descricaoCompleta = `${tituloLog}\n${linhasExtrato.join('\n')}`;
+            }
 
             const logMovimentacao = {
                 data: dataAtual,
-                descricao: descricaoCompleta,
-                militar: meuNomeCompleto
+                descricao: `✅ Recebido ${temQualquerAlteracao ? 'C/A' : 'S/A'} por: ${meuNomeCompleto}.\n${linhasExtrato.join('\n')}`,
+                militar: meuNomeCompleto,
+                tipo: "ACEITE"
             };
 
+            // ✅ CORREÇÃO 3: Atualiza o status e garante que o destinatario_uid seja de quem assinou
             transaction.update(cautelaRef, {
                 status: 'RECEBIDA',
+                destinatario_uid: meuUid, // Define o novo dono oficial para o Dashboard
+                destinatario: meuNomeCompleto,
                 timestamp_recebimento: firebase.firestore.FieldValue.serverTimestamp(),
                 itens: itensConferidos,
                 militar_completo_receptor: meuNomeCompleto,
