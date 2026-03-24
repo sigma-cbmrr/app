@@ -2411,6 +2411,15 @@ function renderCautelaRow(cautela) {
     let badgeClass = 'badge-cautela';
     let badgeText = 'N/D';
 
+    // ✅ LÓGICA DE INVERSÃO DINÂMICA: 
+    // Se a tela for de "A Receber", precisamos mostrar quem ENVIOU (Emitente).
+    const modoRecebimento = (status === 'ABERTA' || status === 'DEVOLUÇÃO');
+    const nomeMilitarExibicao = modoRecebimento 
+        ? (cautela.emitente || "Não identificado") 
+        : (cautela.destinatario || cautela.destinatario_original_nome || 'Aguardando...');
+    
+    const labelColuna = modoRecebimento ? "Emitente" : "Destinatário";
+
     if (status === 'RECEBIDA') { badgeClass = 'badge-solucao'; badgeText = 'RECEBIDA'; }
     else if (status === 'ABERTA') { badgeClass = 'badge-cautela'; badgeText = 'ABERTA'; }
     else if (status === 'DEVOLUÇÃO') { badgeClass = 'badge-pendente'; badgeText = 'EM DEVOLUÇÃO'; }
@@ -2419,7 +2428,7 @@ function renderCautelaRow(cautela) {
     return `
         <tr onclick="${clickAction}" style="${temPendencia ? 'background-color: #fff9f0;' : ''}">
             <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
-            <td data-label="Destinatário">${cautela.destinatario || cautela.destinatario_original_nome || 'Aguardando...'}</td>
+            <td data-label="${labelColuna}">${nomeMilitarExibicao}</td>
             <td data-label="Emissão">${dataEmissao}</td>
             <td data-label="Origem">${cautela.local_origem}</td>
             <td data-label="Itens">${alertaCaa}${itensCount} itens</td>
