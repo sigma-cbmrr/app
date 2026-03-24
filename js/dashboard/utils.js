@@ -250,35 +250,52 @@ async function renderizarPdfV3(pdfBlob) {
     const pdfjsLib = window['pdfjs-dist/build/pdf'];
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
+    const container = document.getElementById('pdf-container');
+    
     try {
+        // 1. Limpa o container e remove o canvas estático antigo para evitar duplicidade
+        container.innerHTML = ''; 
+
         const arrayBuffer = await pdfBlob.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const pdf = await loadingTask.promise;
 
-        // Seleciona a primeira página
-        const page = await pdf.getPage(1);
+        console.log(`✅ [SIGMA V3] PDF carregado. Total de páginas: ${pdf.numPages}`);
 
-        const canvas = document.getElementById('pdf-render-canvas');
-        const context = canvas.getContext('2d');
+        // 2. Loop para renderizar todas as páginas
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            
+            // Criar um novo canvas para cada página
+            const canvas = document.createElement('canvas');
+            canvas.id = `pdf-render-canvas-${pageNum}`;
+            canvas.className = 'pdf-render-canvas'; // Classe para estilo CSS (margens, etc)
+            canvas.style.display = 'block';
+            canvas.style.marginBottom = '20px'; // Espaçamento entre as páginas
+            canvas.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+            
+            container.appendChild(canvas);
 
-        // Limpa o canvas anterior para nova renderização
-        context.clearRect(0, 0, canvas.width, canvas.height);
+            const context = canvas.getContext('2d');
+            
+            // Escala 1.5 para alta definição
+            const viewport = page.getViewport({ scale: 1.5 });
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
 
-        // Escala 1.5 para alta definição (Retina/Mobile)
-        const viewport = page.getViewport({ scale: 1.5 });
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport
+            };
 
-        const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-        };
-
-        await page.render(renderContext).promise;
+            // Renderiza a página atual
+            await page.render(renderContext).promise;
+            console.log(`Página ${pageNum} renderizada.`);
+        }
         
-        // Exibe o modal
+        // 3. Exibe o modal
         document.getElementById('modal-pdf-viewer').style.display = 'flex';
-        console.log("✅ [SIGMA V3] PDF renderizado via Canvas.");
+        document.getElementById('modal-pdf-viewer').setAttribute('aria-hidden', 'false');
 
     } catch (error) {
         console.error("Erro na renderização técnica:", error);

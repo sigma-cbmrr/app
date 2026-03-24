@@ -1,6 +1,7 @@
 // Constantes Globais
 const COLECAO_RESULTADOS = 'resultados_conferencias';
 const COLECAO_LISTAS = 'listas_conferencia';
+const itensPorPagina = 20; //limite da tabela inicial do almoxarifado, para evitar lentidão e travamentos.
 
 // Variáveis Globais
 let currentUserData = null;
@@ -30,6 +31,11 @@ let visaoAtual = 'grid'; // Padrão
 let letraAtiva = 'TODOS';
 let isCaaLoading = false;
 let itemSelecionadoTemp = null;
+let itensExibidosAlmox = 20; 
+let paginaAtualAlmox = 1; // Página inicial do almoxarifado
+let itemSendoVisualizado = null; // Estado Global
+let dadosHistoricoTemp = []; //filtro do histórico global para evitar reconsultas desnecessárias
+const trugNamesCache = {}; // Objeto global para evitar múltiplas leituras ao banco para o mesmo TRUG
 
 // --- 1. AUTH & PERMISSÕES ---
 auth.onAuthStateChanged(async (user) => {
@@ -344,7 +350,9 @@ function setupUIBasedOnRole() {
     botoesAcao.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.style.display = (!isOperacional && souCúpula) ? 'inline-flex' : 'none';
+            // Agora permite se for Cúpula OU se for Gestor Local
+            const temPermissao = souCúpula || isGestorLocal;
+            el.style.display = (!isOperacional && temPermissao) ? 'inline-flex' : 'none';
         }
     });
 

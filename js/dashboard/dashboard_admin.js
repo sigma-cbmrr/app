@@ -85,7 +85,6 @@ async function loadCaaData() {
         const map = {};
         const cacheUnidadesLista = {};
 
-        // 1. BUSCA DOS RESULTADOS (Ordenados do mais recente para o mais antigo)
         const snap = await db.collection(COLECAO_RESULTADOS).orderBy('timestamp', 'desc').limit(100).get();
         console.log(`📊 LOG BANCO: Encontrados ${snap.size} registros para análise.`);
 
@@ -94,11 +93,11 @@ async function loadCaaData() {
             const lId = d.lista_id;
             if (!lId) continue;
 
-            // Identificação de Unidade para conferência de permissão
+            if (map[lId]) continue;
+
             let unidadeVinculada = d.unidade_id;
             let siglaVinculada = d.unidade_sigla || "GERAL";
 
-            // Triangulação se o documento for órfão de unidade_id
             if (!unidadeVinculada) {
                 if (!cacheUnidadesLista[lId]) {
                     const docLista = await db.collection('listas_conferencia').doc(lId).get();
@@ -113,60 +112,54 @@ async function loadCaaData() {
                 }
             }
 
-            // Validação de Visibilidade
             const bateUnidade = (unidadeVinculada === gestorUnidadeId);
             const podeVer = isAdmin || bateUnidade;
 
             if (podeVer) {
-                if (!map[lId]) {
-                    map[lId] = {
-                        docId: doc.id,
-                        lista_id: lId,
-                        local: d.local,
-                        conferente: d.conferente,
-                        date: d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D',
-                        unidade_sigla: siglaVinculada,
-                        items: []
-                    };
-                }
+                map[lId] = {
+                    docId: doc.id,
+                    lista_id: lId,
+                    local: d.local,
+                    conferente: d.conferente,
+                    date: d.timestamp ? d.timestamp.toDate().toLocaleString('pt-BR') : 'N/D',
+                    unidade_sigla: siglaVinculada,
+                    items: []
+                };
 
-                // Acumulamos as pendências ativas
                 const fonte = d.itensRelatorio || d.itensCaa || [];
-                
+
                 fonte.forEach(it => {
-                    // --- 1. VERIFICA PENDÊNCIAS NO ITEM PAI ---
                     if (it.status === 'C/A' && it.pendencias_ids) {
                         it.pendencias_ids.forEach(p => {
                             if (p.status_gestao !== 'RESOLVIDO') {
-                                const jaExiste = map[lId].items.some(existente => existente.id === p.id);
-                                if (!jaExiste) {
-                                    map[lId].items.push({
-                                        ...p,
-                                        itemNome: it.nomeCompleto || it.nome,
-                                        itemId: it.id || it.uid_global,
-                                        tipoRegistro: 'PENDENCIA'
-                                    });
-                                }
+                                map[lId].items.push({
+                                    ...p,
+                                    itemNome: it.nomeCompleto || it.nome,
+                                    itemId: it.uid_global || it.id,
+                                    uid_global: it.uid_global || it.id,
+                                    sub_local: it.setor || it.sub_local || "CABINE", // ✅ CORREÇÃO: Captura o setor do item
+                                    id_pai: null,
+                                    tipoRegistro: 'PENDENCIA'
+                                });
                             }
                         });
                     }
 
-                    // --- 2. VERIFICA PENDÊNCIAS NOS ITENS FILHOS (ACESSÓRIOS) ---
-                    if (it.acessorios_vinculados && it.acessorios_vinculados.length > 0) {
-                        it.acessorios_vinculados.forEach(ac => {
+                    const acessorios = it.acessorios_vinculados || it.acessorios_acoplados || [];
+                    if (acessorios.length > 0) {
+                        acessorios.forEach(ac => {
                             if (ac.status === 'C/A' && ac.pendencias_ids) {
                                 ac.pendencias_ids.forEach(pFilho => {
                                     if (pFilho.status_gestao !== 'RESOLVIDO') {
-                                        const jaExisteFilho = map[lId].items.some(existente => existente.id === pFilho.id);
-                                        if (!jaExisteFilho) {
-                                            map[lId].items.push({
-                                                ...pFilho,
-                                                itemNome: ac.nomeCompleto || ac.nome, // Nome do filho
-                                                itemId: ac.id || ac.uid_global,      // ID do filho
-                                                id_pai: it.id || it.uid_global,       // Referência ao pai (útil para gestão)
-                                                tipoRegistro: 'PENDENCIA'
-                                            });
-                                        }
+                                        map[lId].items.push({
+                                            ...pFilho,
+                                            itemNome: ac.nomeCompleto || ac.nome,
+                                            itemId: ac.uid_global || ac.id,
+                                            uid_global: ac.uid_global || ac.id,
+                                            sub_local: it.setor || it.sub_local || "CABINE", // ✅ CORREÇÃO: Acessório herda o setor do pai
+                                            id_pai: it.uid_global || it.id,
+                                            tipoRegistro: 'PENDENCIA'
+                                        });
                                     }
                                 });
                             }
@@ -176,7 +169,6 @@ async function loadCaaData() {
             }
         }
 
-        // --- 2. COMPLEMENTO DE LISTAS VAZIAS (S/A) ---
         if (!isAdmin && gestorUnidadeId) {
             const snapMestras = await db.collection('listas_conferencia')
                 .where('unidade_id', '==', gestorUnidadeId)
@@ -198,8 +190,11 @@ async function loadCaaData() {
             });
         }
 
-        console.log("🖼️ LOG FINAL: Renderizando cards com último conferente cronológico.");
         renderCards(map);
+
+        if (window.listaAtivaId && map[window.listaAtivaId]) {
+            mostrarTabela(map[window.listaAtivaId]);
+        }
 
     } catch (e) {
         console.error("❌ LOG ERRO FATAL:", e);
@@ -225,13 +220,30 @@ async function renderCards(map) {
 
     // Se o mapa estiver vazio aqui, significa que não há nem listas cadastradas
     if (keys.length === 0) {
-        container.innerHTML = `
-            <div style="padding:60px; text-align:center; color:#94a3b8; width:100%;">
-                <i class="fas fa- ghost fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
-                <p>Nenhuma viatura ou lista mapeada para sua unidade.</p>
-            </div>`;
-        return;
-    }
+    container.innerHTML = `
+        <div style="padding: 60px 20px; text-align: center; width: 100%;">
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.5;">
+                
+                <div style="position: relative; margin-bottom: 20px;">
+                    <i class="fas fa-chart-line fa-4x" style="color: #cbd5e1;"></i>
+                    <i class="fas fa-clipboard-list" style="position: absolute; bottom: -8px; right: -12px; font-size: 1.8em; color: #94a3b8; background: transparent; padding: 4px;"></i>
+                </div>
+
+                <h3 style="margin: 0; color: #475569; font-size: 1em; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">
+                    Nenhuma Pendência Encontrada
+                </h3>
+                
+                <p style="margin: 5px 0 0; color: #94a3b8; font-size: 0.85em; font-weight: 600;">
+                    Não há listas de conferências ativas ou pendências registradas para sua unidade.
+                </p>
+
+                <p style="margin: 15px 0 0; color: #2c7399; font-size: 0.75em; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">
+                    <i class="fas fa-info-circle"></i> Acesse o menu de listas para cadastrar uma nova
+                </p>
+            </div>
+        </div>`;
+    return;
+}
 
     // 2. AGRUPAMENTO POR UNIDADE
     const groupedCards = {};
@@ -299,6 +311,9 @@ async function renderCards(map) {
 
             // Ao clicar, abre a tabela de detalhes (que mostrará as pendências ou a msg de S/A)
             div.onclick = () => {
+                // ✅ SALVA O ID DA LISTA PARA PERMITIR REFRESH SILENCIOSO
+                window.listaAtivaId = d.lista_id; 
+
                 const masterContainer = document.getElementById('dashboard-content-by-role');
                 const detailColumn = document.querySelector('.dashboard-detail-column');
 
@@ -315,7 +330,7 @@ async function renderCards(map) {
                 // 3. Carrega os dados na tabela (sua função original)
                 mostrarTabela(d);
 
-                // 4. Scroll suave para o topo da tabela (opcional, melhora a experiência)
+                // 4. Scroll suave para o topo da tabela
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             };
             container.appendChild(div);
@@ -325,13 +340,12 @@ async function renderCards(map) {
 
 /*CRIA A TABELA DE PENDÊNCIAS COM BASE NOS DADOS FORNECIDOS PELO BACKEND (CA-ADMIN)*/
 function mostrarTabela(data) {
-    const masterContainer = document.getElementById('dashboard-content-by-role'); // O pai de todos
-    const detailColumn = document.querySelector('.dashboard-detail-column'); // A coluna branca
+    const masterContainer = document.getElementById('dashboard-content-by-role'); 
+    const detailColumn = document.querySelector('.dashboard-detail-column'); 
 
-    // ✅ GARANTE QUE O LAYOUT MUDE PARA DUAS COLUNAS
     if (masterContainer) masterContainer.classList.add('split-view');
     if (detailColumn) detailColumn.style.setProperty('display', 'block', 'important');
-    
+
     const wrapper = document.getElementById('ca-table-wrapper');
     const gridContainer = document.getElementById('sigma-v3-dynamic-grid');
     const msgNoIssues = document.getElementById('no-issues-msg');
@@ -341,12 +355,10 @@ function mostrarTabela(data) {
 
     if (!wrapper || !gridContainer) return;
 
-    // 0. GESTÃO DE ESTADO (MASTER-DETAIL)
     if (placeholder) {
         placeholder.style.setProperty('display', 'none', 'important');
     }
 
-    // ✅ CORREÇÃO 1: Ativa o fundo cinza de contraste
     if (detailsWrapper) {
         detailsWrapper.style.setProperty('background', '#f1f5f9', 'important');
         detailsWrapper.style.setProperty('padding', '20px', 'important');
@@ -356,7 +368,6 @@ function mostrarTabela(data) {
     wrapper.style.setProperty('display', 'block', 'important');
     wrapper.style.setProperty('height', 'auto', 'important');
 
-    // 1. CABEÇALHO COM BOTÃO FECHAR
     if (tableTitle) {
         tableTitle.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 15px;">
@@ -403,19 +414,22 @@ function mostrarTabela(data) {
             const iconRef = ehCautela ? 'fa-hand-holding' : 'fa-exclamation-triangle';
             const nomeAutorCompleto = p.autor_nome || "Militar não identificado";
 
-            // ✅ CORREÇÃO: Mapeamento de dados para o Gerenciador (Pai e Filho)
+            const idRealParaBusca = p.uid_global || p.itemId;
+            const detectIsMulti = (p.tombamento && p.tombamento !== "" && p.tombamento !== "N/A");
+
             const btnData = {
                 docId: data.docId,
                 pendId: p.id,
-                idPai: p.id_pai || null, // Se for filho, aqui terá o ID do anfitrião
+                idPai: p.id_pai || null, 
                 item: {
-                    id: p.itemId,
-                    uid_global: p.itemId,
+                    id: idRealParaBusca, 
+                    uid_global: idRealParaBusca, 
                     nome: p.itemNome,
                     tombamento: p.tombamento || "",
-                    tipo_controle: p.tombamento ? 'multi' : 'single',
+                    tipo_controle: detectIsMulti ? 'multi' : 'single',
                     qtd_pendente: p.quantidade || 1,
-                    descricao: p.descricao
+                    descricao: p.descricao,
+                    setor: p.sub_local // ✅ MUDANÇA CIRÚRGICA: Alterado de p.setor para p.sub_local
                 }
             };
 
@@ -423,9 +437,9 @@ function mostrarTabela(data) {
 
             const card = document.createElement('div');
             card.className = 'sigma-v3-card-item';
-            
-            // Adiciona uma marcação visual se for um item filho (acessório)
-            const prefixoFilho = p.id_pai ? `<span style="font-size: 0.65em; color: #800020; font-weight: 800; display: block; margin-bottom: 4px;"><i class="fas fa-paperclip"></i> ACESSÓRIO DE KIT</span>` : '';
+
+            const prefixoFilho = (p.id_pai && p.id_pai !== p.itemId) ?
+                `<span style="font-size: 0.65em; color: #800020; font-weight: 800; display: block; margin-bottom: 4px;"><i class="fas fa-paperclip"></i> ACESSÓRIO DE KIT</span>` : '';
 
             card.innerHTML = `
                 <div class="sigma-v3-card-header">
@@ -437,17 +451,28 @@ function mostrarTabela(data) {
                     </span>
                 </div>
                 ${prefixoFilho}
-                <h4>${p.itemNome}</h4>
-                <div style="display: flex; gap: 10px; font-size: 0.75em; font-weight: 800; text-transform: uppercase;">
-                    ${p.tombamento ?
+                
+                <h4 style="margin-bottom: 5px;">${p.itemNome}</h4>
+
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 12px;">
+                    <span style="background: #f8fafc; color: #64748b; font-size: 9px; font-weight: 800; padding: 3px 8px; border-radius: 6px; border: 1px solid #e2e8f0; text-transform: uppercase; letter-spacing: 0.5px;">
+                        <i class="fas fa-map-marker-alt" style="margin-right: 4px; color: #94a3b8;"></i>
+                        ${p.sub_local || 'Localização não definida'} </span>
+                </div>
+
+                <div style="display: flex; gap: 10px; font-size: 0.75em; font-weight: 800; text-transform: uppercase; margin-bottom: 10px;">
+                    ${detectIsMulti ?
                     `<span style="color: #800020;"><i class="fas fa-tag"></i> Tomb: ${p.tombamento}</span>` :
                     `<span style="color: #d90f23;"><i class="fas fa-layer-group"></i> Qtd: ${p.quantidade} un.</span>`}
                 </div>
+                
                 <p class="sigma-v3-obs-box">"${p.descricao}"</p>
+                
                 <div class="sigma-v3-author-info">
                     <i class="fas fa-user-edit"></i> 
                     <span>Por: <b>${nomeAutorCompleto}</b></span>
                 </div>
+
                 ${!ehCautela ?
                     `<button class="sigma-v3-btn-manage" onclick='abrirGestaoPendencia(${btnJson})'>
                         <i class="fas fa-gavel"></i> Gerenciar Pendência
@@ -460,9 +485,6 @@ function mostrarTabela(data) {
             gridContainer.appendChild(card);
         });
     }
-
-    const oldFooter = document.getElementById('wrapper-footer-actions');
-    if (oldFooter) oldFooter.remove();
 
     if (window.innerWidth <= 1100) {
         wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -500,278 +522,488 @@ function fecharTabela() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/**
- * Abre o Modal de Gestão via SweetAlert2
- * @param {Object} data - Objeto contendo docId, itemData, pendId, etc.
- */
 async function abrirGestaoPendencia(data) {
     const { docId, item, pendId, idPai } = data;
-    const isMulti = item.tipo_controle === 'multi';
-
-    // Busca saldo atual no estoque para informar o gestor
-    const saldoEstoque = await buscarSaldoEstoqueGestor(item.id || item.uid_global);
+    const unidadeGestor = currentUserData.unidade_id;
 
     Swal.fire({
-        title: 'GERENCIAR PENDÊNCIA',
+        title: 'Carregando Opções...',
+        html: '<i class="fas fa-circle-notch fa-spin fa-2x" style="color:#800020;"></i>',
+        showConfirmButton: false,
+        allowOutsideClick: false
+    });
+
+    // 1. BUSCA DE DADOS EM TEMPO REAL
+    const [saldoEstoque, snapVirtual] = await Promise.all([
+        buscarSaldoEstoqueGestor(item.id || item.uid_global),
+        db.collection('inventario').doc(item.id || item.uid_global)
+          .collection('tombamentos').where('uid_pendencia', '==', pendId).limit(1).get()
+    ]);
+
+    // ✅ CORREÇÃO: Redefinimos isMulti com base no tipo REAL que veio do banco de dados
+    const tipoRealDoBanco = saldoEstoque.tipo || item.tipo_controle || item.tipo;
+    const isMulti = tipoRealDoBanco === 'multi';
+
+    const virtualDoc = !snapVirtual.empty ? snapVirtual.docs[0].data() : null;
+    const localizacaoReal = virtualDoc?.sub_local || item.sub_local || 'N/D';
+
+    Swal.fire({
+        title: 'GESTÃO DE ATIVOS',
+        width: '600px',
         html: `
             <div style="text-align: left; font-family: 'Inter', sans-serif;">
-                <p style="color: #800020; font-weight: 800; margin-bottom: 5px; font-size: 1.1rem;">${item.nome}</p>
-                
-                <p style="font-size: 0.8rem; color: #64748b; font-weight: 600; margin-bottom: 20px; text-transform: uppercase;">
-                    <i class="fas fa-layer-group"></i> Quantidade Pendente: <span style="color: #d90f23;">${item.qtd_pendente || 1} un.</span>
-                </p>
-                
-                <div class="form-group">
-                    <label style="font-weight: 800; font-size: 0.75rem; color: #64748b; text-transform: uppercase;">Ação do Gestor</label>
-                    <select id="swal-gestao-status" class="sigma-v3-select" style="width: 100%; margin-bottom: 15px;">
-                        <option value="Solucionado">✅ Resolver Pendência (Saneamento)</option>
-                        <option value="Substituir">♻️ Substituir Item (Troca por Estoque)</option>
-                        <option value="Em solução">⏳ Em solução (Acompanhamento)</option>
-                    </select>
+                <div style="margin-bottom: 20px; border-left: 4px solid #800020; padding-left: 15px;">
+                    <b style="color: #1e293b; font-size: 1.1rem; display: block;">${item.nome}</b>
+                    <div style="display:flex; gap: 10px; margin-top: 5px;">
+                        <span style="font-size: 0.7rem; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; font-weight: 800; color: #475569;">
+                            <i class="fas fa-map-marker-alt"></i> ${localizacaoReal}
+                        </span>
+                        <span style="font-size: 0.7rem; background: #fff1f2; padding: 2px 8px; border-radius: 4px; font-weight: 800; color: #be123c;">
+                            <i class="fas fa-layer-group"></i> ${item.qtd_pendente || 1} UN. PENDENTE
+                        </span>
+                    </div>
                 </div>
 
-                <div id="swal-div-qtd" style="display:none;">
-                    <label style="font-weight: 800; font-size: 0.75rem; color: #d90f23;">Qtd para Saneamento (Máx: ${item.qtd_pendente || 1})</label>
-                    <input type="number" id="swal-gestao-qtd" class="sigma-v3-date-input" value="${item.qtd_pendente || 1}" min="1" max="${item.qtd_pendente || 1}">
+                <label style="font-weight: 800; font-size: 0.65rem; color: #64748b; text-transform: uppercase; margin-bottom: 10px; display: block;">Escolha a ação desejada:</label>
+                
+                <div class="sigma-gestao-cards-container" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px;">
+                    <div class="gestao-card" onclick="selectGestaoCard(this, 'Solucionado')" style="border: 2px solid #e2e8f0; background: #fff; padding: 15px; border-radius: 12px; cursor: pointer; text-align: center; transition: 0.2s;">
+                        <i class="fas fa-check-circle" style="color: #94a3b8; font-size: 1.5rem; margin-bottom: 8px;"></i>
+                        <b style="display: block; font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Resolver</b>
+                    </div>
+                    <div class="gestao-card" onclick="selectGestaoCard(this, 'Substituir')" style="border: 2px solid #e2e8f0; background: #fff; padding: 15px; border-radius: 12px; cursor: pointer; text-align: center; transition: 0.2s;">
+                        <i class="fas fa-exchange-alt" style="color: #94a3b8; font-size: 1.5rem; margin-bottom: 8px;"></i>
+                        <b style="display: block; font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Substituir</b>
+                    </div>
+                    <div class="gestao-card" onclick="selectGestaoCard(this, 'Em solução')" style="border: 2px solid #e2e8f0; background: #fff; padding: 15px; border-radius: 12px; cursor: pointer; text-align: center; transition: 0.2s;">
+                        <i class="fas fa-tools" style="color: #94a3b8; font-size: 1.5rem; margin-bottom: 8px;"></i>
+                        <b style="display: block; font-size: 0.7rem; color: #64748b; text-transform: uppercase;">Manutenção</b>
+                    </div>
                 </div>
 
-                <div id="swal-div-substituir" style="display:none; background: #f8fafc; padding: 15px; border-radius: 10px; border: 1px dashed #cbd5e1;">
-                    <p style="font-size: 0.8rem; font-weight: bold; color: #2c7399; margin-bottom: 10px;">
-                        Disponível no Almoxarifado: <span id="swal-estoque-count">${saldoEstoque.total}</span> un.
+                <input type="hidden" id="swal-gestao-status" value="">
+
+                <div id="swal-div-substituir" style="display:none; background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px dashed #cbd5e1; margin-bottom: 15px;">
+                     <p style="font-size: 0.7rem; font-weight: 800; color: #2c7399; margin-bottom: 10px; text-transform: uppercase;">
+                        <i class="fas fa-warehouse"></i> Estoque Disponível: <span style="font-size: 1rem; color: #1e293b;">${saldoEstoque.total} un.</span>
                     </p>
+                    
                     ${isMulti ? `
-                        <label style="font-weight: 800; font-size: 0.7rem;">SELECIONE O NOVO TOMBAMENTO:</label>
-                        <select id="swal-novo-tombamento" class="sigma-v3-select">
-                            ${saldoEstoque.tombamentos.map(t => `<option value="${t}">${t}</option>`).join('')}
+                        <label style="font-weight: 800; font-size: 0.65rem; color: #475569; display: block; margin-bottom: 5px;">SELECIONE O NOVO PATRIMÔNIO:</label>
+                        <select id="swal-novo-tombamento" class="sigma-v3-select" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #2c7399; background: white; font-weight: 700;">
+                            <option value="">-- Escolha o tombamento para reposição --</option>
+                            ${saldoEstoque.lista_tombamentos.map(t => `
+                                <option value="${t.tomb}">
+                                    🔹 ${t.tomb} ${t.serie !== 'S/N' ? `| S/N: ${t.serie}` : ''}
+                                </option>
+                            `).join('')}
                         </select>
+                        <p style="font-size: 0.6rem; color: #64748b; margin-top: 5px;">* Apenas itens em estoque com status 'DISPONÍVEL' são exibidos.</p>
                     ` : `
-                        <p style="font-size: 0.75rem; color: #64748b;">A quantidade 1 será retirada do estoque e o item danificado será recolhido.</p>
+                        <div style="background: #eff6ff; padding: 10px; border-radius: 8px; border: 1px solid #bfdbfe;">
+                            <p style="font-size: 0.7rem; color: #1e40af; line-height: 1.4; margin: 0;">
+                                <i class="fas fa-info-circle"></i> <b>Item de Consumo/Single:</b> O sistema utilizará 01 unidade virtual livre do seu almoxarifado para realizar a troca.
+                            </p>
+                        </div>
                     `}
                 </div>
 
-                <div class="form-group" style="margin-top: 15px;">
-                    <label style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-weight: 800; font-size: 0.65rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; display: block;">
-                        DESPACHO TÉCNICO / OBSERVAÇÕES
-                    </label>
-                    <textarea id="swal-gestao-obs" 
-                        style="
-                            width: 100%; 
-                            min-height: 100px; 
-                            padding: 12px; 
-                            border: 1px solid #cbd5e1; 
-                            border-radius: 8px; 
-                            background-color: #ffffff; 
-                            font-family: 'Segoe UI', Roboto, -apple-system, sans-serif; 
-                            font-size: 0.85rem; 
-                            color: #334155; 
-                            line-height: 1.5; 
-                            resize: vertical; 
-                            outline: none; 
-                            box-sizing: border-box;
-                            transition: border-color 0.2s;
-                        " 
-                        onfocus="this.style.borderColor='#800020'"
-                        onblur="this.style.borderColor='#cbd5e1'"
-                        placeholder="Descreva detalhadamente a solução ou o andamento da manutenção...">
-                    </textarea>
+                <div class="form-group">
+                    <label style="font-weight: 800; font-size: 0.65rem; color: #64748b; text-transform: uppercase; margin-bottom: 5px; display: block;">Justificativa / Despacho</label>
+                    <textarea id="swal-gestao-obs" style="width: 100%; min-height: 80px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.8rem; color: #334155;"></textarea>
                 </div>
             </div>
         `,
         showCancelButton: true,
-        confirmButtonText: 'SALVAR AÇÃO',
+        confirmButtonText: 'CONFIRMAR AÇÃO',
         confirmButtonColor: '#1b8a3e',
-        cancelButtonText: 'CANCELAR',
-        didOpen: () => {
-            const selectStatus = document.getElementById('swal-gestao-status');
-            const divQtd = document.getElementById('swal-div-qtd');
-            const divSub = document.getElementById('swal-div-substituir');
-
-            selectStatus.onchange = () => {
-                divQtd.style.display = selectStatus.value === 'Solucionado' ? 'block' : 'none';
-                divSub.style.display = selectStatus.value === 'Substituir' ? 'block' : 'none';
-            };
-        },
         preConfirm: () => {
             const status = document.getElementById('swal-gestao-status').value;
             const obs = document.getElementById('swal-gestao-obs').value.trim();
-            const qtd = document.getElementById('swal-gestao-qtd') ? parseInt(document.getElementById('swal-gestao-qtd').value) : 1;
-            const novoTomb = document.getElementById('swal-novo-tombamento') ? document.getElementById('swal-novo-tombamento').value : null;
+            const novoTomb = document.getElementById('swal-novo-tombamento')?.value;
 
-            if (!obs) {
-                Swal.showValidationMessage('O despacho técnico é obrigatório');
-                return false;
+            if (!status) return Swal.showValidationMessage('Selecione uma ação clicando nos cards.');
+            if (!obs) return Swal.showValidationMessage('Descreva a justificativa.');
+            
+            if (status === 'Substituir') {
+                if (saldoEstoque.total < 1) return Swal.showValidationMessage('Estoque insuficiente no Almoxarifado.');
+                if (isMulti && !novoTomb) return Swal.showValidationMessage('Você precisa selecionar o tombamento do novo item.');
             }
 
-            return { status, obs, qtd, novoTomb };
+            return { status, obs, novoTomb, tipo_item: tipoRealDoBanco, qtd: 1, virtualId: virtualDoc?.tomb || null };
         }
     }).then((result) => {
-        if (result.isConfirmed) {
-            executarAcaoGestao({ ...data, ...result.value });
-        }
+        if (result.isConfirmed) executarAcaoGestao({ ...data, ...result.value });
     });
+
+    window.selectGestaoCard = (el, val) => {
+        document.querySelectorAll('.gestao-card').forEach(c => {
+            c.classList.remove('active');
+            c.style.borderColor = '#e2e8f0';
+            c.style.background = '#fff';
+            c.querySelector('i').style.color = '#94a3b8';
+            c.querySelector('b').style.color = '#64748b';
+        });
+
+        el.classList.add('active');
+        document.getElementById('swal-gestao-status').value = val;
+        
+        const colors = { 'Solucionado': '#1b8a3e', 'Substituir': '#2c7399', 'Em solução': '#f59e0b' };
+        const bgs = { 'Solucionado': '#f0fdf4', 'Substituir': '#f0f9ff', 'Em solução': '#fffbeb' };
+        const textColors = { 'Solucionado': '#166534', 'Substituir': '#1e40af', 'Em solução': '#92400e' };
+
+        el.style.borderColor = colors[val];
+        el.style.background = bgs[val];
+        el.querySelector('i').style.color = colors[val];
+        el.querySelector('b').style.color = textColors[val];
+
+        document.getElementById('swal-div-substituir').style.display = val === 'Substituir' ? 'block' : 'none';
+    };
 }
 
 /*--- Ação principal para processar a decisão do gestor (Sincronizada para Pai/Filho) ---*/
 async function executarAcaoGestao(data) {
-    const { docId, item, pendId, idPai, status, obs, qtd, novoTomb } = data;
+    const { docId, item, pendId, idPai, status, obs, qtd, novoTomb, virtualId } = data;
     const batch = db.batch();
     const dataHora = new Date().toLocaleString('pt-BR');
     const nomeGestor = `${currentUserData.posto} ${currentUserData.nome_guerra}`;
     const unidadeId = currentUserData.unidade_id;
+    const unidadeSigla = currentUserData.unidade_sigla || "N/D";
 
     try {
-        Swal.fire({ title: 'Processando...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        Swal.fire({ title: 'Sincronizando Banco de Dados...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
         const resRef = db.collection('resultados_conferencias').doc(docId);
         const resSnap = await resRef.get();
         if (!resSnap.exists) throw new Error("Documento de conferência não encontrado.");
-        
-        let { itensRelatorio } = resSnap.data();
 
-        // 1. LOCALIZAÇÃO DO ALVO (Pai ou Filho)
-        // Se idPai existir, o alvo é um acessório dentro de um kit. Se não, é um item comum.
-        const idBusca = idPai || item.id || item.uid_global;
-        const itemPai = itensRelatorio.find(i => i.id === idBusca || i.uid_global === idBusca);
-        
-        if (!itemPai) throw new Error("Item anfitrião não localizado no relatório.");
+        let { itensRelatorio, lista_id } = resSnap.data();
+        const idMaterial = item.id || item.uid_global;
+        const itemRef = db.collection('inventario').doc(idMaterial);
+        const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+        const pathCache = `unidades_cache.${unidadeId}`;
 
-        let alvoParaRemover; // Referência de onde a pendência será extraída
-        let pendenciaEncontrada;
-
-        if (idPai) {
-            // O alvo é um FILHO. Vamos buscar dentro dos acessórios do pai.
-            const acessorio = itemPai.acessorios_vinculados.find(ac => (ac.id || ac.uid_global) === (item.id || item.uid_global));
-            if (!acessorio) throw new Error("Acessório não localizado dentro do kit.");
-            alvoParaRemover = acessorio;
-        } else {
-            // O alvo é o próprio PAI.
-            alvoParaRemover = itemPai;
+        // --- 1. LOCALIZAÇÃO DO ALVO NO RELATÓRIO (CORREÇÃO CIRÚRGICA V3) ---
+        let alvoParaRemover = null;
+        for (const it of itensRelatorio) {
+            if (it.pendencias_ids && it.pendencias_ids.some(p => String(p.id) === String(pendId))) {
+                alvoParaRemover = it;
+                break;
+            }
+            const acessorios = it.acessorios_vinculados || it.acessorios_acoplados || [];
+            const acAlvo = acessorios.find(ac => ac.pendencias_ids && ac.pendencias_ids.some(p => String(p.id) === String(pendId)));
+            if (acAlvo) {
+                alvoParaRemover = acAlvo;
+                break;
+            }
         }
 
-        const pIdx = alvoParaRemover.pendencias_ids.findIndex(p => p.id === pendId);
-        if (pIdx === -1) throw new Error("Pendência específica não localizada no registro.");
+        if (!alvoParaRemover) throw new Error("Pendência não localizada no relatório (Erro de Sincronismo).");
 
-        // --- CASO 1: SANEAMENTO (SOLUCIONADO) ---
+        const pIdx = alvoParaRemover.pendencias_ids.findIndex(p => String(p.id) === String(pendId));
+        if (pIdx === -1) throw new Error("Pendência não localizada no relatório.");
+        
+        const pendenciaOriginal = alvoParaRemover.pendencias_ids[pIdx];
+        const isMulti = item.tipo_controle === 'multi' || item.tipo === 'multi';
+
+        // 2. BUSCA DE UNIDADES AFETADAS NO RASTREIO
+        const snapTombamentos = await itemRef.collection('tombamentos')
+            .where('unidade_id', '==', unidadeId)
+            .where('uid_pendencia', '==', pendId).get();
+
+        const docsAfetados = snapTombamentos.docs;
+
+        // --- CASO 1: RESOLVER (SANEAMENTO INTELIGENTE) ---
         if (status === 'Solucionado') {
+            const qtdParaSanear = Number(qtd);
+            const docsParaLiberar = docsAfetados.slice(0, qtdParaSanear);
+
+            docsParaLiberar.forEach(docSnap => {
+                const tData = docSnap.data();
+                const tRef = docSnap.ref;
+                const statusDestino = (tData.local_id === "VIATURA") ? "EM CARGA" : "DISPONÍVEL";
+
+                batch.update(tRef, {
+                    situacao_atual: statusDestino,
+                    motivo_pendencia: firebase.firestore.FieldValue.delete(),
+                    uid_pendencia: firebase.firestore.FieldValue.delete(),
+                    atualizado_por: nomeGestor,
+                    atualizado_em: dataHora
+                });
+
+                // ✅ Ajuste no histórico individual
+                const identMsg = isMulti ? `Tombamento ${tData.tomb}` : `1un de ITEM DE CONSUMO`;
+                batch.set(tRef.collection('historico_vida').doc(), {
+                    data: dataHora, evento: "SOLUCAO_PENDENCIA", quem: nomeGestor,
+                    detalhes: `✅ Pendência resolvida para ${identMsg}. Definido como ${statusDestino} no local ${tData.local_id}. Obs: ${obs}`, 
+                    unidade: unidadeSigla
+                });
+            });
+
+            if (qtdParaSanear >= pendenciaOriginal.quantidade) {
+                alvoParaRemover.pendencias_ids.splice(pIdx, 1);
+            } else {
+                pendenciaOriginal.quantidade -= qtdParaSanear;
+                pendenciaOriginal.descricao += `\n[SANEAMENTO PARCIAL]: Resolvido ${qtdParaSanear} un. por ${nomeGestor}`;
+            }
+
+            batch.update(saldoRef, { uso_pend: firebase.firestore.FieldValue.increment(-qtdParaSanear), last_update: dataHora });
+            batch.update(itemRef, { [`${pathCache}.uso_pend`]: firebase.firestore.FieldValue.increment(-qtdParaSanear) });
+            
+            batch.set(saldoRef.collection('historico_vida').doc(), {
+                data: dataHora, evento: "SANEAMENTO", quem: nomeGestor,
+                detalhes: `Baixa de -${qtdParaSanear} un. em uso_pend (Pendência resolvida).`, unidade: unidadeSigla
+            });
+        }
+
+        // --- CASO 2: SUBSTITUIR (O "SWAP" DE PATRIMÔNIO E ATUALIZAÇÃO DE LISTA) ---
+        else if (status === 'Substituir') {
+            const docRuim = docsAfetados[0]; 
+            if (!docRuim) throw new Error("Registro da unidade avariada não localizado no rastreio.");
+            const dataRuim = docRuim.data();
+
+            const despachoGestor = `[SUBSTITUIÇÃO VIA GESTÃO - ${nomeGestor}]: ${obs}`;
+
+            let docNovoReposicao = null;
+            if (isMulti) {
+                if (!novoTomb) throw new Error("Nenhum novo patrimônio foi selecionado.");
+                const snapNovo = await itemRef.collection('tombamentos').doc(novoTomb).get();
+                if (snapNovo.exists) docNovoReposicao = snapNovo;
+            } else {
+                const snapDisp = await itemRef.collection('tombamentos')
+                    .where('unidade_id', '==', unidadeId)
+                    .where('situacao_atual', '==', 'DISPONÍVEL')
+                    .where('local_id', '==', 'ALMOXARIFADO').limit(1).get();
+                if (!snapDisp.empty) docNovoReposicao = snapDisp.docs[0];
+            }
+
+            if (!docNovoReposicao) throw new Error("Unidade de reposição não localizada no estoque.");
+            const dataNovo = docNovoReposicao.data();
+
+            // ✅ MELHORIA: Identificação textual amigável (Esconde UID Virtual)
+            const identRuimMsg = isMulti ? dataRuim.tomb : "1un avariada";
+            const identNovoMsg = isMulti ? dataNovo.tomb : "1un boa";
+
+            // A. O "Ruim" volta para o Almoxarifado
+            batch.update(docRuim.ref, {
+                situacao_atual: "PENDENTE", local_id: "ALMOXARIFADO", viatura_id: null,
+                sub_local: dataNovo.sub_local || "ALMOXARIFADO", 
+                uid_pendencia: firebase.firestore.FieldValue.delete(),
+                motivo_pendencia: despachoGestor, atualizado_por: nomeGestor, atualizado_em: dataHora
+            });
+            
+            batch.set(docRuim.ref.collection('historico_vida').doc(), {
+                data: dataHora, evento: "RECOLHIMENTO_AVARIA", quem: nomeGestor,
+                detalhes: `♻️ Substituído por ${identNovoMsg}. Enviado para: ALMOXARIFADO. Motivo: ${obs}`, 
+                unidade: unidadeSigla
+            });
+
+            // B. O "Novo" sai do estoque para a viatura
+            batch.update(docNovoReposicao.ref, {
+                situacao_atual: "EM CARGA", local_id: "VIATURA",
+                viatura_id: lista_id || dataRuim.viatura_id, 
+                sub_local: dataRuim.sub_local || "N/D",
+                data_movimentacao: dataHora, atualizado_por: nomeGestor
+            });
+            
+            batch.set(docNovoReposicao.ref.collection('historico_vida').doc(), {
+                data: dataHora, evento: "SUBSTITUICAO_CARGA", quem: nomeGestor,
+                detalhes: `✅ Alocado na VTR para substituir o item avariado (${identRuimMsg}).`, 
+                unidade: unidadeSigla
+            });
+
+            // C. ATUALIZAÇÃO CIRÚRGICA DA LISTA_CONFERENCIA (VIATURA)
+            const idNovoParaLista = isMulti ? `${idMaterial}-${dataNovo.tomb}` : `${idMaterial}_${dataRuim.setor_id || 'setor'}`;
+            const listaRef = db.collection('listas_conferencia').doc(lista_id);
+            const listaSnap = await listaRef.get();
+            
+            if (listaSnap.exists) {
+                let { list } = listaSnap.data();
+                let mudou = false;
+                list = list.map(setor => ({
+                    ...setor,
+                    itens: setor.itens.map(it => {
+                        if (it.uid_instancia === dataRuim.uid_instancia || it.id === dataRuim.id) {
+                            mudou = true;
+                            return { 
+                                ...it, 
+                                id: idNovoParaLista, 
+                                uid_instancia: idNovoParaLista,
+                                tombamentos: isMulti ? [{ ...dataNovo, situacao_atual: "EM CARGA", viatura_id: lista_id }] : (it.tombamentos || []),
+                                tombamento: isMulti ? dataNovo.tomb : (it.tombamento || "")
+                            };
+                        }
+                        return it;
+                    })
+                }));
+                if (mudou) batch.update(listaRef, { list, editado_por: nomeGestor, atualizado_em: firebase.firestore.FieldValue.serverTimestamp() });
+            }
+
             alvoParaRemover.pendencias_ids.splice(pIdx, 1);
             
-            // Se limpou todas as pendências do item (seja ele pai ou filho), volta para S/A
-            if (alvoParaRemover.pendencias_ids.length === 0) {
-                alvoParaRemover.status = 'S/A';
-            }
-
-            const saldoRef = db.collection('inventario').doc(item.id || item.uid_global).collection('saldos_unidades').doc(unidadeId);
-            batch.update(saldoRef, {
-                qtd_disp: firebase.firestore.FieldValue.increment(qtd),
-                qtd_pend: firebase.firestore.FieldValue.increment(-qtd)
+            const updatesSaldo = {
+                disp: firebase.firestore.FieldValue.increment(-1),
+                pend: firebase.firestore.FieldValue.increment(1),
+                uso_pend: firebase.firestore.FieldValue.increment(-1),
+                last_update: dataHora
+            };
+            batch.update(saldoRef, updatesSaldo);
+            batch.update(itemRef, {
+                [`${pathCache}.disp`]: firebase.firestore.FieldValue.increment(-1),
+                [`${pathCache}.pend`]: firebase.firestore.FieldValue.increment(1),
+                [`${pathCache}.uso_pend`]: firebase.firestore.FieldValue.increment(-1)
             });
-            registrarHistoricoVida(batch, item.id, "SANEAMENTO", `✅ Pendência resolvida. Despacho: ${obs}`, qtd);
+
+            // ✅ Correção no Histórico de Saldo (Onde aparece o log da imagem b847a2.png)
+            batch.set(saldoRef.collection('historico_vida').doc(), {
+                data: dataHora, evento: "SUBSTITUICAO", quem: nomeGestor,
+                detalhes: `♻️ Troca realizada: 1un boa alocada na carga, 1un avariada (${identRuimMsg}) recolhida ao estoque.`, 
+                unidade: unidadeSigla
+            });
         }
 
-        // --- CASO 2: SUBSTITUIÇÃO ---
-        else if (status === 'Substituir') {
-            const saldoRef = db.collection('inventario').doc(item.id || item.uid_global).collection('saldos_unidades').doc(unidadeId);
-            const saldoAtual = await buscarSaldoEstoqueGestor(item.id || item.uid_global);
-
-            if (saldoAtual.total <= 0) {
-                // ESTOQUE ZERADO - RECOLHIMENTO
-                alvoParaRemover.pendencias_ids.splice(pIdx, 1);
-                alvoParaRemover.status = 'RECOLHIDO/PENDENTE';
-
-                batch.update(saldoRef, {
-                    qtd_pend: firebase.firestore.FieldValue.increment(1),
-                    last_update: dataHora
-                });
-                registrarHistoricoVida(batch, item.id, "RECOLHIMENTO_AVULSO", `⚠️ Sem estoque para troca. Item recolhido da viatura como pendente. Despacho: ${obs}`, 1);
-            } 
-            else {
-                // HÁ ESTOQUE - SUBSTITUIÇÃO
-                if (item.tipo_controle === 'multi') {
-                    const tombOriginal = item.tombamento;
-                    alvoParaRemover.tombamento = novoTomb;
-                    alvoParaRemover.pendencias_ids.splice(pIdx, 1);
-                    alvoParaRemover.status = 'S/A';
-
-                    batch.update(saldoRef, {
-                        tombamentos_disponiveis: firebase.firestore.FieldValue.arrayRemove(novoTomb),
-                        tombamentos_pendentes: firebase.firestore.FieldValue.arrayUnion(tombOriginal),
-                        last_update: dataHora
-                    });
-                    registrarHistoricoVida(batch, item.id, "SUBSTITUICAO_MULTI", `♻️ Substituído tombamento ${tombOriginal} por ${novoTomb}. Motivo: ${obs}`, 1);
-                } else {
-                    alvoParaRemover.pendencias_ids.splice(pIdx, 1);
-                    alvoParaRemover.status = 'S/A';
-
-                    batch.update(saldoRef, {
-                        qtd_disp: firebase.firestore.FieldValue.increment(-1),
-                        qtd_pend: firebase.firestore.FieldValue.increment(1),
-                        last_update: dataHora
-                    });
-                    registrarHistoricoVida(batch, item.id, "SUBSTITUICAO_SINGLE", `♻️ Item substituído por estoque novo. Original recolhido. Despacho: ${obs}`, 1);
-                }
-            }
-        }
-
-        // --- CASO 3: EM SOLUÇÃO ---
+        // --- CASO 3: MANTER (APENAS ATUALIZA DESPACHO) ---
         else if (status === 'Em solução') {
-            alvoParaRemover.pendencias_ids[pIdx].status_gestao = 'EM SOLUÇÃO';
-            alvoParaRemover.pendencias_ids[pIdx].descricao += `\n[GESTÃO ${dataHora}]: ${obs}`;
-            registrarHistoricoVida(batch, item.id, "ACOMPANHAMENTO", `⏳ Gestor marcou como 'Em Solução'. Obs: ${obs}`, 0);
+            const despachoFormatado = `⚖️ [GESTÃO - ${dataHora}]: ${obs}`;
+            pendenciaOriginal.descricao += `\n${despachoFormatado}`;
+            pendenciaOriginal.status_gestao = 'EM SOLUÇÃO';
+
+            docsAfetados.forEach(docSnap => {
+                const tRef = docSnap.ref;
+                batch.update(tRef, {
+                    motivo_pendencia: despachoFormatado,
+                    atualizado_por: nomeGestor,
+                    atualizado_em: dataHora
+                });
+                
+                batch.set(tRef.collection('historico_vida').doc(), {
+                    data: dataHora, evento: "ATUALIZACAO_GESTAO", quem: nomeGestor,
+                    detalhes: despachoFormatado, unidade: unidadeSigla
+                });
+            });
         }
 
-        // Atualiza o documento principal com a nova estrutura modificada
+        // 3. FINALIZAÇÃO E COMMIT
+        if (alvoParaRemover.pendencias_ids.length === 0) alvoParaRemover.status = 'S/A';
+
         batch.update(resRef, { itensRelatorio });
         await batch.commit();
 
-        Swal.fire('Sucesso!', 'Ação registrada com sucesso. A lista foi atualizada.', 'success');
+        Swal.fire({ icon: 'success', title: 'Ação Registrada!', text: 'Inventário e Histórico atualizados corretamente.', timer: 1500, showConfirmButton: false });
         if (typeof loadCaaData === 'function') loadCaaData();
 
     } catch (e) {
-        console.error("Erro na gestão:", e);
-        Swal.fire('Erro', 'Falha ao processar ação: ' + e.message, 'error');
+        console.error("🚨 ERRO NA GESTÃO V3:", e);
+        Swal.fire('Falha na Operação', e.message, 'error');
     }
 }
 
 // Helper para Histórico de Vida
-function registrarHistoricoVida(batch, itemId, evento, detalhes, qtd) {
+function registrarHistoricoVida(batch, itemId, evento, detalhes, qtd, tombId = null) {
     const unidadeId = currentUserData.unidade_id;
-    const histRef = db.collection('inventario').doc(itemId).collection('saldos_unidades').doc(unidadeId).collection('historico_vida').doc();
+    const unidadeSigla = currentUserData.unidade_sigla || "N/D";
+    const nomeMilitar = `${currentUserData.posto} ${currentUserData.nome_guerra}`;
+    const dataReg = new Date().toLocaleString('pt-BR');
+
+    // 1. NORMALIZAÇÃO DO ID GLOBAL
+    // Se o itemId vier com o tombamento (ex: ITEM-0001-V-UID...), extraímos apenas o pai
+    const partes = itemId.split('-');
+    const ehComposto = partes.length > 2 && (itemId.includes('V-UID') || partes.length > 4);
+    const docIdGlobal = ehComposto ? partes.slice(0, 2).join('-') : itemId;
+    
+    // Se não recebemos tombId por parâmetro, mas o itemId é composto, extraímos o tombId dele
+    const idUnidadeFisica = tombId || (ehComposto ? partes.slice(2).join('-') : null);
+
+    let histRef;
+
+    if (idUnidadeFisica) {
+        // ✅ LOG UNITÁRIO (Forense): Grava na ficha individual do item (Patrimônio ou V-UID)
+        // Isso garante que cada Peça Facial ou Amplificador tenha seu prontuário próprio.
+        histRef = db.collection('inventario')
+            .doc(docIdGlobal)
+            .collection('tombamentos')
+            .doc(idUnidadeFisica)
+            .collection('historico_vida')
+            .doc();
+            
+        console.log(`📝 Log Unitário: ${docIdGlobal} -> ${idUnidadeFisica}`);
+    } else {
+        // ✅ LOG DE SALDO (Contábil): Grava na subcoleção de saldos da unidade
+        // Usado para itens de consumo sem rastreio ou quando a ação é no montante.
+        histRef = db.collection('inventario')
+            .doc(docIdGlobal)
+            .collection('saldos_unidades')
+            .doc(unidadeId)
+            .collection('historico_vida')
+            .doc();
+
+        console.log(`📈 Log de Saldo: ${docIdGlobal} [${unidadeSigla}]`);
+    }
+
+    // 2. GRAVAÇÃO DO EVENTO (PADRÃO SIGMA V3)
     batch.set(histRef, {
-        data: new Date().toLocaleString('pt-BR'),
-        evento: evento,
-        quem: `${currentUserData.posto} ${currentUserData.nome_guerra}`,
+        data: dataReg,
+        evento: evento.toUpperCase(),
+        quem: nomeMilitar,
+        unidade: unidadeSigla,
         detalhes: detalhes,
-        quantidade: qtd
+        quantidade: Number(qtd) || 0,
+        origem: "SISTEMA_GESTAO_V3",
+        tipo_registro: idUnidadeFisica ? "INDIVIDUAL" : "COLETIVO"
     });
 }
 
-/**
- * Busca o saldo e tombamentos disponíveis no estoque da unidade do gestor
- * @param {string} itemId - UID do material no inventário global
- */
 async function buscarSaldoEstoqueGestor(itemId) {
     try {
         const unidadeId = currentUserData.unidade_id || "UNID-1767838511310";
-        const saldoRef = db.collection('inventario').doc(itemId)
-            .collection('saldos_unidades').doc(unidadeId);
+        const itemRef = db.collection('inventario').doc(itemId);
+        
+        const docPrincipal = await itemRef.get();
+        if (!docPrincipal.exists) return { total: 0, lista_tombamentos: [] };
+        
+        const infoItem = docPrincipal.data();
+        // Normalizamos para minúsculo para evitar erros de digitação (Multi vs multi)
+        const tipoReal = (infoItem.tipo || "").toLowerCase();
+        const ehMulti = tipoReal === 'multi';
 
-        const doc = await saldoRef.get();
+        const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+        const docSaldo = await saldoRef.get();
 
-        if (!doc.exists) {
-            return { total: 0, tombamentos: [] };
+        if (!docSaldo.exists) return { total: 0, lista_tombamentos: [], tipo: tipoReal };
+
+        const dataSaldo = docSaldo.data();
+        const totalDisponivel = dataSaldo.disp || 0;
+
+        let listaCompletaTombamentos = [];
+        if (ehMulti) {
+            const snapTomb = await itemRef.collection('tombamentos')
+                .where('unidade_id', '==', unidadeId)
+                .where('situacao_atual', '==', 'DISPONÍVEL')
+                .where('local_id', '==', 'ALMOXARIFADO')
+                .get();
+
+            snapTomb.forEach(doc => {
+                const tData = doc.data();
+                listaCompletaTombamentos.push({
+                    tomb: doc.id,
+                    serie: tData.serie || "S/N",
+                    status_conservacao: tData.status_conservacao || "N/A"
+                });
+            });
         }
 
-        const data = doc.data();
         return {
-            total: data.qtd_disp || 0,
-            // Filtra apenas tombamentos que estão marcados como disponíveis no array
-            tombamentos: data.tombamentos_disponiveis || []
+            total: totalDisponivel,
+            lista_tombamentos: listaCompletaTombamentos,
+            tipo: tipoReal // ✅ RETORNA O TIPO REAL DO BANCO
         };
+        
     } catch (e) {
-        console.error("Erro ao buscar estoque:", e);
-        return { total: 0, tombamentos: [] };
+        console.error("🚨 ERRO BUSCA ESTOQUE:", e);
+        return { total: 0, lista_tombamentos: [] };
     }
 }
+
 async function carregarAlertasTransferencia() {
     const container = document.getElementById('resume-container');
 
@@ -830,6 +1062,7 @@ async function carregarAlertasTransferencia() {
         console.error("Erro na busca de transferências:", e);
     }
 }
+
 async function abrirListaRecebimentoCarga() {
     const minhaUnidadeId = currentUserData.unidade_id;
     const snap = await db.collection('transferencias_pendentes')
@@ -891,6 +1124,7 @@ async function abrirListaRecebimentoCarga() {
         }
     });
 }
+
 function iniciarRecebimentoCargaApp(transferenciaId) {
     Swal.close();
 

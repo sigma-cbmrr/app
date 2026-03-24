@@ -7,12 +7,11 @@ function getNovaCautelaFormHTML() {
     return `
         <div class="sigma-v3-title-label" style="margin-bottom: 25px;">
             <i class="fas fa-file-contract" style="color: #800020;"></i>
-            <span>Novo Termo de Responsabilidade de Uso e Guarda</span>
+            <span>Novo Termo de Responsabilidade de Uso e Guarda (TRUG)</span>
         </div>
 
-        <div style="background: white; border-radius: 20px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid #eef2f6;">
+        <div style="background: white; border-radius: 20px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1px solid #eef2f6; box-sizing: border-box;">
             <div class="form-grid-2-columns" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
-                
                 <div class="form-group">
                     <label style="font-weight: 800; font-size: 0.75em; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 8px;">
                         <i class="fas fa-user-tag"></i> Destinatário (Recebedor)
@@ -20,7 +19,7 @@ function getNovaCautelaFormHTML() {
                     <div class="custom-select-container">
                         <input type="hidden" id="cautela-destinatario-uid">
                         <input type="text" id="cautela-destinatario" placeholder="Nome, posto ou matrícula" required autocomplete="off" 
-                               style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc;">
+                               style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc; font-family: inherit;">
                         <div id="cautela-suggestions-box" class="suggestions-box">
                             <ul id="cautela-suggestions-list"></ul>
                         </div>
@@ -32,34 +31,81 @@ function getNovaCautelaFormHTML() {
                         <i class="fas fa-warehouse"></i> Local de Origem
                     </label>
                     <select id="cautela-local-origem" required onchange="loadCustodiaItens()" 
-                            style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc;">
-                        <option value="" disabled selected>Selecione sua custódia...</option>
+                            style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc; font-weight: 700; color: #1e293b; font-family: inherit; cursor: pointer;">
+                        <option value="" disabled selected>Selecione a origem...</option>
                     </select>
                 </div>
             </div>
-        
-            <h4 style="margin-top: 30px; margin-bottom: 15px; font-weight: 800; font-size: 0.85em; color: #800020; text-transform: uppercase; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px;">
-                <i class="fas fa-clipboard-list"></i> Seleção de Materiais
-            </h4>
-            
-            <div id="itens-custodia-list" style="background: #f8fafc; border-radius: 15px; min-height: 150px; padding: 20px; border: 2px dashed #e2e8f0;">
-                <p style="text-align: center; color: #94a3b8; font-size: 0.9em; margin-top: 40px;">
-                    Selecione a Origem para listar seus itens disponíveis.
-                </p>
+
+            <div id="selection-hub" style="margin-top: 30px; border-top: 2px solid #f1f5f9; padding-top: 20px;">
+                <h4 style="margin-bottom: 15px; font-weight: 800; font-size: 0.85em; color: #800020; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center;">
+                    <span><i class="fas fa-clipboard-list"></i> Seleção de Materiais</span>
+                    <span id="selected-counter-badge" style="background: #800020; color: white; padding: 2px 12px; border-radius: 20px; font-size: 0.8em; font-weight: bold;">0 itens</span>
+                </h4>
+
+                <div style="position: relative; margin-bottom: 20px;">
+                    <i class="fas fa-search" style="position: absolute; left: 15px; top: 13px; color: #94a3b8;"></i>
+                    <input type="text" id="trug-item-search" placeholder="🔍 Buscar material por nome ou tombamento..." 
+                           oninput="filterTrugItems()"
+                           style="width: 100%; padding: 12px 12px 12px 45px; border-radius: 12px; border: 2px solid #e2e8f0; outline: none; font-size: 0.95em; box-sizing: border-box; background: #fff; font-family: inherit;">
+                </div>
+
+                <div id="itens-custodia-list" style="background: #f8fafc; border-radius: 15px; min-height: 200px; padding: 15px; border: 1px solid #e2e8f0; max-height: 500px; overflow-y: auto;">
+                    <div style="text-align: center; color: #94a3b8; margin-top: 60px;">
+                        <i class="fas fa-arrow-up fa-2x" style="margin-bottom: 10px; opacity: 0.5;"></i>
+                        <p style="font-size: 0.95em; font-weight: 600;">Selecione o Local de Origem para carregar os itens.</p>
+                    </div>
+                </div>
             </div>
-        
+
             <div class="form-group" style="margin-top: 25px;">
                 <label style="font-weight: 800; font-size: 0.75em; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 8px;">Observações</label>
-                <textarea id="cautela-obs" rows="3" placeholder="Detalhes ou justificativa..." 
-                          style="width: 100%; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc;"></textarea>
+                <textarea id="cautela-obs" rows="3" placeholder="Descreva o motivo desta movimentação..." 
+                          style="width: 100%; max-width: 100%; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; background: #f8fafc; resize: vertical; font-family: 'Inter', sans-serif; font-size: 0.95em; line-height: 1.5; color: #1e293b; box-sizing: border-box; outline: none; transition: border-color 0.2s;">
+                </textarea>
             </div>
             
             <button class="btn-create" onclick="iniciarCautelaProcesso()" id="btn-iniciar-cautela" disabled 
-                    style="width: 100%; margin-top: 20px; padding: 15px; border-radius: 12px; background: #800020; color: white; font-weight: 800; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.3s; box-shadow: 0 4px 15px rgba(128,0,32,0.2);">
-                <i class="fas fa-paper-plane"></i> ENVIAR CAUTELA (0 itens)
+                    style="width: 100%; margin-top: 20px; padding: 18px; border-radius: 12px; background: #800020; color: white; font-weight: 800; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.3s; box-shadow: 0 4px 15px rgba(128,0,32,0.2); font-size: 1.1em; font-family: inherit;">
+                <i class="fas fa-paper-plane"></i> EMITIR TRUG
             </button>
         </div>
     `;
+}
+
+function filterTrugItems() {
+    const term = document.getElementById('trug-item-search').value.trim().toUpperCase();
+    const cards = document.querySelectorAll('.item-selection-card');
+    const accordions = document.querySelectorAll('.accordion-content');
+    const headers = document.querySelectorAll('.accordion-header');
+
+    cards.forEach(card => {
+        // Busca o texto dentro do card (Nome, Tombamentos, Qtd)
+        const text = card.innerText.toUpperCase();
+        if (text.includes(term)) {
+            card.style.display = 'flex';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+
+    // Gerencia a visibilidade dos Setores (Acordeões) baseada nos resultados
+    headers.forEach((header, index) => {
+        const content = accordions[index];
+        const visibleCards = content.querySelectorAll('.item-selection-card[style="display: flex;"]').length;
+        
+        if (visibleCards > 0) {
+            header.style.display = 'flex';
+            if (term.length > 0) {
+                // Abre o acordeão automaticamente se houver busca ativa
+                content.style.maxHeight = '1500px'; 
+                header.classList.add('active');
+            }
+        } else {
+            header.style.display = 'none';
+            content.style.maxHeight = '0px';
+        }
+    });
 }
 
 //=== Exibe o formulário de nova cautela, com campos limpos, listeners ativados e carregamento de dados necessários ===//
@@ -97,25 +143,29 @@ async function iniciarCautelaProcesso() {
     const obsEmissao = document.getElementById('cautela-obs')?.value || "";
 
     if (!localId || !destinatarioUid || cautelaItensSelecionados.length === 0) {
-        alert("Preencha todos os campos e selecione ao menos um item.");
+        Swal.fire("Atenção", "Preencha o destinatário e selecione ao menos um item.", "warning");
         return;
     }
 
     const btn = document.getElementById('btn-iniciar-cautela');
-    btn.disabled = true; btn.textContent = "Processando...";
+    btn.disabled = true; 
+    btn.innerHTML = `<i class="fas fa-sync fa-spin"></i> PROCESSANDO TRUG...`;
 
     try {
-        // --- 🛑 BUSCA REFINADA: IDENTIFICANDO O ID DA UNIDADE ---
-        // Buscamos na lista_conferencia para pegar o unidade_id real vinculado ao material
-        const listaDoc = await db.collection('listas_conferencia').doc(localId).get();
-        if (!listaDoc.exists) throw new Error("Viatura/Lista não encontrada no banco.");
+        const isDoAlmoxarifado = (localId === "ESTOQUE_GERAL");
+        let listaData = null;
+        let nomeAmigavelLocal = isDoAlmoxarifado ? "ALMOXARIFADO CENTRAL" : "";
+        let unidadeIdOrigem = currentUserData.unidade_id;
 
-        const listaData = listaDoc.data();
-        const unidadeIdOrigem = listaData.unidade_id; // ✅ Captura o ID real (ex: unid_01)
-        const nomeAmigavelLocal = `${listaData.posto_nome || ''} - ${listaData.local || localId}`;
-        // ----------------------------------------------------
+        if (!isDoAlmoxarifado) {
+            const listaDoc = await db.collection('listas_conferencia').doc(localId).get();
+            if (!listaDoc.exists) throw new Error("Viatura/Lista não encontrada no banco.");
+            listaData = listaDoc.data();
+            unidadeIdOrigem = listaData.unidade_id;
+            nomeAmigavelLocal = `${listaData.posto_nome || ''} - ${listaData.ativo_nome || localId}`;
+        }
 
-        const cautelaId = "CAUTELA-" + Math.floor(10000000 + Math.random() * 90000000);
+        const cautelaId = "TRUG-" + Math.floor(10000000 + Math.random() * 90000000);
         const emitenteNome = `${currentUserData.posto} ${currentUserData.quadro} ${currentUserData.nome_guerra}`;
         const dataAtual = new Date().toLocaleString('pt-BR');
 
@@ -123,75 +173,156 @@ async function iniciarCautelaProcesso() {
             cautela_id: cautelaId,
             emitente_uid: firebase.auth().currentUser.uid,
             emitente: emitenteNome,
-            destinatario_original_uid: destinatarioUid,
-            destinatario_original_nome: destinatarioNome,
             destinatario_uid: destinatarioUid,
+            destinatario: destinatarioNome,
             local_origem_id: localId,
             local_origem: nomeAmigavelLocal,
-
-            // ✅ MUDANÇA CRÍTICA: Gravamos o ID para a query de Gestor funcionar
             unidade_origem: unidadeIdOrigem,
-
             status: 'ABERTA',
             timestamp_emissao: firebase.firestore.FieldValue.serverTimestamp(),
             observacoes_emissao: obsEmissao,
-            itens: cautelaItensSelecionados
+            itens: cautelaItensSelecionados,
+            historico_movimentacoes: [{
+                data: dataAtual,
+                militar: emitenteNome,
+                descricao: `TRUG emitido. Aguardando aceite de ${destinatarioNome}.`,
+                tipo: "EMISSAO"
+            }]
         };
 
-        // ... resto da transação (o bloco transaction permanece igual)
         await db.runTransaction(async (transaction) => {
-            // Seu código de transaction aqui...
-            // (Mantenha o mapeamento do mItem.historico_vida e mItem.cautelas como está)
+            
+            // Log de histórico base
+            const gerarLogVida = (idTombOuDoc) => ({
+                data: dataAtual,
+                tipo: "CAUTELA (TRUG)",
+                descricao: `Material cautelado para ${destinatarioNome}. TRUG: ${cautelaId}`,
+                militar_nome: emitenteNome,
+                militar_uid: firebase.auth().currentUser.uid,
+                local: nomeAmigavelLocal,
+                quantidade: 1 // No Sigma V3, logs individuais são sempre unitários
+            });
 
-            // Apenas certifique-se de usar a variável 'listaData.list' que já buscamos acima se quiser otimizar
-            let list = listaData.list;
+            if (!isDoAlmoxarifado && listaData) {
+                let listMestra = listaData.list;
 
-            // Processamento dos itens...
-            list = list.map(setor => ({
-                ...setor,
-                itens: setor.itens.map(mItem => {
-                    const selecoes = cautelaItensSelecionados.filter(c => c.id_base === mItem.id);
-                    if (selecoes.length > 0) {
-                        if (!mItem.historico_vida) mItem.historico_vida = [];
-                        selecoes.forEach(sel => {
-                            const carimbo = {
-                                id: cautelaId,
-                                destinatario: destinatarioNome,
-                                data: dataAtual,
-                                quantidade: Number(sel.quantidade) || 1
-                            };
-                            mItem.historico_vida.push({
-                                evento: "SAIDA_CAUTELA", id_doc: cautelaId, quem: emitenteNome, data: dataAtual,
-                                detalhes: `Saída de ${carimbo.quantidade}un para ${destinatarioNome}`
-                            });
-                            if (mItem.tipo === 'multi' && sel.tombamento) {
-                                mItem.tombamentos = mItem.tombamentos.map(t => {
-                                    if (t.tomb === sel.tombamento) t.cautela = carimbo;
-                                    return t;
+                listMestra = listMestra.map(setor => {
+                    return {
+                        ...setor,
+                        itens: setor.itens.map(mItem => {
+                            const sel = cautelaItensSelecionados.find(c => c.id === mItem.uid_instancia || c.id === mItem.id);
+                            
+                            if (sel) {
+                                const uidGlobal = mItem.uid_global || mItem.id;
+                                const itemRef = db.collection('inventario').doc(uidGlobal);
+                                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeIdOrigem);
+                                const qtdMov = Number(sel.quantidade) || 1;
+                                const carimbo = { id: cautelaId, destinatario: destinatarioNome, data: dataAtual, quantidade: qtdMov };
+
+                                // ✅ ALIMENTA HISTÓRICO DE VIDA (SINGLE OU MULTI)
+                                const histRef = itemRef.collection('historico_vida').doc();
+                                transaction.set(histRef, gerarLogVida(uidGlobal));
+
+                                if (mItem.tipo === 'multi' && sel.tombamento) {
+                                    mItem.tombamentos = mItem.tombamentos.map(t => {
+                                        if (t.tomb === sel.tombamento) {
+                                            t.cautela = carimbo;
+                                            transaction.update(itemRef.collection('tombamentos').doc(t.tomb), { 
+                                                situacao_atual: "CAUTELADO", 
+                                                uid_cautela: cautelaId, 
+                                                atualizado_por: emitenteNome, 
+                                                atualizado_em: dataAtual 
+                                            });
+                                        }
+                                        return t;
+                                    });
+                                } else {
+                                    if (!mItem.cautelas) mItem.cautelas = [];
+                                    mItem.cautelas.push(carimbo);
+                                    transaction.update(itemRef.collection('tombamentos').doc(sel.id), {
+                                        situacao_atual: "CAUTELADO", 
+                                        uid_cautela: cautelaId, 
+                                        atualizado_por: emitenteNome, 
+                                        atualizado_em: dataAtual
+                                    });
+                                }
+
+                                const acessorios = mItem.acessorios_vinculados || mItem.acessorios_acoplados || [];
+                                acessorios.forEach(ac => {
+                                    ac.cautela = carimbo;
+                                    const acRef = db.collection('inventario').doc(ac.uid_global || ac.id).collection('tombamentos').doc(ac.tomb || ac.id);
+                                    transaction.update(acRef, { 
+                                        situacao_atual: "CAUTELADO", 
+                                        uid_cautela: cautelaId, 
+                                        atualizado_por: emitenteNome 
+                                    });
+                                    // ✅ Histórico para acessórios também
+                                    transaction.set(db.collection('inventario').doc(ac.uid_global || ac.id).collection('historico_vida').doc(), gerarLogVida(ac.tomb));
                                 });
-                            } else {
-                                if (!mItem.cautelas) mItem.cautelas = [];
-                                mItem.cautelas.push(carimbo);
+
+                                transaction.update(saldoRef, {
+                                    disp: firebase.firestore.FieldValue.increment(-qtdMov),
+                                    uso_caut: firebase.firestore.FieldValue.increment(qtdMov),
+                                    last_update: dataAtual
+                                });
+                                transaction.update(itemRef, {
+                                    [`unidades_cache.${unidadeIdOrigem}.disp`]: firebase.firestore.FieldValue.increment(-qtdMov),
+                                    [`unidades_cache.${unidadeIdOrigem}.uso_caut`]: firebase.firestore.FieldValue.increment(qtdMov)
+                                });
                             }
-                        });
+                            return mItem;
+                        })
+                    };
+                });
+                transaction.update(db.collection('listas_conferencia').doc(localId), { list: listMestra });
+            } 
+            
+            else {
+                for (const sel of cautelaItensSelecionados) {
+                    const itemRef = db.collection('inventario').doc(sel.id_base);
+                    const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeIdOrigem);
+                    const qtdMov = Number(sel.quantidade) || 1;
+
+                    // ✅ ALIMENTA HISTÓRICO DE VIDA NA SAÍDA DO ALMOX
+                    transaction.set(itemRef.collection('historico_vida').doc(), gerarLogVida(sel.id_base));
+
+                    const updatesInventario = {
+                        situacao_atual: "CAUTELADO", 
+                        uid_cautela: cautelaId, 
+                        local_id: "POSSE_PESSOAL", 
+                        atualizado_por: emitenteNome, 
+                        atualizado_em: dataAtual
+                    };
+
+                    if (sel.tipo === 'multi') {
+                        transaction.update(itemRef.collection('tombamentos').doc(sel.tombamento), updatesInventario);
+                    } else {
+                         transaction.update(itemRef.collection('tombamentos').doc(sel.id), updatesInventario);
                     }
-                    return mItem;
-                })
-            }));
+
+                    transaction.update(saldoRef, {
+                        disp: firebase.firestore.FieldValue.increment(-qtdMov),
+                        caut: firebase.firestore.FieldValue.increment(qtdMov),
+                        last_update: dataAtual
+                    });
+                    transaction.update(itemRef, {
+                        [`unidades_cache.${unidadeIdOrigem}.disp`]: firebase.firestore.FieldValue.increment(-qtdMov),
+                        [`unidades_cache.${unidadeIdOrigem}.caut`]: firebase.firestore.FieldValue.increment(qtdMov)
+                    });
+                }
+            }
 
             transaction.set(db.collection('cautelas_abertas').doc(cautelaId), novaCautela);
-            transaction.update(db.collection('listas_conferencia').doc(localId), { list });
         });
 
-        // ✅ SUCESSO COM SWEETALERT
-        Swal.fire('Sucesso!', `Cautela ${cautelaId} enviada para ${destinatarioNome}.`, 'success')
-            .then(() => location.reload());
+        await Swal.fire({ icon: 'success', title: 'TRUG EMITIDO', text: `ID: ${cautelaId}. O material foi registrado no histórico de vida.`, confirmButtonColor: '#800020' });
+        location.reload();
 
     } catch (e) {
-        console.error(e);
-        alert("Erro ao emitir cautela: " + e.message);
+        console.error("Erro Crítico no TRUG:", e);
+        Swal.fire('Erro na Transação', e.message, 'error');
         btn.disabled = false;
-        btn.textContent = "Enviar Cautela";
+        btn.innerHTML = `<i class="fas fa-paper-plane"></i> EMITIR TRUG`;
     }
 }
 
@@ -1034,29 +1165,41 @@ async function showCautelaDetails(cautelaId) {
         let donoProvisorioNome = "Aguardando Devolução";
         let destaqueRecebedor = "";
 
+        // ✅ MELHORIA: Identifica o destinatário atual usando os campos da sua coleção
         if (currentStatus === 'RECEBIDA' && cautela.local_origem_id) {
             const custodyDoc = await db.collection('custodia_atual').doc(cautela.local_origem_id).get();
             if (custodyDoc.exists) {
                 donoProvisorioNome = custodyDoc.data().conferente_completo || "Dono não identificado";
-                if (meuUid !== cautela.destinatario_uid) {
-                    destaqueRecebedor = `<span style="background-color: #fff5f5; color: #800020; padding: 4px 10px; border-radius: 6px; border: 1.5px solid #800020; font-weight: bold; display: inline-flex; align-items: center; gap: 8px;">
-                                            <i class="fas fa-hand-holding"></i> ${donoProvisorioNome}
-                                         </span>`;
-                }
+            } else {
+                // Fallback para o nome que consta no TRUG se a custódia_atual não estiver disponível
+                donoProvisorioNome = cautela.destinatario || "Militar Identificado";
+            }
+
+            if (meuUid !== cautela.destinatario_uid) {
+                destaqueRecebedor = `<span style="background-color: #fff5f5; color: #800020; padding: 4px 10px; border-radius: 6px; border: 1.5px solid #800020; font-weight: bold; display: inline-flex; align-items: center; gap: 8px;">
+                                                <i class="fas fa-hand-holding"></i> ${donoProvisorioNome}
+                                             </span>`;
             }
         }
 
         const getUpdatedName = async (uid, fallbackName) => {
             if (uid) {
-                const userData = await getUserInfoByUid(uid);
-                return userData ? userData.nome_militar_completo : fallbackName || 'N/D';
+                // Tenta buscar no banco de usuários, mas prioriza o fallback (seu dado gravado) se falhar
+                try {
+                    const userData = await getUserInfoByUid(uid);
+                    return userData ? userData.nome_militar_completo : fallbackName || 'N/D';
+                } catch (e) {
+                    return fallbackName || 'N/D';
+                }
             }
             return fallbackName || 'N/D';
         };
 
+        // ✅ SINCRONISMO COM SUA COLEÇÃO: Alimenta os campos com os dados do TRUG
         document.getElementById('modal-emitente').textContent = await getUpdatedName(cautela.emitente_uid, cautela.emitente);
-        document.getElementById('modal-destinatario-original').textContent = await getUpdatedName(cautela.destinatario_original_uid, cautela.destinatario_original_nome);
-        document.getElementById('modal-destinatario-atual').innerHTML = destaqueRecebedor || donoProvisorioNome;
+        document.getElementById('modal-destinatario-original').textContent = await getUpdatedName(cautela.destinatario_uid, cautela.destinatario);
+        document.getElementById('modal-destinatario-atual').innerHTML = destaqueRecebedor || (currentStatus === 'ABERTA' ? cautela.destinatario : donoProvisorioNome);
+        
         document.getElementById('modal-local-origem').textContent = cautela.local_origem || 'N/D';
         document.getElementById('modal-data-emissao').textContent = cautela.timestamp_emissao ? cautela.timestamp_emissao.toDate().toLocaleDateString('pt-BR') : 'N/D';
         document.getElementById('modal-obs-emissao').textContent = cautela.observacoes_emissao || 'Nenhuma observação.';
@@ -1092,7 +1235,6 @@ async function showCautelaDetails(cautelaId) {
                 const li = document.createElement('li');
                 li.style.cssText = `display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid #eee; background-color: ${idx % 2 !== 0 ? '#f2f2f2' : 'transparent'}; font-size: 0.9em;`;
 
-                // 🛑 LÓGICA DO ÍCONE DE ALERTA NO ITEM 🛑
                 const pDoItem = pendencias.find(p => p.item_index === idx);
                 let htmlAlerta = "";
                 if (pDoItem) {
@@ -1111,25 +1253,24 @@ async function showCautelaDetails(cautelaId) {
         }
 
         // --- BLOQUEIO VISUAL DO BOTÃO DE DEVOLUÇÃO ---
-        if (currentStatus === 'ABERTA' && cautela.destinatario_original_uid === meuUid) {
-            if (btnReceber) { btnReceber.style.display = 'block'; btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); }
+        // ✅ ATUALIZAÇÃO: Verifica o destinatário atual ou original para permitir o aceite (Receber)
+        if (currentStatus === 'ABERTA' && (cautela.destinatario_uid === meuUid)) {
+            if (btnReceber) { 
+                btnReceber.style.display = 'block'; 
+                btnReceber.onclick = () => iniciarRecebimentoCautela(cautelaId); 
+            }
         }
-        else if (currentStatus === 'RECEBIDA' && (cautela.destinatario_uid === meuUid || cautela.destinatario_original_uid === meuUid)) {
+        else if (currentStatus === 'RECEBIDA' && (cautela.destinatario_uid === meuUid)) {
             if (btnDevolver) {
                 btnDevolver.style.display = 'block';
                 if (temPendencia) {
-                    // Estado Desativado/Bloqueado
                     btnDevolver.disabled = true;
                     btnDevolver.style.opacity = "0.5";
                     btnDevolver.style.cursor = "not-allowed";
-                    btnDevolver.title = "A devolução está bloqueada porque existem itens com problemas aguardando análise do Gestor.";
                     btnDevolver.innerHTML = `<i class="fas fa-lock"></i> Devolução Bloqueada`;
                 } else {
-                    // Estado Normal
                     btnDevolver.disabled = false;
                     btnDevolver.style.opacity = "1";
-                    btnDevolver.style.cursor = "pointer";
-                    btnDevolver.title = "";
                     btnDevolver.innerHTML = `<i class="fas fa-undo"></i> Iniciar Devolução`;
                     btnDevolver.onclick = () => iniciarDevolucaoCautela(cautelaId, donoProvisorioNome);
                 }
@@ -1137,7 +1278,10 @@ async function showCautelaDetails(cautelaId) {
             if (btnSubstituir) { btnSubstituir.style.display = 'block'; }
         }
         else if (currentStatus === 'DEVOLUÇÃO' && cautela.destinatario_uid === meuUid) {
-            if (btnConfirmarDevolucao) { btnConfirmarDevolucao.style.display = 'block'; btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, currentUserData.nome_militar_completo); }
+            if (btnConfirmarDevolucao) { 
+                btnConfirmarDevolucao.style.display = 'block'; 
+                btnConfirmarDevolucao.onclick = () => iniciarConferenciaDevolucao(cautelaId, currentUserData.nome_militar_completo); 
+            }
         }
 
     } catch (e) {
@@ -2277,47 +2421,70 @@ function renderCautelaRow(cautela) {
 async function loadCustodiaLocais() {
     const selectLocal = document.getElementById('cautela-local-origem');
     const militarUid = firebase.auth().currentUser.uid;
+    const unidadeIdGestor = currentUserData.unidade_id;
+    const unidadeSigla = currentUserData.unidade_sigla || "UNIDADE";
+    const role = currentUserData.role;
 
     if (!selectLocal || !militarUid) {
-        const fallbackNome = currentUserData.nome_militar_completo || 'Usuário Desconhecido';
-        selectLocal.innerHTML = `<option value="" disabled selected>Erro: Usuário (${fallbackNome}) não identificado.</option>`;
+        selectLocal.innerHTML = `<option value="" disabled selected>Erro: Usuário não identificado.</option>`;
         return;
     }
 
     selectLocal.disabled = true;
-    selectLocal.innerHTML = '<option value="" disabled selected>Carregando locais...</option>';
+    selectLocal.innerHTML = '<option value="" disabled selected>Carregando origens...</option>';
 
     try {
-        // Busca na coleção 'custodia_atual' as listas onde o militar logado é o conferente
-        const custodyRef = db.collection('custodia_atual');
-        const resultsSnapshot = await custodyRef
-            .where('conferente_uid', '==', militarUid)
-            .get();
-
-        // Usamos um Map para garantir que não haja duplicidade de IDs de lista
         const locaisMap = new Map();
+        const isGestorOuAdmin = (role === 'gestor' || role === 'admin' || role === 'gestor_geral');
 
-        resultsSnapshot.forEach(doc => {
-            const data = doc.data();
-            const idRealDaLista = data.lista_id; // "alfa_abt17"
-            const nomeExibicao = data.local_nome; // "ALFA - ABT-17"
+        // --- 1. LÓGICA DE GESTOR: INJETAR ALMOXARIFADO ---
+        if (isGestorOuAdmin) {
+            // Injeta a opção do Estoque Físico (Prateleira)
+            // Usamos um ID especial que a função loadCustodiaItens saberá interpretar
+            locaisMap.set("ESTOQUE_GERAL", `📦 ALMOXARIFADO CENTRAL - ${unidadeSigla}`);
 
-            if (idRealDaLista && nomeExibicao) {
-                locaisMap.set(idRealDaLista, nomeExibicao);
+            // Busca TODAS as listas da unidade para o Gestor
+            if (unidadeIdGestor) {
+                const snapListas = await db.collection('listas_conferencia')
+                    .where('unidade_id', '==', unidadeIdGestor)
+                    .where('ativo', '==', true)
+                    .get();
+
+                snapListas.forEach(doc => {
+                    const d = doc.data();
+                    const nomeExibicao = d.posto_nome ? `${d.posto_nome} - ${d.local || d.ativo_nome || doc.id}` : (d.local || d.ativo_nome || doc.id);
+                    locaisMap.set(doc.id, `🚒 ${nomeExibicao}`);
+                });
             }
-        });
+        } else {
+            // --- 2. LÓGICA OPERACIONAL: BUSCAR CUSTÓDIA ATUAL ---
+            const custodyRef = db.collection('custodia_atual');
+            const resultsSnapshot = await custodyRef
+                .where('conferente_uid', '==', militarUid)
+                .get();
 
-        let optionsHtml = '<option value="" disabled selected>Selecione um local...</option>';
+            resultsSnapshot.forEach(doc => {
+                const data = doc.data();
+                if (data.lista_id && data.local_nome) {
+                    locaisMap.set(data.lista_id, `🚒 ${data.local_nome}`);
+                }
+            });
+        }
+
+        let optionsHtml = '<option value="" disabled selected>De onde sairá o material?</option>';
 
         if (locaisMap.size === 0) {
-            optionsHtml = '<option value="" disabled selected>Nenhum local sob sua custódia.</option>';
+            optionsHtml = '<option value="" disabled selected>Nenhum local disponível.</option>';
         } else {
-            // Converte o Map em Array e ordena pelo Nome legível
-            const listaOrdenada = Array.from(locaisMap.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+            // Ordenação: Garante que o ALMOXARIFADO sempre fique no topo se existir
+            const listaOrdenada = Array.from(locaisMap.entries()).sort((a, b) => {
+                if (a[0] === "ESTOQUE_GERAL") return -1;
+                if (b[0] === "ESTOQUE_GERAL") return 1;
+                return a[1].localeCompare(b[1]);
+            });
 
             listaOrdenada.forEach(([id, nome]) => {
-                // 🛑 CORREÇÃO: O 'value' agora é o ID (alfa_abt17) e o texto é o Nome (ALFA - ABT-17)
-                optionsHtml += `<option value="${id}">${nome}</option>`;
+                optionsHtml += `<option value="${id}">${nome.toUpperCase()}</option>`;
             });
         }
 
@@ -2325,7 +2492,7 @@ async function loadCustodiaLocais() {
         selectLocal.disabled = false;
 
     } catch (error) {
-        console.error("Erro ao carregar locais sob custódia:", error);
+        console.error("🚨 Erro ao carregar locais para TRUG:", error);
         selectLocal.disabled = false;
         selectLocal.innerHTML = '<option value="" disabled selected>Erro ao carregar locais.</option>';
     }
@@ -2335,133 +2502,148 @@ async function loadCustodiaLocais() {
 async function loadCustodiaItens() {
     const selectLocal = document.getElementById('cautela-local-origem');
     const listaId = selectLocal.value;
-
     const itemListContainer = document.getElementById('itens-custodia-list');
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    const selectionHub = document.getElementById('selection-hub');
+    const unidadeIdGestor = currentUserData.unidade_id;
 
-    itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #800020;">Buscando materiais...</p>';
+    itemListContainer.innerHTML = '<div style="text-align: center; padding: 40px; color: #800020;"><i class="fas fa-circle-notch fa-spin fa-2x"></i><br><span style="font-size:0.8em; font-weight:700; margin-top:10px; display:block; letter-spacing:1px;">MAPEANDO PATRIMÔNIO...</span></div>';
+    
     if (btnIniciar) btnIniciar.disabled = true;
 
-    if (!listaId) {
-        itemListContainer.innerHTML = '<p class="placeholder-message" style="text-align: center; color: #999;">Por favor, selecione um Local de Origem.</p>';
-        return;
-    }
-
     try {
-        const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
-
-        if (!listaDoc.exists) {
-            itemListContainer.innerHTML = `<p style="color:red; text-align:center;">Erro: Documento da lista (${listaId}) não encontrado.</p>`;
-            return;
-        }
-
-        const listaMestra = listaDoc.data().list || [];
-        let htmlContent = '<div class="inventory-accordion-container">';
+        let htmlContent = '';
         let totalGeralDisponivel = 0;
-        let isFirst = true;
 
-        listaMestra.forEach(setor => {
-            const setorItems = (setor.itens || []);
+        // --- MODO A: ALMOXARIFADO CENTRAL ---
+        if (listaId === "ESTOQUE_GERAL") {
+            const snapInventario = await db.collection('inventario')
+                .where('unidade_origem_id', '==', unidadeIdGestor)
+                .get();
 
-            // 🛑 CÁLCULO UNIFICADO DE DISPONIBILIDADE (Igual ao App de Conferência)
-            const setorTotal = setorItems.reduce((acc, item) => {
-                if (item.tipo === 'single') {
-                    const esperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
-                    const cautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                    // ⬇️ NOVA LÓGICA: Abate também pendências de conferência não resolvidas
-                    const pendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
+            let itensDisponiveis = [];
+            snapInventario.forEach(doc => {
+                const item = doc.data();
+                const cache = item.unidades_cache ? item.unidades_cache[unidadeIdGestor] : null;
+                const saldoDisp = cache ? (Number(cache.disp) || 0) : 0;
+                if (saldoDisp > 0) itensDisponiveis.push({ ...item, saldoReal: saldoDisp });
+            });
 
-                    const saldo = esperado - cautelado - pendente;
-                    return acc + (saldo > 0 ? saldo : 0);
-                } else if (item.tipo === 'multi') {
-                    // ⬇️ NOVA LÓGICA: Só conta se não tiver cautela E não tiver pendências de conferência no tombamento
-                    return acc + (item.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
-                }
-                return acc;
-            }, 0);
+            if (itensDisponiveis.length > 0) {
+                totalGeralDisponivel = itensDisponiveis.length;
+                htmlContent = `<div class="sigma-v3-inventory-group" style="margin-bottom: 20px;">
+                    <div class="accordion-header active" style="background: #1b8a3e; color: white; padding: 12px 18px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 800; font-size: 0.85em; text-transform: uppercase;"><i class="fas fa-warehouse"></i> DISPONÍVEL NO ALMOXARIFADO</span>
+                    </div>
+                    <div class="accordion-content" style="max-height: none; padding: 15px 5px; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">`;
 
-            if (setorTotal <= 0) return;
-            totalGeralDisponivel += setorTotal;
-
-            const contentId = `content-${setor.id}`;
-            htmlContent += `
-                <div class="${isFirst ? 'accordion-header active' : 'accordion-header'}" onclick="toggleAccordion(this, '${contentId}')">
-                    <span>${setor.nome} (${setorTotal} disponíveis)</span>
-                    <i class="fas fa-chevron-down"></i>
-                </div>
-                <div class="accordion-content" id="${contentId}" style="${isFirst ? 'max-height: 1500px;' : ''}">
-                    <div class="items-card-grid">`;
-
-            setorItems.forEach(item => {
-                if (item.tipo === 'single') {
-                    const totalEsperado = Number(item.quantidadeEsperada || item.quantidade) || 0;
-                    const totalCautelado = (item.cautelas || []).reduce((sum, c) => sum + (Number(c.quantidade) || 0), 0);
-                    // ⬇️ Abatimento de pendências para o saldo individual do card
-                    const totalPendente = (item.pendencias_ids || []).reduce((sum, p) => sum + (Number(p.quantidade) || 0), 0);
-
-                    const saldoDisponivel = totalEsperado - totalCautelado - totalPendente;
-
-                    if (saldoDisponivel > 0) {
+                for (const item of itensDisponiveis) {
+                    if (item.tipo === 'single') {
                         htmlContent += `
-                            <div class="item-selection-card" data-item-id="${item.id}">
-                                <h4 class="item-card-title"><i class="fas fa-boxes"></i> ${item.nome}</h4>
-                                <div class="qtd-control-wrapper">
-                                    <label>
-                                        <input type="checkbox" name="cautela-item-base" 
-                                               data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisponivel}"
-                                               onchange="toggleItemQuantity(this); updateCautelaItemCount();"> Selecionar
-                                    </label>
-                                    <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" 
-                                           min="1" max="${saldoDisponivel}" value="1" disabled style="width: 60px;">
+                            <div class="item-selection-card" data-item-id="${item.uid_global}" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; display: flex; flex-direction: column;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <h4 style="margin: 0; font-size: 0.85em; color: #1e293b; font-weight: 800;">${item.nome}</h4>
+                                    <span style="background: #1b8a3e; color: white; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 6px;">DISP: ${item.saldoReal}</span>
                                 </div>
-                                <small style="color:#a00030; font-weight: bold;">Disponível: ${saldoDisponivel} de ${totalEsperado}</small>
+                                <div style="margin-top: 15px; display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 8px; border-radius: 8px;">
+                                    <label style="font-size: 11px; font-weight: 800; color: #64748b; cursor: pointer;"><input type="checkbox" name="cautela-item-base" data-id="${item.uid_global}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${item.saldoReal}" data-setor="ALMOXARIFADO" onchange="toggleItemQuantity(this); updateCautelaItemCount();" style="width: 16px; height: 16px; accent-color: #800020;"> SELECIONAR </label>
+                                    <input type="number" class="input-qtd-cautela" min="1" max="${item.saldoReal}" value="1" disabled style="width: 45px; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center; font-weight: 800;">
+                                </div>
                             </div>`;
-                    }
-                } else if (item.tipo === 'multi' && item.tombamentos?.length > 0) {
-                    // ⬇️ Filtra tombamentos que possuem pendências ativas (carimbos vermelhos)
-                    const tags = (item.tombamentos || []).map(t => {
-                        const isC = !!t.cautela;
-                        const hasP = (t.pendencias_ids && t.pendencias_ids.length > 0);
-                        const bloqueado = isC || hasP;
-                        const motivoBloqueio = isC ? 'Cautelado' : (hasP ? 'Com Pendência' : 'Livre');
-
-                        return `
-                            <div class="tombamento-tag ${bloqueado ? 'cautelado' : ''}" title="${motivoBloqueio}">
-                                <input type="checkbox" name="cautela-item-multi" 
-                                       data-id="${item.id}-${t.tomb}" data-id-base="${item.id}" data-tombamento="${t.tomb}" 
-                                       data-nome="${item.nome}" data-tipo="multi" 
-                                       onchange="updateCautelaItemCount();" ${bloqueado ? 'disabled' : ''}>
-                                ${t.tomb} ${bloqueado ? `<i class="fas fa-lock" style="color: ${hasP ? '#d90f23' : '#800020'};"></i>` : ''}
+                    } else {
+                        const snapTomb = await db.collection('inventario').doc(item.uid_global).collection('tombamentos')
+                            .where('unidade_id', '==', unidadeIdGestor).where('situacao_atual', '==', 'DISPONÍVEL').where('local_id', '==', 'ALMOXARIFADO').get();
+                        let pills = '';
+                        snapTomb.forEach(tDoc => {
+                            const t = tDoc.data();
+                            pills += `<label class="tomb-pill" style="cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700;"><input type="checkbox" name="cautela-item-multi" data-id="${item.uid_global}-${t.tomb}" data-id-base="${item.uid_global}" data-tombamento="${t.tomb}" data-nome="${item.nome}" data-tipo="multi" data-setor="ALMOXARIFADO" onchange="updateCautelaItemCount();"> ${t.tomb}</label>`;
+                        });
+                        if (pills) {
+                            htmlContent += `<div class="item-selection-card" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; border-left: 4px solid #1b8a3e;">
+                                <h4 style="margin: 0 0 12px 0; font-size: 0.85em; color: #1e293b; font-weight: 800;">${item.nome}</h4>
+                                <div style="display: flex; flex-wrap: wrap; gap: 8px;">${pills}</div>
                             </div>`;
-                    }).join('');
-
-                    // Só renderiza o card se houver algum tombamento não bloqueado
-                    if (tags.includes('type="checkbox"')) {
-                        htmlContent += `
-                            <div class="item-selection-card">
-                                <h4 class="item-card-title"><i class="fas fa-shield-alt"></i> ${item.nome}</h4>
-                                <div class="tombamento-tag-list">${tags}</div>
-                            </div>`;
+                        }
                     }
                 }
-            });
-            htmlContent += '</div></div>';
-            isFirst = false;
-        });
+                htmlContent += `</div></div>`;
+            }
 
-        if (totalGeralDisponivel === 0) {
-            itemListContainer.innerHTML = '<p style="color:green; padding:20px; text-align:center;">✅ Nenhum material disponível para cautela (itens com pendência ou cautelados).</p>';
         } else {
-            itemListContainer.innerHTML = htmlContent + '</div>';
-            document.querySelectorAll('.input-qtd-cautela').forEach(el => {
-                el.addEventListener('input', updateCautelaItemCount);
+            // --- MODO B: VIATURA / SETOR ---
+            const listaDoc = await db.collection('listas_conferencia').doc(listaId).get();
+            if (!listaDoc.exists) return;
+
+            const listaMestra = listaDoc.data().list || [];
+            listaMestra.forEach(setor => {
+                const setorItems = (setor.itens || []);
+                const setorTotal = setorItems.reduce((acc, item) => {
+                    if (item.tipo === 'single') {
+                        const saldo = (item.quantidadeEsperada || item.quantidade) - ((item.cautelas || []).reduce((s, c) => s + (c.quantidade || 0), 0)) - ((item.pendencias_ids || []).reduce((s, p) => s + (p.quantidade || 0), 0));
+                        return acc + (saldo > 0 ? saldo : 0);
+                    }
+                    return acc + (item.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).length;
+                }, 0);
+
+                if (setorTotal <= 0) return;
+                totalGeralDisponivel += setorTotal;
+
+                const contentId = `content-${setor.id}`;
+                htmlContent += `
+                    <div class="sigma-v3-inventory-group" style="margin-bottom: 20px;">
+                        <div class="accordion-header active" onclick="toggleAccordion(this, '${contentId}')" style="background: #f8fafc; padding: 12px 18px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; border: 1px solid #eef2f6;">
+                            <span style="font-weight: 800; color: #475569; font-size: 0.85em; text-transform: uppercase;"><i class="fas fa-folder" style="color: #800020; margin-right: 10px;"></i> ${setor.nome}</span>
+                            <span style="font-size: 0.75em; font-weight: 700; color: #94a3b8;">${setorTotal} DISPONÍVEIS</span>
+                        </div>
+                        <div class="accordion-content" id="${contentId}" style="max-height: 2000px; overflow: hidden; padding: 10px 5px; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">`;
+
+                setorItems.forEach(item => {
+                    // ✅ Lógica de Kit: Verifica se existem acessórios vinculados na arquitetura
+                    const acessorios = item.acessorios_vinculados || item.acessorios_acoplados || [];
+                    const kitText = acessorios.length > 0 ? `<div style="margin-top: 5px; color: #800020; font-size: 10px; font-weight: 700;"><i class="fas fa-link"></i> KIT: ${acessorios.map(a => a.nome).join(', ')}</div>` : "";
+
+                    if (item.tipo === 'single') {
+                        const saldoDisp = (item.quantidadeEsperada || item.quantidade) - ((item.cautelas || []).reduce((s, c) => s + (c.quantidade || 0), 0)) - ((item.pendencias_ids || []).reduce((s, p) => s + (p.quantidade || 0), 0));
+                        if (saldoDisp > 0) {
+                            htmlContent += `
+                                <div class="item-selection-card" data-item-id="${item.id}" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; display: flex; flex-direction: column;">
+                                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                        <div>
+                                            <h4 style="margin: 0; font-size: 0.85em; color: #1e293b; font-weight: 800;">${item.nome}</h4>
+                                            ${kitText}
+                                        </div>
+                                        <span style="background: #fff1f2; color: #be123c; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 6px;">LIVRE: ${saldoDisp}</span>
+                                    </div>
+                                    <div style="margin-top: 15px; display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 8px; border-radius: 8px;">
+                                        <label style="font-size: 11px; font-weight: 800; color: #64748b; cursor: pointer;"><input type="checkbox" name="cautela-item-base" data-id="${item.id}" data-nome="${item.nome}" data-tipo="single" data-max-qtd="${saldoDisp}" data-setor="${setor.nome}" onchange="toggleItemQuantity(this); updateCautelaItemCount();" style="width: 16px; height: 16px; accent-color: #800020;"> SELECIONAR </label>
+                                        <input type="number" class="input-qtd-cautela" data-item-id="${item.id}" min="1" max="${saldoDisp}" value="1" disabled style="width: 45px; border-radius: 6px; text-align: center; font-weight: 800;">
+                                    </div>
+                                </div>`;
+                        }
+                    } else if (item.tipo === 'multi' && item.tombamentos?.length > 0) {
+                        const tags = (item.tombamentos || []).filter(t => !t.cautela && (!t.pendencias_ids || t.pendencias_ids.length === 0)).map(t => `
+                            <label class="tomb-pill" style="cursor: pointer; display: flex; align-items: center; gap: 6px; background: white; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700;"><input type="checkbox" name="cautela-item-multi" data-id="${item.id}-${t.tomb}" data-id-base="${item.id}" data-tombamento="${t.tomb}" data-nome="${item.nome}" data-tipo="multi" data-setor="${setor.nome}" onchange="updateCautelaItemCount();" style="accent-color: #800020;"> ${t.tomb}</label>`).join('');
+                        if (tags) {
+                            htmlContent += `
+                                <div class="item-selection-card" style="background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; border-left: 4px solid #800020;">
+                                    <h4 style="margin: 0; font-size: 0.85em; color: #1e293b; font-weight: 800;">${item.nome}</h4>
+                                    ${kitText}
+                                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">${tags}</div>
+                                </div>`;
+                        }
+                    }
+                });
+                htmlContent += '</div></div></div>';
             });
-            updateCautelaItemCount();
         }
 
-    } catch (error) {
-        console.error("Erro ao carregar itens:", error);
-        itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar materiais.</p>';
+        itemListContainer.innerHTML = htmlContent || '<div style="text-align:center; padding:40px; color:#94a3b8;">Nenhum item disponível para TRUG.</div>';
+        if (selectionHub) selectionHub.style.display = 'block';
+        updateCautelaItemCount();
+
+    } catch (e) {
+        console.error("Erro ao carregar itens para TRUG:", e);
+        itemListContainer.innerHTML = '<p style="color:red; text-align:center;">Erro ao carregar o inventário.</p>';
     }
 }
 
@@ -2484,7 +2666,7 @@ function toggleAccordion(header, contentId) {
 //=== Monitora a seleção de checkboxes e atualiza o botão de envio ===//
 function updateCautelaItemCount() {
     let selectedCount = 0;
-    // REINICIALIZA O ARRAY GLOBAL (Garante que a função de envio veja os dados novos)
+    // REINICIALIZA O ARRAY GLOBAL
     cautelaItensSelecionados = [];
 
     // 1. Processar itens com Tombamento (tipo 'multi')
@@ -2492,8 +2674,9 @@ function updateCautelaItemCount() {
         const idBase = chk.getAttribute('data-id-base');
         const tombamento = chk.getAttribute('data-tombamento');
         const nomeCompleto = chk.getAttribute('data-nome') || "";
+        const setorOrigem = chk.getAttribute('data-setor') || "N/D"; // ✅ Captura o setor
 
-        // Remove "(Tomb: ...)" do nome se ele já existir, para não salvar duplicado
+        // Remove "(Tomb: ...)" do nome se ele já existir
         const nomeLimpo = nomeCompleto.replace(/\s\(Tomb:\s[^\)]+\)/i, '').trim();
 
         if (idBase && tombamento) {
@@ -2503,7 +2686,8 @@ function updateCautelaItemCount() {
                 nome: nomeLimpo,
                 tombamento: tombamento,
                 quantidade: 1,
-                tipo: 'multi'
+                tipo: 'multi',
+                setor_origem: setorOrigem // ✅ Adicionado ao objeto
             });
             selectedCount++;
         }
@@ -2517,14 +2701,15 @@ function updateCautelaItemCount() {
         const inputQtd = card.querySelector('.input-qtd-cautela');
         const id = chk.getAttribute('data-id');
         const nome = chk.getAttribute('data-nome');
+        const setorOrigem = chk.getAttribute('data-setor') || "N/D"; // ✅ Captura o setor
 
         let qtd = 1;
         if (inputQtd && !inputQtd.disabled) {
             qtd = parseInt(inputQtd.value) || 0;
-            const max = parseInt(inputQtd.getAttribute('max')) || 0;
+            const max = parseInt(chk.getAttribute('data-max-qtd')) || 0; // ✅ Correção: pega do chk
 
             if (qtd > max) {
-                alert(`A quantidade máxima disponível para ${nome} é ${max}.`);
+                Swal.fire({ icon: 'warning', title: 'Limite Excedido', text: `A quantidade máxima disponível para ${nome} neste setor é ${max}.`, timer: 2000 });
                 inputQtd.value = max;
                 qtd = max;
             }
@@ -2532,6 +2717,7 @@ function updateCautelaItemCount() {
             if (qtd < 1) {
                 chk.checked = false;
                 inputQtd.disabled = true;
+                inputQtd.value = 1;
                 return;
             }
         }
@@ -2542,18 +2728,26 @@ function updateCautelaItemCount() {
                 id_base: id,
                 nome: nome,
                 quantidade: qtd,
-                tipo: 'single'
+                tipo: 'single',
+                setor_origem: setorOrigem // ✅ Adicionado ao objeto
             });
             selectedCount += qtd;
         }
     });
 
-    // 3. Atualizar Interface do Botão
+    // 3. Atualizar Interface do Botão e o Badge do Hub
     const btnIniciar = document.getElementById('btn-iniciar-cautela');
+    const badgeContador = document.getElementById('selected-counter-badge');
+
+    if (badgeContador) {
+        badgeContador.textContent = `${selectedCount} item${selectedCount !== 1 ? 's' : ''}`;
+        badgeContador.style.background = selectedCount > 0 ? "#1b8a3e" : "#800020";
+    }
+
     if (btnIniciar) {
-        btnIniciar.innerHTML = `<i class="fas fa-paper-plane"></i> Enviar Cautela (${selectedCount} itens)`;
-        // O botão só habilita se houver itens no array global
+        btnIniciar.innerHTML = `<i class="fas fa-paper-plane"></i> EMITIR TRUG (${selectedCount} ITENS)`;
         btnIniciar.disabled = (selectedCount <= 0);
+        btnIniciar.style.background = selectedCount > 0 ? "#800020" : "#ccc";
     }
 }
 
