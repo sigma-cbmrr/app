@@ -523,7 +523,6 @@ function showCautelasDashboard(type) {
     const menuContainer = document.getElementById('cautelas-options-container');
     const contentArea = document.getElementById('cautelas-content');
 
-    // Mantém a compatibilidade com o layout de cards se ele ainda existir
     if (menuContainer) menuContainer.style.display = 'none';
 
     if (contentArea) {
@@ -532,22 +531,20 @@ function showCautelasDashboard(type) {
         let title = '';
         let description = '';
 
-        // Definindo as variáveis de texto para evitar repetição de HTML
         if (type === 'Cautelas Ativas') {
             icon = 'fa-clipboard-check';
             title = 'TRUGs Ativos';
-            description = 'Termo de Responsabilida de Uso e Guarda Ativos. Clique em uma linha para ver os detalhes.';
+            description = 'Termo de Responsabilidade de Uso e Guarda Ativos. Clique em uma linha para ver os detalhes.';
         } else if (type === 'Cautelas a Receber') {
             icon = 'fa-inbox';
-            title = 'TRUGs a Receber (Devolução)';
-            description = 'TRUGs emitidos por terceiros que precisam ser confirmadas por você.';
+            title = 'TRUGs a Receber';
+            description = 'TRUGs que aguardam seu aceite nominal ou por custódia de viatura/setor.';
         } else if (type === 'Histórico') {
             icon = 'fa-archive';
             title = 'Histórico de TRUGs';
             description = 'Visualize os TRUGs finalizados de acordo com o seu papel na transação.';
         }
 
-        // Cabeçalho Padrão Sigma V3 (Substitui o antigo header-container)
         htmlContent = `
             <div class="sigma-v3-title-label" style="margin-bottom: 20px;">
                 <i class="fas ${icon}" style="color: #800020;"></i>
@@ -566,6 +563,7 @@ function showCautelasDashboard(type) {
                         <table class="sigma-v3-table" id="cautelas-ativas-table" style="display: none; width:100%;">
                             <thead>
                                 <tr>
+                                    <th style="width:100px; text-align:center;">CONTEXTO</th>
                                     <th>ID</th><th>Destinatário</th><th>Emissão</th><th>Local Origem</th><th>Itens</th><th>Status</th>
                                 </tr>
                             </thead>
@@ -585,6 +583,7 @@ function showCautelasDashboard(type) {
                         <table class="sigma-v3-table" id="cautelas-receive-table" style="display: none; width:100%;">
                             <thead>
                                 <tr>
+                                    <th style="width:100px; text-align:center;">TIPO</th>
                                     <th>ID</th><th>Emitente</th><th>Emissão</th><th>Local Origem</th><th>Itens</th><th>Status</th>
                                 </tr>
                             </thead>
@@ -609,8 +608,6 @@ function showCautelasDashboard(type) {
                     </div>
                 </div>`;
             setTimeout(() => loadHistorico('minhas'), 50);
-        } else {
-            console.warn("View de Cautelas desconhecida:", type);
         }
 
         contentArea.innerHTML = htmlContent;
@@ -864,21 +861,18 @@ async function loadCautionsToReceive() {
     const loading = document.getElementById('loading-receive');
     const table = document.getElementById('cautelas-receive-table');
 
-    // Configurações de exibição inicial
     tbody.innerHTML = '';
     loading.style.display = 'block';
     table.style.display = 'none';
 
     try {
+        const militarUid = firebase.auth().currentUser.uid;
         const role = currentUserData.role || 'operacional';
         const user = currentUserData;
-
-        // Statuses de Ação Pessoal: ABERTA e DEVOLUÇÃO
         const statusesToReceive = ['ABERTA', 'DEVOLUÇÃO'];
 
-        // Busca: Filtra pelo 'destinatario' e usa escopo 'personal' para TODOS os perfis (Operacional, Gestor, Admin).
-        // Isso implementa a regra de que esta aba é APENAS para AÇÃO PESSOAL.
-        const cautionsToReceive = await queryCautelas(
+        // 1. Busca as cautelas nominais (onde o UID dele é o destinatário)
+        const personalCautions = await queryCautelas(
             statusesToReceive,
             role,
             user,
@@ -886,32 +880,66 @@ async function loadCautionsToReceive() {
             'personal'
         );
 
+        // 2. Busca se ele é dono provisório de algum local para identificar Cargas/Devoluções
+        const snapCustodia = await db.collection('custodia_atual')
+            .where('conferente_uid', '==', militarUid).get();
+        
+        const meusLocaisIds = [];
+        snapCustodia.forEach(doc => meusLocaisIds.push(doc.id));
+
+        // 3. Unifica e identifica a natureza (Contexto)
+        const mapFinal = new Map();
+
+        // Processa as Pessoais primeiro
+        personalCautions.forEach(c => {
+            mapFinal.set(c.id, { ...c, contexto: 'PESSOAL' });
+        });
+
+        // Se tiver locais, busca cautelas enviadas para esses locais (Carga Vtr)
+        if (meusLocaisIds.length > 0) {
+            const snapLocais = await db.collection('cautelas_abertas')
+                .where('local_origem_id', 'in', meusLocaisIds)
+                .where('status', 'in', statusesToReceive).get();
+
+            snapLocais.forEach(doc => {
+                const data = doc.data();
+                const id = doc.id;
+                // Se já existir no map como pessoal, o "PESSOAL" tem prioridade visual
+                if (!mapFinal.has(id)) {
+                    mapFinal.set(id, { id, ...data, contexto: 'DEVOLUÇÃO' });
+                }
+            });
+        }
+
+        const combinedResults = Array.from(mapFinal.values()).sort((a, b) => 
+            (b.timestamp_emissao?.toMillis() || 0) - (a.timestamp_emissao?.toMillis() || 0)
+        );
+
         // --- RENDERIZAÇÃO ---
 
-        if (cautionsToReceive.length === 0) {
+        if (combinedResults.length === 0) {
             tbody.innerHTML = `
-    			<tr>
-        			<td colspan="6" style="text-align:center; padding:60px; color:#64748b;">
-            			<i class="fas fa-file-import fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
-            			<span style="font-weight:600; font-size:0.95em;">Nenhuma cautela pendente de recebimento.</span>
-			            <p style="font-size:0.8em; opacity:0.7; margin-top:5px;">Você está em dia com suas conferências de materiais.</p>
-        			</td>
-    			</tr>`;
+                <tr>
+                    <td colspan="7" style="text-align:center; padding:60px; color:#64748b;">
+                        <i class="fas fa-file-import fa-3x" style="opacity:0.2; margin-bottom:15px; display:block;"></i>
+                        <span style="font-weight:600; font-size:0.95em;">Nenhuma cautela pendente de recebimento.</span>
+                    </td>
+                </tr>`;
         } else {
             let htmlContent = '';
-            cautionsToReceive.forEach(cautela => {
+            combinedResults.forEach(cautela => {
+                // ✅ Agora passamos o contexto identificado para a função de linha
                 htmlContent += renderCautelaRow(cautela);
             });
             tbody.innerHTML = htmlContent;
         }
 
-        // --- FINALIZAÇÃO DA EXIBIÇÃO ---
         loading.style.display = 'none';
         table.style.display = 'table';
 
     } catch (e) {
         console.error("Erro ao carregar cautelas a receber:", e);
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:red; padding:20px;">Erro ao carregar dados: ${e.message}</td></tr>`;
         loading.style.display = 'none';
         table.style.display = 'table';
     }
@@ -2411,8 +2439,18 @@ function renderCautelaRow(cautela) {
     let badgeClass = 'badge-cautela';
     let badgeText = 'N/D';
 
+    // ✅ LÓGICA DE CONTEXTO (Badge da 1ª Coluna)
+    // Se o objeto cautela trouxer o campo 'contexto' definido na busca, usamos ele.
+    const contexto = cautela.contexto || (status === 'RECEBIDA' ? 'PESSOAL' : 'CARGA');
+    let contextoHtml = '';
+
+    if (contexto === 'PESSOAL') {
+        contextoHtml = `<span style="background: #800020; color: white; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px;"><i class="fas fa-user"></i> PESSOAL</span>`;
+    } else {
+        contextoHtml = `<span style="background: #8e44ad; color: white; padding: 3px 8px; border-radius: 6px; font-size: 9px; font-weight: 800; letter-spacing: 0.5px;"><i class="fas fa-truck-loading"></i> DEVOLUÇÃO</span>`;
+    }
+
     // ✅ LÓGICA DE INVERSÃO DINÂMICA: 
-    // Se a tela for de "A Receber", precisamos mostrar quem ENVIOU (Emitente).
     const modoRecebimento = (status === 'ABERTA' || status === 'DEVOLUÇÃO');
     const nomeMilitarExibicao = modoRecebimento 
         ? (cautela.emitente || "Não identificado") 
@@ -2427,6 +2465,7 @@ function renderCautelaRow(cautela) {
 
     return `
         <tr onclick="${clickAction}" style="${temPendencia ? 'background-color: #fff9f0;' : ''}">
+            <td style="width: 100px; text-align: center;">${contextoHtml}</td>
             <td data-label="ID"><strong>${cautela.cautela_id}</strong></td>
             <td data-label="${labelColuna}">${nomeMilitarExibicao}</td>
             <td data-label="Emissão">${dataEmissao}</td>
