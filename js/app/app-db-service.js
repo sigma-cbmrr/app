@@ -230,13 +230,12 @@ async function finalizarConferencia() {
 
     const isChecklist = window.isModoChecklist || false;
 
-    // ✅ UX V3: Feedback visual imediato
+    // UX V3: Feedback visual imediato
     btn.innerHTML = `<i class="fas fa-sync fa-spin"></i> ${isChecklist ? "SALVANDO VISTORIA..." : "SALVANDO CONFERÊNCIA..."}`;
     btn.disabled = true;
     btn.style.opacity = "0.7";
 
     try {
-        // ✅ ASSINATURA: Extraída da global userInfo
         const p = {
             uid: userInfo?.uid || "S_UID",
             postoGraduacao: userInfo?.postoGraduacao || "ND",
@@ -261,30 +260,27 @@ async function finalizarConferencia() {
         let itensRelatorio = [];
         let itensCaa = [];
         let totalCaa = 0;
+        let eventosParaHistoricoInventario = window.eventosParaHistoricoInventario || [];
         const fonteDeDados = window.dadosConferencia || dadosConferencia;
 
-        // --- 1. PROCESSAMENTO DA ÁRVORE DE DADOS (DNA V3 - CORREÇÃO DE HIERARQUIA E MANUTENÇÃO) ---
+        // --- 1. PROCESSAMENTO DA ÁRVORE DE DADOS (MANTIDO ÍNTEGRO) ---
         const novaListaMestra = fonteDeDados.map(setor => {
             return {
                 ...setor,
                 itens: setor.itens.map(item => {
-
                     const processarEntidade = (entidade, uid, nomeParaRelatorio, uidPai = null) => {
-                        // ✅ AJUSTE V3: Localiza status na memória usando o Anfitrião (Pai) ou o próprio UID
                         const idAnfitriao = uidPai || uid;
                         const statusLocal = window.itemStatus[idAnfitriao];
 
                         if (!entidade.pendencias_ids) entidade.pendencias_ids = [];
                         if (!entidade.historico_vida) entidade.historico_vida = [];
 
-                        // 1.1 Atualização de situação se resolvido
                         if (entidade.situacao === 'AVARIADO' && statusLocal?.status === 'ok') {
                             entidade.situacao = 'DISPONÍVEL';
                             delete entidade.id_cautela_origem;
                             delete entidade.motivo_avaria;
                         }
 
-                        // ✅ 1.2 CAPTURA DE PENDÊNCIAS MANTIDAS
                         if (statusLocal?.pendencias_originais_mantidas) {
                             statusLocal.pendencias_originais_mantidas.forEach(pMantida => {
                                 const jaExiste = entidade.pendencias_ids.some(p => String(p.id) === String(pMantida.id));
@@ -308,19 +304,29 @@ async function finalizarConferencia() {
                             return { entidade, dRel: dRelBasico };
                         }
 
-                        // 1.4 Lógica de Resolução
                         if (statusLocal.ids_resolvidos) {
                             statusLocal.ids_resolvidos.forEach(res => {
                                 const idx = entidade.pendencias_ids.findIndex(pnd => String(pnd.id) === String(res.id));
                                 if (idx > -1) {
                                     const pendenciaMorta = entidade.pendencias_ids[idx];
                                     entidade.historico_vida.push({
-                                        evento: res.qtd_remanescente > 0 ? "SOLUCAO_PARCIAL" : "SOLUCAO_TOTAL",
+                                        evento: res.qtd_remanescente > 0 ? "SOLUCAO PARCIAL" : "SOLUCAO TOTAL",
                                         id_pendencia_origem: String(pendenciaMorta.id || ""),
                                         quem: conferenteCompleto,
                                         data: dataAtualLog,
                                         detalhes: `Resolvido ${res.qtd_resolvida}. Justificativa: ${res.obs}`
                                     });
+
+                                    eventosParaHistoricoInventario.push({
+                                        uid_instancia: uid,
+                                        uid_pai_instancia: uidPai,
+                                        evento: "PENDENCIA RESOLVIDA",
+                                        quantidade: res.qtd_resolvida,
+                                        detalhes: `✅ Resolvido em conferência: ${res.obs}`,
+                                        uid_pendencia: pendenciaMorta.id,
+                                        setor_nome: setor.nome
+                                    });
+
                                     entidade.pendencias_ids.splice(idx, 1);
                                     if (res.qtd_remanescente > 0) {
                                         entidade.pendencias_ids.push({
@@ -335,7 +341,6 @@ async function finalizarConferencia() {
                             });
                         }
 
-                        // ✅ 1.5 CONVERSÃO DE TEMP PARA PEND (DNA V3 - BUSCA NO PAI)
                         const statusAnfitriao = window.itemStatus[idAnfitriao] || {};
                         const novosRelatosDestaEntidade = (statusAnfitriao.pendencias_temporarias || [])
                             .filter(p => String(p.uid_alvo_direto) === String(uid));
@@ -358,6 +363,16 @@ async function finalizarConferencia() {
                                     quem: conferenteCompleto,
                                     data: dataAtualLog,
                                     detalhes: `${p.quantidade}un - ${p.descricao || ""}`
+                                });
+
+                                eventosParaHistoricoInventario.push({
+                                    uid_instancia: uid,
+                                    uid_pai_instancia: uidPai,
+                                    evento: "PENDENCIA RELATADA",
+                                    quantidade: p.quantidade,
+                                    detalhes: `⚠️ Relatado em campo: ${p.descricao}`,
+                                    uid_pendencia: novoId,
+                                    setor_nome: setor.nome
                                 });
                                 entidade.pendencias_ids.push({ ...p, id: novoId });
                             }
@@ -382,9 +397,7 @@ async function finalizarConferencia() {
                             return !isResolvida && ehParaEsteAlvo;
                         });
 
-                        const temAlteracaoAtiva = pendenciasAtivas.length > 0 || entidade.situacao === 'AVARIADO';
-                        const statusFinal = temAlteracaoAtiva ? 'C/A' : 'S/A';
-                        const quantidadeReal = entidade.quantidade || entidade.quantidadeEsperada || 1;
+                        const statusFinal = (pendenciasAtivas.length > 0 || entidade.situacao === 'AVARIADO') ? 'C/A' : 'S/A';
 
                         const dRel = {
                             id: String(uid || entidade.uid_global || ""),
@@ -393,7 +406,7 @@ async function finalizarConferencia() {
                             status: statusFinal,
                             situacao_patrimonial: entidade.situacao || 'DISPONÍVEL',
                             pendencias_ids: pendenciasAtivas,
-                            quantidade: quantidadeReal,
+                            quantidade: entidade.quantidade || entidade.quantidadeEsperada || 1,
                             setor: String(setor.nome || ""),
                             obs: pendenciasAtivas.map(p => `${p.quantidade}un: ${p.descricao}`).join(' | ')
                         };
@@ -407,13 +420,11 @@ async function finalizarConferencia() {
                         item.tombamentos = item.tombamentos.map(t => {
                             const uidInstancia = item.uid_instancia || `${item.uid_global || item.id}-${t.tomb}`;
                             const res = processarEntidade(t, uidInstancia, `${item.nome} (${t.tomb})`);
-
-                            // ✅ CORREÇÃO: Passando uidInstancia como o 4º parâmetro (uidPai)
                             res.dRel.acessorios_vinculados = acessoriosRaiz.map((ac, idx) => {
                                 const uidFilho = `${uidInstancia}_ac_${idx}`;
                                 return processarEntidade(ac, uidFilho, ac.nome, uidInstancia).dRel;
                             });
-
+                            if (res.dRel.acessorios_vinculados.some(ac => ac.status === 'C/A')) res.dRel.status = 'C/A';
                             itensRelatorio.push(res.dRel);
                             if (res.dRel.status === 'C/A') itensCaa.push(res.dRel);
                             return res.entidade;
@@ -421,13 +432,10 @@ async function finalizarConferencia() {
                     } else {
                         const uidMestre = item.uid_instancia || item.uid_global || item.id;
                         const res = processarEntidade(item, uidMestre, item.nome);
-
-                        // ✅ CORREÇÃO: Passando uidMestre como o 4º parâmetro (uidPai)
                         res.dRel.acessorios_vinculados = acessoriosRaiz.map((ac, idx) => {
                             const uidFilho = `${uidMestre}_ac_${idx}`;
                             return processarEntidade(ac, uidFilho, ac.nome, uidMestre).dRel;
                         });
-
                         itensRelatorio.push(res.dRel);
                         if (res.dRel.status === 'C/A') itensCaa.push(res.dRel);
                         item = res.entidade;
@@ -464,6 +472,19 @@ async function finalizarConferencia() {
 
         batch.update(db.collection(colecaoListaOrigem).doc(LISTA_ID), { list: listaLimpaParaArquitetura });
 
+        // ✅ SINCRONISMO V3: GRAVAÇÃO DE CUSTÓDIA ATUAL (NOVO)
+        // Este comando cria o carimbo necessário para o menu TRUG funcionar
+        if (!isChecklist) {
+            batch.set(db.collection('custodia_atual').doc(LISTA_ID), {
+                lista_id: LISTA_ID,
+                local_nome: String(infoLocal.posto + " - " + infoLocal.nome),
+                conferente_uid: String(p.uid),
+                conferente_completo: String(conferenteCompleto),
+                unidade_id: String(unidadeId),
+                timestamp: timestampAgora
+            });
+        }
+
         const resRef = db.collection(colecaoResultadosDestino).doc();
         batch.set(resRef, {
             local: String(localNome || ""),
@@ -483,130 +504,166 @@ async function finalizarConferencia() {
             obs_gerais_vistoria: String(obsGeraisTexto || "")
         });
 
-        // --- 3. ATUALIZAÇÃO DE INVENTÁRIO GLOBAL (DNA V3 - TRADUÇÃO DE INSTÂNCIA PARA GLOBAL) ---
-        let pendenciasParaInventario = [];
-        itensRelatorio.forEach(ir => {
-            // Coleta pendências do Pai
-            if (ir.pendencias_ids) {
-                pendenciasParaInventario.push(...ir.pendencias_ids.filter(p => String(p.id).startsWith('PEND-')));
-            }
-            // Coleta pendências dos Filhos
-            if (ir.acessorios_vinculados) {
-                ir.acessorios_vinculados.forEach(ac => {
-                    if (ac.pendencias_ids) {
-                        pendenciasParaInventario.push(...ac.pendencias_ids.filter(p => String(p.id).startsWith('PEND-')));
-                    }
-                });
-            }
-        });
-
-        for (const pend of pendenciasParaInventario) {
-            let uidAlvoRaw = pend.uid_alvo_direto;
+        // --- 3. SINCRONISMO V3: INVENTÁRIO, TOMBAMENTOS E SALDOS (MANTIDO ÍNTEGRO) ---
+        for (const ev of eventosParaHistoricoInventario) {
+            let uidAlvoRaw = ev.uid_instancia;
             if (!uidAlvoRaw) continue;
 
-            // ✅ TRADUÇÃO DE DNA: Se o ID contém "_ac_", precisamos achar o UID Global real do componente
-            let uidGlobalFinal = uidAlvoRaw;
+            let itemNoBanco = null;
+            let infoPaiKit = null;
 
-            if (uidAlvoRaw.includes('_ac_')) {
-                const [idPai, resto] = uidAlvoRaw.split('_ac_');
-                const indexAcessorio = parseInt(resto);
+            fonteDeDados.forEach(setor => {
+                setor.itens.forEach(it => {
+                    const idMestre = String(it.uid_instancia || it.uid_global || it.id);
+                    if (idMestre === uidAlvoRaw || (it.tombamentos && it.tombamentos.some(t => `${it.uid_global || it.id}-${t.tomb}` === uidAlvoRaw))) {
+                        itemNoBanco = it;
+                    }
+                    if (uidAlvoRaw.includes('_ac_')) {
+                        const [idPaiInstancia, resto] = uidAlvoRaw.split('_ac_');
+                        const indexAcessorio = parseInt(resto);
+                        if (idMestre === idPaiInstancia || (it.tombamentos && it.tombamentos.some(t => `${it.uid_global || it.id}-${t.tomb}` === idPaiInstancia))) {
+                            const materialReal = (it.acessorios_vinculados || it.acessorios_acoplados)[indexAcessorio];
+                            if (materialReal) {
+                                itemNoBanco = materialReal;
+                                const tombPai = it.tombamentos?.find(t => `${it.uid_global || it.id}-${t.tomb}` === idPaiInstancia)?.tomb;
+                                infoPaiKit = { nome: it.nome, tomb: tombPai };
+                            }
+                        }
+                    }
+                });
+            });
 
-                // Busca na fonte de dados o material real que ocupa essa posição
-                let materialReal = null;
-                fonteDeDados.forEach(setor => {
-                    setor.itens.forEach(it => {
-                        const idMestre = String(it.uid_instancia || it.uid_global || it.id);
-                        // Se o Pai for um tombamento (ex: 517)
-                        if (it.tombamentos) {
-                            it.tombamentos.forEach(t => {
-                                const idTomb = `${it.uid_global || it.id}-${t.tomb}`;
-                                if (idTomb === idPai) materialReal = (t.acessorios_vinculados || it.acessorios_vinculados)[indexAcessorio];
-                            });
-                        }
-                        // Se o Pai for um item simples
-                        if (idMestre === idPai) {
-                            materialReal = (it.acessorios_vinculados || it.acessorios_acoplados)[indexAcessorio];
-                        }
-                    });
+            if (!itemNoBanco) continue;
+
+            const uidGlobalFinal = itemNoBanco.uid_global || itemNoBanco.id;
+            const itemRef = db.collection('inventario').doc(uidGlobalFinal);
+            const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
+            const ehMulti = itemNoBanco.tipo === 'multi';
+
+            let detalhesV3 = `${ev.detalhes}\nLOCALIZAÇÃO: ${localNome} | SETOR: ${ev.setor_nome}`;
+            if (infoPaiKit) detalhesV3 += `\nACOPLADO NO KIT: ${infoPaiKit.nome}${infoPaiKit.tomb ? ' (TOMB: ' + infoPaiKit.tomb + ')' : ''}`;
+
+            if (ehMulti) {
+                const partes = uidAlvoRaw.split('-');
+                const tombamentoID = partes[partes.length - 1];
+                const tombRef = itemRef.collection('tombamentos').doc(tombamentoID);
+                
+                batch.update(tombRef, { 
+                    situacao_atual: ev.evento === "PENDENCIA RESOLVIDA" ? "EM CARGA" : "PENDENTE",
+                    uid_pendencia: ev.evento === "PENDENCIA RESOLVIDA" ? null : ev.uid_pendencia,
+                    motivo_pendencia: ev.evento === "PENDENCIA RESOLVIDA" ? firebase.firestore.FieldValue.delete() : ev.detalhes.replace('⚠️ Relatado em campo: ', ''),
+                    atualizado_por: conferenteCompleto,
+                    atualizado_em: dataAtualLog
                 });
 
-                if (materialReal) {
-                    uidGlobalFinal = materialReal.uid_global || materialReal.id;
+                batch.set(tombRef.collection('historico_vida').doc(), {
+                    data: dataAtualLog,
+                    evento: ev.evento,
+                    quem: conferenteCompleto,
+                    detalhes: detalhesV3,
+                    uid_pendencia: ev.uid_pendencia,
+                    lista_origem_id: LISTA_ID,
+                    unidade: unidadeNome
+                });
+            } else {
+                const snapLivres = await itemRef.collection('tombamentos')
+                    .where('unidade_id', '==', unidadeId)
+                    .where('viatura_id', '==', LISTA_ID)
+                    .where('sub_local', '==', ev.setor_nome)
+                    .where('situacao_atual', '==', (ev.evento === "PENDENCIA RELATADA" ? "EM CARGA" : "PENDENTE"))
+                    .limit(Number(ev.quantidade)).get();
+
+                if (!snapLivres.empty) {
+                    snapLivres.forEach(docV => {
+                        batch.update(docV.ref, {
+                            situacao_atual: ev.evento === "PENDENCIA RELATADA" ? "PENDENTE" : "EM CARGA",
+                            uid_pendencia: ev.evento === "PENDENCIA RELATADA" ? ev.uid_pendencia : null,
+                            motivo_pendencia: ev.evento === "PENDENCIA RELATADA" ? ev.detalhes.replace('⚠️ Relatado em campo: ', '') : firebase.firestore.FieldValue.delete(),
+                            atualizado_por: conferenteCompleto,
+                            atualizado_em: dataAtualLog
+                        });
+
+                        batch.set(docV.ref.collection('historico_vida').doc(), {
+                            data: dataAtualLog,
+                            evento: ev.evento,
+                            quem: conferenteCompleto,
+                            detalhes: detalhesV3,
+                            uid_pendencia: ev.uid_pendencia,
+                            unidade: unidadeNome
+                        });
+                    });
                 }
             }
 
-            // ✅ LÓGICA DE DESPACHO FIREBASE (USANDO O UID GLOBAL TRADUZIDO)
-            const partes = uidGlobalFinal.split('-');
-            const ehPatrimonio = partes.length > 4;
-            const docIdInventario = ehPatrimonio ? partes.slice(0, -1).join('-') : uidGlobalFinal;
-            const itemRef = db.collection('inventario').doc(docIdInventario);
+            const inc = ev.evento === "PENDENCIA RELATADA" ? Number(ev.quantidade) : -Number(ev.quantidade);
+            
+            batch.set(saldoRef, { 
+                uso_pend: firebase.firestore.FieldValue.increment(inc),
+                last_update: dataAtualLog 
+            }, { merge: true });
 
-            if (ehPatrimonio) {
-                const tombamentoID = partes[partes.length - 1];
-                const tombRef = itemRef.collection('tombamentos').doc(tombamentoID);
+            batch.set(saldoRef.collection('historico_vida').doc(), {
+                data: dataAtualLog,
+                evento: ev.evento,
+                quem: conferenteCompleto,
+                detalhes: detalhesV3,
+                quantidade: ev.quantidade,
+                uid_pendencia: ev.uid_pendencia,
+                lista_origem_id: LISTA_ID,
+                unidade: unidadeNome
+            });
 
-                batch.set(tombRef.collection('historico_vida').doc("EVT-P-" + Date.now()), {
-                    data: dataAtualLog,
-                    evento: "ALERTA_VIA_ANFITRIAO",
-                    quem: conferenteCompleto,
-                    detalhes: `⚠️ Relatado em campo: ${pend.descricao}`,
-                    uid_pendencia: pend.id,
-                    lista_origem_id: LISTA_ID
-                });
-                batch.update(tombRef, { situacao_atual: "PENDENTE" });
-            } else {
-                const saldoRef = itemRef.collection('saldos_unidades').doc(unidadeId);
-                const updateData = isChecklist ?
-                    { qtd_pend: firebase.firestore.FieldValue.increment(pend.quantidade), last_update: dataAtualLog } :
-                    {
-                        qtd_disp: firebase.firestore.FieldValue.increment(-pend.quantidade),
-                        qtd_pend: firebase.firestore.FieldValue.increment(pend.quantidade),
-                        last_update: dataAtualLog
-                    };
-
-                batch.update(saldoRef, updateData);
-                batch.set(saldoRef.collection('historico_vida').doc("EVT-S-P-" + Date.now()), {
-                    data: dataAtualLog,
-                    evento: "PENDENCIA_RELATADA",
-                    quem: conferenteCompleto,
-                    detalhes: `⚠️ Relatado em campo: ${pend.descricao}`,
-                    quantidade: pend.quantidade,
-                    uid_pendencia: pend.id,
-                    lista_origem_id: LISTA_ID,
-                    local_sigla: infoLocal.nome || "N/D"
-                });
-            }
+            batch.update(itemRef, { [`unidades_cache.${unidadeId}.uso_pend`]: firebase.firestore.FieldValue.increment(inc) });
         }
 
         await batch.commit();
 
-        // ✅ MODAL ELEGANTE DE FINALIZAÇÃO
         Swal.fire({
             title: '<span style="color:#1b8a3e; font-weight:900;">CONFERÊNCIA SALVA!</span>',
             html: `
                 <div style="text-align:center; font-family:'Inter', sans-serif;">
                     <i class="fas fa-check-circle" style="font-size:4em; color:#1b8a3e; margin-bottom:15px;"></i>
-                    <p style="color:#475569; font-size:0.95em;">Os dados foram sincronizados com sucesso e o inventário atualizado.</p>
+                    <p style="color:#475569; font-size:0.95em;">Inventário, Prontuários e Custódia atualizados.</p>
                     <div style="background:#f1f5f9; padding:15px; border-radius:12px; margin-top:10px;">
-                        <small style="display:block; color:#64748b; text-transform:uppercase; font-weight:800; font-size:0.7em;">Resumo do Despacho</small>
-                        <b style="font-size:1.1em; color:#1e293b;">${totalCaa} itens com alteração</b>
+                        <b style="font-size:1.1em; color:#1e293b;">${totalCaa} alteração(ões) registrada(s)</b>
                     </div>
                 </div>
             `,
-            confirmButtonText: '<i class="fas fa-chart-line"></i> IR PARA DASHBOARD',
+            confirmButtonText: 'IR PARA DASHBOARD',
             confirmButtonColor: '#1b8a3e',
-            allowOutsideClick: false,
-            customClass: { popup: 'v3-popup-radius' }
+            allowOutsideClick: false
         }).then(() => {
             window.top.location.href = "sigma_dashboard.html";
         });
 
     } catch (e) {
-        console.error("V3 Critical Error:", e);
-        Swal.fire("Erro de Gravação", "Não foi possível sincronizar os dados: " + e.message, "error");
+        console.error("❌ Erro Crítico:", e);
+        Swal.fire({
+            title: "Erro de Gravação",
+            text: e.message,
+            icon: "error",
+            confirmButtonColor: "#800020"
+        });
         btn.disabled = false;
+        btn.style.opacity = "1";
         btn.innerHTML = isChecklist ? "FINALIZAR VISTORIA" : "FINALIZAR CONFERÊNCIA";
     }
+}
+
+// Função auxiliar para tradução de acessórios em tempo de execução
+async function traduzirUidAcessorioParaGlobal(uidRaw) {
+    const [idPai, resto] = uidRaw.split('_ac_');
+    const idx = parseInt(resto);
+    // Esta função busca na global para evitar múltiplas leituras de banco
+    const it = (window.dadosConferencia || []).flatMap(s => s.itens).find(i =>
+        String(i.uid_instancia || i.uid_global || i.id) === idPai ||
+        (i.tombamentos && i.tombamentos.some(t => `${i.uid_global || i.id}-${t.tomb}` === idPai))
+    );
+    if (it) {
+        const ac = (it.acessorios_vinculados || it.acessorios_acoplados)[idx];
+        return ac?.uid_global || ac?.id;
+    }
+    return null;
 }
 
 /* --- FINALIZAÇÃO DO RECEBIMENTO DE CAUTELA (DNA V3) --- */
