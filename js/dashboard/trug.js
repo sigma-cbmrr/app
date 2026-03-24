@@ -923,26 +923,37 @@ async function getCautelasAReceberCount() {
     const militarUid = firebase.auth().currentUser.uid;
 
     try {
-        // Cautelas NOVAS (Alvo Original)
-        const snapNovas = await db.collection('cautelas_abertas')
-            .where('destinatario_original_uid', '==', militarUid)
-            .where('status', '==', 'ABERTA')
-            .get();
-
-        // DEVOLUÇÕES para conferir (Destinatário Atual)
-        const snapDevolucoes = await db.collection('cautelas_abertas')
+        // 1. Busca cautelas onde o militar é o DESTINATÁRIO NOMINAL (Novas ou Devoluções)
+        const snapPessoais = await db.collection('cautelas_abertas')
             .where('destinatario_uid', '==', militarUid)
-            .where('status', '==', 'DEVOLUÇÃO')
+            .where('status', 'in', ['ABERTA', 'DEVOLUÇÃO'])
             .get();
 
-        // Usamos um Set para garantir que se uma cautela cair em ambos, conte apenas uma vez
         const totalIds = new Set();
-        snapNovas.forEach(doc => totalIds.add(doc.id));
-        snapDevolucoes.forEach(doc => totalIds.add(doc.id));
+        snapPessoais.forEach(doc => totalIds.add(doc.id));
+
+        // 2. Busca se o militar possui CUSTÓDIA ATUAL de algum local (Vtr/Setor)
+        // Isso cobre o caso dele ser o "Recebedor Atual" do local de destino do TRUG
+        const snapCustodia = await db.collection('custodia_atual')
+            .where('conferente_uid', '==', militarUid)
+            .get();
+
+        if (!snapCustodia.empty) {
+            const locaisSobMinhaResponsabilidade = [];
+            snapCustodia.forEach(doc => locaisSobMinhaResponsabilidade.push(doc.id));
+
+            // Busca TRUGs enviadas para os locais que este militar está operando agora
+            const snapLocais = await db.collection('cautelas_abertas')
+                .where('local_origem_id', 'in', locaisSobMinhaResponsabilidade)
+                .where('status', 'in', ['ABERTA', 'DEVOLUÇÃO'])
+                .get();
+
+            snapLocais.forEach(doc => totalIds.add(doc.id));
+        }
 
         return totalIds.size;
     } catch (e) {
-        console.error("Erro ao contar cautelas:", e);
+        console.error("Erro ao contar cautelas a receber:", e);
         return 0;
     }
 }
