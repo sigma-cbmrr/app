@@ -141,7 +141,7 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 10px;">
                     <div style="min-width: 0;">
                         <small style="color:#d97706; font-weight:900; font-size:0.65em; text-transform:uppercase; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><i class="fas fa-file-contract"></i> MATERIAL CAUTELADO</small>
-                        <span style="font-size: 0.85em; font-weight: 900; color: #92400e;">TRUG: ${c.id || c.id_cautela || 'N/D'}</span>
+                        <span style="font-size: 0.85em; font-weight: 900; color: #92400e;">${c.id || c.id_cautela || 'N/D'}</span>
                     </div>
                     <button type="button" id="btn-ciente-${uid}" onclick="registrarCienteCautela('${uid}', event)" style="background:${btnBg}; border:${btnBorder}; color:${btnColor}; padding:6px 12px; border-radius:8px; font-size:0.7em; font-weight: bold; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; height: fit-content; line-height: 1;">
                         <i class="fas ${btnIcon}"></i> <span>${btnText}</span>
