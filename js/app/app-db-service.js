@@ -226,15 +226,16 @@ function adaptarCautelaParaRender(cautelaData) {
             if (tipo === 'multi') {
                 tombamentos = [{
                     tomb: cItem.tombamento,
-                    id_completo: `${cItem.id_base || cItem.id}-${cItem.tombamento}`,
-                    cautela: { id: cautelaData.cautela_id, destinatario: cautelaData.destinatario || "N/D" }
+                    id_completo: `${cItem.id_base || cItem.id}-${cItem.tombamento}`
+                    // O objeto 'cautela' foi cirurgicamente removido daqui.
+                    // O motor visual agora tratará este item como livre para o aceite.
                 }];
             }
 
             return {
                 id: cItem.id_base || cItem.id,
                 nome: cItem.nome,
-                quantidadeEsperada: qtdReal, // Define 4 unidades aqui!
+                quantidadeEsperada: qtdReal, // Define unidades
                 tipo: tipo,
                 tombamentos: tombamentos,
                 cautelas: [], // Esconde carimbo laranja
