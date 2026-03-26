@@ -132,18 +132,22 @@ async function abrirModalPendenciaV3(uid, tipo, nomeItem, saldoDisponivel, uidPa
         const btnIcon = isCiente ? 'fa-check-double' : 'fa-check';
         const btnText = isCiente ? 'CIENTE' : 'DAR CIENTE';
 
+        // O que mudou:
+        // 1. Adicionado gap:10px no flex container pai para o texto não encostar no botão
+        // 2. Removida a classe 'v3-action-icon' do botão
+        // 3. Adicionado: white-space: nowrap; flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px;
         htmlPendencias += `
             <div class="v3-manage-card" style="background:#fffbeb; border:1px solid #fcd34d; padding:15px; border-radius:12px; margin-bottom:12px; width: 100%; box-sizing: border-box;">
-                <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div>
-                        <small style="color:#d97706; font-weight:900; font-size:0.65em; text-transform:uppercase;"><i class="fas fa-file-contract"></i> MATERIAL CAUTELADO (TRUG)</small><br>
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 10px;">
+                    <div style="min-width: 0;">
+                        <small style="color:#d97706; font-weight:900; font-size:0.65em; text-transform:uppercase; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><i class="fas fa-file-contract"></i> MATERIAL CAUTELADO</small>
                         <span style="font-size: 0.85em; font-weight: 900; color: #92400e;">TRUG: ${c.id || c.id_cautela || 'N/D'}</span>
                     </div>
-                    <button type="button" id="btn-ciente-${uid}" onclick="registrarCienteCautela('${uid}', event)" class="v3-action-icon" style="background:${btnBg}; border:${btnBorder}; color:${btnColor}; width:auto; padding:6px 15px; border-radius:8px; font-size:0.75em; font-weight: bold; cursor: pointer; transition: all 0.2s;">
-                        <i class="fas ${btnIcon}"></i> ${btnText}
+                    <button type="button" id="btn-ciente-${uid}" onclick="registrarCienteCautela('${uid}', event)" style="background:${btnBg}; border:${btnBorder}; color:${btnColor}; padding:6px 12px; border-radius:8px; font-size:0.7em; font-weight: bold; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; height: fit-content; line-height: 1;">
+                        <i class="fas ${btnIcon}"></i> <span>${btnText}</span>
                     </button>
                 </div>
-                <div style="font-weight:700; color:#1e293b; font-size:0.9em; margin-top:8px;">
+                <div style="font-weight:700; color:#1e293b; font-size:0.9em; margin-top:8px; word-break: break-word;">
                     Destinatário: <span style="color:#800020;">${c.destinatario || 'N/D'}</span>
                 </div>
                 <div style="font-size:0.7em; color:#64748b; margin-top:4px; font-style:italic;">
